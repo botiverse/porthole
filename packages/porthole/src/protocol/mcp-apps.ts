@@ -45,6 +45,76 @@ export interface ShellToolInput {
   readonly html: string;
 }
 
+/**
+ * The style variables MCP Apps defines (`McpUiStyleVariableKey`, 2026-01-26). The official App SDK
+ * refuses a host context whose `styles.variables` holds any other name ("Unrecognized key"), so a
+ * host sends exactly these there; Porthole's own names go under `PORTHOLE_STYLES` instead.
+ */
+export const MCP_APPS_STYLE_VARIABLES: readonly string[] = [
+  ...["background", "text", "border", "ring"].flatMap((kind) =>
+    (kind === "background"
+      ? [
+          "primary",
+          "secondary",
+          "tertiary",
+          "inverse",
+          "ghost",
+          "info",
+          "danger",
+          "success",
+          "warning",
+          "disabled",
+        ]
+      : kind === "text"
+        ? [
+            "primary",
+            "secondary",
+            "tertiary",
+            "inverse",
+            "ghost",
+            "info",
+            "danger",
+            "success",
+            "warning",
+            "disabled",
+          ]
+        : kind === "border"
+          ? [
+              "primary",
+              "secondary",
+              "tertiary",
+              "inverse",
+              "ghost",
+              "info",
+              "danger",
+              "success",
+              "warning",
+              "disabled",
+            ]
+          : ["primary", "secondary", "inverse", "info", "danger", "success", "warning"]
+    ).map((name) => `--color-${kind}-${name}`),
+  ),
+  "--font-sans",
+  "--font-mono",
+  ...["normal", "medium", "semibold", "bold"].map((weight) => `--font-weight-${weight}`),
+  ...["xs", "sm", "md", "lg"].map((size) => `--font-text-${size}-size`),
+  ...["xs", "sm", "md", "lg", "xl", "2xl", "3xl"].map((size) => `--font-heading-${size}-size`),
+  ...["xs", "sm", "md", "lg"].map((size) => `--font-text-${size}-line-height`),
+  ...["xs", "sm", "md", "lg", "xl", "2xl", "3xl"].map(
+    (size) => `--font-heading-${size}-line-height`,
+  ),
+  ...["xs", "sm", "md", "lg", "xl", "full"].map((size) => `--border-radius-${size}`),
+  "--border-width-regular",
+  ...["hairline", "sm", "md", "lg"].map((size) => `--shadow-${size}`),
+];
+
+/**
+ * The host context's own-prefixed field for the theme variables MCP Apps doesn't define (an
+ * accent, a chart palette): `{ variables }`. The shell applies them with the standard ones; a view
+ * that doesn't know the field ignores it (the host context is open to extra fields).
+ */
+export const PORTHOLE_STYLES = "porthole/styles";
+
 /** The logger name the shell's error reports (`notifications/message`, level `error`) carry. */
 export const SHELL_LOGGER = "porthole";
 
@@ -62,5 +132,7 @@ export interface HostContext {
   readonly timeZone?: string;
   readonly platform?: "web" | "desktop" | "mobile";
   readonly deviceCapabilities?: { readonly touch?: boolean; readonly hover?: boolean };
+  /** Porthole's own theme variables, outside the spec's list (`PORTHOLE_STYLES`). */
+  readonly "porthole/styles"?: { readonly variables: Readonly<Record<string, string>> };
   readonly [key: string]: unknown;
 }

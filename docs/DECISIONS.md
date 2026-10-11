@@ -498,3 +498,125 @@ modes outside the bridge (an ungated power); honoring `frameDomains` (re-opens P
 channel).
 **Revisit when** the SDK accepts unknown style keys or the spec adds names (then widen the list),
 or a host needs fullscreen views (then a `displayMode` capability with a gate).
+
+## P028 · 2026-10-11 · The host context carries only the spec's style names; Porthole's own go in `porthole/styles` · Accepted
+
+**Decision.** In `ui/initialize` and `host-context-changed`, `styles.variables` holds
+exactly the names MCP Apps defines (`MCP_APPS_STYLE_VARIABLES`, in the core, re-exported
+by `/mcp`). The theme's other variables (`--color-accent`, the chart palette, a host's
+own) travel in the host context's own-prefixed field `porthole/styles: { variables }`;
+the shell applies both, filtered by the config's names. The shell numbers its own
+requests with strings (`porthole-shell-<n>`) so content using the App SDK in the same
+window never takes the shell's answers, nor the shell the SDK's.
+**Why.** Measured: the official App SDK (ext-apps 2.0.3) validates the host context
+strictly and fails the whole handshake on an unknown style name ("Invalid result for
+ui/initialize: hostContext.styles.variables: Unrecognized keys"), while it keeps
+unknown top-level fields. The `0.app-sdk-*` probes connect the official SDK from content
+under the inline, artifact and MCP Apps presets; the `style-split` negative control
+(every variable in `styles`) makes all three fail with that error.
+**Rejected.** Dropping the extra variables (the manual teaches them); defaults baked
+into the shell's CSS only (a host's live values for them would never arrive).
+**Revisit when** the spec's style list grows (move names across) or it gains an
+extension point for host-specific variables (use it, and take ours upstream).
+
+## P029 · 2026-10-11 · Documents are rendered inert and imported; content can't rewrite its document or build declarative shadow roots · Accepted
+
+**Decision.** A whole document (an artifact page, an MCP Apps view in an opaque frame,
+a served page, the sandbox proxy's view) is never handed to the page's parser: it
+travels as data (the shell's plan, or the protocol's tool input), is parsed with
+`DOMParser` (no scripts run, no declarative shadow roots built), guarded, imported in
+place of the shell's, and its scripts run in order, as a fragment's are, followed by
+`DOMContentLoaded` and `load`. Content can't rewrite its document
+(`document.open`/`write`/`writeln` throw), and the entry points that would build a
+declarative shadow root (`setHTMLUnsafe`, `Document.parseHTMLUnsafe`) get fragment
+parsing's behavior. The sandbox proxy (P026) writes the shell's own document with the
+view in its plan, not the view's markup.
+**Why.** The frame guard (P006) reaches every shadow root `attachShadow` makes, but not
+a closed declarative one: the parser builds it without any script seeing it, and a frame
+inside it runs in a fresh realm. Measured on Chromium: with the `setHTMLUnsafe` block
+taken out (`declarative-shadow` control) a child frame in a closed declarative root
+runs; with `document.write` allowed (`parser-entry-points`) a rewritten document's child
+runs. Rendering by import has no such path, and the re-serialization alternative
+(parse, strip, serialize, write) reopens it through markup that parses differently the
+second time.
+**Rejected.** Writing documents with `document.write` (the first host's way); a string
+sanitizer; letting content rewrite its document.
+**Cost.** Content that calls `document.write` fails (reported as an error); declarative
+shadow DOM in content is inert; a page's scripts see `document.readyState` "complete"
+(their load events still fire, once).
+**Revisit when** engines let a script observe or refuse declarative shadow roots (then
+allow them), or a host needs `document.write` content.
+
+## P030 · 2026-10-11 · Guarded elements are refused synchronously, where they are connected or changed · Accepted
+
+**Decision.** Besides the mutation observer (which runs at the next microtask), the shell
+wraps every DOM insertion API (`appendChild`, `insertBefore`, `replaceChild`,
+`append`/`prepend`/`replaceChildren`, `before`/`after`/`replaceWith`,
+`insertAdjacentElement`, `Range.insertNode`/`surroundContents`) to drop frame-like
+elements and resource hints before they are connected; parses markup set through
+`innerHTML`, `outerHTML`, `insertAdjacentHTML` and `setHTML` in a detached element of the
+same kind, guards it, then moves it in; refuses `execCommand("insertHTML")`; and removes a
+connected `<link>` or `<meta>` from the document before any change (attributes, IDL
+setters, `relList`, attribute nodes and maps) that would make it a guarded one. Each
+wrapper is fixed in place (non-configurable).
+**Why.** Measured on WebKit: a `rel=preconnect` link that script inserts, or turns into a
+preconnect while connected, opens a TCP connection at once, outside the CSP, before any
+observer runs (`8.preconnect` failed with 3 connections; it passes with these guards).
+Chromium measured no preconnect from a frame here, but harden for the weakest engine
+(PRINCIPLE 6). The `sync-guard` negative control makes `8.preconnect` fail on WebKit.
+**Rejected.** Accepting the leak on WebKit; relying on the observer alone.
+**Revisit when** WebKit applies the CSP to preconnect (then the observer suffices), or a
+DOM insertion API is added (wrap it, and add its probe).
+
+## P031 · 2026-10-11 · A display whose content navigates its frame is started again, at most three times · Accepted
+
+**Decision.** The web platform counts its frame's loads; any after the first means the
+content navigated the frame. The display is started again from its content (an event
+`navigated`), at most three times per run, then stopped with an error. The wall against
+navigating out is the embedding page's `frame-src` (P006); a document the frame
+navigates to must never run, and the leak suite asserts that, not the restart.
+**Why.** Measured on Chromium and WebKit: a self-navigation the embedding page's
+`frame-src` blocks still replaces the frame's document (an error page fires `load`), so
+the content is gone either way; starting again keeps the display showing. Measured on
+Chromium with the embedding CSP taken out (`embedder-csp` control): a `blob:` or `data:`
+document the frame navigates to runs, and only the restart's timing kept it from
+reaching the STUN oracle, which is a race, not a wall; so `5.blob`/`5.data` assert, with
+a witness origin, that such a document never runs.
+**Rejected.** Ignoring navigations (a blank display); restarting forever (content that
+navigates on load would loop).
+**Revisit when** an engine keeps the frame's document on a blocked navigation.
+
+## P032 · 2026-10-11 · Every hardening item has a negative control · Accepted
+
+**Decision.** The leak suite's server can serve the core with one defense taken out
+(`PORTHOLE_LEAK_WEAKEN=<name>`: `frame-guard`, `webrtc`, `attach-shadow`,
+`parser-entry-points`, `declarative-shadow`, `sync-guard`, `connect-src`, `self`,
+`sandbox`, `base-uri`, `style-split`, `embedder-csp`). Each names the exact text it
+removes, and the server refuses to start if that text is gone, so a control can't
+silently weaken nothing. DESIGN.md records, per engine, which probes each control makes
+fail. Every probe that asserts "nothing left" also has a positive control (an allowed
+origin, an unsandboxed peer connection, an unsandboxed hint) or says it has none.
+**Why.** PRINCIPLE 6: a wall never seen to fail proves nothing. Running the controls found
+what the passing suite could not: that `5.blob` passed by a race (P031), that two walls
+stand behind form submission (`sandbox` alone doesn't fail `6.submit`: `form-action`
+holds), and that an opaque frame's `'self'` doesn't reach the host on Chromium.
+**Rejected.** Trusting a green suite.
+**Revisit when** a defense is added (add its control) or a control stops failing its
+probes (the probe has gone blind: fix it first).
+
+## P033 · 2026-10-11 · The embedding page frames nothing by default: `frame-src 'none'` for opaque content · Accepted
+
+**Decision.** `embedderCsp` no longer includes `'self'`: for opaque displays it is
+`frame-src 'none'; child-src 'none'`; served and external displays add their content
+origins, and a host its own frames through `embedder.frameSrc`, where `'self'` is
+accepted only by name. Resolves DESIGN's open question on `'self'`.
+**Why.** Measured on Chromium and WebKit: a `srcdoc` frame loads and runs under its
+embedding page's `frame-src 'none'`, so `'self'` bought opaque content nothing but a way
+to navigate its frame to the host's own origin, a request carrying whatever the content
+puts in its URL, with any of the host's `SameSite=None` cookies. Probe `5.host-origin`
+asserts no such request; the `embedder-self` control makes it fail. This tightens a
+default (PRINCIPLE 1 allows that freely); a host that frames its own pages names `'self'`
+and accepts that navigation.
+**Rejected.** Keeping `'self'` (the first host's policy) for compatibility.
+**Revisit when** an engine stops letting `srcdoc` frames load under `frame-src 'none'`
+(the opaque-origin probes would fail at once).

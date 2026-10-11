@@ -137,7 +137,7 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
     }
     // And the runtime really defines each global it is told to, from the plan.
     for (const global of plan?.globals ?? []) {
-      expect(SHELL_RUNTIME).toContain(`window.${global} = `);
+      expect(SHELL_RUNTIME).toContain(`lock(window, "${global}", `);
     }
   });
 

@@ -93,6 +93,8 @@ export type {
 export {
   MCP_APPS_METHODS,
   MCP_APPS_PROTOCOL_VERSION,
+  MCP_APPS_STYLE_VARIABLES,
+  PORTHOLE_STYLES,
   type HostContext,
 } from "./protocol/mcp-apps.ts";
 export type {

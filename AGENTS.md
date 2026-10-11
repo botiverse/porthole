@@ -17,9 +17,10 @@ Read these first:
 
 ## Status
 
-Phase 1 is being built, milestone by milestone (DESIGN.md § Milestones). M1 is
-in: the config, the compiler, the presets, and the public interfaces as typed
-stubs (an unbuilt function throws `NotBuiltYet`).
+Phase 1 is being built, milestone by milestone (DESIGN.md § Milestones). M1 and
+M2 are in: the config, compiler and presets; the isolation core (`createHost`, the
+web platform, the shell runtime, the shell adapter, the bridge); the leak suite with
+its oracles and negative controls. Unbuilt functions throw `NotBuiltYet`.
 
 ## Setup
 
@@ -36,6 +37,7 @@ pnpm check            # typecheck + lint + format check + unit tests (run before
 pnpm test             # unit tests (vitest; packages/porthole/test)
 pnpm test:leak        # the Playwright conformance/leak suite (Chromium + WebKit; Firefox from M5)
 PORTHOLE_LEAK_ENGINES=chromium pnpm test:leak   # a subset, where an engine can't run
+PORTHOLE_LEAK_WEAKEN=sync-guard pnpm test:leak  # a negative control: its probes must fail (P032)
 pnpm --filter @botiverse/porthole build         # dist/ (JS + .d.ts) for packing
 pnpm exec oxfmt <file>                          # format (never prettier)
 ```
@@ -74,7 +76,9 @@ packages/porthole/leak/  the leak suite run against Porthole's reference host
 1. Run `pnpm check`. It must pass.
 2. If you touched isolation, egress, the shell, the CSP generator, or any
    host-function gate, run `pnpm test:leak` on every engine it supports. A
-   hardening item without a passing test does not exist (PRINCIPLE 5).
+   hardening item without a passing test does not exist (PRINCIPLE 5). A new
+   defense gets a negative control in `leak/server.ts` and DESIGN.md's table says
+   which probes it fails (P032).
 3. If you changed the config schema, regenerate and re-read the example CSP,
    shell and guide, and confirm all three still agree (`test/agreement.test.ts`
    must pass, and must still cover what you added).

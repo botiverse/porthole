@@ -131,8 +131,9 @@ realm) and by the host where the engine passes the gesture up.
   `child-src` the same; no `default-src`.
 - `shell` (the plan) and `shellDocument({ origins, title?, document?, cspMeta? })`:
   the frame's document with the CSP `<meta>` first, the base styles, and the runtime
-  given its plan. With `document`, the shell's head goes first and the document
-  follows without its doctype, so nothing of the document's runs before the runtime.
+  given its plan. A given `document` (an MCP Apps view, a served page) travels in the
+  plan as data; the runtime renders it as it renders any document (§ The shell
+  runtime), never handing its markup to the page's parser.
 - `guide(topics?)` and `toolDescription()`: the manual and the show tool's
   description.
 
@@ -145,7 +146,7 @@ the declared capabilities, and each capability's manual entry states its gates
 CSP directive equals the egress plus the declared capabilities' needs; the manual
 states the limits, layout and theme event; and changing the config (opening an
 origin, dropping a capability or a variable, overriding an entry) changes all of
-them together. `leak/shell.spec.ts` checks the same wiring in real frames.
+them together. The leak suite's `0.*` probes check the same wiring in real frames.
 
 ## Public interfaces
 
@@ -155,16 +156,16 @@ functions not built yet throw `NotBuiltYet` naming their milestone.
 | Seam | File | Built by | Used by |
 | --- | --- | --- | --- |
 | Config, presets, compiler, guide, theme | `src/config/`, `src/presets/`, `src/compile/`, `src/guide/`, `src/theme/` | core (M1, done) | everyone |
-| Host API: `createHost`, `MountOptions`, `DisplayHandle`, `DisplayEvents` | `src/host/types.ts` | core (M2–M3) | React binding, hosts |
+| Host API: `createHost`, `MountOptions`, `DisplayHandle`, `DisplayEvents` | `src/host/types.ts`, `src/host/create-host.ts` | core (M2, built: opaque, domain and url frames) | React binding, hosts |
 | Isolation: `InstanceRef`, `ServedDocument`, `InstanceLocator`, `FrameLocation`, `FrameSource`; `checkFrameLocation` | `src/isolation/types.ts`, `src/isolation/served.ts` | core; served modes (the checks) | served modes, hosts |
-| Platform host: `PlatformHost`, `Surface`, `SurfaceSpec` | `src/platform/types.ts` | core (web, M2) | native hosts later |
-| Transport | `src/transport/types.ts` | core (M2) | adapters |
-| Protocol adapter: `ProtocolAdapter`, `AdapterSession`, `AdapterConnection`, `ShellConnection` | `src/protocol/adapter.ts` | core (shell adapter, M2–M3) | MCP adapter |
-| MCP Apps names: `MCP_APPS_METHODS`, `HostContext`; JSON-RPC parsing | `src/protocol/mcp-apps.ts`, `src/protocol/jsonrpc.ts` | core (M1, done) | shell, both adapters |
+| Platform host: `PlatformHost`, `Surface`, `SurfaceSpec`; `webPlatform` | `src/platform/` | core (web, M2, built) | native hosts later |
+| Transport; `postMessageTransport` | `src/transport/` | core (M2, built) | adapters |
+| Protocol adapter: `ProtocolAdapter`, `AdapterSession`, `AdapterConnection`, `ShellConnection`; `shellAdapter` | `src/protocol/adapter.ts`, `src/protocol/shell-adapter.ts` | core (shell adapter, M2, built) | MCP adapter |
+| MCP Apps names: `MCP_APPS_METHODS`, `MCP_APPS_STYLE_VARIABLES`, `PORTHOLE_STYLES`, `HostContext`; JSON-RPC parsing | `src/protocol/mcp-apps.ts`, `src/protocol/jsonrpc.ts` | core | shell, both adapters |
 | MCP Apps adapter: `mcpAppsAdapter`, `McpAppConnection`, `viewEgress`, `readViewResource`, `MCP_APPS_STYLE_VARIABLES`, `sandboxProxyDocument` | `src/mcp/` | MCP adapter (done) | hosts showing MCP Apps views |
-| Host-function bridge: `HostFunctionBridge`, `CapabilityHandlers`, `Confirm`, `ConfirmRequest`, `Refusal` | `src/bridge/types.ts` | core (M3) | adapters, hosts |
+| Host-function bridge: `HostFunctionBridge`, `CapabilityHandlers`, `Confirm`, `ConfirmRequest`, `Refusal`; `createBridge` | `src/bridge/` | core (M2 built; gating tests M3) | adapters, hosts |
 | React: `PortholeProvider`, `PortholeFrame`, `ConfirmDialog` props | `src/react/index.ts` | core (M4) | first host |
-| Conformance: `ConformanceHost`, `LaunchSpec`, `LaunchedDisplay`, `defineLeakSuite`; `defineServedSuite`, `ServedConformanceHost` | `src/conformance/index.ts`, `src/conformance/served.ts` | core (M2); served modes (done) | any host |
+| Conformance: `ConformanceHost`, `LaunchSpec`, `LaunchedDisplay`, `defineLeakSuite`, `PROBES`, the oracles; `defineServedSuite`, `ServedConformanceHost` | `src/conformance/` | core (M2, built); served modes (done) | any host |
 | Server: `createServer`, `PortholeServer`, `TicketStore`, `ArtifactStore`, `ContentDomain`, `Grant`, `Access`, `Upstream`, `proxyTo`, `memoryTicketStore` | `src/server/` | served modes (done) | host backends |
 
 ### Host API
@@ -263,7 +264,16 @@ The core ships the adapter for the MCP Apps subset its own shell speaks
 `host-context-changed`, `size-changed` and `notifications/message` (errors) into
 the bridge, `ui/message` and `ui/open-link` into the bridge, `ui/resource-teardown`.
 Content may also use the official App SDK directly; the adapter answers a second
-`ui/initialize` from the same frame.
+`ui/initialize` from the same frame, and the shell numbers its own requests with
+strings (`porthole-shell-1`) so neither takes the other's answers.
+
+The host context carries in `styles.variables` only the names MCP Apps defines
+(`MCP_APPS_STYLE_VARIABLES`): the official SDK refuses any other name there and fails
+the whole handshake. Porthole's own variables (the accent, the chart palette) go in
+the host context's own-prefixed field `porthole/styles: { variables }`, which the
+shell applies beside the standard ones and a view ignores (P028). The `0.app-sdk-*`
+probes connect the official SDK from content under the inline, artifact and MCP Apps
+presets.
 
 The `/mcp` adapter (full MCP Apps views) implements `ProtocolAdapter` with its own
 connection operations (`sendToolInputPartial`, `sendToolInput`, `sendToolResult`,
@@ -281,8 +291,9 @@ it (`leak/mcp/`), in an opaque frame and behind the sandbox proxy.
 ### The host-function bridge
 
 `bridge.call(capability, args)` checks, in order: declared → arguments valid
-(`openLink` http(s) only; a prompt 1..`maxPromptChars` characters) → muted? →
-rate limit → user activation → `confirm` → the host's handler. Each refusal is a
+(`openLink` http(s) only and without credentials in the URL; a prompt
+1..`maxPromptChars` characters) → muted? → rate limit → user activation → `confirm`
+→ the host's handler. Each refusal is a
 `Refusal` and a `refused` display event; the frame gets an error result. After
 `declinesBeforeMute` declines a display stops asking (`muted`) until it runs again.
 
@@ -328,27 +339,53 @@ absent.
 ## Egress hardening, each with its test
 
 Closed by default; opened only to origins the config declares. The leak suite
-attempts each channel and asserts nothing leaves, on Chromium and WebKit, then
-Firefox (P017); harden for the weakest (PRINCIPLE 6). The probes land in M2; until
-an item's probe passes, the item does not exist (PRINCIPLE 5).
+(`src/conformance/probes.ts`, run by `pnpm test:leak` against the reference host)
+attempts each channel from inside the content, as an agent's code would, and asserts
+with an out-of-band oracle that nothing left: an HTTP canary that also counts raw TCP
+connections, a UDP listener for STUN, a witness origin a navigated document would
+reach, and the page's responses. Each oracle has a positive control (an allowed
+origin loads; an unsandboxed peer connection sends STUN; an unsandboxed hint
+connects) or the probe says it has none. Each defense has a negative control
+(`PORTHOLE_LEAK_WEAKEN`, P032) that takes it out, so its probes are seen to fail.
+Engines: Chromium 153 and WebKit 26.6 (Playwright 1.63) gate; Firefox next (P017).
 
-| # | Channel | Mechanism | Test |
-|---|---------|-----------|------|
-| 1 | fetch / XHR / WebSocket / `sendBeacon` to a non-allowed origin | CSP `connect-src` = allowlist only | a canary to a non-allowed origin fails; one to an allowed origin succeeds |
-| 2 | images / media / fonts / styles / scripts from non-allowed origins | CSP `img/media/font/style/script-src` = allowlist only | a tracking-pixel canary and an off-list script both fail |
-| 3 | WebRTC (reaches the network outside `connect-src` via ICE gathering) | CSP `webrtc 'block'` **and** the shell deletes the `RTC*` constructors before content runs | a canary that tries to open a peer connection produces no packet at a local UDP listener |
-| 4 | a nested frame runs in a fresh realm where RTC was never removed | the shell removes frame-like elements (`iframe, frame, object, embed, …`) the content adds, **including inside shadow roots**, and re-arms after any content-initiated document rewrite | a child-frame RTC canary — in the light DOM, in an open and a closed shadow root, and after the content calls `document.open()` — produces no packet *(the shadow-root and document-rewrite cases are gaps a naive top-level observer misses; measured here, so they are explicit cases)* |
-| 5 | self-navigation of the frame to an external URL carrying data in the query | the **embedding page's** `frame-src` (a frame's own CSP cannot stop its own navigation) | navigating the frame to an external URL produces no request; the frame keeps its content |
-| 6 | forms that submit, pop-ups, downloads, top-navigation | iframe `sandbox` grants only `allow-scripts` (no `allow-forms`, `allow-popups`, `allow-downloads`, `allow-top-navigation*`); `form-action 'none'` | each is attempted and blocked |
-| 7 | `<base>` hijack, plugins | `base-uri 'none'`, `object-src 'none'` | a `<base>` and an `<object>` canary have no effect |
-| 8 | resource hints / speculation rules (`dns-prefetch`, `preconnect`, `prefetch`, speculation rules) | `default-src 'none'` governs them (no `prefetch-src` allowance) | none produces a DNS lookup or connection in the engine's network log |
-| 9 | reaching the host origin, storage, cookies, DOM | opaque origin, no `allow-same-origin` with a host-origin document; nothing secret ever sent into the frame | the frame cannot read `parent`, its origin is not the host's, and no host token is present |
-| 10 | loading from the embedding page's own origin (an opaque frame's `'self'` may resolve to it) | no `'self'` in any directive (P022) | a script, style, image and fetch to the host origin all fail |
+| # | Channel | Mechanism | Probes | Negative control → fails (Chromium / WebKit) |
+|---|---------|-----------|--------|------------------------------------------|
+| 1 | fetch, XHR, WebSocket, EventSource, `sendBeacon`, `fetchLater`, a blob worker's fetch | CSP `connect-src` = the allowlist only (`'none'` by default) | `1.connect` (with an allowed origin as positive control) | `connect-src` → `1.connect` (both); `8.prefetch` too on Chromium |
+| 2 | images, CSS images, SVG `<image>`/`<use>`, media and posters, `input type=image`, stylesheets, `@import`, fonts, scripts, `import()`, workers, manifests, icons | CSP `img/media/font/style/script-src` = the allowlist only; `worker-src blob:` | `2.resources` (an allowed image as positive control) | — (the same CSP as item 1) |
+| 3 | WebRTC (ICE gathering reaches the network outside `connect-src`) | CSP `webrtc 'block'` **and** the shell removes every `RTC*`/`webkitRTC*` constructor, fixed in place, before content runs | `3.webrtc` (an unsandboxed peer connection as positive control: it sends STUN on both engines) | `webrtc` → `3.webrtc` (both) |
+| 4 | a nested frame: a fresh realm where item 3's removal never happened | the shell drops frame-like elements (`iframe, frame, frameset, object, embed, portal, fencedframe`) synchronously wherever content connects a node (P030), and an observer removes any that arrive another way, in the document and every shadow root (`attachShadow` is wrapped so closed ones are reached too); documents are rendered inert and imported, never written; `document.open/write` throw; declarative shadow roots can't be built (P029); CSP `frame-src 'none'` | `4.light-dom`, `.sync-realm`, `.open-shadow`, `.closed-shadow`, `.shadow-nested`, `.declarative-shadow`, `.parse-html-unsafe`, `.domparser`, `.document-write`, `.plugins`, `.foreign-object`, `.template-clone`, `.static` (each: the child never runs, no STUN, no frame left) | `frame-guard,sync-guard` → light-dom, sync-realm, plugins, foreign-object, template-clone; `attach-shadow,sync-guard` → closed-shadow, shadow-nested; `declarative-shadow` → declarative-shadow; `parser-entry-points` → document-write (each on both engines). Either guard alone is covered by the other. |
+| 5 | self-navigation out, with data in the URL (`location`, `replace`, `open(…, "_self")`, meta refresh, a link clicked past the shell, an SVG link), to the host's own origin, or to a `blob:`/`data:` document of its own (a fresh realm) | the **embedding page's** `frame-src` (`embedderCsp`: `'none'` for opaque content, P033): a frame's own CSP cannot stop its own navigation; the shell sends link clicks out through `openLink` and drops refreshes (P030); a display whose frame navigates is started again, at most three times (P031) | `5.location`, `.replace`, `.open-self`, `.refresh`, `.anchor`, `.svg-link`, `.host-origin`, `.blob`, `.data` (no request reaches the canary or the host; a navigated document never runs: a witness origin hears nothing) | `embedder-csp` → location, replace, open-self, anchor, svg-link, blob, data, `6.remote-download` (both; `.refresh` holds: the synchronous guard drops the refresh); `embedder-self` → `5.host-origin` |
+| 6 | forms, popups, downloads, top and parent navigation | `sandbox="allow-scripts"` only; CSP `form-action 'none'` | `6.submit`, `.request-submit`, `.blank-form`, `.open`, `.blank-link`, `.download`, `.remote-download`, `.top`, `.top-link`, `.parent` | `sandbox` → open, blank-link, top, top-link, parent (both), download (Chromium; WebKit started no download either way). Form submits still fail: `form-action` is a second wall |
+| 7 | `<base>` hijack, plugins | CSP `base-uri 'none'`, `object-src 'none'`; plugins removed as frames | `7.base-plugins` | `base-uri` → `7.base-plugins` (both); `frame-guard,sync-guard` too (plugins left in place) |
+| 8 | resource hints and speculation rules | CSP for those an engine governs (`prefetch`, `preload`, `modulepreload`); for the rest the shell drops `dns-prefetch`, `preconnect`, `prefetch`, `prerender` links, speculation rules, refreshes and `x-dns-prefetch-control` metas synchronously, and refuses changes that would make a connected link one (P030); `x-dns-prefetch-control: off` | `8.preconnect`, `.dns-prefetch`, `.prefetch`, `.prerender`, `.preload`, `.modulepreload`, `.speculation-rules` (each in markup, inserted, and switched on by attribute change; no request, no connection) | `sync-guard` → `8.preconnect` (WebKit: it preconnects synchronously, outside CSP). Measured: Chromium opened no preconnect even unsandboxed. `dns-prefetch` has no out-of-band oracle here (DNS isn't observed); the element is refused before it connects |
+| 9 | the host's DOM, storage, cookies, credentials; another display | opaque origin (no `allow-same-origin`); nothing secret is sent into the frame; the shell takes messages only from its parent | `9.host`, `9.siblings` (a display can't navigate or drive another) | — (the sandbox is the platform's; measured: a new frame's realm is cross-origin even in the task that made it, both engines) |
+| 10 | the embedding page's own origin | no `'self'` in any directive (P022) | `10.self` | `self` → none: measured, an opaque frame's `'self'` reaches nothing of the host on either engine. Kept out anyway (nothing legitimate needs it) |
 
-Gating tests (capabilities): `sendPrompt` without a user gesture is refused by
+Interop (`0.*`): the content runs in an opaque origin; the shell defines a global only
+per declared capability, fixed in place; it applies exactly the declared theme
+variables; streamed content is drawn inert and runs once; and content using the
+official App SDK connects under the inline, artifact and MCP Apps presets
+(`style-split` → all three, P028).
+
+Gating tests (capabilities, M3): `sendPrompt` without a user gesture is refused by
 the shell and, when gated `confirm`, nothing is sent until the host confirms;
 `openLink` is http(s) only and confirmed; a muted frame stops asking; a
 `confirm`-gated call with no `confirm` function is refused.
+
+## The shell runtime
+
+The runtime (`src/shell/runtime.ts`, plain ES2020, no build) runs first in every
+frame it serves. Before any content: an in-memory `localStorage` (opaque frames), the
+WebRTC removal (item 3), the frame and hint guards (items 4, 8: the observer, the
+wrapped `attachShadow`, the synchronous insertion and attribute guards), and the
+closed parser entry points (P029). Then, when it speaks for the content: the
+handshake, the theme (P028), content drawn inert while partial and run once when
+whole (a fragment parsed in a template, its scripts recreated in order; a document
+parsed with `DOMParser` and imported, its scripts recreated in order, then
+`DOMContentLoaded` and `load`), size and error reports, and link clicks sent out
+through `openLink`. A view that speaks for itself (`protocol: "none"`, MCP Apps) is
+rendered the same way from the plan, once the shell's document has loaded.
 
 ## Streaming
 
@@ -461,17 +498,22 @@ A Playwright suite (`@botiverse/porthole/conformance`) that:
   host's DOM — aligned with the upstream conformance-interface effort so results
   can feed it;
 - runs every egress and escape probe in the table above, each attempting its
-  channel and asserting nothing leaves, using out-of-band oracles (a local UDP
-  listener for ICE, a local HTTP server for navigation/pixels, the engine's
-  network log for hints);
+  channel and asserting nothing leaves, using out-of-band oracles (`httpOracle`: a
+  local HTTP server that also counts TCP connections; `udpOracle`: a UDP listener
+  for STUN), each with its positive control;
 - runs the MCP Apps examples unmodified and checks the lifecycle and interaction;
 - renders the generated guide's examples and checks they read at the target
   widths and themes.
 
-Porthole runs it against its own reference host (`leak/`, served by
-`leak/server.ts`, which serves the core's TypeScript stripped as Node does):
-`pnpm test:leak` runs Chromium and WebKit; `PORTHOLE_LEAK_ENGINES=chromium` runs a
-subset where an engine's system libraries are missing.
+Porthole runs it against its own reference host (`leak/host/reference.ts`, the real
+`createHost` in a page; `leak/reference-host.ts`, its `ConformanceHost`; served by
+`leak/server.ts`, which serves the core's TypeScript stripped as Node does, with the
+embedding CSP `embedderCsp` derives): `pnpm test:leak` runs Chromium and WebKit;
+`PORTHOLE_LEAK_ENGINES=chromium` runs a subset where an engine's system libraries
+are missing; `PORTHOLE_LEAK_WEAKEN=<control>[,<control>]` serves the core with
+defenses taken out (P032; the table above lists what each must fail).
+`ConformanceHost.launch` called twice on one page shows two displays side by side
+(`9.siblings`).
 
 ## Milestones
 
@@ -482,14 +524,16 @@ The core (this repository's lead work), in order; each lands when its tests pass
    `allow`, embedder CSP, shell plan and document, guide and tool description) with
    the agreement test; the presets as configs; the public interfaces above as typed
    stubs; the shell's wiring checked in real frames on Chromium and WebKit.
-2. **M2 — isolation core, shell runtime, egress hardening.** The web platform host
-   and transport, opaque frames through `createHost`, the reference host and
-   `defineLeakSuite`, items 1–10 above each with its probe, green on Chromium and
-   WebKit.
-3. **M3 — streaming, auto-size, theming, the gated bridge.** The shell adapter,
-   inert streaming drafts, size reporting under the limits, theme apply and flip,
-   base styles for native form elements, and the host-function bridge with its
-   gating tests.
+2. **M2 — isolation core, shell runtime, egress hardening** (done). The web
+   platform host and transport, `createHost` mounting opaque, domain and url frames
+   (served frames checked by `checkFrameLocation`), the shell adapter and the bridge,
+   the reference host and `defineLeakSuite`, items 1–10 above each with its probes,
+   positive controls and negative controls, green on Chromium and WebKit; the
+   official App SDK connecting under every preset.
+3. **M3 — streaming, auto-size, theming, the gated bridge.** Streaming drafts
+   through the host API and their leak tests, size reporting under the limits,
+   theme apply and flip, base styles for native form elements, and the
+   host-function bridge's gating tests (unit and in real frames).
 4. **M4 — the React binding and its default confirmation dialog.**
    `<PortholeProvider>`, `<PortholeFrame>`, `ConfirmDialog`.
 5. **M5 — Firefox** in the leak suite gate.
@@ -504,7 +548,4 @@ migration**.
 1. **URL mode's sandbox tokens.** The baseline is `allow-scripts allow-same-origin
    allow-forms`; does a dev-server preview need more (popups for OAuth flows,
    downloads)? The served-modes work decides with a probe and a decision entry.
-2. **`'self'` in the embedding page's `frame-src`.** It covers `srcdoc` frames and
-   the host's own frames, but also lets a widget navigate its frame to a host page
-   (no exfiltration: the host origin is not the attacker's). Measure whether
-   `srcdoc` frames need it at all, and drop it if not.
+2. ~~`'self'` in the embedding page's `frame-src`~~: measured and dropped (P033).

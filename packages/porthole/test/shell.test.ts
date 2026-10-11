@@ -59,14 +59,15 @@ describe("the shell document", () => {
     expect(() => compiled.shellDocument({ origins: ["*"] })).toThrow(/exact origin/u);
   });
 
-  test("hardens a given document by running first in it, keeping standards mode", () => {
+  test("carries a given document as data, for the shell to render inert, never as markup", () => {
     const view =
-      '<!DOCTYPE html>\n<script>window.early = 1</script>\n<html lang="fr"><head><title>View</title></head><body>Hi</body></html>';
+      '<!DOCTYPE html>\n<script>window.early = 1</script>\n<html lang="fr"><body>Hi <template shadowrootmode="closed"><iframe></iframe></template></body></html>';
     const hardened = compile(presets.mcpApp()).shellDocument({ origins: [ORIGIN], document: view });
-    expect(hardened.startsWith("<!doctype html>\n<html>\n<head>\n<meta charset")).toBe(true);
+    // The page's parser sees the shell alone: one script, one doctype, no markup of the view's.
     expect(hardened.match(/<!doctype/giu)).toHaveLength(1);
-    expect(hardened.indexOf("const plan")).toBeLessThan(hardened.indexOf("window.early"));
-    expect(planIn(hardened)).toMatchObject({ protocol: "none", globals: [] });
+    expect(hardened.match(/<script>/gu)).toHaveLength(1);
+    expect(hardened).not.toContain("<template");
+    expect(planIn(hardened)).toMatchObject({ protocol: "none", globals: [], document: view });
   });
 
   test("may leave the CSP to a served document's headers", () => {

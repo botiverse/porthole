@@ -114,7 +114,10 @@ export interface GuideConfig {
 }
 
 export interface EmbedderConfig {
-  /** Extra `frame-src` sources the embedding page allows, for frames it shows besides these. */
+  /**
+   * Extra `frame-src` sources the embedding page allows, for frames it shows besides these:
+   * origins, or `'self'` if it frames its own pages (which lets content navigate there too).
+   */
   readonly frameSrc?: readonly string[];
 }
 

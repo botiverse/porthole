@@ -27,13 +27,7 @@ export {
   type ToolResult,
 } from "./adapter.ts";
 export { sandboxProxyDocument } from "./proxy.ts";
-export {
-  MCP_APPS_STYLE_VARIABLES,
-  VIEW_MIME_TYPE,
-  readViewResource,
-  viewEgress,
-  type ViewResource,
-} from "./view.ts";
+export { VIEW_MIME_TYPE, readViewResource, viewEgress, type ViewResource } from "./view.ts";
 export type {
   AdapterConnection,
   AdapterEvent,
@@ -41,7 +35,12 @@ export type {
   ProtocolAdapter,
 } from "../protocol/adapter.ts";
 export type { HostContext } from "../protocol/mcp-apps.ts";
-export { MCP_APPS_METHODS, MCP_APPS_PROTOCOL_VERSION } from "../protocol/mcp-apps.ts";
+export {
+  MCP_APPS_METHODS,
+  MCP_APPS_PROTOCOL_VERSION,
+  MCP_APPS_STYLE_VARIABLES,
+  PORTHOLE_STYLES,
+} from "../protocol/mcp-apps.ts";
 export {
   JSON_RPC_ERRORS,
   parseJsonRpc,

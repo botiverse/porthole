@@ -1,28 +1,32 @@
 /**
  * `@botiverse/porthole/conformance`: the leak/conformance suite (P008), runnable by any host
  * against its own integration. A host implements `ConformanceHost` (how to show one display in a
- * fresh page and drive it), then registers the suite in its Playwright project:
+ * page and drive it), then registers the suite in its Playwright project:
  *
  *   import { test } from "@playwright/test";
  *   import { defineLeakSuite } from "@botiverse/porthole/conformance";
  *   defineLeakSuite(test, myHost);
  *
  * Each probe attempts one egress or escape channel (DESIGN.md § Egress hardening) and asserts,
- * with an out-of-band oracle where one exists (an HTTP canary server, a UDP listener for ICE),
- * that nothing left. Porthole runs it against its own reference host on every engine it supports.
+ * with an out-of-band oracle where one exists (an HTTP canary that also counts connections, a UDP
+ * listener for ICE), that nothing left. Each oracle has a positive control: where the engine
+ * can't make the channel work even unsandboxed, the probe says so instead of passing silently.
+ * Porthole runs it against its own reference host on every engine it supports.
  */
-import type { Frame, Page, TestType } from "@playwright/test";
+import type { Frame, Page } from "@playwright/test";
 import type { ConfirmRequest } from "../bridge/types.ts";
 import type { CapabilityName } from "../config/capabilities.ts";
 import type { ColorScheme, PortholeConfig } from "../config/schema.ts";
-import { NotBuiltYet } from "../internal/not-built.ts";
+import type { DisplayEvents } from "../host/types.ts";
 
 export interface LaunchSpec {
   readonly config: PortholeConfig;
-  /** The whole content. */
+  /** The whole content (a fragment, or a document for artifact mode). */
   readonly content: string;
   /** Content to stream first, each step sent as partial, before the whole. */
   readonly partials?: readonly string[];
+  /** A whole document the frame starts with instead (an MCP Apps view). */
+  readonly document?: string;
   readonly title?: string;
   readonly scheme?: ColorScheme;
   /** The frame's width, px. */
@@ -34,8 +38,12 @@ export interface RecordedCall {
   readonly args: unknown;
 }
 
+export type RecordedEvent = {
+  [E in keyof DisplayEvents]: { readonly type: E; readonly detail: DisplayEvents[E] };
+}[keyof DisplayEvents];
+
 export interface LaunchedDisplay {
-  /** The display's frame, to probe from inside. */
+  /** The display's frame as it is now (a restart makes a new one), to probe from inside. */
   frame(): Promise<Frame>;
   setTheme(scheme: ColorScheme): Promise<void>;
   /** Waits for the next confirmation the host is asked for, answers it, and returns it. */
@@ -47,13 +55,19 @@ export interface LaunchedDisplay {
   calls(): Promise<readonly RecordedCall[]>;
   /** The errors the display reported. */
   errors(): Promise<readonly string[]>;
+  /** Every event the display emitted, in order. */
+  events(): Promise<readonly RecordedEvent[]>;
   destroy(): Promise<void>;
 }
 
 /** What a host implements to run the suite against its integration. */
 export interface ConformanceHost {
   readonly name: string;
-  /** Shows one display in `page` (a fresh page per test) and returns handles to drive it. */
+  /**
+   * Shows one display in `page` and returns handles to drive it. The first call on a page loads
+   * the host's page (sending its embedding CSP for `spec.config`); a later call on the same page
+   * adds another display beside the first.
+   */
   launch(page: Page, spec: LaunchSpec): Promise<LaunchedDisplay>;
 }
 
@@ -62,14 +76,8 @@ export interface LeakSuiteOptions {
   readonly skip?: Readonly<Record<string, string>>;
 }
 
-/** Registers every probe as a test. */
-export function defineLeakSuite(
-  _test: TestType<object, object>,
-  _host: ConformanceHost,
-  _options?: LeakSuiteOptions,
-): void {
-  throw new NotBuiltYet("defineLeakSuite", "M2");
-}
+export { defineLeakSuite, PROBES, type Probe } from "./probes.ts";
+export { httpOracle, settle, udpOracle, type HttpOracle, type UdpOracle } from "./oracles.ts";
 
 // The served modes' cases (domain and url mode), with their own host interface.
 export {

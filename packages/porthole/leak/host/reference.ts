@@ -1,0 +1,113 @@
+import { createHost } from "../../src/index.ts";
+import type { CapabilityHandlers, ConfirmRequest } from "../../src/bridge/types.ts";
+import type { LaunchSpec, RecordedCall, RecordedEvent } from "../../src/conformance/index.ts";
+import type { DisplayEvents, DisplayHandle } from "../../src/host/types.ts";
+
+/**
+ * Porthole's reference host, in the browser: the real core (`createHost`, served as stripped
+ * TypeScript), mounting each display the suite asks for, recording what reaches its handlers and
+ * holding each confirmation until the test answers it.
+ */
+
+interface Display {
+  readonly handle: DisplayHandle;
+  readonly calls: RecordedCall[];
+  readonly events: RecordedEvent[];
+  readonly confirmations: { request: ConfirmRequest; resolve: (accepted: boolean) => void }[];
+}
+
+const displays = new Map<number, Display>();
+let next = 0;
+
+const EVENTS: readonly (keyof DisplayEvents)[] = [
+  "initialized",
+  "resize",
+  "error",
+  "navigated",
+  "refused",
+  "muted",
+];
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const reference = {
+  async launch(spec: LaunchSpec): Promise<number> {
+    const id = next;
+    next += 1;
+    const box = document.createElement("section");
+    box.id = `display-${id}`;
+    box.style.width = `${spec.widthPx ?? 600}px`;
+    document.getElementById("displays")?.append(box);
+
+    const calls: RecordedCall[] = [];
+    const record =
+      <T>(capability: RecordedCall["capability"], value: T) =>
+      (args: unknown): T => {
+        calls.push({ capability, args });
+        return value;
+      };
+    const handlers: CapabilityHandlers = {
+      sendPrompt: record("sendPrompt", true),
+      openLink: record("openLink", true),
+      downloadFile: record("downloadFile", true),
+      callTool: record("callTool", { content: [] }),
+      readData: record("readData", { contents: [] }),
+      setModelContext: record("setModelContext", undefined),
+    };
+    const confirmations: Display["confirmations"] = [];
+    const host = createHost(spec.config, {
+      handlers,
+      confirm: (request) => new Promise((resolve) => confirmations.push({ request, resolve })),
+      hostInfo: { name: "porthole-reference", version: "0" },
+    });
+    const handle = host.mount(box, {
+      displayId: `display-${id}`,
+      title: spec.title ?? "Probe",
+      scheme: spec.scheme ?? "light",
+      ...(spec.document === undefined ? {} : { document: spec.document }),
+    });
+    const events: RecordedEvent[] = [];
+    const initialized = new Promise<void>((resolve) => {
+      for (const type of EVENTS) {
+        handle.on(type, (detail) => {
+          events.push({ type, detail } as RecordedEvent);
+          if (type === "initialized") {
+            resolve();
+          }
+        });
+      }
+    });
+    displays.set(id, { handle, calls, events, confirmations });
+    if (spec.document === undefined) {
+      await Promise.race([initialized, pause(5_000)]);
+      for (const partial of spec.partials ?? []) {
+        handle.setContent(partial, { partial: true });
+        await pause(150);
+      }
+      handle.setContent(spec.content);
+    }
+    return id;
+  },
+  calls: (id: number) => displays.get(id)?.calls ?? [],
+  events: (id: number) => displays.get(id)?.events ?? [],
+  errors: (id: number) =>
+    (displays.get(id)?.events ?? []).flatMap((event) =>
+      event.type === "error" ? [event.detail.message] : [],
+    ),
+  pendingConfirmations: (id: number) => displays.get(id)?.confirmations.length ?? 0,
+  answer(id: number, accept: boolean): ConfirmRequest | null {
+    const waiting = displays.get(id)?.confirmations.shift();
+    if (waiting === undefined) {
+      return null;
+    }
+    waiting.resolve(accept);
+    return waiting.request;
+  },
+  setTheme: (id: number, scheme: "light" | "dark") => displays.get(id)?.handle.setTheme(scheme),
+  destroy(id: number) {
+    displays.get(id)?.handle.destroy();
+    displays.delete(id);
+  },
+};
+
+(window as unknown as { reference: typeof reference }).reference = reference;

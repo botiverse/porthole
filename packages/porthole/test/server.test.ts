@@ -411,9 +411,14 @@ describe("the MCP Apps sandbox proxy", () => {
     const compiled = compile(configs.mcpApp);
     const document = sandboxProxyDocument(compiled, [HOST]);
     const setup = /const setup = (\{.*\});/u.exec(document)?.[1] ?? "{}";
-    const { head } = JSON.parse(setup) as { head: string };
-    const view = "<html><body>view</body></html>";
-    expect(head + view).toBe(
+    const { shell: page, slot } = JSON.parse(setup) as { shell: string; slot: string };
+    const view = "<html><body>view</body><script>x = '</script>'\u2028</script></html>";
+    // What the proxy's runtime does with the view: its JSON literal, safe inside a <script>.
+    const literal = JSON.stringify(view)
+      .replace(/</gu, "\\u003c")
+      .replace(/\u2028/gu, "\\u2028")
+      .replace(/\u2029/gu, "\\u2029");
+    expect(page.replace(slot, () => literal)).toBe(
       compiled.shellDocument({ origins: [HOST], document: view, cspMeta: false }),
     );
     expect(() => sandboxProxyDocument(compile(configs.artifact), [HOST])).toThrow(/MCP Apps/u);

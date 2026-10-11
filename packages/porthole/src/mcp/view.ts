@@ -6,65 +6,8 @@ import { isOriginSource } from "../config/validate.ts";
  * the view declares, in Porthole's vocabulary so it goes into a config (P003).
  */
 
-/**
- * The style variables MCP Apps standardizes (spec § Theming). The official App SDK refuses a
- * host context naming any other (measured: zod's record of these keys rejects an unknown one), so
- * a view is sent these and only these; Porthole's own names (`--color-accent`, the chart palette)
- * stay with its shell.
- */
-export const MCP_APPS_STYLE_VARIABLES: readonly string[] = [
-  ...[
-    "primary",
-    "secondary",
-    "tertiary",
-    "inverse",
-    "ghost",
-    "info",
-    "danger",
-    "success",
-    "warning",
-    "disabled",
-  ].map((name) => `--color-background-${name}`),
-  ...[
-    "primary",
-    "secondary",
-    "tertiary",
-    "inverse",
-    "info",
-    "danger",
-    "success",
-    "warning",
-    "disabled",
-    "ghost",
-  ].map((name) => `--color-text-${name}`),
-  ...[
-    "primary",
-    "secondary",
-    "tertiary",
-    "inverse",
-    "ghost",
-    "info",
-    "danger",
-    "success",
-    "warning",
-    "disabled",
-  ].map((name) => `--color-border-${name}`),
-  ...["primary", "secondary", "inverse", "info", "danger", "success", "warning"].map(
-    (name) => `--color-ring-${name}`,
-  ),
-  "--font-sans",
-  "--font-mono",
-  ...["normal", "medium", "semibold", "bold"].map((name) => `--font-weight-${name}`),
-  ...["xs", "sm", "md", "lg"].map((size) => `--font-text-${size}-size`),
-  ...["xs", "sm", "md", "lg", "xl", "2xl", "3xl"].map((size) => `--font-heading-${size}-size`),
-  ...["xs", "sm", "md", "lg"].map((size) => `--font-text-${size}-line-height`),
-  ...["xs", "sm", "md", "lg", "xl", "2xl", "3xl"].map(
-    (size) => `--font-heading-${size}-line-height`,
-  ),
-  ...["xs", "sm", "md", "lg", "xl", "full"].map((size) => `--border-radius-${size}`),
-  "--border-width-regular",
-  ...["hairline", "sm", "md", "lg"].map((size) => `--shadow-${size}`),
-];
+/** The style variables MCP Apps standardizes: one list, the core's (P028). */
+export { MCP_APPS_STYLE_VARIABLES } from "../protocol/mcp-apps.ts";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);

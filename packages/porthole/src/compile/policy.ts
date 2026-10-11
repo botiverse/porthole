@@ -108,11 +108,13 @@ export function allowAttribute(_config: PortholeConfig): string {
 /**
  * The `frame-src` sources the EMBEDDING page must allow, and nothing else: a frame's own CSP can't
  * stop it navigating itself to an external URL with data in the query, but the embedding page's
- * `frame-src` governs every navigation of its frames, including self-initiated ones. `'self'`
- * covers `srcdoc` frames; served and external content adds its own origins.
+ * `frame-src` governs every navigation of its frames, including self-initiated ones. `srcdoc`
+ * frames need no source (measured: they load under `frame-src 'none'`), so opaque content gets
+ * none, and can't navigate its frame even to the host's own origin (P033); served and external
+ * content adds its own origins, and a host its own frames (`'self'` only if it names it).
  */
 export function embedderFrameSources(config: PortholeConfig): string[] {
-  return unique(["'self'", ...config.contentOrigins, ...(config.embedder.frameSrc ?? [])]);
+  return unique([...config.contentOrigins, ...(config.embedder.frameSrc ?? [])]);
 }
 
 /**
@@ -123,7 +125,7 @@ export function embedderFrameSources(config: PortholeConfig): string[] {
  */
 export function embedderCsp(configs: readonly PortholeConfig[]): string {
   const sources = unique(configs.flatMap(embedderFrameSources));
-  const all = sources.length === 0 ? ["'self'"] : sources;
+  const all = sources.length === 0 ? ["'none'"] : sources;
   return serializeCsp([
     ["frame-src", ...all],
     ["child-src", ...all],

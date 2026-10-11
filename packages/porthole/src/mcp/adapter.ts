@@ -14,7 +14,7 @@ import {
   MCP_APPS_PROTOCOL_VERSION,
   type HostContext,
 } from "../protocol/mcp-apps.ts";
-import { MCP_APPS_STYLE_VARIABLES } from "./view.ts";
+import { MCP_APPS_STYLE_VARIABLES } from "../protocol/mcp-apps.ts";
 
 /**
  * The MCP Apps adapter (P004, P007): the host side of the protocol for full MCP Apps views, written

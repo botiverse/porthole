@@ -29,6 +29,11 @@ export interface Surface {
   setHeight(px: number): void;
   setColorScheme(scheme: ColorScheme): void;
   /**
+   * Whether the embedding page has transient user activation now (a gesture in the frame
+   * activates its ancestors), or undefined where the platform can't tell.
+   */
+  userActivation(): boolean | undefined;
+  /**
    * The frame loaded a document other than the one it was given: the content navigated it. The
    * framework starts it again from its content and reports it.
    */

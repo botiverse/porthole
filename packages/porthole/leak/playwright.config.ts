@@ -29,7 +29,10 @@ export default defineConfig({
     cwd: "..",
     url: `http://127.0.0.1:${port}/`,
     reuseExistingServer: false,
-    env: { PORTHOLE_LEAK_PORT: String(port) },
+    env: {
+      PORTHOLE_LEAK_PORT: String(port),
+      PORTHOLE_LEAK_WEAKEN: process.env.PORTHOLE_LEAK_WEAKEN ?? "",
+    },
   },
   projects: all.filter((project) => engines.includes(project.name)),
 });

@@ -272,7 +272,13 @@ export function validateConfig(input: unknown): PortholeConfig {
 
   const embedder = object(config.embedder, "config.embedder");
   only(embedder, ["frameSrc"], "config.embedder");
-  sources(embedder.frameSrc, "config.embedder.frameSrc");
+  // The host's own frames may include its own origin, by name.
+  sources(
+    Array.isArray(embedder.frameSrc)
+      ? embedder.frameSrc.filter((source) => source !== "'self'")
+      : embedder.frameSrc,
+    "config.embedder.frameSrc",
+  );
 
   return input as PortholeConfig;
 }

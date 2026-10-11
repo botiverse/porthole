@@ -11,8 +11,10 @@ export interface ShellDocumentOptions {
   /** The frame document's title (for assistive technology inside the frame). */
   readonly title?: string;
   /**
-   * A whole document to harden instead of the shell's own empty one (an MCP Apps view, a page
-   * served as it is): the shell's policy and runtime go first in it, before anything of its own.
+   * A whole document to show in place of the shell's own empty one (an MCP Apps view): the shell
+   * parses it inert, guards it, imports it, and runs its scripts in order, once its own policy
+   * and runtime are in place. It is never handed to the page's parser, which could build what the
+   * shell's guards can't see.
    */
   readonly document?: string;
   /**
@@ -52,10 +54,8 @@ body {
 #porthole-root > svg { display: block; max-width: 100%; height: auto; }`;
 
 /**
- * The frame's document: its policy, the base styles, and the runtime, before anything else. For
- * a given `document`, the shell's head comes first and the document follows with its doctype
- * dropped, so nothing of the document's can run before the runtime, while the page keeps
- * standards mode.
+ * The frame's document: its policy first, then the base styles, an empty root, and the runtime.
+ * A given `document` travels in the runtime's plan, as data.
  */
 export function shellDocument(plan: ShellPlan, csp: string, options: ShellDocumentOptions): string {
   for (const origin of options.origins) {
@@ -64,7 +64,11 @@ export function shellDocument(plan: ShellPlan, csp: string, options: ShellDocume
     }
   }
   const runtime = SHELL_RUNTIME.replace("__PLAN__", () =>
-    scriptJson({ ...plan, origins: options.origins }),
+    scriptJson({
+      ...plan,
+      origins: options.origins,
+      ...(options.document === undefined ? {} : { document: options.document }),
+    }),
   );
   const head = [
     '<meta charset="utf-8">',
@@ -72,12 +76,9 @@ export function shellDocument(plan: ShellPlan, csp: string, options: ShellDocume
       ? null
       : `<meta http-equiv="Content-Security-Policy" content="${escapeAttribute(csp)}">`,
     '<meta name="referrer" content="no-referrer">',
+    // Off for good: an engine may prefetch names it sees in links, outside the CSP.
+    '<meta http-equiv="x-dns-prefetch-control" content="off">',
   ].filter((line) => line !== null);
-
-  if (options.document !== undefined) {
-    const rest = options.document.replace(/^﻿?\s*<!doctype[^>]*>/iu, "");
-    return `<!doctype html>\n<html>\n<head>\n${head.join("\n")}\n<script>${runtime}</script>\n${rest}`;
-  }
 
   return `<!doctype html>
 <html lang="en">
