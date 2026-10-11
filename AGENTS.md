@@ -17,11 +17,11 @@ Read these first:
 
 ## Status
 
-Phase 1 is being built, milestone by milestone (DESIGN.md § Milestones). M1–M3
+Phase 1 is being built, milestone by milestone (DESIGN.md § Milestones). M1–M4
 are in: the config, compiler and presets; the isolation core (`createHost`, the web
 platform, the shell runtime, the shell adapter, the gated bridge); streaming,
-sizing and theming; the leak suite with its oracles and negative controls. Unbuilt
-functions throw `NotBuiltYet`.
+sizing and theming; the React binding with its default dialog; the leak suite with
+its oracles and negative controls.
 
 ## Setup
 
@@ -54,7 +54,8 @@ packages/porthole/src/   config/ compile/ shell/ guide/ theme/ presets/   the co
                          protocol/ bridge/ transport/ platform/ isolation/ host/   the seams
                          react/ mcp/ conformance/ server/                 the subpath entries
 packages/porthole/test/  unit tests; agreement.test.ts is the config ↔ CSP ↔ shell ↔ manual check
-packages/porthole/leak/  the leak suite run against Porthole's reference host
+packages/porthole/leak/  the leak suite run against Porthole's reference host; react.spec.ts the
+                         React binding in real browsers (leak/react/app.tsx, bundled by esbuild)
 ```
 
 ## Conventions

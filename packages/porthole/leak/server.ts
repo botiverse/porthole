@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { stripTypeScriptTypes } from "node:module";
+import { build } from "esbuild";
 import path from "node:path";
 
 /**
@@ -187,7 +188,43 @@ const TYPES: Readonly<Record<string, string>> = {
   ".ts": "text/javascript; charset=utf-8",
 };
 
+/**
+ * The React binding's test app, bundled on request (React ships CommonJS only), with the same
+ * weakenings applied to the core's sources as the stripped files get.
+ */
+async function bundleReactApp(): Promise<string> {
+  const result = await build({
+    entryPoints: [path.join(root, "leak/react/app.tsx")],
+    bundle: true,
+    format: "esm",
+    write: false,
+    logLevel: "silent",
+    define: { "process.env.NODE_ENV": '"development"' },
+    plugins: [
+      {
+        name: "weaken",
+        setup(plugin) {
+          plugin.onLoad({ filter: /[/]src[/].*[.]ts$/ }, async (args) => ({
+            contents: weaken(path.relative(root, args.path), await readFile(args.path, "utf8")),
+            loader: "ts",
+          }));
+        },
+      },
+    ],
+  });
+  return result.outputFiles[0]?.text ?? "";
+}
+
 async function serve(pathname: string): Promise<{ body: string; type: string } | null> {
+  if (pathname === "/leak/react/app.js") {
+    return { body: await bundleReactApp(), type: "text/javascript; charset=utf-8" };
+  }
+  if (pathname === "/leak/react/" || pathname === "/leak/react") {
+    return {
+      body: await readFile(path.join(root, "leak/react/index.html"), "utf8"),
+      type: "text/html; charset=utf-8",
+    };
+  }
   const relative = pathname === "/" ? "leak/host/index.html" : pathname.replace(/^\/+/u, "");
   if (!/^(src|leak\/host)\//u.test(relative) || relative.includes("..")) {
     return null;

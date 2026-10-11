@@ -621,3 +621,27 @@ and accepts that navigation.
 **Rejected.** Keeping `'self'` (the first host's policy) for compatibility.
 **Revisit when** an engine stops letting `srcdoc` frames load under `frame-src 'none'`
 (the opaque-origin probes would fail at once).
+
+## P034 · 2026-10-11 · The React binding owns lifecycle and page state; the core owns everything else · Accepted
+
+**Decision.** `@botiverse/porthole/react` is mounting and lifecycle only: a
+`PortholeProvider` per page holds the live-frame registry (`admitFrame`, the first host's
+policy: frames off screen longest stop first, a stopped one keeps its height and offers
+"Run again"), the heights displays reported (by display id), and the default dialog
+queue; a `PortholeFrame` per display mounts the core's `createHost` when it nears the
+screen, feeds it `content`/`partial`/`scheme` (and its id and title), and makes a new
+display only for a new `config`, `document` or `instance` (or `generation`). It is
+written in TSX (the React lint rules only understand JSX; a host's bundler or the
+package's build compiles it). Handlers are read
+from the latest props. The cap is each config's `limits.maxLiveFrames`. Without a
+provider, frames run against a page-wide registry and no one confirms (gated calls are
+refused). The shell reports no size before it has drawn something.
+**Why.** These are the first host's widget-frame behaviors (OBJECTIVE 4: its code
+reduced to config plus callbacks), and they are page state a framework binding owns,
+not isolation. Measured while testing: the first host's shell reported an empty
+shell's height at its handshake, which overwrote a display's remembered height and
+made a re-mounted frame jump; `11.size` now asserts the first size is the content's.
+**Rejected.** A binding with its own frame or protocol code; a default with no
+provider that silently auto-confirms.
+**Revisit when** a second framework needs a binding (then move the registry and
+heights into a framework-free module both use: `live.ts` already is).

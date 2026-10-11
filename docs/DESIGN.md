@@ -164,7 +164,7 @@ functions not built yet throw `NotBuiltYet` naming their milestone.
 | MCP Apps names: `MCP_APPS_METHODS`, `MCP_APPS_STYLE_VARIABLES`, `PORTHOLE_STYLES`, `HostContext`; JSON-RPC parsing | `src/protocol/mcp-apps.ts`, `src/protocol/jsonrpc.ts` | core | shell, both adapters |
 | MCP Apps adapter: `mcpAppsAdapter`, `McpAppConnection`, `viewEgress`, `readViewResource`, `MCP_APPS_STYLE_VARIABLES`, `sandboxProxyDocument` | `src/mcp/` | MCP adapter (done) | hosts showing MCP Apps views |
 | Host-function bridge: `HostFunctionBridge`, `CapabilityHandlers`, `Confirm`, `ConfirmRequest`, `Refusal`; `createBridge` | `src/bridge/` | core (M2–M3, built and proven) | adapters, hosts |
-| React: `PortholeProvider`, `PortholeFrame`, `ConfirmDialog` props | `src/react/index.ts` | core (M4) | first host |
+| React: `PortholeProvider`, `PortholeFrame`, `ConfirmDialog`, `admitFrame` | `src/react/` | core (M4, built) | first host |
 | Conformance: `ConformanceHost`, `LaunchSpec`, `LaunchedDisplay`, `defineLeakSuite`, `PROBES`, the oracles; `defineServedSuite`, `ServedConformanceHost` | `src/conformance/` | core (M2, built); served modes (done) | any host |
 | Server: `createServer`, `PortholeServer`, `TicketStore`, `ArtifactStore`, `ContentDomain`, `Grant`, `Access`, `Upstream`, `proxyTo`, `memoryTicketStore` | `src/server/` | served modes (done) | host backends |
 
@@ -299,13 +299,50 @@ it (`leak/mcp/`), in an opaque frame and behind the sandbox proxy.
 
 ### React binding
 
-`<PortholeProvider confirm? hostInfo? locator?>` near the root owns the default
-confirmation dialog and the live-frame cap; `<PortholeFrame config displayId title
-content partial scheme theme handlers confirm? instance? document? generation?
-onResize onError …>` mounts a display lazily as it nears the screen, keeps at most
-`limits.maxLiveFrames` running (those off screen longest stop first, and run again
-when they come back), and remembers each display's height. Written with
-`createElement`, so it needs no JSX transform.
+`@botiverse/porthole/react` (`src/react/`, TSX that a host's bundler or `pnpm build`
+compiles; peer `react` 19.2+ for `useEffectEvent`). All isolation is the core's; the
+binding is mounting and lifecycle (P034).
+
+```ts
+<PortholeProvider confirm? hostInfo? locator? dialogClassName?>   // once per page
+  <PortholeFrame
+    config={widgetConfig}            // a preset's config, stable (module scope or memoized)
+    displayId={id} title={title}     // height memory and confirmations key on these
+    scheme={scheme}                  // "light" | "dark": flips in place
+    content={code} partial={streaming}   // drafts inert while partial; whole runs once
+    handlers={{ sendPrompt, openLink }}  // one per declared capability; latest are called
+    theme={(scheme) => tokens}       // live values for the config's variable names
+    generation={n}                   // bump to run again from the start
+    onError onResize onNavigated onRefused onMuted onInitialized
+    renderPlaceholder? eager? confirm? document? instance? className? style? />
+</PortholeProvider>
+```
+
+- **Provider** (per page): which frames run (a live-frame cap: the config's
+  `limits.maxLiveFrames`; frames off screen longest stop first, show a placeholder at
+  their last height with "Run again", and run again when they come back), the
+  heights displays reported (by `displayId`, so a frame mounting again starts at its
+  last height), and the default confirmation dialog (`ConfirmDialog`, P019): the
+  call's whole effect and the display's title, Cancel focused, the accept button
+  ignoring presses for `ARM_DELAY_MS` after it opens, Escape cancels; a modal in the
+  host page, outside every frame. `confirm` replaces it. Without a provider frames
+  still run (one page-wide registry) and calls that need a person are refused.
+- **Frame**: mounts when it nears the screen (800 px) unless `eager`; until its
+  content reports a size it holds its remembered height (at least
+  `PLACEHOLDER_HEIGHT_PX`) and is hidden behind its placeholder (`data-porthole-state`:
+  `waiting`, `running`, `stopped`; `data-porthole-ready` while it loads); then it is
+  as tall as its content, within the config's limits. Only a new `config`,
+  `document`, `instance` or `generation` makes a new display; `content`, `partial`,
+  `scheme`, handlers, and even `displayId` and `title` are fed to the running one (a
+  streamed display keeps its frame when its id settles, and its confirmations name
+  it as the host now does).
+  Navigation recovery is the core's: started again up to three times, `onNavigated`
+  each time, then stopped with an error.
+- The shell reports no size before it has drawn something, so an empty shell never
+  overwrites a remembered height (the first host's frame jumped there).
+
+Its tests run in real browsers (`leak/react.spec.ts`, against `leak/react/app.tsx`,
+which the leak server bundles with esbuild because React ships CommonJS only).
 
 ## Widget side (what the agent writes against)
 
@@ -548,8 +585,11 @@ The core (this repository's lead work), in order; each lands when its tests pass
    host-function bridge's gates, each proven in real frames (items 11, 12) with
    negative controls, and in unit tests (`test/bridge.test.ts`,
    `test/shell-adapter.test.ts`).
-4. **M4 — the React binding and its default confirmation dialog.**
-   `<PortholeProvider>`, `<PortholeFrame>`, `ConfirmDialog`.
+4. **M4 — the React binding and its default confirmation dialog** (done).
+   `<PortholeProvider>`, `<PortholeFrame>`, `ConfirmDialog`: streaming through props,
+   height memory per display, the live-frame cap with "Run again", theme flips,
+   navigation recovery, generations, and the default, replaceable dialog, each
+   proven in a real browser.
 5. **M5 — Firefox** in the leak suite gate.
 
 In parallel, against the interfaces: the **MCP Apps adapter** (`/mcp`, running the

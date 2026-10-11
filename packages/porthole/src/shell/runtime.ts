@@ -561,9 +561,12 @@ export const SHELL_RUNTIME = String.raw`(() => {
     window.dispatchEvent(new CustomEvent(plan.themeEvent, { detail: { theme: context.theme } }));
   };
 
+  // No size before there is something to size: an empty shell's height would make the host
+  // forget the height it remembered for this display, and the frame would jump.
+  let drawn = false;
   let lastHeight = -1;
   const measure = () => {
-    if (!declared("resize")) {
+    if (!declared("resize") || !drawn) {
       return;
     }
     const box = root !== null && root.isConnected ? root : document.documentElement;
@@ -717,6 +720,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
     }
     morph(root, inert(parseInert(input.html || "")));
     drafted = true;
+    drawn = true;
     schedule();
   };
 
@@ -726,6 +730,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
       return;
     }
     rendered = true;
+    drawn = true;
     const html = String(input.html || "");
     if (plan.content === "document") {
       await renderDocument(html);

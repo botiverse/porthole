@@ -166,6 +166,9 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
       const sizes = (await display.events()).flatMap((event) =>
         event.type === "resize" ? [event.detail.height] : [],
       );
+      // The first size is the content's: an empty shell reports none (it would make the host
+      // forget the height it remembered, and the frame jump).
+      expect(sizes[0]).toBe(150);
       expect(sizes).toEqual(expect.arrayContaining([150, 300, 400, 30]));
       expect(Math.max(...sizes)).toBe(400);
     },
