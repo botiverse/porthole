@@ -156,15 +156,15 @@ functions not built yet throw `NotBuiltYet` naming their milestone.
 | --- | --- | --- | --- |
 | Config, presets, compiler, guide, theme | `src/config/`, `src/presets/`, `src/compile/`, `src/guide/`, `src/theme/` | core (M1, done) | everyone |
 | Host API: `createHost`, `MountOptions`, `DisplayHandle`, `DisplayEvents` | `src/host/types.ts` | core (M2–M3) | React binding, hosts |
-| Isolation: `InstanceRef`, `ServedDocument`, `InstanceLocator`, `FrameLocation`, `FrameSource` | `src/isolation/types.ts` | core | served modes, hosts |
+| Isolation: `InstanceRef`, `ServedDocument`, `InstanceLocator`, `FrameLocation`, `FrameSource`; `checkFrameLocation` | `src/isolation/types.ts`, `src/isolation/served.ts` | core; served modes (the checks) | served modes, hosts |
 | Platform host: `PlatformHost`, `Surface`, `SurfaceSpec` | `src/platform/types.ts` | core (web, M2) | native hosts later |
 | Transport | `src/transport/types.ts` | core (M2) | adapters |
 | Protocol adapter: `ProtocolAdapter`, `AdapterSession`, `AdapterConnection`, `ShellConnection` | `src/protocol/adapter.ts` | core (shell adapter, M2–M3) | MCP adapter |
 | MCP Apps names: `MCP_APPS_METHODS`, `HostContext`; JSON-RPC parsing | `src/protocol/mcp-apps.ts`, `src/protocol/jsonrpc.ts` | core (M1, done) | shell, both adapters |
 | Host-function bridge: `HostFunctionBridge`, `CapabilityHandlers`, `Confirm`, `ConfirmRequest`, `Refusal` | `src/bridge/types.ts` | core (M3) | adapters, hosts |
 | React: `PortholeProvider`, `PortholeFrame`, `ConfirmDialog` props | `src/react/index.ts` | core (M4) | first host |
-| Conformance: `ConformanceHost`, `LaunchSpec`, `LaunchedDisplay`, `defineLeakSuite` | `src/conformance/index.ts` | core (M2) | any host |
-| Server: `createServer`, `PortholeServer`, `TicketStore`, `ArtifactStore`, `ContentDomain`, `Grant` | `src/server/index.ts` | served modes | host backends |
+| Conformance: `ConformanceHost`, `LaunchSpec`, `LaunchedDisplay`, `defineLeakSuite`; `defineServedSuite`, `ServedConformanceHost` | `src/conformance/index.ts`, `src/conformance/served.ts` | core (M2); served modes (done) | any host |
+| Server: `createServer`, `PortholeServer`, `TicketStore`, `ArtifactStore`, `ContentDomain`, `Grant`, `Access`, `Upstream`, `proxyTo`, `memoryTicketStore` | `src/server/` | served modes (done) | host backends |
 
 ### Host API
 
@@ -221,10 +221,15 @@ and calls `PortholeServer.issue`.
   arrives over the transport, as for opaque frames), a stored artifact version, the
   MCP Apps sandbox proxy, or an external app (url mode).
 - **Tickets** are minted by `issue` (one-time, short-lived, bound to an instance and
-  a viewer), carried once in the frame's URL, taken by the content origin, and
-  exchanged for a cookie of that origin only (`__Host-`, `Secure`, `HttpOnly`,
-  `SameSite=None; Partitioned` in a frame); the response then redirects to the
-  document without the ticket.
+  a viewer, stored as their hash), carried once in the frame's URL, and taken by the
+  content origin. A served document (at `/__porthole/d/<instance key>`) comes back in
+  that same answer, with a cookie of that origin and instance only (`__Host-`,
+  `Secure`, `HttpOnly`, `SameSite=None; Partitioned` in a frame, `Lax` on a tab) for
+  what follows, a reload; a url-mode app's ticket buys the cookie and redirects to
+  the app's own landing path, every request of the app riding on the cookie. WebKit
+  keeps no cookie in a cross-site frame (measured), so a framed url-mode app runs
+  only where the engine keeps partitioned cookies; elsewhere the host opens it on a
+  tab (P025).
 - **Separation is checked.** The content domain is a registrable domain the host
   uses for nothing else, and a mount refuses a located origin that doesn't match
   `contentOrigins` or is same-site with the host.
@@ -232,7 +237,22 @@ and calls `PortholeServer.issue`.
 `/server`'s handler is fetch-style (`Request → Response | null`, null for requests
 that aren't for the content domain), so a backend mounts it in front of its own
 routes. Dev and tests use `*.localhost` subdomains, which browsers resolve to
-loopback.
+loopback. In url mode an app's requests go, once its cookie checks out, to the
+host's `upstream` (`proxyTo` relays them by HTTP, telling the app it is on its own
+origin and nothing of the proxy); WebSockets take the host's own upgrade path, let
+in by `PortholeServer.access`. The MCP Apps sandbox proxy is served the same way,
+its CSP from the config plus the view's declared egress, signed into the ticket; it
+becomes the view rather than nesting it (P026).
+
+The served modes have their own conformance cases (`defineServedSuite`, run against
+`leak/served/`'s reference serving, which starts its own servers per worker): content
+runs on its own origin and can't reach the host's DOM, storage, cookies or URL,
+navigate the host's page or open a window (domain and url mode, each also after a
+click); storage persists within a scope and is never shared across scopes; a ticket
+opens its content once; only the host origins may frame content; the CSP in headers
+closes egress; an app shows nothing without its cookie, runs on a tab, and runs
+framed where the engine keeps partitioned cookies; the sandbox proxy becomes a
+hardened view, takes it only from its host, and opens only what the view declares.
 
 ### Protocol adapters
 

@@ -396,3 +396,67 @@ agreement test keeps the shell and the manual on the same name.
 **Rejected.** An own-prefixed error method; a fixed event name.
 **Revisit when** MCP Apps standardizes error reporting or theme-change events for
 views.
+
+## P025 · 2026-10-11 · A served document comes with its ticket's answer; the cookie serves what follows · Accepted
+
+**Decision.** Refines P016's ticket flow. `/server` names each storage scope's origin
+`<label>.<content domain>` (24 base32 characters of an HMAC of the scope, keyed from the
+server's secret), and each instance a key (16 characters, an HMAC of the instance): a served
+document (shell, artifact version, sandbox proxy) lives at `/__porthole/d/<key>`, and `issue`
+returns that path with a one-time ticket (`?ticket=`, 60 s by default, stored as its hash). The
+request that takes the ticket is answered **with the document itself**, CSP and `frame-ancestors`
+in headers, plus a cookie of that origin and instance only: `__Host-porthole-<key>`, `Secure`,
+`HttpOnly`, `Path=/`, `SameSite=None; Partitioned` in a frame (`Sec-Fetch-Dest` other than
+`document`), `SameSite=Lax` on a tab of its own; signed, carrying the instance, the viewer and its
+end (an hour by default, `Grant.sessionSeconds`). The cookie serves what follows: a reload, and
+every request of a url-mode app, whose ticket is taken at `/__porthole/enter` and redirects to the
+app's own landing path. Over http (loopback dev only) the cookie drops `__Host-`, and `Secure` on
+a tab. Host origins on, or possibly same-site with, the content domain are refused when the server
+is created; a mount checks a located frame the same way (`checkFrameLocation`). Without the
+public-suffix list the same-site check errs toward "same site" (it refuses hosts sharing the last
+two labels, so `a.github.io` and `b.github.io` are refused though browsers would allow them).
+**Measured** (`.dev` probes, Playwright 1.63: Chromium 153, WebKit 26.6). WebKit keeps **no**
+cookie in a cross-site frame: not `SameSite=None; Secure`, not `Partitioned`, not `__Host-`, over
+http or https (`document.hasStorageAccess()` is false); on a tab of its own it keeps them over
+https. Chromium keeps partitioned cookies in frames, including `Secure` ones over http on
+`*.localhost`. Framed `localStorage` persists across reloads in both. So a redirect after the ticket
+(the first design) shows WebKit nothing, while the document in the ticket's own answer shows it
+everywhere; and a url-mode app, which needs its cookie for every subresource, cannot run framed in
+WebKit: a host shows it on a tab there. The leak suite's `served.url.framed` asserts the WebKit
+failure (`test.fail`), so a change in WebKit shows up as a failing case.
+**Why.** The ticket must work on the weakest engine we support (PRINCIPLE 6), and a used ticket
+left in the frame's URL is worthless (taken atomically, once), while the frame sends no referrer.
+Per-instance cookies let several instances of one scope (one origin) reload side by side.
+**Rejected.** Redirecting to a ticket-free URL (WebKit shows the 401 page); a token in the
+document's path (a credential in every URL the content can read and log); a service worker that
+adds the session to an app's requests (fragile beside an app's own worker, and no WebSockets).
+**Revisit when** WebKit keeps partitioned cookies in frames (then `served.url.framed` fails as
+"passed unexpectedly": framed url mode works there too), or a host needs revocation before a
+cookie's end (then a check on every request).
+
+## P026 · 2026-10-11 · The MCP Apps sandbox proxy becomes its view · Accepted
+
+**Decision.** The sandbox proxy `/server` serves (`ServedDocument` `mcp-proxy`) speaks the
+spec's host-facing protocol, `sandbox-proxy-ready` until the host answers
+`sandbox-resource-ready { html }`, then writes the shell's hardening head and the view into
+**its own** document rather than into a nested same-origin frame. Writing a document erases the
+window's listeners, so nothing of the proxy remains and the view talks to its host directly; the
+spec's relay is the identity. The view's CSP goes out in the proxy's headers before the HTML
+arrives: `issue` takes the view's declared egress (`_meta.ui.csp`, mapped to Porthole's
+vocabulary by `/mcp`) in the instance and signs it into the ticket and cookie, opened on top of
+the config's (closed by default, so a view gets exactly what it declares). The proxy takes the HTML
+only from its parent, from a host origin, once; it ignores the message's `csp`, `sandbox` and
+`permissions` (the policy is the headers'; the frame's sandbox and `allow` are the host's). Leak
+cases `served.proxy.view`, `.parent-only` and `.egress` prove it on Chromium and WebKit.
+**Threat it re-opens.** None beyond P016's: the view runs with `allow-same-origin` on a scope's
+origin, as any domain-mode content.
+**Why.** A view nested in a same-origin frame can script its proxy: a second realm where WebRTC
+and frame creation are intact (outside the shell's hardening) and whose fetches run under the
+proxy's own policy, so the proxy would need the view's hardening a second time. Writing in place
+leaves one realm, hardened once, under one policy. The host and the view see the protocol the
+spec describes.
+**Rejected.** The reference host's nested inner frame (`document.write` into a same-origin child,
+CSP from a `?csp=` query); a `<meta>` CSP written with the view (the header is in force before any
+HTML arrives and can't be edited by it).
+**Revisit when** the spec makes the relay observable to a view, or a host needs to send a proxy a
+second resource; the framing note goes upstream with the leak runner (P018).

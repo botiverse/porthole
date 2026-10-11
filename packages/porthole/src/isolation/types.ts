@@ -11,16 +11,34 @@
  * app. Browsers partition a framed origin's storage by the top-level site, so it is stable within
  * one host app.
  */
+import type { EgressConfig } from "../config/schema.ts";
 
-/** Which document a served frame loads. */
+/**
+ * Which document a served frame loads. `preset` names the config it is served under (the server's
+ * `configs`); the artifact and the proxy default to their presets' names.
+ */
 export type ServedDocument =
   /** The shell, served with its CSP in headers; content arrives over the transport as for opaque. */
   | { readonly kind: "shell"; readonly preset: string }
   /** A stored page (artifact mode), by id and version: versions are immutable. */
-  | { readonly kind: "artifact"; readonly id: string; readonly version: string }
-  /** The MCP Apps sandbox proxy: a second origin that relays between host and view. */
-  | { readonly kind: "mcp-proxy" }
-  /** Someone else's running app (url mode), e.g. a dev server behind the host's preview gateway. */
+  | {
+      readonly kind: "artifact";
+      readonly id: string;
+      readonly version: string;
+      /** Default `artifact`. */
+      readonly preset?: string;
+    }
+  /**
+   * The MCP Apps sandbox proxy: a second origin the host hands the view's HTML to, which becomes
+   * the view. `egress` is what the view declares (`_meta.ui.csp`, mapped by `/mcp`'s
+   * `viewEgress`), opened on top of the config's: its CSP goes out in the proxy's headers, before
+   * the HTML arrives.
+   */
+  | { readonly kind: "mcp-proxy"; readonly preset?: string; readonly egress?: EgressConfig }
+  /**
+   * Someone else's running app (url mode), e.g. a dev server behind the host's preview gateway:
+   * `url` is where the host's upstream finds it; the frame lands on its path and query.
+   */
   | { readonly kind: "external"; readonly url: string };
 
 /** One served instance: where its storage lives, and what it shows. */

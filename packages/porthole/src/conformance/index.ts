@@ -70,3 +70,11 @@ export function defineLeakSuite(
 ): void {
   throw new NotBuiltYet("defineLeakSuite", "M2");
 }
+
+// The served modes' cases (domain and url mode), with their own host interface.
+export {
+  defineServedSuite,
+  type ServedConformanceHost,
+  type ServedDisplay,
+  type ServedSuiteOptions,
+} from "./served.ts";
