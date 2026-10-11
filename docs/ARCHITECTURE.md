@@ -31,8 +31,8 @@ it is one host function (PRINCIPLE 4).
                             │ picks a preset, passes theme + callbacks
   ┌─────────────────────────▼─────────────────────────────────────────┐
   │  PRESET POLICY LAYER                                                │
-  │  inline-widget · artifact · mcp-app                                 │
-  │  each = a config: CSP+origins, capabilities+gates, components, guide│
+  │  inline-widget · artifact · mcp-app · url                           │
+  │  each = a config: CSP+origins, capabilities+gates, theme, guide     │
   └─────────────────────────┬─────────────────────────────────────────┘
                             │ one config
   ┌─────────────────────────▼─────────────────────────────────────────┐
@@ -43,7 +43,7 @@ it is one host function (PRINCIPLE 4).
   │                 └── guide + tool description                        │
   │                                                                     │
   │  isolation core · egress hardening · streaming render · auto-size   │
-  │  theming · host-function bridge · preset components · guide gen     │
+  │  theming · host-function bridge · guide gen · serving (/server)     │
   └───────┬───────────────────────────────────────┬────────────────────┘
           │ host side                              │ in-frame side (shell)
   ┌───────▼─────────┐                      ┌───────▼──────────────────┐
@@ -68,8 +68,10 @@ Pure mechanism, no product policy, no host or vendor types.
   and `allow` attributes, the shell's wiring, and the guide + tool description.
   Deterministic and pure, so a test can assert the three outputs agree.
 - **Isolation core.** Places the content on an origin that is never the host's,
-  with nothing of the host's reachable. Phase 1: an opaque-origin frame. The
-  mode is chosen by config; the rest of the framework does not depend on which.
+  with nothing of the host's reachable: an opaque-origin frame, or a served
+  origin of its own (domain mode: a subdomain per storage scope on a separate
+  registrable domain; url mode: the app's own origin). The mode is chosen by
+  config; the rest of the framework does not depend on which.
 - **Egress hardening.** The closed-by-default network and navigation walls, plus
   the in-shell defenses for channels a CSP does not cover (see Trust boundaries).
 - **Shell runtime.** The code that runs first inside the frame: applies theme,
@@ -77,21 +79,28 @@ Pure mechanism, no product policy, no host or vendor types.
   declared host functions to the content.
 - **Host-function bridge.** Carries capability calls from the shell to the host
   and results back, over a transport, with validation and gating at the boundary.
-- **Streaming render, auto-size, theming, preset components, guide generator.**
-  The remaining mechanisms, each usable on its own.
+- **Streaming render, auto-size, theming, guide generator.** The remaining
+  mechanisms, each usable on its own. Content is plain HTML and SVG; its look
+  comes from the theme variables, never from a component vocabulary (P015).
+- **Serving.** For served modes, a request handler a host's backend mounts: it
+  serves documents on their own origins with their CSP in headers, and turns a
+  one-time ticket the host minted into a cookie of that origin only.
 
 ### Preset policy layer
 
 A preset is a named config with safe defaults. It fixes the CSP and allowed
-origins, the capabilities and their gates, the preset components, and the manual.
+origins, the capabilities and their gates, the theme vocabulary, and the manual.
 A host adopts a preset and overrides only theme and callbacks.
 
 - **inline-widget** — host injects agent code into a strict, opaque-origin frame
   with a shell; smallest capability set; for cards inside a conversation.
-- **artifact** — a standalone page served at a URL on a separate registrable
-  domain, CSP in headers, versioned (server parts are phase 2).
+- **artifact** — a standalone page: written into an opaque frame where the host
+  has it, or served at a URL on a separate registrable domain, CSP in headers,
+  versioned.
 - **mcp-app** — renders a standard MCP Apps view (a `ui://` template plus tool
   input/result), using the MCP Apps adapter.
+- **url** — frames a running app by URL (a dev server's preview): isolation and
+  access auth only; no shell, no capabilities, no egress control.
 
 ### Protocol adapters
 
@@ -118,7 +127,7 @@ artifact we offer upstream (PRINCIPLE 5, 6).
 - **Host → preset:** a preset name, theme tokens (resolved per color scheme), and
   callbacks for each enabled host function. Nothing else is required.
 - **Preset → framework:** one config (capabilities with gates and egress needs,
-  allowed origins, theme variable map, limits, components, mode).
+  allowed origins, theme variable map, limits, layout, mode and isolation).
 - **Config → {CSP, shell, guide}:** derived, never hand-written; a test asserts
   agreement.
 - **Framework ↔ shell:** lifecycle and capability messages over a transport.
@@ -170,8 +179,23 @@ transparent to the view and the host.
 The content is served as a real document at a URL on a separate registrable
 domain with its CSP in HTTP headers; the host embeds that URL in a frame whose
 `frame-ancestors` names the host. No code injection, and the shell is optional.
-Access is gated by a one-time ticket exchanged for a scoped cookie. The serving
-infrastructure is designed in phase 1 and built in phase 2.
+Access is gated by a one-time ticket exchanged for a scoped cookie. Where the host
+holds the page and needs no stable origin, the shell writes it into an opaque
+frame instead.
+
+### URL frame
+
+```
+Host app            Host backend (+ /server)          App origin (served)
+   │  mount(url preset) │                                  │
+   │── locate ─────────►│ decide the viewer may see it,    │
+   │◄── ticketed URL ───│ mint a one-time ticket           │
+   │  frame src = URL ──────────────────────────────────────►│ ticket → cookie
+   │                                                       │ (that origin only)
+```
+
+No shell and no protocol: the app is someone else's. The embedding page frames
+only the declared content origins.
 
 ## Trust boundaries
 
@@ -208,9 +232,6 @@ infrastructure is designed in phase 1 and built in phase 2.
 - **Protocol extension points.** MCP Apps gaps go through the spec's own
   mechanisms (experimental capabilities, own-prefixed methods), so the external
   contract stays standard (PRINCIPLE 2).
-- **Preset components.** The themed component set inside the sandbox is a list in
-  the config; hosts can add components, which the generator then lists in the
-  manual.
 - **Theme variables.** The theme map is config; the standard MCP Apps variable
   names are the default vocabulary.
 
