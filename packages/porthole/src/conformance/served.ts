@@ -227,11 +227,19 @@ export function defineServedSuite(
             const button = document.createElement("button");
             button.id = "porthole-probe-popup";
             button.textContent = "open";
+            // Without allow-popups, Chromium and WebKit return null; Firefox throws. Both refuse.
+            const open = () => {
+              try {
+                return window.open(url) !== null;
+              } catch {
+                return false;
+              }
+            };
             button.addEventListener("click", () => {
-              document.body.dataset.popup = String(window.open(url) !== null);
+              document.body.dataset.popup = String(open());
             });
             document.body.append(button);
-            return window.open(url) !== null;
+            return open();
           }, target);
           await frame.click("#porthole-probe-popup");
           await page.waitForTimeout(SETTLE_MS);
@@ -307,12 +315,20 @@ export function defineServedSuite(
         await host.frameFromForeignOrigin(page, location.url);
         await page.waitForTimeout(SETTLE_MS);
         for (const frame of page.frames().slice(1)) {
-          const shown = await frame
-            .evaluate(() => ({
-              origin: window.origin,
-              root: document.getElementById("porthole-root") !== null,
-            }))
-            .catch(() => ({ origin: "unreachable", root: false }));
+          // A refused frame shows the engine's error page, which Firefox never lets a script
+          // finish in: a frame that doesn't answer in time showed nothing of the content.
+          const unreachable = { origin: "unreachable", root: false };
+          const shown = await Promise.race([
+            frame
+              .evaluate(() => ({
+                origin: window.origin,
+                root: document.getElementById("porthole-root") !== null,
+              }))
+              .catch(() => unreachable),
+            new Promise<typeof unreachable>((resolve) =>
+              setTimeout(() => resolve(unreachable), 3_000),
+            ),
+          ]);
           expect(shown.root).toBe(false);
           expect(shown.origin).not.toBe(location.origin);
         }

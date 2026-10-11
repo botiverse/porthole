@@ -17,11 +17,11 @@ Read these first:
 
 ## Status
 
-Phase 1 is being built, milestone by milestone (DESIGN.md § Milestones). M1–M4
-are in: the config, compiler and presets; the isolation core (`createHost`, the web
-platform, the shell runtime, the shell adapter, the gated bridge); streaming,
-sizing and theming; the React binding with its default dialog; the leak suite with
-its oracles and negative controls.
+Phase 1's core milestones (DESIGN.md § Milestones), M1–M5, are in: the config,
+compiler and presets; the isolation core (`createHost`, the web platform, the shell
+runtime, the shell adapter, the gated bridge); streaming, sizing and theming; the
+React binding with its default dialog; the leak suite with its oracles and negative
+controls, gating on Chromium, WebKit and Firefox.
 
 ## Setup
 
@@ -36,16 +36,16 @@ its oracles and negative controls.
 ```bash
 pnpm check            # typecheck + lint + format check + unit tests (run before every commit)
 pnpm test             # unit tests (vitest; packages/porthole/test)
-pnpm test:leak        # the Playwright conformance/leak suite (Chromium + WebKit; Firefox from M5)
+pnpm test:leak        # every Playwright suite (leak, served, MCP examples, React) on Chromium, WebKit, Firefox
 PORTHOLE_LEAK_ENGINES=chromium pnpm test:leak   # a subset, where an engine can't run
 PORTHOLE_LEAK_WEAKEN=sync-guard pnpm test:leak  # a negative control: its probes must fail (P032)
 pnpm --filter @botiverse/porthole build         # dist/ (JS + .d.ts) for packing
 pnpm exec oxfmt <file>                          # format (never prettier)
 ```
 
-WebKit needs system libraries a shared Linux box may lack (no sudo there): run the
-WebKit half of the leak suite on a machine that has them (`playwright install
---with-deps webkit`). Scratch files go under `.dev/scratch/` (gitignored).
+WebKit and Firefox need system libraries a shared Linux box may lack (no sudo
+there): run them on a machine that has them (`playwright install --with-deps webkit
+firefox`). Scratch files go under `.dev/scratch/` (gitignored).
 
 ## Layout
 

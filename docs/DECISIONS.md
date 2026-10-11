@@ -269,7 +269,7 @@ modes from being designed in the abstract.
 **Revisit when** browsers' storage partitioning or third-party cookie rules change
 how a framed origin keeps state.
 
-## P017 · 2026-10-11 · Leak-suite gate: Chromium and WebKit first, Firefox right after · Accepted
+## P017 · 2026-10-11 · Leak-suite gate: Chromium and WebKit first, Firefox right after · Accepted; completed by P035
 
 **Decision.** Amends P008's engine order. A hardening milestone is done when its
 probes pass on Chromium and WebKit; Firefox joins the gate as the next milestone,
@@ -645,3 +645,36 @@ made a re-mounted frame jump; `11.size` now asserts the first size is the conten
 provider that silently auto-confirms.
 **Revisit when** a second framework needs a binding (then move the registry and
 heights into a framework-free module both use: `live.ts` already is).
+
+## P035 · 2026-10-11 · Firefox joins the gate; its differences are measured and need no new wall · Accepted
+
+**Decision.** Completes P017: every Playwright suite (leak, served, MCP examples, React)
+runs on Chromium, WebKit and Firefox, and every negative control was run on Firefox.
+All leak probes passed on Firefox as they stood; no defense was added for it. Its
+differences, each measured (Firefox 155, Playwright 1.63):
+- A navigation the embedding page's `frame-src` blocks **keeps** the frame's document
+  (Chromium and WebKit replace it with an error page, so their displays restart, P031).
+  The React binding's recovery test therefore navigates to `about:blank`, which every
+  engine follows.
+- A frame without `allow-popups` gets an exception from `window.open` (the others get
+  `null`): no window either way. The served `no-popups` cases accept both.
+- Firefox sends no STUN to a loopback server by default, which left `3.webrtc` without
+  its positive control; the suite's Firefox project sets
+  `media.peerconnection.ice.loopback` (test environment only), and an unsandboxed peer
+  connection then reaches the oracle while the sandboxed one, without constructors, can't.
+- Without the embedding CSP, Firefox still refuses a frame's own navigation to `data:`
+  (`5.data` holds under the `embedder-csp` control); the other navigations out fail, as
+  on the other engines.
+- Like Chromium, Firefox opened no preconnect even unsandboxed (`sync-guard` alone fails
+  nothing on it); WebKit stays the weakest engine there (P030).
+- A click in the frame reaches the host page's user activation; a new child frame's
+  realm is unreachable in the task that made it (a `TypeError`, not a `SecurityError`).
+- Headless Firefox has no WebGL on a machine without a GPU (Mesa installed or not): the
+  threejs example cases skip there with that reason; they are about the machine, not
+  Porthole. A Playwright worker crashed once (SIGSEGV) and never again on rerun.
+- Waiting on script in a frame that `frame-ancestors` refused never settles on Firefox;
+  the served `frame-ancestors` case bounds that wait.
+**Why.** PRINCIPLE 6: engines differ, so each is measured and the weakest decides. Firefox
+is weaker nowhere the suite can see.
+**Revisit when** an engine version changes any of these (the probes and controls will say
+which), or Firefox gains a synchronous hint path like WebKit's.

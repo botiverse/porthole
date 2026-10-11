@@ -281,13 +281,15 @@ test("without a provider frames still run, and calls that need a person are refu
 test("content that navigates its frame away is started again, the host told; past a few, stopped", async ({
   page,
 }) => {
+  // To about:blank, which no embedding page's frame-src governs: every engine replaces the
+  // frame's document (a blocked navigation keeps it on Firefox, measured).
   await open(page, {
     provider: "default",
     frames: [
       frame({
         displayId: "nav",
         content:
-          '<p>here</p><script>setTimeout(() => (location.href = "https://example.invalid/?d=x"), 100)</script>',
+          '<p>here</p><script>setTimeout(() => (location.href = "about:blank"), 100)</script>',
       }),
     ],
   });

@@ -2,16 +2,30 @@ import { defineConfig, devices } from "@playwright/test";
 
 /**
  * The leak/conformance suite (P008), run against Porthole's reference host. Every engine Porthole
- * supports is a project: Chromium and WebKit gate phase 1, Firefox follows (P017).
+ * supports is a project: Chromium, WebKit and Firefox (P017).
  * `PORTHOLE_LEAK_ENGINES=chromium` runs a subset (WebKit needs system libraries some machines lack).
  */
 
 const port = Number(process.env.PORTHOLE_LEAK_PORT ?? 8797);
-const engines = (process.env.PORTHOLE_LEAK_ENGINES ?? "chromium,webkit").split(",");
+const engines = (process.env.PORTHOLE_LEAK_ENGINES ?? "chromium,webkit,firefox").split(",");
 
 const all = [
   { name: "chromium", use: { ...devices["Desktop Chrome"] } },
   { name: "webkit", use: { ...devices["Desktop Safari"] } },
+  {
+    name: "firefox",
+    use: {
+      ...devices["Desktop Firefox"],
+      // Lets an unsandboxed peer connection reach the loopback STUN oracle, so 3.webrtc has its
+      // positive control on Firefox too (by default it sends no STUN to loopback: measured).
+      launchOptions: {
+        firefoxUserPrefs: {
+          "media.peerconnection.ice.loopback": true,
+          "media.peerconnection.ice.obfuscate_host_addresses": false,
+        },
+      },
+    },
+  },
 ];
 
 export default defineConfig({

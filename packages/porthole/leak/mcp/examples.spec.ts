@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { mountExample, type Mode } from "./examples.ts";
 
 /**
@@ -8,6 +8,17 @@ import { mountExample, type Mode } from "./examples.ts";
  */
 
 const SERVER_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/u;
+
+/**
+ * Whether the engine has WebGL here: the threejs example needs it, and headless Firefox has none
+ * on a machine without a GPU (measured, Mesa installed or not). Where it has none, those cases are
+ * about the machine, not Porthole, so they are skipped with this reason rather than failed.
+ */
+async function webgl(page: Page): Promise<boolean> {
+  return page.evaluate(() => document.createElement("canvas").getContext("webgl") !== null);
+}
+const NO_WEBGL =
+  "measured: this engine has no WebGL on this machine (the threejs example needs it)";
 
 for (const mode of ["opaque", "proxy"] as const satisfies readonly Mode[]) {
   test.describe(`MCP Apps examples (${mode})`, () => {
@@ -92,6 +103,7 @@ for (const mode of ["opaque", "proxy"] as const satisfies readonly Mode[]) {
     test("threejs-server: streamed input, a rendered scene, errors into the model context", async ({
       page,
     }) => {
+      test.skip(!(await webgl(page)), NO_WEBGL);
       const view = await mountExample(page, "threejs", mode);
       const code = [
         "const scene = new THREE.Scene();",
@@ -119,6 +131,7 @@ for (const mode of ["opaque", "proxy"] as const satisfies readonly Mode[]) {
     });
 
     test("threejs-server: a scene that throws reaches the model context", async ({ page }) => {
+      test.skip(!(await webgl(page)), NO_WEBGL);
       const view = await mountExample(page, "threejs", mode);
       await view.send("sendToolInput", { code: "throw new Error('the scene broke')", height: 200 });
       await expect
