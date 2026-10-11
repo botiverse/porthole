@@ -607,12 +607,16 @@ export const SHELL_RUNTIME = String.raw`(() => {
   const notify = (method, params) => send({ method, params });
 
   const themeNames = new Set(plan.themeVariables);
+  // What the content was last told of (its scheme and values): the theme it starts with is no
+  // change, and a host context that changes neither (a host re-sending it) is none either.
+  let announced = null;
   const applyTheme = (context) => {
     if (context === null || typeof context !== "object") {
       return;
     }
     // The spec's variables, and Porthole's own beside them (its own-prefixed field).
     const own = context["porthole/styles"];
+    const applied = [];
     for (const variables of [context.styles && context.styles.variables, own && own.variables]) {
       if (variables === null || typeof variables !== "object") {
         continue;
@@ -621,12 +625,21 @@ export const SHELL_RUNTIME = String.raw`(() => {
         const value = variables[name];
         if (themeNames.has(name) && typeof value === "string") {
           document.documentElement.style.setProperty(name, value);
+          applied.push(name + ":" + value);
         }
       }
     }
     lastContext = context;
     schemeFollows();
-    window.dispatchEvent(new CustomEvent(plan.themeEvent, { detail: { theme: context.theme } }));
+    const now = JSON.stringify([context.theme, applied.sort()]);
+    if (announced === null) {
+      announced = now;
+      return;
+    }
+    if (now !== announced) {
+      announced = now;
+      window.dispatchEvent(new CustomEvent(plan.themeEvent, { detail: { theme: context.theme } }));
+    }
   };
 
   // No size before there is something to size: an empty shell's height would make the host

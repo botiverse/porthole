@@ -61,7 +61,18 @@ export interface EgressConfig {
   readonly img?: readonly string[];
   readonly font?: readonly string[];
   readonly media?: readonly string[];
+  /**
+   * Passive content that may load from any https site (P059): images, audio and video, fonts, for
+   * pages that hotlink them. Never scripts, styles or data. It opens a channel out: a viewer's
+   * address and a visit signal reach any site, and data can leave in the URL.
+   */
+  readonly anyHttps?: readonly PassiveKind[];
 }
+
+/** What `EgressConfig.anyHttps` may open: content that runs nothing (P059). */
+export const PASSIVE_KINDS = ["img", "media", "font"] as const;
+
+export type PassiveKind = (typeof PASSIVE_KINDS)[number];
 
 export interface ThemeConfig {
   /**

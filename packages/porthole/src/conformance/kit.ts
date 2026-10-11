@@ -22,6 +22,11 @@ export interface ProbeContext {
   requestsTo(origin: string): string[];
   /** Records a measured engine fact in the report. */
   measured(text: string): void;
+  /**
+   * Ends the probe as inapplicable on this host (reported as skipped, with the reason): what it
+   * proves can't be observed here, through no fault of the host's isolation (P058).
+   */
+  inapplicable(reason: string): never;
 }
 
 export interface Probe {
@@ -49,6 +54,17 @@ export function attack(code: string, markup = ""): string {
 (async () => {
   const r = {};
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  // Whether a policy blocks \`origin\` though the frame's own allows it: then it is the page's,
+  // which an opaque frame inherits (P058). \`attempt\` loads something from it once more.
+  const inheritedBlocks = async (origin, attempt) => {
+    let blocked = false;
+    const seen = (event) => { if (String(event.blockedURI).indexOf(origin) === 0) blocked = true; };
+    document.addEventListener("securitypolicyviolation", seen);
+    try { await attempt(); } catch (e) {}
+    await wait(300);
+    document.removeEventListener("securitypolicyviolation", seen);
+    return blocked;
+  };
   try {
 ${code}
   } catch (error) {

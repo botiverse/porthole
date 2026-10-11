@@ -335,6 +335,13 @@ const sdkProbe = (preset: "inline" | "artifact" | "mcp-app"): Probe => ({
 export type { Probe, ProbeContext } from "./kit.ts";
 export { attack } from "./kit.ts";
 
+/**
+ * Why a positive control can't pass on this host: an opaque (`srcdoc`) frame inherits the
+ * embedding page's whole policy, and the page's own closes what the config opens (P058).
+ */
+const INHERITED = (directive: string, origin: string) =>
+  `the page's own CSP, which an opaque frame inherits, blocks ${origin} (${directive}): content in opaque frames here is as closed as the page, whatever its config opens. Domain mode's frames don't inherit it.`;
+
 export const PROBES: readonly Probe[] = [
   // ── 0: the shell's own wiring, in a real frame ─────────────────────────────────────────────
   {
@@ -440,10 +447,14 @@ export const PROBES: readonly Probe[] = [
       worker.onmessage = (event) => (event.data === "sent" ? resolve() : reject());
       worker.onerror = reject;
     }));
-    r.allowed = await fetch(${js(allowed.origin)} + "/allowed").then((response) => response.text(), () => "blocked");`),
+    r.allowed = await fetch(${js(allowed.origin)} + "/allowed").then((response) => response.text(), () => "blocked");
+    r.inherited = await inheritedBlocks(${js(allowed.origin)}, () => fetch(${js(allowed.origin)} + "/policy").catch(() => {}));`),
       });
       const verdict = await context.result(display, 20_000);
       await settle();
+      if (verdict.allowed !== "oracle" && verdict.inherited === true) {
+        context.inapplicable(INHERITED("connect-src", allowed.origin));
+      }
       expect(verdict.allowed, "the allowed origin (the positive control)").toBe("oracle");
       expect(allowed.requests().map((request) => request.path)).toContain("/allowed");
       expect(canary.requests(), "requests reached the canary").toEqual([]);
@@ -489,12 +500,16 @@ export const PROBES: readonly Probe[] = [
     try { new Worker(${js(`${c}/worker.js`)}); } catch (e) {}
     const ok = document.getElementById("ok");
     r.allowed = await new Promise((resolve) => { if (ok.complete && ok.naturalWidth > 0) resolve("loaded"); ok.onload = () => resolve("loaded"); ok.onerror = () => resolve("blocked"); setTimeout(() => resolve("timeout"), 3000); });
-    r.script = typeof globalThis.__portholeOracleScript;`,
+    r.script = typeof globalThis.__portholeOracleScript;
+    r.inherited = await inheritedBlocks(${js(allowed.origin)}, () => { new Image().src = ${js(`${allowed.origin}/policy.png`)}; });`,
           markup,
         ),
       });
       const verdict = await context.result(display, 20_000);
       await settle();
+      if (verdict.allowed !== "loaded" && verdict.inherited === true) {
+        context.inapplicable(INHERITED("img-src", allowed.origin));
+      }
       expect(verdict.allowed, "the allowed image (the positive control)").toBe("loaded");
       expect(canary.requests(), "resources loaded from the canary").toEqual([]);
       expect(context.requestsTo(canary.origin)).toEqual([]);
@@ -1106,6 +1121,10 @@ export function leakTests(
           requestsTo: (origin) =>
             requests.filter((url) => url.startsWith(`${origin}/`) || url === origin),
           measured: (text) => info.annotations.push({ type: "measured", description: text }),
+          inapplicable: (why) => {
+            info.skip(true, `inapplicable on this host: ${why}`);
+            throw new Error(`inapplicable on this host: ${why}`);
+          },
         });
       } finally {
         await Promise.all(closers.map((close) => close()));

@@ -33,6 +33,7 @@ export type {
   ThemeConfig,
   ThemeValue,
 } from "./config/schema.ts";
+export { PASSIVE_KINDS, type PassiveKind } from "./config/schema.ts";
 export {
   BUILT_IN_TOPICS,
   ConfigError,
@@ -62,6 +63,7 @@ export {
 export { compile, type CompiledConfig } from "./compile/compile.ts";
 export {
   allEgressOrigins,
+  anyHttps,
   declaredCapabilities,
   effectiveGates,
   egressOrigins,

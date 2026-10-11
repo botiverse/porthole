@@ -1325,3 +1325,114 @@ Unit tests cover the storage note and its validation.
 
 **Revisit when** a host's config or instance carries something that isn't plain data (then
 compare it otherwise).
+
+## P058 · 2026-10-11 · An opaque frame is as closed as its page; the suite says when a case can't be observed · Accepted
+
+**Decision.** This is now documented in ARCHITECTURE (the network boundary) and DESIGN: a `srcdoc`
+frame inherits the embedding page's whole policy along with its own. On a page with
+`default-src 'none'` and a tight `connect-src` or `img-src`, opaque-mode content is more closed
+than its config says. On such a page, hosts should prefer domain mode, whose frames inherit nothing.
+
+The conformance suite detects this. When a positive control (`1.connect`'s allowed fetch,
+`2.resources`'s allowed image) fails, the probe loads from the allowed origin once more and
+watches for a CSP violation. A violation there can't come from the frame's own policy, which
+allows that origin, so it is the page's. The probe then reports itself **inapplicable on this
+host** (skipped, with the reason) instead of failing.
+
+`12.no-confirm` does the same on a host that always has a confirm function (a default dialog), so
+a display without one can't be shown. When it is asked anyway, it answers no and reports
+inapplicable.
+
+Probes get `context.inapplicable(reason)`. Item 3 of 0.1.5 (the second host's adoption).
+
+**Why.** The second host's real page sends `default-src 'none'` and `connect-src 'self'`. Its
+suite failed two positive controls that prove nothing about its isolation, and failed one case
+that its React host can't set up.
+
+**Tested.** `leak/inherited-policy.spec.ts` runs the three cases against a reference page closed
+like the second host's (with its nonce, P054) and against a host that always confirms. Each
+reports inapplicable with its reason. Against the plain reference host they still run and pass.
+
+**Rejected.** Skipping the positive controls by host configuration (a host would turn them off
+everywhere); parsing the page's policy from its headers (frames see what applies, headers don't
+show meta policies).
+**Revisit when** a browser lets an embedding page give a `srcdoc` frame a policy of its own.
+
+## P059 · 2026-10-11 · Passive content may load from any https site, by the host's explicit choice · Accepted
+
+**Decision.** `egress.anyHttps` lists the passive kinds that may load from any https site:
+`img`, `media` and `font`. Those CSP directives get `https:`. Scripts, styles, data (`connect`),
+workers and frames never get it, and a config naming any other kind is refused. The manual and
+the tool description say "images … from any https site". Nothing is opened by default. The MCP
+sandbox proxy keeps the host config's choice; a view can't ask for it. Item 2 of 0.1.5.
+
+**Risk it re-opens.**
+- Any site the content names learns that someone viewed it, and from which address.
+- The content can send data out in an image URL to a server of its choosing. Egress closes this
+  channel by default (P006); this flag reopens it for these kinds.
+- An attacker who controls an image can show anything in the frame. The frame is still the
+  content's own; nothing reaches the host.
+
+**Why.** A host showing existing reports needs their hotlinked images to work.
+
+**Tested** (`leak/cdn.spec.ts`, all three engines): with `anyHttps: ["img", "media"]`, a hotlinked
+image from a routed stranger's site loads. A script, a stylesheet and a fetch to the same site
+never reach it. Without the flag, the image doesn't either. The agreement test checks that only
+passive directives carry `https:` and that the manual says "from any https site" exactly when the
+CSP does.
+
+**Rejected.**
+- `*` or `http:` (cleartext, and loopback/LAN reach).
+- Allowing it for styles: CSS can probe and leak through selectors.
+- Per-site lists: the host doesn't know the hotlinked sites.
+
+**Revisit when** a host needs it for a kind that runs code: never by this flag.
+
+## P060 · 2026-10-11 · A wildcard over a public suffix is refused · Accepted
+
+**Decision.** An origin source `scheme://*.<base>` is refused when `<base>` is a single label
+(`*.com`, `*.dev`; except `localhost`, for loopback development). It is also refused when
+`<base>` is on a built-in list of common public suffixes:
+- registries' second levels (`co.uk`, `com.au`, `co.jp`, …);
+- hosting platforms where anyone gets a name (`github.io`, `pages.dev`, `workers.dev`,
+  `vercel.app`, `netlify.app`, `amazonaws.com`, `cloudfront.net`, …).
+
+The refusal says why and what to write instead. A wildcard over a domain under such a suffix
+(`*.example.co.uk`, `*.me.github.io`) is fine. This applies to egress, content origins, and an
+MCP view's declared domains (dropped there). Item 1 of 0.1.5 (a bug: `https://*.com` was
+accepted).
+
+**Why.** A wildcard over a public suffix opens every stranger's site, which is what egress control
+exists to prevent.
+
+**Tested** in unit tests: the refusals, the reason, wildcards accepted under such suffixes, and a
+preset refusing a content origin.
+
+**Rejected.** Shipping the whole Public Suffix List (about 200 KB, and a moving target). A wildcard
+should name the host's own domain; the list covers the common ways it wouldn't.
+**Revisit when** a host hits a suffix the list lacks (add it).
+
+## P061 · 2026-10-11 · A theme event means the theme changed · Accepted
+
+**Decision.** The shell fires the config's theme event only when the scheme or an applied value
+changed since the content was last told:
+- never for the theme a display starts with, at mount;
+- never for a host context that repeats what the content has.
+
+The React binding no longer calls `setTheme` or `refreshTheme` on mount: it does so only when
+`scheme` or `themeKey` differ from what the display was made with. Item 4 of 0.1.5
+(botiverse/porthole#3).
+
+**Why.** Under the React binding, every mount called `setTheme` with the scheme the display
+already had, two animation frames later. When the handshake and the content's scripts finished
+within those frames, the content heard a "flip" to its own scheme. `[11.theme-flip]` failed about
+1 run in 5 on the first host's React conformance host.
+
+**Tested:**
+- `11.theme-flip` now asserts no event at mount and none for a `setTheme` to the same scheme,
+  before it flips (all three engines, repeated).
+- A React test mounts a display listening for theme events, re-renders it unchanged, then flips
+  it: exactly one event.
+
+**Revisit when** content needs an event for values that change while the scheme doesn't (it gets
+one now; the rule is "changed", not "flipped").

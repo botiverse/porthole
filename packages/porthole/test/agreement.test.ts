@@ -62,6 +62,12 @@ const CASES: Record<string, PortholeConfig> = {
   }),
   "artifact page": presets.artifact(),
   "artifact page with comments": presets.artifact({ capabilities: { annotate: {} } }),
+  "artifact page, hotlinked images and media from any https site": presets.artifact({
+    egress: { anyHttps: ["img", "media"] },
+  }),
+  "artifact page, library CDNs and any https image": presets.artifact({
+    egress: { ...LIBRARY_CDNS, anyHttps: ["img"] },
+  }),
   "inline widget, served, storage shared per conversation": presets.inlineWidget({
     isolation: "domain",
     contentOrigins: ["https://*.example-usercontent.com"],
@@ -208,7 +214,15 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
     for (const origin of allowed) {
       expect(named, `the CSP allows ${origin}, which the manual never names`).toContain(origin);
     }
-    if (allowed.size === 0) {
+    // Any https site, for passive kinds only (P059): the CSP's scheme source and the manual's words.
+    const anyHttpsIn = compiled.cspDirectives
+      .filter(([, ...sources]) => sources.includes("https:"))
+      .map(([name]) => name);
+    for (const name of anyHttpsIn) {
+      expect(["img-src", "media-src", "font-src"], `https: in ${name}`).toContain(name);
+    }
+    expect(text.includes("from any https site")).toBe(anyHttpsIn.length > 0);
+    if (allowed.size === 0 && anyHttpsIn.length === 0) {
       expect(text).toContain("Network: none");
       expect(text).toContain("with no network");
     }

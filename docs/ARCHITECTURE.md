@@ -219,6 +219,11 @@ only the declared content origins.
      realm) reach the network outside a frame's own `connect-src`. These are
      closed by in-shell defenses and by the embedding page's own policy, each
      proven by a leak-suite probe (DESIGN.md lists them).
+   - *An opaque frame is as closed as its page.* A `srcdoc` frame inherits the
+     embedding page's whole policy as well as its own, so on a page with
+     `default-src 'none'` and a tight `connect-src`/`img-src` its content is more
+     closed than its config says: an origin the config opens stays shut. On such
+     a page prefer domain mode, whose frames inherit nothing (P058).
 
 3. **Message boundary.** Every message crossing the frame is validated against a
    schema and checked for sender identity before use; the shell accepts messages

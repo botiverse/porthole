@@ -126,6 +126,10 @@ const mergeEgress = (base: EgressConfig, extra: EgressConfig | undefined): Egres
       merged[kind] = origins;
     }
   }
+  const passive = [...new Set([...(base.anyHttps ?? []), ...(extra?.anyHttps ?? [])])];
+  if (passive.length > 0) {
+    merged.anyHttps = passive;
+  }
   return merged;
 };
 

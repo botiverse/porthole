@@ -73,8 +73,8 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
     },
     {
       file: POLICY,
-      find: '["img-src", "data:", "blob:", ...origins("img")],',
-      replace: '["img-src", "\'self\'", "data:", "blob:", ...origins("img")],',
+      find: '["img-src", "data:", "blob:", ...https("img"), ...origins("img")],',
+      replace: '["img-src", "\'self\'", "data:", "blob:", ...https("img"), ...origins("img")],',
     },
     {
       file: POLICY,

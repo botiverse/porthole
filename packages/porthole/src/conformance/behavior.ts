@@ -197,7 +197,8 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
   {
     id: "11.theme-flip",
     item: 11,
-    title: "a theme flip re-themes the running content in place, and tells it once",
+    title:
+      "a theme flip re-themes the running content in place, and tells it once; no event without one",
     async run(context) {
       const config = inline({ theme: { event: "app:theme" } });
       const light = resolveTheme(config.theme, "light");
@@ -210,6 +211,13 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
       const frame = await display.frame();
       await expect(frame.locator("p")).toHaveText("themed");
       expect(await variable(frame, "--color-text-primary")).toBe(light["--color-text-primary"]);
+      const flips = () => read(frame, () => (window as unknown as { flips: string[] }).flips);
+      // Mounting, and a host telling it the scheme it already has, are no flip: no event (#3).
+      await settle(400);
+      expect(await flips(), "no theme event at mount").toEqual([]);
+      await display.setTheme("light");
+      await settle(400);
+      expect(await flips(), "no theme event for the scheme it has").toEqual([]);
       await display.setTheme("dark");
       await expect
         .poll(() => variable(frame, "--color-text-primary"))
@@ -477,6 +485,17 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
         content: PROMPT_CONTENT,
       });
       await click(display, "#ask");
+      // A host that always has a confirm function (a default dialog) asks anyway: what this case
+      // proves can't happen there (P058). Its answer is no, so nothing is sent either way.
+      const asked = await display.answerNextConfirmation(false, { timeoutMs: 1_500 }).then(
+        () => true,
+        () => false,
+      );
+      if (asked) {
+        context.inapplicable(
+          "this host always has a confirm function (a default dialog), so a display without one can't be shown; it asked the person instead",
+        );
+      }
       expect(await bodyData(display, "result")).toBe("false");
       expect(await refusals(display)).toContain("sendPrompt:no-confirm");
       expect(await display.calls()).toEqual([]);

@@ -499,6 +499,23 @@ connects) or the probe says it has none. Each defense has a negative control
 Engines: Chromium 153, WebKit 26.6 and Firefox 155 (Playwright 1.63) all gate (P017,
 P035).
 
+Origins are exact, or `https://*.` a domain of the host's own: a wildcard over a
+public suffix (`*.com`, `*.co.uk`, `*.github.io`) is refused, as is any scheme
+source, with one exception (P060). A host may let passive content load from any
+https site (`egress.anyHttps: ["img", "media", "font"]`, P059): those directives
+get `https:`, scripts, styles, data and frames never do, and the manual says so
+(`leak/cdn.spec.ts`: a hotlinked image loads; a script, a stylesheet and a fetch
+to the same site don't reach it).
+
+An opaque frame inherits the embedding page's whole policy (P058): on a page that
+closes images or fetches to its own origin, the positive controls of `1.connect`
+and `2.resources` can't load, through no fault of the host's isolation. The suite
+then reports the probe inapplicable on this host, with the reason, instead of
+failing it: a probe sees the allowed origin blocked by a policy that isn't the
+frame's own (the frame's allows it). `12.no-confirm` likewise, on a host that
+always has a confirm function (a default dialog). Tested against a reference page
+closed like a strict host's (`leak/inherited-policy.spec.ts`).
+
 | # | Channel | Mechanism | Probes | Negative control → fails (Chromium / WebKit / Firefox) |
 |---|---------|-----------|--------|------------------------------------------|
 | 1 | fetch, XHR, WebSocket, EventSource, `sendBeacon`, `fetchLater`, a blob worker's fetch | CSP `connect-src` = the allowlist only (`'none'` by default) | `1.connect` (with an allowed origin as positive control) | `connect-src` → `1.connect` (all three); `8.prefetch` too on Chromium |
@@ -524,7 +541,7 @@ official App SDK connects under the inline, artifact and MCP Apps presets
 |---|------|-----------|--------|------------------------------------------|
 | 11 | streaming | `setContent(html, { partial: true })` any number of times, then whole once; the shell draws a draft from a template with everything that runs or navigates removed (scripts, frames, `on*`, `javascript:`), changing only what changed | `11.streaming`: each draft shows; a drawn node is kept across drafts (an image doesn't reload); nothing runs (no script, handler or `javascript:` href) until the whole, which runs once; a repeat or a late draft changes nothing | `draft-inert` → `11.streaming` |
 | 11 | auto-size | the shell reports its height (`size-changed`) as it changes; the host clamps it to `minHeightPx`..`maxHeightPx` and sizes the frame; past the cap the content scrolls inside | `11.size` (grows, shrinks, stops at the cap and scrolls, floors at the minimum; events carry the clamped height), `11.size-document` (a whole page's height; its own `load` fires; its title kept) | — |
-| 11 | theming | `setTheme(scheme)`: the host sends the resolved variables (the host's live values over the defaults, P028), the shell sets them in place, with `data-theme` and `color-scheme`, then fires the config's theme event once; the frame element's `color-scheme` follows | `11.theme-flip` (in place: content state kept, the event fired once per flip, back and forth), `11.theme-host-values` (live values for standard and own names; undeclared names dropped) | — |
+| 11 | theming | `setTheme(scheme)`: the host sends the resolved variables (the host's live values over the defaults, P028), the shell sets them in place, with `data-theme` and `color-scheme`, then fires the config's theme event once, only when the scheme or a value changed (never at mount, never for a host re-sending what the content has, P061); the frame element's `color-scheme` follows | `11.theme-flip` (no event at mount or for the same scheme; in place: content state kept, the event fired once per flip, back and forth), `11.theme-host-values` (live values for standard and own names; undeclared names dropped) | — |
 | 11 | base styles | plain CSS at zero specificity (`:where`): native buttons, inputs, selects and text areas take the theme's borders, radius, colors and focus ring, 44 px tall (the manual's touch size); the manual says so for inline widgets | `11.base-styles` (themed; content's own CSS overrides them) | — |
 | 12 | `sendPrompt` | the shell refuses a call without a gesture; the host refuses one without its page's user activation, then asks `confirm` with the whole text; declines count toward a mute | `12.prompt-gesture-confirm` (a call on load is refused; a click asks; a no sends nothing; a yes reaches the handler), `12.raw-message` (a raw `ui/message` around the shell, no click: refused by the host), `12.mute`, `12.no-confirm` | `confirm-gate` → prompt-gesture-confirm, link, mute, no-confirm; `shell-gesture` → prompt-gesture-confirm, mute; `host-gesture` → raw-message |
 | 12 | `openLink` | link clicks go out through `openLink`; the bridge takes http(s) only, without credentials in the URL; confirmed | `12.link` (a web link asks and opens; `javascript:` links and `openLink("javascript:…")` do nothing and are refused) | `link-scheme` → `12.link` |

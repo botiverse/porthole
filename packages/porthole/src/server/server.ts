@@ -92,6 +92,10 @@ function mergeEgress(base: EgressConfig, extra: EgressConfig | undefined): Egres
       merged[kind] = origins;
     }
   }
+  // What the host's config opens to any https site stays; a view can't ask for it (P059).
+  if (base.anyHttps !== undefined) {
+    merged.anyHttps = base.anyHttps;
+  }
   return merged;
 }
 

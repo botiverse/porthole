@@ -462,7 +462,13 @@ describe("a view's resource", () => {
           "*",
           "https://x.com/path",
         ],
-        resourceDomains: ["https://*.cdn.example.com", "HTTPS://Fonts.Example.com"],
+        resourceDomains: [
+          "https://*.cdn.example.com",
+          "HTTPS://Fonts.Example.com",
+          // A wildcard over a public suffix opens every stranger's site: dropped (P060).
+          "https://*.com",
+          "https://*.github.io",
+        ],
         frameDomains: ["https://www.youtube.com"],
         baseUriDomains: ["https://base.example.com"],
       }),

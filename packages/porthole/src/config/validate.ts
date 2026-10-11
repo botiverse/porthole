@@ -1,5 +1,10 @@
 import { CAPABILITY_NAMES, isCapabilityName, type Gate } from "./capabilities.ts";
-import { URL_PERMISSIONS, URL_SANDBOX_EXTRAS, type PortholeConfig } from "./schema.ts";
+import {
+  PASSIVE_KINDS,
+  URL_PERMISSIONS,
+  URL_SANDBOX_EXTRAS,
+  type PortholeConfig,
+} from "./schema.ts";
 
 /**
  * Checks a config before anything is derived from it. Every string that ends up in a CSP, an
@@ -22,6 +27,155 @@ export class ConfigError extends Error {
 export const BUILT_IN_TOPICS = ["widget", "chart", "interactive"] as const;
 
 const LOOPBACK = /^(localhost|127\.0\.0\.1|\[::1\])$|\.localhost$/u;
+
+/**
+ * Suffixes under which anyone can register or publish a name (a public suffix): a wildcard over
+ * one (`https://*.co.uk`, `https://*.github.io`) opens every stranger's site. Single labels (`com`,
+ * `dev`) are refused by rule; these are the common multi-label ones, registries' and hosting
+ * platforms'. Not the whole Public Suffix List: a wildcard should name the host's own domain.
+ */
+const PUBLIC_SUFFIXES = new Set([
+  // Registries' second levels.
+  ...["co", "org", "ac", "gov", "me", "net", "ltd", "plc", "sch", "nhs", "police"].map(
+    (each) => `${each}.uk`,
+  ),
+  ...["com", "net", "org", "edu", "gov", "asn", "id"].map((each) => `${each}.au`),
+  ...["co", "org", "net", "ac", "govt", "geek", "school"].map((each) => `${each}.nz`),
+  ...["co", "ne", "or", "ac", "go", "ad", "ed", "gr", "lg"].map((each) => `${each}.jp`),
+  ...["co", "or", "ne", "ac", "go", "re"].map((each) => `${each}.kr`),
+  ...["com", "net", "org", "gov", "edu"].flatMap((each) =>
+    [
+      "br",
+      "cn",
+      "hk",
+      "tw",
+      "sg",
+      "my",
+      "mx",
+      "ar",
+      "tr",
+      "ua",
+      "pl",
+      "ph",
+      "pk",
+      "ng",
+      "eg",
+      "sa",
+      "vn",
+      "co",
+    ].map((country) => `${each}.${country}`),
+  ),
+  ...["co", "net", "org", "gen", "firm", "ind", "ac", "edu", "gov", "res"].map(
+    (each) => `${each}.in`,
+  ),
+  ...["co", "org", "ac", "gov", "net", "web"].map((each) => `${each}.za`),
+  ...["co", "org", "ac", "gov", "net", "muni"].map((each) => `${each}.il`),
+  "co.id",
+  "or.id",
+  "ac.id",
+  "co.th",
+  "or.th",
+  "ac.th",
+  "co.ke",
+  "co.tz",
+  "co.ug",
+  "com.de",
+  "co.at",
+  "or.at",
+  "ac.at",
+  "co.it",
+  "com.es",
+  "nom.es",
+  "com.fr",
+  "asso.fr",
+  "eu.org",
+  "us.com",
+  "uk.com",
+  "eu.com",
+  "uk.net",
+  "gb.net",
+  "jpn.com",
+  "kr.com",
+  // Hosting platforms: anyone gets a name under these.
+  "github.io",
+  "githubusercontent.com",
+  "gitlab.io",
+  "bitbucket.io",
+  "pages.dev",
+  "workers.dev",
+  "r2.dev",
+  "vercel.app",
+  "now.sh",
+  "netlify.app",
+  "netlify.com",
+  "herokuapp.com",
+  "herokussl.com",
+  "appspot.com",
+  "web.app",
+  "firebaseapp.com",
+  "cloudfunctions.net",
+  "run.app",
+  "googleusercontent.com",
+  "blogspot.com",
+  "azurewebsites.net",
+  "azurestaticapps.net",
+  "azureedge.net",
+  "blob.core.windows.net",
+  "cloudapp.net",
+  "trafficmanager.net",
+  "cloudfront.net",
+  "amazonaws.com",
+  "s3.amazonaws.com",
+  "elasticbeanstalk.com",
+  "awsapprunner.com",
+  "amplifyapp.com",
+  "fly.dev",
+  "onrender.com",
+  "railway.app",
+  "up.railway.app",
+  "glitch.me",
+  "repl.co",
+  "replit.app",
+  "replit.dev",
+  "surge.sh",
+  "deno.dev",
+  "ngrok.io",
+  "ngrok-free.app",
+  "ngrok.app",
+  "loca.lt",
+  "trycloudflare.com",
+  "codesandbox.io",
+  "csb.app",
+  "stackblitz.io",
+  "webcontainer.io",
+  "neocities.org",
+  "wordpress.com",
+  "tumblr.com",
+  "wixsite.com",
+  "squarespace.com",
+  "myshopify.com",
+  "carrd.co",
+  "notion.site",
+  "framer.app",
+  "webflow.io",
+  "readthedocs.io",
+  "gitbook.io",
+  "sourceforge.net",
+  "digitaloceanspaces.com",
+  "ondigitalocean.app",
+  "b-cdn.net",
+  "jsdelivr.net",
+]);
+
+/** Why a wildcard's base can't be wildcarded, or null: a public suffix, or a single label. */
+function wildcardProblem(base: string): string | null {
+  if (base === "localhost") {
+    return null;
+  }
+  return !base.includes(".") || PUBLIC_SUFFIXES.has(base)
+    ? `is a wildcard over a public suffix (*.${base}): anyone can serve a site under it; name a domain of your own (https://*.cdn.example.com)`
+    : null;
+}
 const HOST =
   /^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/u;
 
@@ -49,6 +203,12 @@ export function originSourceProblem(value: unknown): string | null {
   }
   if (host !== "[::1]" && !HOST.test(host)) {
     return `${JSON.stringify(value)} ${shape}`;
+  }
+  if (host.startsWith("*.")) {
+    const problem = wildcardProblem(host.slice(2));
+    if (problem !== null) {
+      return `${JSON.stringify(value)} ${problem}`;
+    }
   }
   if ((scheme === "http" || scheme === "ws") && !LOOPBACK.test(host.replace(/^\*\./u, "x."))) {
     return `${JSON.stringify(value)} uses ${scheme} off loopback: ${scheme} is allowed only for localhost, *.localhost, 127.0.0.1 and [::1] (loopback development); use ${scheme === "http" ? "https" : "wss"}`;
@@ -174,9 +334,25 @@ export function validateConfig(input: unknown): PortholeConfig {
 
   const egress = object(config.egress, "config.egress");
   const kinds = ["connect", "script", "style", "img", "font", "media"];
-  only(egress, kinds, "config.egress");
+  only(egress, [...kinds, "anyHttps"], "config.egress");
   for (const kind of kinds) {
     sources(egress[kind], `config.egress.${kind}`);
+  }
+  if (egress.anyHttps !== undefined) {
+    if (!Array.isArray(egress.anyHttps)) {
+      fail("config.egress.anyHttps", `must be a list of ${PASSIVE_KINDS.join(", ")}`);
+    }
+    (egress.anyHttps as unknown[]).forEach((kind, index) => {
+      if (!(PASSIVE_KINDS as readonly unknown[]).includes(kind)) {
+        fail(
+          `config.egress.anyHttps[${index}]`,
+          `${JSON.stringify(kind)}: only images, media and fonts may load from any https site (P059), never scripts, styles or data`,
+        );
+      }
+    });
+    if (config.mode === "url") {
+      fail("config.egress.anyHttps", "url mode has no egress control");
+    }
   }
 
   const theme = object(config.theme, "config.theme");

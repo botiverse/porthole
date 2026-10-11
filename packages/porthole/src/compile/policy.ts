@@ -1,5 +1,5 @@
 import { CAPABILITIES, type CapabilityName, type Gate } from "../config/capabilities.ts";
-import type { EgressConfig, PortholeConfig } from "../config/schema.ts";
+import type { PortholeConfig } from "../config/schema.ts";
 
 /**
  * The frame's policies, derived from the config: its CSP (in the shell's `<meta>` for opaque
@@ -10,7 +10,12 @@ import type { EgressConfig, PortholeConfig } from "../config/schema.ts";
 /** A CSP directive: its name, then its sources. */
 export type CspDirective = readonly [name: string, ...sources: string[]];
 
-export type EgressKind = keyof EgressConfig;
+export type EgressKind = "connect" | "script" | "style" | "img" | "font" | "media";
+
+/** Whether `kind` loads from any https site (`EgressConfig.anyHttps`, P059): passive kinds only. */
+export function anyHttps(config: PortholeConfig, kind: EgressKind): boolean {
+  return (config.egress.anyHttps ?? []).some((each) => each === kind);
+}
 
 /** The capabilities a config declares, in vocabulary order. */
 export function declaredCapabilities(config: PortholeConfig): CapabilityName[] {
@@ -56,13 +61,15 @@ export function frameCspDirectives(config: PortholeConfig): CspDirective[] {
     return [];
   }
   const origins = (kind: EgressKind) => egressOrigins(config, kind);
+  // Any https site, for passive kinds a host opened so (P059); never for what runs or talks.
+  const https = (kind: "img" | "media" | "font") => (anyHttps(config, kind) ? ["https:"] : []);
   return [
     ["default-src", "'none'"],
     ["script-src", "'unsafe-inline'", "'unsafe-eval'", "blob:", ...origins("script")],
     ["style-src", "'unsafe-inline'", ...origins("style")],
-    ["font-src", "data:", ...origins("font")],
-    ["img-src", "data:", "blob:", ...origins("img")],
-    ["media-src", "data:", "blob:", ...origins("media")],
+    ["font-src", "data:", ...https("font"), ...origins("font")],
+    ["img-src", "data:", "blob:", ...https("img"), ...origins("img")],
+    ["media-src", "data:", "blob:", ...https("media"), ...origins("media")],
     ["connect-src", ...list(origins("connect"))],
     ["worker-src", "blob:"],
     ["child-src", "blob:"],

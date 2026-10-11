@@ -735,3 +735,30 @@ test("fill: an artifact fills its box and scrolls inside, without the host's CSS
     )
     .toBe(720);
 });
+
+test("a mounting frame hears no theme event; a flip, exactly one (#3)", async ({ page }) => {
+  const content = `<p id="t">themed</p><script>window.flips = []; addEventListener("porthole:theme", (event) => window.flips.push(event.detail.theme));</script>`;
+  const state = (scheme: "light" | "dark", themeKey?: number): AppState => ({
+    provider: "default",
+    frames: [
+      frame({
+        displayId: "themed",
+        content,
+        scheme,
+        ...(themeKey === undefined ? {} : { themeKey }),
+      }),
+    ],
+  });
+  await open(page, state("light", 1));
+  const inside = frameOf(page, "themed");
+  await expect(inside.locator("#t")).toHaveText("themed");
+  const flips = () =>
+    inside.locator("html").evaluate(() => (window as unknown as { flips: string[] }).flips);
+  await page.waitForTimeout(400);
+  expect(await flips(), "no event at mount").toEqual([]);
+  await open(page, state("light", 1));
+  await page.waitForTimeout(300);
+  expect(await flips(), "no event for a render that changes nothing").toEqual([]);
+  await open(page, state("dark", 1));
+  await expect.poll(flips).toEqual(["dark"]);
+});

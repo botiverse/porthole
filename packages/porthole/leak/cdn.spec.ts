@@ -100,3 +100,69 @@ test("a served artifact page loads its library from a CDN only under a config th
   expect(await libraryOf(closed), "the default: egress closed").toBe("none");
   expect(hits.cdn).toBe(1);
 });
+
+const ANY_SITE = "https://any-site.example";
+const PIXEL = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
+
+/** Routes a stranger's https site; records each path that reached it. */
+async function routeAnySite(context: BrowserContext): Promise<string[]> {
+  const reached: string[] = [];
+  await context.route(`${ANY_SITE}/**`, (route) => {
+    const url = new URL(route.request().url());
+    reached.push(url.pathname);
+    const type = url.pathname.endsWith(".gif")
+      ? "image/gif"
+      : url.pathname.endsWith(".css")
+        ? "text/css"
+        : url.pathname.endsWith(".js")
+          ? "text/javascript"
+          : "application/json";
+    return route.fulfill({
+      contentType: type,
+      body: type === "image/gif" ? PIXEL : type === "text/javascript" ? LIBRARY : "{}",
+      headers: { "access-control-allow-origin": "*" },
+    });
+  });
+  return reached;
+}
+
+const HOTLINKED = `<!doctype html><html><head><title>Report</title>
+<link rel="stylesheet" href="${ANY_SITE}/style.css">
+<script src="${ANY_SITE}/script.js"></script></head><body>
+<main id="artifact"><img id="hotlinked" src="${ANY_SITE}/chart.gif" alt="chart"></main>
+<script>
+  fetch(${JSON.stringify(`${ANY_SITE}/data.json`)}).then(() => (document.body.dataset.fetch = "sent"), () => (document.body.dataset.fetch = "blocked"));
+  const image = document.getElementById("hotlinked");
+  const done = () => (document.body.dataset.image = image.naturalWidth > 0 ? "loaded" : "blocked");
+  if (image.complete) done(); else { image.onload = done; image.onerror = done; }
+</script></body></html>`;
+
+test("images from any https site, when the host opts in: they load; scripts, styles and data from it never (P059)", async ({
+  page,
+  context,
+}) => {
+  const reached = await routeAnySite(context);
+  const open = await referenceHost.launch(page, {
+    config: presets.artifact({ egress: { anyHttps: ["img", "media"] } }),
+    content: HOTLINKED,
+  });
+  const frame = await open.frame();
+  await expect.poll(() => frame.evaluate(() => document.body.dataset.image ?? "")).toBe("loaded");
+  await expect.poll(() => frame.evaluate(() => document.body.dataset.fetch ?? "")).toBe("blocked");
+  await settle(frame);
+  expect(reached).toEqual(["/chart.gif"]);
+  expect(await libraryOf(frame), "the script never ran").toBe("none");
+
+  // Without the opt-in, not even the image.
+  const closedReached = reached.length;
+  const closed = await referenceHost.launch(page, {
+    config: presets.artifact(),
+    content: HOTLINKED,
+  });
+  const closedFrame = await closed.frame();
+  await expect
+    .poll(() => closedFrame.evaluate(() => document.body.dataset.image ?? ""))
+    .toBe("blocked");
+  await settle(closedFrame);
+  expect(reached).toHaveLength(closedReached);
+});

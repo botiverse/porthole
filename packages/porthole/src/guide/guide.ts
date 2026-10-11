@@ -7,6 +7,7 @@ import {
 import type { PortholeConfig } from "../config/schema.ts";
 import { BUILT_IN_TOPICS } from "../config/validate.ts";
 import {
+  anyHttps,
   declaredCapabilities,
   effectiveGates,
   egressOrigins,
@@ -83,11 +84,20 @@ const KIND_WORDS: Readonly<Record<EgressKind, string>> = {
   connect: "data (fetch, WebSocket)",
 };
 
+/** What the manual calls `https:` (any https site), where a config opens passive kinds to it. */
+export const ANY_HTTPS_SITE = "any https site";
+
+/** The sources content may load `kind` from, as the manual names them: origins, any https site. */
+const sourcesFor = (config: PortholeConfig, kind: EgressKind): string[] => [
+  ...(anyHttps(config, kind) ? [ANY_HTTPS_SITE] : []),
+  ...egressOrigins(config, kind),
+];
+
 /** What content may load, in prose, from the same origins the CSP lists. */
 function network(config: PortholeConfig): string {
   const kinds: EgressKind[] = ["script", "style", "font", "img", "media", "connect"];
   const open = kinds
-    .map((kind) => [kind, egressOrigins(config, kind)] as const)
+    .map((kind) => [kind, sourcesFor(config, kind)] as const)
     .filter(([, origins]) => origins.length > 0);
   if (open.length === 0) {
     return "Network: none. Nothing loads from outside (no scripts, styles, fonts, images or data from any server) and any fetch fails, so write everything inline: SVG and CSS draw charts well.";
@@ -419,10 +429,19 @@ export function generateToolDescription(config: PortholeConfig): string {
       ),
     ),
   ];
+  const passive = (["img", "media", "font"] as const)
+    .filter((kind) => anyHttps(config, kind))
+    .map((kind) => KIND_WORDS[kind]);
+  const fromAnywhere =
+    passive.length === 0
+      ? ""
+      : `${passive.length === 1 ? passive[0] : `${passive.slice(0, -1).join(", ")} and ${passive.at(-1)}`} from ${ANY_HTTPS_SITE}`;
   const net =
-    origins.length === 0
+    origins.length === 0 && fromAnywhere === ""
       ? "with no network (nothing loads from outside)"
-      : `loading only from ${origins.join(", ")}`;
+      : origins.length === 0
+        ? `loading only ${fromAnywhere}`
+        : `loading only from ${origins.join(", ")}${fromAnywhere === "" ? "" : `, and ${fromAnywhere}`}`;
   const globals = declaredCapabilities(config).flatMap((name) => {
     const spec = capabilitySpec(name);
     if (spec.global === undefined || !c.global(spec.global)) {

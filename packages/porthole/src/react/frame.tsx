@@ -622,15 +622,22 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
       attempt(() => display.annotations.focus(id), latest());
     }
   }, [annotates, focusToken]);
+  // A flip or a restyle after the display was made: its first scheme and values went with it.
+  const [mountScheme] = useState(scheme);
+  const flipped = useRef(false);
   useEffect(() => {
-    handle.current?.setTheme(scheme);
-  }, [scheme]);
+    if (flipped.current || scheme !== mountScheme) {
+      flipped.current = true;
+      handle.current?.setTheme(scheme);
+    }
+  }, [scheme, mountScheme]);
   const { themeKey } = frame;
+  const [mountThemeKey] = useState(themeKey);
   useEffect(() => {
-    if (themeKey !== undefined) {
+    if (themeKey !== undefined && themeKey !== mountThemeKey) {
       handle.current?.refreshTheme();
     }
-  }, [themeKey]);
+  }, [themeKey, mountThemeKey]);
 
   return (
     <div

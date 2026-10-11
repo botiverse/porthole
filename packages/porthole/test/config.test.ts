@@ -4,6 +4,7 @@ import {
   ConfigError,
   createHost,
   isOriginSource,
+  originSourceProblem,
   presets,
   validateConfig,
   type PortholeConfig,
@@ -53,8 +54,32 @@ describe("origin sources", () => {
     "ws://live.example.com",
     "https://a.com:99999",
     "",
+    // A wildcard over a public suffix opens every stranger's site (0.1.5).
+    "https://*.com",
+    "https://*.dev",
+    "wss://*.io",
+    "https://*.co.uk",
+    "https://*.com.au",
+    "https://*.github.io",
+    "https://*.pages.dev",
+    "https://*.amazonaws.com",
   ])("refuses %j", (source) => {
     expect(isOriginSource(source)).toBe(false);
+  });
+
+  test("says why a wildcard over a public suffix is refused, and takes one over a domain under it", () => {
+    expect(originSourceProblem("https://*.co.uk")).toMatch(/public suffix \(\*\.co\.uk\)/u);
+    for (const source of [
+      "https://*.example.co.uk",
+      "https://*.porthole.github.io",
+      "https://*.cdn.example.com",
+      "http://*.localhost:8790",
+    ]) {
+      expect(originSourceProblem(source), source).toBeNull();
+    }
+    expect(() =>
+      presets.artifact({ isolation: "domain", contentOrigins: ["https://*.com"] }),
+    ).toThrow(/public suffix/u);
   });
 });
 
@@ -281,6 +306,34 @@ describe("0.1.1: what a host may change", () => {
     expect(refusal({ ...base, storage: { shared: "conversation" } })).toMatch(/only domain/u);
     expect(refusal({ ...own, storage: { shared: "A Conversation!" } })).toMatch(/noun/u);
     expect(refusal({ ...own, storage: { scope: "x" } })).toMatch(/not a known field/u);
+  });
+
+  test("only passive kinds may load from any https site, by the host's explicit choice (P059)", () => {
+    const open = presets.artifact({ egress: { anyHttps: ["img", "media", "font"] } });
+    const directives = Object.fromEntries(
+      compile(open).cspDirectives.map(([name, ...sources]) => [name, sources]),
+    );
+    for (const name of ["img-src", "media-src", "font-src"]) {
+      expect(directives[name], name).toContain("https:");
+    }
+    for (const name of [
+      "script-src",
+      "style-src",
+      "connect-src",
+      "frame-src",
+      "worker-src",
+      "default-src",
+    ]) {
+      expect(directives[name] ?? [], name).not.toContain("https:");
+    }
+    expect(compile(presets.artifact()).csp).not.toContain("https:");
+    for (const kind of ["script", "style", "connect", "frame", "img-src"]) {
+      expect(refusal({ ...open, egress: { anyHttps: [kind] } }), kind).toMatch(
+        /only images, media and fonts/u,
+      );
+    }
+    expect(refusal({ ...open, egress: { anyHttps: "img" } })).toMatch(/must be a list/u);
+    expect(refusal({ ...open, egress: { img: ["https:"] } })).toMatch(/not an origin/u);
   });
 
   test("a whole document takes the person's scheme when it declares it, unless the host says always", () => {
