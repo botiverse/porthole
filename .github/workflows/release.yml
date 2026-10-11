@@ -1,0 +1,43 @@
+name: release
+
+# Publish @botiverse/porthole to npm when a version tag (v*) lands. Auth is npm
+# trusted publishing (OIDC): the job only requests an id-token; no npm token
+# secret exists in this repo. The npm-side trusted-publisher setting for
+# @botiverse/porthole is owner-managed.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+      - run: pnpm install --frozen-lockfile
+      # The tag is the single source of truth: refuse to publish when the
+      # package disagrees with it.
+      - name: verify tag matches the package version
+        run: |
+          node -e '
+            const { readFileSync } = require("node:fs");
+            const tag = process.env.GITHUB_REF_NAME;
+            const pkg = JSON.parse(readFileSync("packages/porthole/package.json", "utf8"));
+            if (`v${pkg.version}` !== tag) {
+              console.error(`tag ${tag} does not match ${pkg.name}@${pkg.version}`);
+              process.exit(1);
+            }
+          '
+      - run: pnpm run check
+      - run: pnpm --filter @botiverse/porthole run build
+      # pnpm publish so publishConfig.exports (dist) replaces the source exports.
+      - run: pnpm --filter @botiverse/porthole publish --access public --no-git-checks
