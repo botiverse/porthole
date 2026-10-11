@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Porthole">
+  <!-- The large mark: a riveted porthole onto HTML, the word drawn as strokes (no shadow on the letters, so they stay crisp). Below about 64 px use
+       porthole-mark.svg, where </> stays legible. Ferry's family: Raft's yellow and ink, hard offset shadow. -->
+  <rect width="100" height="100" rx="23" fill="#ffd441"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#d3ad03" transform="translate(3.5 3.5)">
+      <circle cx="50" cy="50" r="30" stroke-width="9"/>
+    </g>
+    <g stroke="#191815">
+      <circle cx="50" cy="50" r="30" stroke-width="9"/>
+      <path d="M30 44 L30 56 M38 44 L38 56 M30 50 L38 50" stroke-width="4"/>
+      <path d="M41 44 L49 44 M45 44 L45 56" stroke-width="4"/>
+      <path d="M52 56 L52 44 L56.5 51.5 L61 44 L61 56" stroke-width="4"/>
+      <path d="M64.5 44 L64.5 56 L70.5 56" stroke-width="4"/>
+    </g>
+  </g>
+  <g fill="#ffd441">
+    <circle cx="77.72" cy="61.48" r="2.3"/>
+    <circle cx="61.48" cy="77.72" r="2.3"/>
+    <circle cx="38.52" cy="77.72" r="2.3"/>
+    <circle cx="22.28" cy="61.48" r="2.3"/>
+    <circle cx="22.28" cy="38.52" r="2.3"/>
+    <circle cx="38.52" cy="22.28" r="2.3"/>
+    <circle cx="61.48" cy="22.28" r="2.3"/>
+    <circle cx="77.72" cy="38.52" r="2.3"/>
+  </g>
+</svg>

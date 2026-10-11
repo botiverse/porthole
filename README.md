@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/assets/porthole-mark.svg" width="112" alt="Porthole"></p>
+<p align="center"><img src="docs/assets/porthole-logo.svg" width="128" alt="Porthole"></p>
 
 # Porthole
 
