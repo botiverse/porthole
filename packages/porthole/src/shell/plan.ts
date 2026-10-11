@@ -25,6 +25,8 @@ export interface ShellPlan {
   readonly themeVariables: readonly string[];
   /** The window event fired after a theme change. */
   readonly themeEvent: string;
+  /** Whether a whole document takes the person's scheme: when it declares it, or always. */
+  readonly themeDocuments: "declared" | "always";
   /** `memory`: an opaque origin has no storage, so a map stands in for the frame's life. */
   readonly storage: "memory" | "native";
   readonly maxErrorReports: number;
@@ -58,6 +60,7 @@ export function shellPlan(config: PortholeConfig): ShellPlan | null {
     globals,
     themeVariables: Object.keys(config.theme.variables),
     themeEvent: config.theme.event,
+    themeDocuments: config.theme.documents ?? "declared",
     storage: config.isolation === "opaque" ? "memory" : "native",
     maxErrorReports: config.limits.maxErrorReports,
     maxPromptChars: config.limits.maxPromptChars,

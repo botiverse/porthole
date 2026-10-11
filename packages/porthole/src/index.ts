@@ -31,7 +31,15 @@ export type {
   ThemeConfig,
   ThemeValue,
 } from "./config/schema.ts";
-export { BUILT_IN_TOPICS, ConfigError, isOriginSource, validateConfig } from "./config/validate.ts";
+export {
+  BUILT_IN_TOPICS,
+  ConfigError,
+  isOriginSource,
+  originSourceProblem,
+  validateConfig,
+} from "./config/validate.ts";
+export { URL_SANDBOX_EXTRAS, type UrlSandboxExtra } from "./config/schema.ts";
+export { hostOriginProblem, isHostOrigin } from "./isolation/served.ts";
 
 // Presets.
 export {
@@ -103,7 +111,9 @@ export type {
   CapabilityHandler,
   CapabilityHandlers,
   Confirm,
+  ConfirmAnswer,
   ConfirmRequest,
+  Proceed,
   HostFunctionBridge,
   Refusal,
 } from "./bridge/types.ts";

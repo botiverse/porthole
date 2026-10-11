@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>A running app</title>
+  </head>
+  <body>
+    <p id="app">A running app.</p>
+    <button
+      id="popup"
+      onclick="
+        try {
+          document.body.dataset.popup = String(window.open('about:blank', '_blank') !== null);
+        } catch (error) {
+          document.body.dataset.popup = 'false';
+        }
+      "
+    >
+      Open a window
+    </button>
+    <button
+      id="top"
+      onclick="
+        try {
+          top.location.href = 'about:blank#taken';
+          document.body.dataset.top = 'navigated';
+        } catch (error) {
+          document.body.dataset.top = 'refused';
+        }
+      "
+    >
+      Leave
+    </button>
+    <script>
+      document.documentElement.dataset.app = "ready";
+    </script>
+  </body>
+</html>

@@ -85,10 +85,12 @@ describe("the frame's attributes", () => {
 
 describe("the embedding page's CSP", () => {
   test("restricts frames only, and allows no navigation for opaque frames (srcdoc needs no source)", () => {
-    expect(embedderCsp([presets.inlineWidget()])).toBe("frame-src 'none'; child-src 'none'");
+    expect(embedderCsp([presets.inlineWidget()])).toBe("frame-src 'none'");
     expect(embedderCsp([presets.inlineWidget({ embedder: { frameSrc: ["'self'"] } })])).toBe(
-      "frame-src 'self'; child-src 'self'",
+      "frame-src 'self'",
     );
+    // Nothing a host's workers fall back to (child-src, default-src): frames only (P038).
+    expect(embedderCsp([presets.inlineWidget()])).not.toMatch(/child-src|worker-src|default-src/u);
   });
 
   test("adds served and external content origins and the host's own frames, once each", () => {
@@ -104,8 +106,7 @@ describe("the embedding page's CSP", () => {
       }),
     ]);
     expect(csp).toBe(
-      "frame-src https://*.example-usercontent.com https://*.preview.example.com https://www.youtube-nocookie.com; " +
-        "child-src https://*.example-usercontent.com https://*.preview.example.com https://www.youtube-nocookie.com",
+      "frame-src https://*.example-usercontent.com https://*.preview.example.com https://www.youtube-nocookie.com",
     );
     expect(csp).not.toContain("default-src");
   });

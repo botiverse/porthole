@@ -155,6 +155,13 @@ const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp">> = {
       replace: "        if (false) {",
     },
   ],
+  "document-theme": [
+    {
+      file: RUNTIME,
+      find: '    themed = plan.themeDocuments === "always" ||',
+      replace: "    themed = true ||",
+    },
+  ],
   "embedder-csp": "embedder-csp",
   "embedder-self": "embedder-csp",
 };
@@ -246,7 +253,7 @@ function embedderPolicy(url: URL): string {
   const asked = url.searchParams.get("csp") ?? "";
   const policy = /^(frame-src|child-src) [^;]+(; (frame-src|child-src) [^;]+)*$/u.test(asked)
     ? asked
-    : "frame-src 'none'; child-src 'none'";
+    : "frame-src 'none'";
   return weakened.includes("embedder-self")
     ? policy
         .replaceAll("'none'", "'self'")

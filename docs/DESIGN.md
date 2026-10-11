@@ -192,6 +192,8 @@ display.setContent(code);                      // once, whole: now it runs
 display.setTheme("dark");
 display.on("resize", ({ height }) => {});
 display.on("error", ({ message }) => {});
+display.on("outcome", (outcome) => {});        // loaded | blocked (why) | timeout (P040)
+display.refreshTheme();                        // the host's values changed without a flip
 display.destroy();
 
 host.compiled.guide(["widget", "chart"]);      // the manual, from the same config
@@ -313,8 +315,9 @@ binding is mounting and lifecycle (P034).
     handlers={{ sendPrompt, openLink }}  // one per declared capability; latest are called
     theme={(scheme) => tokens}       // live values for the config's variable names
     generation={n}                   // bump to run again from the start
-    onError onResize onNavigated onRefused onMuted onInitialized
-    renderPlaceholder? eager? confirm? document? instance? className? style? />
+    onError onResize onNavigated onRefused onMuted onInitialized onOutcome
+    aliases? themeKey? renderPlaceholder? eager? confirm? document? instance?
+    className? style? />
 </PortholeProvider>
 ```
 
@@ -372,6 +375,13 @@ absent.
   storage scope, so `localStorage` persists (P016).
 - **URL mode** (`presets.url`). A running app by URL (the first host's dev-server
   preview): frame, isolation and access auth; no shell, no egress control (P020).
+  It has no handshake: its first load makes it ready, and it fills its container (an
+  app reports no size; give the frame a height), at least `minHeightPx`. A host may
+  add popups, modals and downloads to its sandbox, never top navigation (P037).
+  Through `/server`, a framed app is entered through a page that checks the browser
+  kept its cookie and tells the host (P040); the host's `outcome` says loaded,
+  blocked (and why: `cookies` on WebKit, `framing`, `session`, `upstream`) or
+  timeout, so it can offer its own "Open in a new tab".
 
 ## Egress hardening, each with its test
 
@@ -393,7 +403,7 @@ P035).
 | 2 | images, CSS images, SVG `<image>`/`<use>`, media and posters, `input type=image`, stylesheets, `@import`, fonts, scripts, `import()`, workers, manifests, icons | CSP `img/media/font/style/script-src` = the allowlist only; `worker-src blob:` | `2.resources` (an allowed image as positive control) | — (the same CSP as item 1) |
 | 3 | WebRTC (ICE gathering reaches the network outside `connect-src`) | CSP `webrtc 'block'` **and** the shell removes every `RTC*`/`webkitRTC*` constructor, fixed in place, before content runs | `3.webrtc` (an unsandboxed peer connection as positive control: it sends STUN on both engines) | `webrtc` → `3.webrtc` (all three; Firefox's positive control needs `media.peerconnection.ice.loopback`, set in the suite's Firefox project, P035) |
 | 4 | a nested frame: a fresh realm where item 3's removal never happened | the shell drops frame-like elements (`iframe, frame, frameset, object, embed, portal, fencedframe`) synchronously wherever content connects a node (P030), and an observer removes any that arrive another way, in the document and every shadow root (`attachShadow` is wrapped so closed ones are reached too); documents are rendered inert and imported, never written; `document.open/write` throw; declarative shadow roots can't be built (P029); CSP `frame-src 'none'` | `4.light-dom`, `.sync-realm`, `.open-shadow`, `.closed-shadow`, `.shadow-nested`, `.declarative-shadow`, `.parse-html-unsafe`, `.domparser`, `.document-write`, `.plugins`, `.foreign-object`, `.template-clone`, `.static` (each: the child never runs, no STUN, no frame left) | `frame-guard,sync-guard` → light-dom, sync-realm, plugins, foreign-object, template-clone; `attach-shadow,sync-guard` → closed-shadow, shadow-nested; `declarative-shadow` → declarative-shadow; `parser-entry-points` → document-write (each on all three engines). Either guard alone is covered by the other. |
-| 5 | self-navigation out, with data in the URL (`location`, `replace`, `open(…, "_self")`, meta refresh, a link clicked past the shell, an SVG link), to the host's own origin, or to a `blob:`/`data:` document of its own (a fresh realm) | the **embedding page's** `frame-src` (`embedderCsp`: `'none'` for opaque content, P033): a frame's own CSP cannot stop its own navigation; the shell sends link clicks out through `openLink` and drops refreshes (P030); a display whose frame navigates is started again, at most three times (P031) | `5.location`, `.replace`, `.open-self`, `.refresh`, `.anchor`, `.svg-link`, `.host-origin`, `.blob`, `.data` (no request reaches the canary or the host; a navigated document never runs: a witness origin hears nothing) | `embedder-csp` → location, replace, open-self, anchor, svg-link, blob, data, `6.remote-download` (all three; `.refresh` holds: the synchronous guard drops the refresh; Firefox also holds `.data` by itself, P035); `embedder-self` → `5.host-origin` |
+| 5 | self-navigation out, with data in the URL (`location`, `replace`, `open(…, "_self")`, meta refresh, a link clicked past the shell, an SVG link), to the host's own origin, or to a `blob:`/`data:` document of its own (a fresh realm) | the **embedding page's** `frame-src` (`embedderCsp`: `'none'` for opaque content, P033; frames only, so the host's own workers are untouched, P038): a frame's own CSP cannot stop its own navigation; the shell sends link clicks out through `openLink` and drops refreshes (P030); a display whose frame navigates is started again, at most three times (P031) | `5.location`, `.replace`, `.open-self`, `.refresh`, `.anchor`, `.svg-link`, `.host-origin`, `.blob`, `.data` (no request reaches the canary or the host; a navigated document never runs: a witness origin hears nothing) | `embedder-csp` → location, replace, open-self, anchor, svg-link, blob, data, `6.remote-download` (all three; `.refresh` holds: the synchronous guard drops the refresh; Firefox also holds `.data` by itself, P035); `embedder-self` → `5.host-origin` |
 | 6 | forms, popups, downloads, top and parent navigation | `sandbox="allow-scripts"` only; CSP `form-action 'none'` | `6.submit`, `.request-submit`, `.blank-form`, `.open`, `.blank-link`, `.download`, `.remote-download`, `.top`, `.top-link`, `.parent` | `sandbox` → open, blank-link, top, top-link, parent (all three), download (Chromium; WebKit and Firefox started no download either way). Form submits still fail: `form-action` is a second wall |
 | 7 | `<base>` hijack, plugins | CSP `base-uri 'none'`, `object-src 'none'`; plugins removed as frames | `7.base-plugins` | `base-uri` → `7.base-plugins` (all three); `frame-guard,sync-guard` too (plugins left in place) |
 | 8 | resource hints and speculation rules | CSP for those an engine governs (`prefetch`, `preload`, `modulepreload`); for the rest the shell drops `dns-prefetch`, `preconnect`, `prefetch`, `prerender` links, speculation rules, refreshes and `x-dns-prefetch-control` metas synchronously, and refuses changes that would make a connected link one (P030); `x-dns-prefetch-control: off` | `8.preconnect`, `.dns-prefetch`, `.prefetch`, `.prerender`, `.preload`, `.modulepreload`, `.speculation-rules` (each in markup, inserted, and switched on by attribute change; no request, no connection) | `sync-guard` → `8.preconnect` (WebKit: it preconnects synchronously, outside CSP). Measured: Chromium and Firefox opened no preconnect even unsandboxed. `dns-prefetch` has no out-of-band oracle here (DNS isn't observed); the element is refused before it connects |
@@ -461,9 +471,15 @@ The theme vocabulary is the MCP Apps style variables (`--color-background-*`,
 (`src/theme/variables.ts`). A host supplies live values for the same names from
 its own tokens (`HostOptions.theme`); `resolveTheme` takes a host value for each
 declared name, the default otherwise, and drops undeclared names. The shell
-applies them in place on a flip and fires the theme event. Its base styles set the
-body's type and color from the variables; base styles for native form elements
-(buttons, inputs) are the only further look Porthole adds, as plain CSS (P015).
+applies them in place on a flip and fires the theme event; the host's values are
+read two frames after the flip, so a host that restyles on its next frame is read
+after it has (`refreshTheme()` reads them again, P043). A host drops a default it
+doesn't want with `null` in a preset's theme. Its base styles set the body's type
+and color from the variables; base styles for native form elements (buttons,
+inputs) are the only further look Porthole adds, as plain CSS (P015). A whole
+document (an artifact page) takes the person's scheme only when it declares it
+supports both, `<meta name="color-scheme" content="light dark">`, or the host sets
+`theme.documents: "always"`; otherwise it shows as its author styled it (P039).
 
 ## Guide generation
 
@@ -547,6 +563,11 @@ A Playwright suite (`@botiverse/porthole/conformance`) that:
   handlers and the errors; flip the theme) so the suite is not coupled to any one
   host's DOM — aligned with the upstream conformance-interface effort so results
   can feed it;
+- is registered by the host in a spec file of its own (`leakTests(host)`,
+  `servedTests(host)`: one entry per probe, `test(each.title, ({ page, browserName },
+  info) => each.run({ page, browserName }, info))`), so its tests are located there
+  and selected by that file or a probe id; it runs on the host's own Playwright, which
+  Porthole doesn't declare (P041);
 - runs every egress and escape probe in the table above, each attempting its
   channel and asserting nothing leaves, using out-of-band oracles (`httpOracle`: a
   local HTTP server that also counts TCP connections; `udpOracle`: a UDP listener
@@ -558,7 +579,8 @@ A Playwright suite (`@botiverse/porthole/conformance`) that:
 Porthole runs it against its own reference host (`leak/host/reference.ts`, the real
 `createHost` in a page; `leak/reference-host.ts`, its `ConformanceHost`; served by
 `leak/server.ts`, which serves the core's TypeScript stripped as Node does, with the
-embedding CSP `embedderCsp` derives): `pnpm test:leak` runs Chromium and WebKit;
+embedding CSP `embedderCsp` derives): `pnpm test:leak` runs Chromium, WebKit and
+Firefox;
 `PORTHOLE_LEAK_ENGINES=chromium` runs a subset where an engine's system libraries
 are missing; `PORTHOLE_LEAK_WEAKEN=<control>[,<control>]` serves the core with
 defenses taken out (P032; the table above lists what each must fail).

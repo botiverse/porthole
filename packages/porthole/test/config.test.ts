@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  compile,
   ConfigError,
   createHost,
   isOriginSource,
@@ -192,6 +193,80 @@ describe("createHost", () => {
     const container = {} as HTMLElement;
     expect(() => host.mount(container, { displayId: "d1", title: "T", scheme: "light" })).toThrow(
       /sendPrompt/u,
+    );
+  });
+});
+
+describe("0.1.1: what a host may change", () => {
+  test("a host drops default theme variables with null, and adds its own", () => {
+    const config = presets.inlineWidget({
+      theme: { variables: { "--color-chart-1": null, "--color-accent": null, "--brand": "#00f" } },
+    });
+    expect(config.theme.variables).not.toHaveProperty("--color-chart-1");
+    expect(config.theme.variables).not.toHaveProperty("--color-accent");
+    expect(config.theme.variables["--brand"]).toBe("#00f");
+    expect(config.theme.variables["--color-text-primary"]).toBeDefined();
+  });
+
+  test("http and ws are allowed on loopback only, and the error says so", () => {
+    expect(() =>
+      validateConfig(presets.url({ contentOrigins: ["http://*.localhost:8790"] })),
+    ).not.toThrow();
+    expect(refusal(withField({ egress: { connect: ["http://cdn.example.com"] } }))).toMatch(
+      /http off loopback: http is allowed only for localhost, \*\.localhost, 127\.0\.0\.1 and \[::1\].*use https/u,
+    );
+    expect(() => presets.url({ contentOrigins: ["http://preview.example.com"] })).toThrow(
+      /off loopback/u,
+    );
+  });
+
+  test("url mode may add the documented sandbox tokens; nothing else, and never top navigation", () => {
+    const config = presets.url({
+      contentOrigins: ["https://*.preview.example.com"],
+      sandbox: [
+        "allow-popups",
+        "allow-popups-to-escape-sandbox",
+        "allow-modals",
+        "allow-downloads",
+      ],
+    });
+    expect(compile(config).sandbox).toBe(
+      "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads",
+    );
+    expect(
+      compile(presets.url({ contentOrigins: ["https://*.preview.example.com"] })).sandbox,
+    ).toBe("allow-scripts allow-same-origin allow-forms");
+    const url = presets.url({ contentOrigins: ["https://*.preview.example.com"] });
+    expect(refusal({ ...url, sandbox: ["allow-top-navigation"] })).toMatch(/never granted/u);
+    expect(refusal({ ...url, sandbox: ["allow-top-navigation-by-user-activation"] })).toMatch(
+      /never granted/u,
+    );
+    expect(refusal({ ...url, sandbox: ["allow-presentation"] })).toMatch(/must be one of/u);
+    expect(refusal({ ...base, sandbox: ["allow-popups"] })).toMatch(/only url mode/u);
+  });
+
+  test("a whole document takes the person's scheme when it declares it, unless the host says always", () => {
+    expect(compile(presets.artifact()).shell?.themeDocuments).toBe("declared");
+    expect(
+      compile(presets.artifact({ theme: { documents: "always" } })).shell?.themeDocuments,
+    ).toBe("always");
+    expect(refusal(withField({ theme: { ...base.theme, documents: "sometimes" } }))).toMatch(
+      /declared/u,
+    );
+    expect(compile(presets.artifact()).guide(["widget"])).toContain(
+      '<meta name="color-scheme" content="light dark">',
+    );
+  });
+
+  test("a load timeout is a positive limit", () => {
+    expect(() =>
+      presets.url({
+        contentOrigins: ["https://*.p.example.com"],
+        limits: { loadTimeoutMs: 2_000 },
+      }),
+    ).not.toThrow();
+    expect(refusal(withField({ limits: { ...base.limits, loadTimeoutMs: 0 } }))).toMatch(
+      /loadTimeoutMs/u,
     );
   });
 });

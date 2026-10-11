@@ -1,11 +1,13 @@
+import { hostOriginProblem } from "../isolation/served.ts";
 import { SHELL_RUNTIME } from "./runtime.ts";
 import type { ShellPlan } from "./plan.ts";
 
 export interface ShellDocumentOptions {
   /**
    * The origins the shell takes messages from: the embedding page's own (`location.origin`), or
-   * every host origin a served document may be embedded by. Exact origins, no wildcards. The
-   * sender must also be the frame's parent.
+   * every host origin a served document may be embedded by. Exact origins of any scheme (a
+   * desktop app's own, `ferry://app`), no wildcards, never "null". The sender must also be the
+   * frame's parent.
    */
   readonly origins: readonly string[];
   /** The frame document's title (for assistive technology inside the frame). */
@@ -23,8 +25,6 @@ export interface ShellDocumentOptions {
    */
   readonly cspMeta?: boolean;
 }
-
-const EXACT_ORIGIN = /^(https?:\/\/[a-z0-9.-]+(:\d{1,5})?|https?:\/\/\[::1\](:\d{1,5})?)$/u;
 
 const escapeAttribute = (value: string): string =>
   value.replace(/&/gu, "&amp;").replace(/"/gu, "&quot;").replace(/</gu, "&lt;");
@@ -80,8 +80,9 @@ body {
  */
 export function shellDocument(plan: ShellPlan, csp: string, options: ShellDocumentOptions): string {
   for (const origin of options.origins) {
-    if (!EXACT_ORIGIN.test(origin)) {
-      throw new TypeError(`shellDocument: ${JSON.stringify(origin)} is not an exact origin`);
+    const problem = hostOriginProblem(origin);
+    if (problem !== null) {
+      throw new TypeError(`shellDocument: ${problem}`);
     }
   }
   const runtime = SHELL_RUNTIME.replace("__PLAN__", () =>

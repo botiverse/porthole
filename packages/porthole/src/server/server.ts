@@ -1,7 +1,7 @@
 import { compile, type CompiledConfig } from "../compile/compile.ts";
 import type { DisplayMode, EgressConfig } from "../config/schema.ts";
 import {
-  isExactOrigin,
+  hostOriginProblem,
   maybeSameSite,
   originMatchesSource,
   parseOrigin,
@@ -9,7 +9,8 @@ import {
 import type { FrameLocation, InstanceRef, ServedDocument } from "../isolation/types.ts";
 import { sandboxProxyDocument } from "../mcp/proxy.ts";
 import { createKeys, newTicket, ticketId } from "./keys.ts";
-import { statusPage } from "./pages.ts";
+import { enterPage, pageScript, SESSION_PATH, statusPage } from "./pages.ts";
+import type { FrameBlock } from "../host/types.ts";
 import { memoryTicketStore } from "./tickets.ts";
 import type { Access, PortholeServer, ServerOptions, TicketRecord, TicketStore } from "./types.ts";
 
@@ -187,9 +188,14 @@ export function createServer(options: ServerOptions): PortholeServer {
     throw new TypeError("hostOrigins must name the origins that embed content");
   }
   for (const origin of options.hostOrigins) {
-    const parsed = isExactOrigin(origin) ? parseOrigin(origin) : null;
+    const problem = hostOriginProblem(origin);
+    if (problem !== null) {
+      throw new TypeError(`hostOrigins: ${problem}`);
+    }
+    // A desktop app's own scheme (ferry://app) is never the same site as web content.
+    const parsed = parseOrigin(origin);
     if (parsed === null) {
-      throw new TypeError(`hostOrigins: ${JSON.stringify(origin)} is not an exact origin`);
+      continue;
     }
     if (
       parsed.host === domain ||
@@ -209,8 +215,15 @@ export function createServer(options: ServerOptions): PortholeServer {
   }
   const tickets: TicketStore = options.tickets ?? memoryTicketStore();
 
-  const page = (status: number, title: string, detail: string, method?: string): Response =>
-    statusPage(status, title, detail, frameAncestors, method);
+  /** A page saying why there is nothing to show, told to the host too (its reason, P040). */
+  const page = (
+    status: number,
+    title: string,
+    detail: string,
+    method?: string,
+    reason: FrameBlock = status === 404 ? "not-found" : status === 502 ? "upstream" : "error",
+  ): Response =>
+    statusPage(status, title, detail, frameAncestors, method, reason, options.hostOrigins);
 
   /** The config a served document is served under, checked to fit it and this server. */
   function configFor(name: string, kind: keyof typeof MODES): CompiledConfig {
@@ -428,6 +441,7 @@ export function createServer(options: ServerOptions): PortholeServer {
         "This link has been used",
         "Content here opens once per link. Open it again from the app that showed it.",
         method,
+        "session",
       );
     }
     const served = await documentOf(access.instance);
@@ -452,13 +466,27 @@ export function createServer(options: ServerOptions): PortholeServer {
         403,
         "This link has been used",
         "A link into an app works once, for a short time. Open it again from the app that showed it.",
+        method,
+        "session",
       );
     }
     const target = new URL(record.instance.document.url);
+    const landing = `${target.pathname}${target.search}${target.hash}`;
+    // In a frame, a page enters the app: it can tell whether the browser kept the cookie (and tell
+    // the host), where a redirect would leave a frame without one showing a refusal. On a tab of
+    // its own, a redirect.
+    if (request.headers.get("sec-fetch-dest") !== "document") {
+      return enterPage(
+        landing,
+        frameAncestors,
+        options.hostOrigins,
+        sessionCookie(request, record),
+      );
+    }
     return new Response(null, {
       status: 303,
       headers: {
-        location: `${target.pathname}${target.search}${target.hash}`,
+        location: landing,
         "set-cookie": sessionCookie(request, record),
         "cache-control": "no-store",
         "referrer-policy": "no-referrer",
@@ -508,6 +536,7 @@ export function createServer(options: ServerOptions): PortholeServer {
         "Open this from the app",
         "This address shows an app only to the people the app opens it for.",
         method,
+        "session",
       );
     }
     if (options.upstream === undefined) {
@@ -579,7 +608,7 @@ export function createServer(options: ServerOptions): PortholeServer {
         clean.document.kind === "external"
           ? `${ENTER_PATH}?ticket=${ticket}`
           : `${PREFIX}d/${key}?ticket=${ticket}`;
-      return { url: `${origin}${path}`, origin };
+      return { url: `${origin}${path}`, origin, reports: true };
     },
 
     async access(request) {
@@ -600,6 +629,17 @@ export function createServer(options: ServerOptions): PortholeServer {
         }
         if (url.pathname === ENTER_PATH) {
           return await enter(request, url, label);
+        }
+        const script = pageScript(url.pathname);
+        if (script !== null) {
+          return script;
+        }
+        if (url.pathname === SESSION_PATH) {
+          // Whether this request's cookie opens its origin's app: the entry page asks.
+          return new Response(null, {
+            status: accessOf(request, label, null) === null ? 401 : 204,
+            headers: { "cache-control": "no-store" },
+          });
         }
         const document = DOCUMENT_PATH.exec(url.pathname);
         if (document?.[1] !== undefined) {

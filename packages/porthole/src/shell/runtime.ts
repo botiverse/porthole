@@ -487,6 +487,21 @@ export const SHELL_RUNTIME = String.raw`(() => {
     window.dispatchEvent(new Event("load"));
   };
 
+  // A fragment takes the person's scheme; a whole document only if it declares that it supports
+  // both (or the config says always), else it shows as its author styled it (P039).
+  let lastContext = null;
+  let themed = plan.content !== "document";
+  const schemeFollows = () => {
+    const root = document.documentElement;
+    const theme = lastContext && lastContext.theme;
+    if (themed && (theme === "light" || theme === "dark")) {
+      root.style.colorScheme = theme;
+      root.setAttribute("data-theme", theme);
+    } else {
+      root.style.removeProperty("color-scheme");
+      root.removeAttribute("data-theme");
+    }
+  };
   // A whole document, parsed inert (no scripts run, no declarative shadow roots built), guarded,
   // imported in place of the shell's, then its scripts run in order. The theme on the root stays.
   const renderDocument = async (html) => {
@@ -502,6 +517,9 @@ export const SHELL_RUNTIME = String.raw`(() => {
     document.head.replaceChildren(...Array.from(parsed.head.childNodes, (node) => document.importNode(node, true)));
     document.body.replaceWith(document.importNode(parsed.body, true));
     root = null;
+    const declaredScheme = parsed.querySelector('meta[name="color-scheme" i]');
+    themed = plan.themeDocuments === "always" || (declaredScheme !== null && /\bdark\b/i.test(declaredScheme.getAttribute("content") || ""));
+    schemeFollows();
     await runScripts(scripts);
     announceLoaded();
   };
@@ -554,10 +572,8 @@ export const SHELL_RUNTIME = String.raw`(() => {
         }
       }
     }
-    if (context.theme === "light" || context.theme === "dark") {
-      document.documentElement.style.colorScheme = context.theme;
-      document.documentElement.setAttribute("data-theme", context.theme);
-    }
+    lastContext = context;
+    schemeFollows();
     window.dispatchEvent(new CustomEvent(plan.themeEvent, { detail: { theme: context.theme } }));
   };
 

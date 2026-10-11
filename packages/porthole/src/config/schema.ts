@@ -71,6 +71,13 @@ export interface ThemeConfig {
   readonly variables: Readonly<Record<string, ThemeValue>>;
   /** The window event the shell fires after the theme changed, for code that must redraw. */
   readonly event: string;
+  /**
+   * Whether a whole document (an artifact page) takes the person's light or dark scheme:
+   * `declared` (default): only a page that declares it supports both
+   * (`<meta name="color-scheme" content="light dark">`); any other page shows as its author
+   * styled it, in light. `always`: every page. The variables are there either way.
+   */
+  readonly documents?: "declared" | "always";
 }
 
 export interface Limits {
@@ -88,7 +95,26 @@ export interface Limits {
   readonly maxPromptChars: number;
   /** The most errors one run of a display reports. */
   readonly maxErrorReports: number;
+  /**
+   * How long a display may take to load before its outcome is a timeout (ms). Optional; 15 s
+   * when absent.
+   */
+  readonly loadTimeoutMs?: number;
 }
+
+/**
+ * Sandbox tokens a url-mode frame may add to its baseline, by the host's choice (P037): a
+ * person's own running app (a dev server's preview) may need popups (an OAuth flow), modals and
+ * downloads. Never top navigation, and nothing for other modes.
+ */
+export const URL_SANDBOX_EXTRAS = [
+  "allow-popups",
+  "allow-popups-to-escape-sandbox",
+  "allow-modals",
+  "allow-downloads",
+] as const;
+
+export type UrlSandboxExtra = (typeof URL_SANDBOX_EXTRAS)[number];
 
 /** Where the host shows the content, for the manual's size rules. */
 export interface LayoutConfig {
@@ -137,4 +163,6 @@ export interface PortholeConfig {
    */
   readonly contentOrigins: readonly string[];
   readonly embedder: EmbedderConfig;
+  /** Url mode only: sandbox tokens added to its baseline (`URL_SANDBOX_EXTRAS`). */
+  readonly sandbox?: readonly UrlSandboxExtra[];
 }

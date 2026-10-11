@@ -107,6 +107,10 @@ function network(config: PortholeConfig): string {
   return `Network: only ${parts.join("; ")}. Anything else fails.`;
 }
 
+/** Whether a whole document takes the theme only when it declares support (ThemeConfig.documents). */
+const optsIn = (config: PortholeConfig): boolean =>
+  config.mode === "artifact" && (config.theme.documents ?? "declared") === "declared";
+
 const loadsScripts = (config: PortholeConfig): boolean =>
   egressOrigins(config, "script").length > 0;
 
@@ -157,7 +161,7 @@ function widget(c: Context): string {
     "",
     what,
     "",
-    `Where it runs: in a sandboxed frame as wide as the column it sits in, about ${layout.narrowWidthPx} px on a phone (${layout.minWidthPx} on a small one) and ${layout.wideWidthPx} on a desktop; the same ${noun} is read on both, so never write for one of them. Design for ${layout.narrowWidthPx} first; where the layout depends on the width, read it as it runs (the box's clientWidth, again from a ResizeObserver). ${height} It runs in the person's light or dark theme, and again each time it is shown${loadsScripts(config) ? ": pin library versions" : ""}.`,
+    `Where it runs: in a sandboxed frame as wide as the column it sits in, about ${layout.narrowWidthPx} px on a phone (${layout.minWidthPx} on a small one) and ${layout.wideWidthPx} on a desktop; the same ${noun} is read on both, so never write for one of them. Design for ${layout.narrowWidthPx} first; where the layout depends on the width, read it as it runs (the box's clientWidth, again from a ResizeObserver). ${height} ${optsIn(config) ? `It shows in light, as you style it; to follow the person's light or dark theme, declare it in its head (<meta name="color-scheme" content="light dark">) and draw with the variables below.` : "It runs in the person's light or dark theme."} It runs again each time it is shown${loadsScripts(config) ? ": pin library versions" : ""}.`,
     "",
     "Sizes that read on a phone:",
     c.when(
@@ -173,7 +177,9 @@ function widget(c: Context): string {
       ? "\nLibraries: pin an exact version at least two weeks old (chart.js@4.4.1 in its URL), never @latest or a range, so the code can't be swapped under you and draws the same every time."
       : null,
     "",
-    `Colors: every color from these variables, never hard-coded, so light and dark both work. The ${noun}'s own background is transparent (it sits on the app's surface).`,
+    optsIn(config)
+      ? `Colors, for a ${noun} that declares light and dark: every color from these variables, never hard-coded, so both work; its own background then stays transparent (it sits on the app's surface).`
+      : `Colors: every color from these variables, never hard-coded, so light and dark both work. The ${noun}'s own background is transparent (it sits on the app's surface).`,
     c.names("--color-background-") === "" ? null : `- Surfaces: ${c.names("--color-background-")}`,
     c.names("--color-text-") === "" ? null : `- Text: ${c.names("--color-text-")}`,
     c.names("--color-border-") === ""

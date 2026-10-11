@@ -33,6 +33,30 @@ export function isExactOrigin(origin: unknown): origin is string {
 }
 
 /**
+ * A host page's origin, exactly as `location.origin` and a message's `event.origin` give it:
+ * `scheme://host[:port]`, lowercase, any scheme (an Electron or Tauri app's own registered scheme,
+ * `ferry://app`, `app://local`), never `"null"` (an opaque origin isn't one origin: every opaque
+ * page says "null") and never a path. The shell takes messages only from these, exactly.
+ */
+const HOST_ORIGIN =
+  /^[a-z][a-z0-9+.-]*:\/\/([a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*|\[[0-9a-f:.]+\])(:\d{1,5})?$/u;
+
+export function isHostOrigin(origin: unknown): origin is string {
+  return typeof origin === "string" && origin.length <= 300 && HOST_ORIGIN.test(origin);
+}
+
+/** Why `origin` can't be a host origin, in words a host's developer can act on; null if it can. */
+export function hostOriginProblem(origin: unknown): string | null {
+  if (isHostOrigin(origin)) {
+    return null;
+  }
+  if (origin === "null") {
+    return 'the host page\'s origin is opaque ("null"): serve it from a real origin (an Electron custom protocol must be registered as standard, and file: pages have none)';
+  }
+  return `${JSON.stringify(origin)} is not an exact origin (scheme://host[:port], lowercase, no path)`;
+}
+
+/**
  * Whether two hosts may be the same site. Without the public-suffix list this errs one way only:
  * it says "same site" whenever the hosts are equal or share their last two labels, so a pair it
  * calls cross-site always is (a refused pair, like `a.github.io` and `b.github.io`, may not be:

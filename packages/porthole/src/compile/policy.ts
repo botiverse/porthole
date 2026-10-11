@@ -93,7 +93,8 @@ export function sandboxTokens(config: PortholeConfig): string[] {
     case "domain":
       return ["allow-scripts", "allow-same-origin"];
     case "external":
-      return ["allow-scripts", "allow-same-origin", "allow-forms"];
+      // The host may add a documented few (popups, modals, downloads), never top navigation.
+      return ["allow-scripts", "allow-same-origin", "allow-forms", ...(config.sandbox ?? [])];
   }
 }
 
@@ -119,15 +120,11 @@ export function embedderFrameSources(config: PortholeConfig): string[] {
 
 /**
  * The CSP the embedding page sends (a header, or the host's own document's policy), for every kind
- * of display it shows. It sets no `default-src`: it restricts frames only, leaving the host's own
- * scripts, styles and fetches to the host's policy. `child-src` repeats `frame-src` for engines
- * that read frames from it.
+ * of display it shows. Frames only: no `default-src`, so the host's own scripts, styles and
+ * fetches stay its policy's; and no `child-src`, which the host's workers would fall back to (every
+ * engine Porthole supports reads frames from `frame-src`, P038).
  */
 export function embedderCsp(configs: readonly PortholeConfig[]): string {
   const sources = unique(configs.flatMap(embedderFrameSources));
-  const all = sources.length === 0 ? ["'none'"] : sources;
-  return serializeCsp([
-    ["frame-src", ...all],
-    ["child-src", ...all],
-  ]);
+  return serializeCsp([["frame-src", ...(sources.length === 0 ? ["'none'"] : sources)]]);
 }

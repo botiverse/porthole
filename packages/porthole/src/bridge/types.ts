@@ -38,10 +38,26 @@ export type ConfirmRequest = {
 }[CapabilityName];
 
 /**
- * Asks a person. Resolves true only if they accept. The host's UI, or the React binding's default
- * dialog; drawn outside the frame, never inside it.
+ * What the person chose. `true`/`"accepted"`: the call goes. `false`/`"declined"`: it doesn't,
+ * and the decline counts toward muting the display. `"redirected"`: it doesn't go, but the person
+ * took it elsewhere (edited the prompt first, say), so it neither counts as a decline nor resets
+ * the count. The host decides which its UI's choices are.
  */
-export type Confirm = (request: ConfirmRequest) => Promise<boolean>;
+export type ConfirmAnswer = boolean | "accepted" | "declined" | "redirected";
+
+/**
+ * Runs the call's effect now, inside the caller's own gesture, and counts as accepted. A host
+ * whose effect needs the person's gesture (opening a window) calls it from the click handler of
+ * its own "yes" button, rather than resolving the promise and letting the effect run after.
+ */
+export type Proceed = () => void;
+
+/**
+ * Asks a person. Resolves with their answer. The host's UI, or the React binding's default
+ * dialog; drawn outside the frame, never inside it. `proceed` (optional to use) runs the effect
+ * within the "yes" click itself.
+ */
+export type Confirm = (request: ConfirmRequest, proceed: Proceed) => Promise<ConfirmAnswer>;
 
 /** Why a call didn't run. */
 export type Refusal =
@@ -55,6 +71,8 @@ export type Refusal =
   | "no-confirm"
   /** The person declined. */
   | "declined"
+  /** The person took it elsewhere (edited it first): not sent, not counted as a decline. */
+  | "redirected"
   /** The display was muted after too many declines (until it runs again). */
   | "muted"
   | "rate-limited"

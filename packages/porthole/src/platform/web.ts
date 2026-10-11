@@ -26,7 +26,9 @@ export const webPlatform: PlatformHost = {
       border: "0",
       background: "transparent",
       colorScheme: spec.colorScheme,
-      height: `${Math.max(0, Math.round(spec.initialHeightPx))}px`,
+      ...(spec.fill === true
+        ? { height: "100%", minHeight: `${Math.max(0, Math.round(spec.initialHeightPx))}px` }
+        : { height: `${Math.max(0, Math.round(spec.initialHeightPx))}px` }),
     });
     const origin = spec.source.kind === "srcdoc" ? "null" : spec.source.origin;
     if (spec.source.kind === "srcdoc") {
@@ -36,9 +38,13 @@ export const webPlatform: PlatformHost = {
     }
 
     const navigated = new Set<() => void>();
+    const loaded = new Set<() => void>();
     let loads = 0;
     frame.addEventListener("load", () => {
       loads += 1;
+      for (const listener of loaded) {
+        listener();
+      }
       if (loads > 1) {
         for (const listener of navigated) {
           listener();
@@ -53,7 +59,9 @@ export const webPlatform: PlatformHost = {
       transport,
       element: frame,
       setHeight(px: number) {
-        frame.style.height = `${Math.max(0, Math.round(px))}px`;
+        if (spec.fill !== true) {
+          frame.style.height = `${Math.max(0, Math.round(px))}px`;
+        }
       },
       setColorScheme(scheme: ColorScheme) {
         frame.style.colorScheme = scheme;
@@ -64,12 +72,17 @@ export const webPlatform: PlatformHost = {
         ).userActivation;
         return activation === undefined ? undefined : activation.isActive;
       },
+      onLoad(listener) {
+        loaded.add(listener);
+        return () => loaded.delete(listener);
+      },
       onNavigated(listener) {
         navigated.add(listener);
         return () => navigated.delete(listener);
       },
       destroy() {
         navigated.clear();
+        loaded.clear();
         transport.close();
         frame.remove();
       },

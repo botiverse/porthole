@@ -17,6 +17,11 @@ export interface SurfaceSpec {
   readonly allow: string;
   readonly referrerPolicy: "no-referrer";
   readonly colorScheme: ColorScheme;
+  /**
+   * Fill the container's height (a url-mode app, which reports no size), at least
+   * `initialHeightPx`, instead of taking the content's.
+   */
+  readonly fill?: boolean;
   /** The height to start at (a remembered height, so a frame mounting again doesn't jump). */
   readonly initialHeightPx: number;
 }
@@ -38,6 +43,8 @@ export interface Surface {
    * framework starts it again from its content and reports it.
    */
   onNavigated(listener: () => void): () => void;
+  /** Every load of the frame's document, the first included. */
+  onLoad(listener: () => void): () => void;
   destroy(): void;
 }
 

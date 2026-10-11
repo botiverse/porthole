@@ -52,9 +52,35 @@ export interface MountOptions {
 }
 
 /** What a display reports, by event name. */
+/** Why a display's frame showed nothing of its content (`FrameOutcome`). */
+export type FrameBlock =
+  /** The page that frames it isn't one its server allows (frame-ancestors), or it never ran. */
+  | "framing"
+  /** The browser keeps no cookie for it inside a frame (WebKit, P025): open it on a tab. */
+  | "cookies"
+  /** Its ticket was used or its session ended. */
+  | "session"
+  /** Its app didn't answer. */
+  | "upstream"
+  | "not-found"
+  | "error";
+
+/**
+ * How a display's first document went, once per run: it loaded (a shell or view finished its
+ * handshake; a url-mode app's document loaded), it was blocked (and why), or nothing settled in
+ * `limits.loadTimeoutMs`. A host shows its own fallback ("Open in a new tab") on anything but
+ * loaded.
+ */
+export type FrameOutcome =
+  | { readonly state: "loaded" }
+  | { readonly state: "blocked"; readonly reason: FrameBlock; readonly status?: number }
+  | { readonly state: "timeout" };
+
 export interface DisplayEvents {
-  /** The frame finished its handshake. */
+  /** The frame finished its handshake (url mode, which has none: its first document loaded). */
   readonly initialized: undefined;
+  /** How the frame's first document went (`FrameOutcome`). */
+  readonly outcome: FrameOutcome;
   /** The content's size, after the config's limits. */
   readonly resize: { readonly height: number; readonly width?: number };
   /** What the content threw, or what the sandbox blocked (its own words: untrusted). */
@@ -69,8 +95,13 @@ export interface DisplayEvents {
 
 export interface DisplayControls {
   readonly displayId: string;
-  /** The theme flipped: the frame is re-themed in place, without a reload. */
+  /**
+   * The theme flipped: the frame is re-themed in place, without a reload. The host's values are
+   * read two animation frames later, once a host that restyles its page asynchronously has.
+   */
   setTheme(scheme: ColorScheme): void;
+  /** The host's theme values changed (same scheme): read them now and re-theme the frame. */
+  refreshTheme(): void;
   on<E extends keyof DisplayEvents>(
     event: E,
     listener: (detail: DisplayEvents[E]) => void,

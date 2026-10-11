@@ -4,6 +4,7 @@ import { declaredCapabilities } from "../compile/policy.ts";
 import { capabilitySpec } from "../config/capabilities.ts";
 import type { ColorScheme, PortholeConfig } from "../config/schema.ts";
 import { locateServed } from "./locate.ts";
+import { watchOutcome, type OutcomeWatch } from "./outcome.ts";
 import type { FrameSource } from "../isolation/types.ts";
 import { webPlatform } from "../platform/web.ts";
 import type { Surface } from "../platform/types.ts";
@@ -22,6 +23,9 @@ import type {
   MountOptions,
   PortholeHost,
 } from "./types.ts";
+
+/** How long a display may take to load before its outcome is a timeout, by default. */
+const DEFAULT_LOAD_TIMEOUT_MS = 15_000;
 
 /** How many times a display is started again after its content navigated its frame away. */
 const MAX_RESTARTS = 3;
@@ -81,12 +85,14 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       let restarts = 0;
       let generation = 0;
       let abort: AbortController | null = null;
+      let outcomeWatch: OutcomeWatch | null = null;
+      let themeFrame: number | null = null;
+      const view = container.ownerDocument.defaultView;
       // The adapter's own operations, the last call of each, replayed into every new frame.
       const replay = new Map<string, unknown[]>();
 
       const hostContext = (): HostContext => {
         const width = container.getBoundingClientRect().width;
-        const view = container.ownerDocument.defaultView;
         // The spec's names in `styles` (the App SDK refuses others there), the rest in our field.
         const variables = resolveTheme(config.theme, scheme, options.theme?.(scheme));
         const standard: Record<string, string> = {};
@@ -142,6 +148,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       const stop = () => {
         abort?.abort();
         abort = null;
+        outcomeWatch?.stop();
+        outcomeWatch = null;
         connection?.close();
         connection = null;
         surface?.destroy();
@@ -156,10 +164,29 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           allow: compiled.allow,
           referrerPolicy: compiled.referrerPolicy,
           colorScheme: scheme,
-          initialHeightPx: height,
+          // An app reports no size: its frame fills the host's container, at least the minimum.
+          ...(speaks
+            ? { initialHeightPx: height }
+            : { fill: true, initialHeightPx: config.limits.minHeightPx }),
         });
         surface = created;
+        const watch = watchOutcome({
+          surface: created,
+          source,
+          speaks,
+          timeoutMs: config.limits.loadTimeoutMs ?? DEFAULT_LOAD_TIMEOUT_MS,
+          onOutcome: (outcome) => emit("outcome", outcome),
+        });
+        outcomeWatch = watch;
         if (!speaks) {
+          // No handshake in url mode: the app's first document loading is as ready as it gets.
+          let ready = false;
+          created.onLoad(() => {
+            if (!ready) {
+              ready = true;
+              emit("initialized", undefined);
+            }
+          });
           return;
         }
         const bridge = createBridge({
@@ -179,6 +206,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           hostContext,
           emit: (event) => {
             if (event.type === "initialized") {
+              watch.initialized();
               emit("initialized", undefined);
             }
           },
@@ -249,6 +277,23 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         setTheme(next: ColorScheme) {
           scheme = next;
           surface?.setColorScheme(next);
+          // Read the host's values two frames later: a host that restyles its page for the new
+          // scheme on its next frame has done so by then.
+          if (view === null) {
+            connection?.hostContextChanged(hostContext());
+            return;
+          }
+          if (themeFrame !== null) {
+            view.cancelAnimationFrame(themeFrame);
+          }
+          themeFrame = view.requestAnimationFrame(() => {
+            themeFrame = view.requestAnimationFrame(() => {
+              themeFrame = null;
+              connection?.hostContextChanged(hostContext());
+            });
+          });
+        },
+        refreshTheme() {
           connection?.hostContextChanged(hostContext());
         },
         on<E extends keyof DisplayEvents>(event: E, listener: (detail: DisplayEvents[E]) => void) {

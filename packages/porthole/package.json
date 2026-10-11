@@ -1,6 +1,6 @@
 {
   "name": "@botiverse/porthole",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A host-side sandbox for agent-made HTML: isolation, egress hardening, a themed shell, gated host functions, and the agent manual, from one config.",
   "license": "Apache-2.0",
   "files": [
@@ -59,18 +59,10 @@
     "typescript": "7.0.2"
   },
   "peerDependencies": {
-    "@modelcontextprotocol/ext-apps": ">=2.0.0",
-    "@playwright/test": ">=1.63.0",
     "react": ">=19"
   },
   "peerDependenciesMeta": {
-    "@playwright/test": {
-      "optional": true
-    },
     "react": {
-      "optional": true
-    },
-    "@modelcontextprotocol/ext-apps": {
       "optional": true
     }
   },

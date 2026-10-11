@@ -4,6 +4,8 @@ import {
   type PlaywrightTestOptions,
   type PlaywrightWorkerArgs,
   type PlaywrightWorkerOptions,
+  type Page,
+  type TestInfo,
   type TestType,
 } from "@playwright/test";
 import { presets } from "../presets/presets.ts";
@@ -1030,64 +1032,98 @@ type AnyTest = TestType<
   PlaywrightWorkerArgs & PlaywrightWorkerOptions
 >;
 
-/** Registers every probe as a test, grouped by egress item. */
+/** The fixtures a conformance test uses. */
+export interface ConformanceFixtures {
+  readonly page: Page;
+  readonly browserName: string;
+}
+
+/**
+ * One conformance test, for a host's own spec file to register: its tests are then located in that
+ * file, so `playwright test my-conformance.spec.ts` (or `--grep "\[1\.connect\]"`) finds them.
+ *
+ *   for (const each of leakTests(myHost)) {
+ *     test(each.title, ({ page, browserName }, info) => each.run({ page, browserName }, info));
+ *   }
+ */
+export interface ConformanceTest {
+  readonly id: string;
+  /** `[<id>] <what it proves>`: the probe id is greppable. */
+  readonly title: string;
+  run(fixtures: ConformanceFixtures, info: TestInfo): Promise<void>;
+}
+
+/** Every probe as a test entry (see `ConformanceTest`). */
+export function leakTests(
+  host: ConformanceHost,
+  options: LeakSuiteOptions = {},
+): ConformanceTest[] {
+  return PROBES.map((probe) => ({
+    id: probe.id,
+    title: `[${probe.id}] ${probe.title}`,
+    async run({ page, browserName }, info) {
+      const reason = options.skip?.[probe.id];
+      info.skip(reason !== undefined, reason);
+      const closers: (() => Promise<void>)[] = [];
+      const requests: string[] = [];
+      page.on("response", (response) => requests.push(response.url()));
+      try {
+        await probe.run({
+          page,
+          engine: browserName,
+          launch: (spec) => host.launch(page, spec),
+          http: async (files) => {
+            const oracle = await httpOracle(files);
+            closers.push(() => oracle.close());
+            return oracle;
+          },
+          udp: async () => {
+            const oracle = await udpOracle();
+            closers.push(() => oracle.close());
+            return oracle;
+          },
+          result: async (display, timeoutMs = 10_000) => {
+            await expect
+              .poll(
+                async () =>
+                  (await display.frame())
+                    .evaluate(() =>
+                      Boolean(
+                        (window as unknown as { portholeProbe?: { done?: boolean } }).portholeProbe
+                          ?.done,
+                      ),
+                    )
+                    .catch(() => false),
+                { timeout: timeoutMs },
+              )
+              .toBe(true);
+            return (await display.frame()).evaluate(
+              () => (window as unknown as { portholeProbe: Record<string, unknown> }).portholeProbe,
+            );
+          },
+          requestsTo: (origin) =>
+            requests.filter((url) => url.startsWith(`${origin}/`) || url === origin),
+          measured: (text) => info.annotations.push({ type: "measured", description: text }),
+        });
+      } finally {
+        await Promise.all(closers.map((close) => close()));
+      }
+    },
+  }));
+}
+
+/**
+ * Registers every probe as a test. Its tests are located in Porthole's own files; a host that
+ * wants to select them by its spec file registers `leakTests` itself instead.
+ */
 export function defineLeakSuite(
   test: AnyTest,
   host: ConformanceHost,
   options: LeakSuiteOptions = {},
 ): void {
   test.describe(`Porthole leak suite (${host.name})`, () => {
-    for (const probe of PROBES) {
-      test(`[${probe.id}] ${probe.title}`, async ({ page, browserName }) => {
-        const reason = options.skip?.[probe.id];
-        test.skip(reason !== undefined, reason);
-        const closers: (() => Promise<void>)[] = [];
-        const requests: string[] = [];
-        page.on("response", (response) => requests.push(response.url()));
-        try {
-          await probe.run({
-            page,
-            engine: browserName,
-            launch: (spec) => host.launch(page, spec),
-            http: async (files) => {
-              const oracle = await httpOracle(files);
-              closers.push(() => oracle.close());
-              return oracle;
-            },
-            udp: async () => {
-              const oracle = await udpOracle();
-              closers.push(() => oracle.close());
-              return oracle;
-            },
-            result: async (display, timeoutMs = 10_000) => {
-              await expect
-                .poll(
-                  async () =>
-                    (await display.frame())
-                      .evaluate(() =>
-                        Boolean(
-                          (window as unknown as { portholeProbe?: { done?: boolean } })
-                            .portholeProbe?.done,
-                        ),
-                      )
-                      .catch(() => false),
-                  { timeout: timeoutMs },
-                )
-                .toBe(true);
-              return (await display.frame()).evaluate(
-                () =>
-                  (window as unknown as { portholeProbe: Record<string, unknown> }).portholeProbe,
-              );
-            },
-            requestsTo: (origin) =>
-              requests.filter((url) => url.startsWith(`${origin}/`) || url === origin),
-            measured: (text) =>
-              test.info().annotations.push({ type: "measured", description: text }),
-          });
-        } finally {
-          await Promise.all(closers.map((close) => close()));
-        }
-      });
+    for (const each of leakTests(host, options)) {
+      test(each.title, ({ page, browserName }, info) => each.run({ page, browserName }, info));
     }
   });
 }

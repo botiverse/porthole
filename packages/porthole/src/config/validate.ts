@@ -1,5 +1,5 @@
 import { CAPABILITY_NAMES, isCapabilityName, type Gate } from "./capabilities.ts";
-import type { PortholeConfig } from "./schema.ts";
+import { URL_SANDBOX_EXTRAS, type PortholeConfig } from "./schema.ts";
 
 /**
  * Checks a config before anything is derived from it. Every string that ends up in a CSP, an
@@ -30,24 +30,30 @@ const HOST =
  * every subdomain) and an optional port, nothing else. Insecure schemes only for loopback names.
  */
 export function isOriginSource(value: unknown): value is string {
+  return originSourceProblem(value) === null;
+}
+
+/** Why `value` isn't an origin source Porthole accepts, in words to act on; null if it is. */
+export function originSourceProblem(value: unknown): string | null {
+  const shape = "is not an origin (scheme://host[:port], lowercase, no path)";
   if (typeof value !== "string" || value.length > 253 + 16) {
-    return false;
+    return `${JSON.stringify(value)} ${shape}`;
   }
   const match = /^(https|http|wss|ws):\/\/([^/:]+|\[::1\])(:(\d{1,5}))?$/u.exec(value);
   if (match === null) {
-    return false;
+    return `${JSON.stringify(value)} ${shape}`;
   }
   const [, scheme, host = "", , port] = match;
   if (port !== undefined && (Number(port) < 1 || Number(port) > 65_535)) {
-    return false;
+    return `${JSON.stringify(value)} has no valid port`;
   }
   if (host !== "[::1]" && !HOST.test(host)) {
-    return false;
+    return `${JSON.stringify(value)} ${shape}`;
   }
   if ((scheme === "http" || scheme === "ws") && !LOOPBACK.test(host.replace(/^\*\./u, "x."))) {
-    return false;
+    return `${JSON.stringify(value)} uses ${scheme} off loopback: ${scheme} is allowed only for localhost, *.localhost, 127.0.0.1 and [::1] (loopback development); use ${scheme === "http" ? "https" : "wss"}`;
   }
-  return true;
+  return null;
 }
 
 const fail = (path: string, message: string): never => {
@@ -78,11 +84,9 @@ function sources(value: unknown, path: string): void {
     return;
   }
   value.forEach((source, index) => {
-    if (!isOriginSource(source)) {
-      fail(
-        `${path}[${index}]`,
-        `${JSON.stringify(source)} is not an origin (scheme://host[:port], lowercase, no path)`,
-      );
+    const problem = originSourceProblem(source);
+    if (problem !== null) {
+      fail(`${path}[${index}]`, problem);
     }
   });
 }
@@ -125,6 +129,7 @@ export function validateConfig(input: unknown): PortholeConfig {
       "guide",
       "contentOrigins",
       "embedder",
+      "sandbox",
     ],
     "config",
   );
@@ -173,7 +178,14 @@ export function validateConfig(input: unknown): PortholeConfig {
   }
 
   const theme = object(config.theme, "config.theme");
-  only(theme, ["variables", "event"], "config.theme");
+  only(theme, ["variables", "event", "documents"], "config.theme");
+  if (
+    theme.documents !== undefined &&
+    theme.documents !== "declared" &&
+    theme.documents !== "always"
+  ) {
+    fail("config.theme.documents", 'must be "declared" or "always"');
+  }
   const variables = object(theme.variables, "config.theme.variables");
   for (const [name, value] of Object.entries(variables)) {
     const path = `config.theme.variables[${JSON.stringify(name)}]`;
@@ -212,9 +224,12 @@ export function validateConfig(input: unknown): PortholeConfig {
     "maxPromptChars",
     "maxErrorReports",
   ];
-  only(limits, limitNames, "config.limits");
+  only(limits, [...limitNames, "loadTimeoutMs"], "config.limits");
   for (const name of limitNames) {
     positive(limits[name], `config.limits.${name}`);
+  }
+  if (limits.loadTimeoutMs !== undefined) {
+    positive(limits.loadTimeoutMs, "config.limits.loadTimeoutMs", 600_000);
   }
   if ((limits.minHeightPx as number) > (limits.maxHeightPx as number)) {
     fail("config.limits.minHeightPx", "must not exceed maxHeightPx");
@@ -279,6 +294,25 @@ export function validateConfig(input: unknown): PortholeConfig {
       : embedder.frameSrc,
     "config.embedder.frameSrc",
   );
+
+  if (config.sandbox !== undefined) {
+    if (config.mode !== "url") {
+      fail("config.sandbox", "only url mode may add sandbox tokens");
+    }
+    if (!Array.isArray(config.sandbox)) {
+      fail("config.sandbox", "must be an array of sandbox tokens");
+    }
+    (config.sandbox as unknown[]).forEach((token, index) => {
+      if (!(URL_SANDBOX_EXTRAS as readonly unknown[]).includes(token)) {
+        fail(
+          `config.sandbox[${index}]`,
+          /top-navigation|same-origin/u.test(String(token))
+            ? `${JSON.stringify(token)} is never granted (P037)`
+            : `must be one of ${URL_SANDBOX_EXTRAS.join(", ")}`,
+        );
+      }
+    });
+  }
 
   return input as PortholeConfig;
 }

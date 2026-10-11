@@ -1,6 +1,10 @@
 import { test } from "@playwright/test";
-import { defineServedSuite } from "../../src/conformance/served.ts";
+import { servedTests } from "../../src/conformance/served.ts";
 import { servedHost } from "./harness.ts";
 
-/** The served-mode cases against Porthole's reference serving (`/server` and a minimal host). */
-defineServedSuite(test, servedHost);
+/** The served-mode cases against Porthole's reference serving, registered as a host would. */
+test.describe(`served modes (${servedHost.name})`, () => {
+  for (const each of servedTests(servedHost)) {
+    test(each.title, ({ page, browserName }, info) => each.run({ page, browserName }, info));
+  }
+});

@@ -592,7 +592,7 @@ navigates on load would loop).
 (`PORTHOLE_LEAK_WEAKEN=<name>`: `frame-guard`, `webrtc`, `attach-shadow`,
 `parser-entry-points`, `declarative-shadow`, `sync-guard`, `connect-src`, `self`,
 `sandbox`, `base-uri`, `style-split`, `embedder-csp`; later also `embedder-self`,
-`confirm-gate`, `host-gesture`, `shell-gesture`, `link-scheme`, `draft-inert`). Each names the exact text it
+`confirm-gate`, `host-gesture`, `shell-gesture`, `link-scheme`, `draft-inert`, `document-theme`). Each names the exact text it
 removes, and the server refuses to start if that text is gone, so a control can't
 silently weaken nothing. DESIGN.md records, per engine, which probes each control makes
 fail. Every probe that asserts "nothing left" also has a positive control (an allowed
@@ -678,3 +678,146 @@ differences, each measured (Firefox 155, Playwright 1.63):
 is weaker nowhere the suite can see.
 **Revisit when** an engine version changes any of these (the probes and controls will say
 which), or Firefox gains a synchronous hint path like WebKit's.
+
+## P036 · 2026-10-11 · A host's origin may have any scheme, still exact · Accepted
+
+**Decision.** The origins the shell takes messages from, and `/server`'s `hostOrigins`, are
+exact origins of any scheme (`scheme://host[:port]`, lowercase, no path): a desktop app's own
+registered scheme (`ferry://app`, `app://local`, `tauri://localhost`) works like `https://`.
+`"null"` is refused with a message saying why (an opaque origin isn't one origin; `file:` pages
+and unregistered custom schemes have one), as are wildcards, paths and uppercase. A custom-scheme
+host is never the same site as web content, so the same-site check doesn't apply to it. Errors on
+origins say what to do: http and ws are allowed on loopback names only ("use https"), and a
+same-site content origin is refused with the host and the rule named. Item 0 (and 10) of 0.1.1.
+**Why.** The first host's packaged desktop app serves its UI from `ferry://app`, and nothing
+mounted there; the checks were written for the web. The check that matters (the sender is the
+frame's parent, from exactly this origin) is unchanged.
+**Rejected.** Accepting `"null"` (any opaque page would pass the origin check).
+**Revisit when** a host must run from an opaque origin (then it needs another channel to prove
+it is the parent).
+
+## P037 · 2026-10-11 · A url-mode frame may opt into popups, modals and downloads · Accepted
+
+**Decision.** `presets.url({ sandbox: [...] })` adds tokens from a documented set
+(`URL_SANDBOX_EXTRAS`: `allow-popups`, `allow-popups-to-escape-sandbox`, `allow-modals`,
+`allow-downloads`) to url mode's baseline (`allow-scripts allow-same-origin allow-forms`). Nothing
+else, never `allow-top-navigation*` (refused by name), and only in url mode. The safe default
+stays: no extras. Item 7 of 0.1.1.
+**Threat it re-opens.** The framed app (the person's own running app, on its own origin) may
+open windows (which, with `-to-escape-sandbox`, are unsandboxed top-level pages of its origin),
+show modal dialogs over the host, and start downloads. Bounded by: its origin is a separate site
+from the host's (`checkFrameLocation`, P020), so a window it opens can't reach the host; it still
+can't navigate the host's page; it is the host's policy to opt in (PRINCIPLE 8), for an app the
+person runs. The React url-mode test shows the default refuses a popup and top navigation, and
+the opt-in allows the popup and still refuses top navigation, on all three engines.
+**Rejected.** A free-form token list; extras for agent-made content (inline, artifact, views).
+**Revisit when** a host needs another token (add it to the set, with its test).
+
+## P038 · 2026-10-11 · The embedding page's CSP restricts frames only (no child-src) · Accepted
+
+**Decision.** `embedderCsp` is `frame-src …` alone; it no longer repeats the sources in
+`child-src`. Item 4 of 0.1.1.
+**Why.** Measured on Chromium, WebKit and Firefox: under 0.1.0's `child-src 'none'` the host's
+own workers (blob and file) were blocked, since `worker-src` falls back to `child-src`. All three
+engines read frames from `frame-src` (the item-5 probes pass without `child-src`), so the repeat
+protected nothing and broke hosts. With no `child-src` (and no `default-src`), Porthole's policy
+says nothing about workers at all, whatever the host's own policy says.
+**Rejected.** Emitting `worker-src 'self' blob:` (it would restrict hosts that load workers from
+elsewhere).
+**Revisit when** an engine Porthole supports reads frames only from `child-src`.
+
+## P039 · 2026-10-11 · A whole document takes the person's scheme only when it declares it · Accepted
+
+**Decision.** An artifact page (or any whole document the shell renders) shows as its author
+styled it, in light, unless it declares it supports both schemes
+(`<meta name="color-scheme" content="light dark">`); then it takes the person's scheme
+(`color-scheme`, `data-theme`) like a widget does. The theme variables are set either way (they
+change nothing a page doesn't use). A host may set `theme.documents: "always"`. The manual says
+so for artifact pages. Fragments (widgets) are unchanged. Item 12 of 0.1.1.
+**Why.** A shown HTML file is the author's own page: forcing a dark `color-scheme` on a page
+written for light turns its default text and canvas dark under its own light colors, and the
+first host had to force light. The `11.document-theme` probe and its `document-theme` control
+show both cases on every engine.
+**Rejected.** Theming every document; never theming documents (pages that support dark should
+follow the person).
+**Revisit when** a host needs per-page control beyond the meta tag.
+
+## P040 · 2026-10-11 · A display reports how its first document went · Accepted
+
+**Decision.** Every display emits `outcome` once per run: `loaded`, `blocked` (with a reason:
+`framing`, `cookies`, `session`, `upstream`, `not-found`, `error`, and the HTTP status where
+there is one), or `timeout` (`limits.loadTimeoutMs`, 15 s by default). A shell or view is loaded
+when its handshake completes. A url-mode frame, which has no handshake, is ready (`initialized`)
+on its first load and fills its container (at least `minHeightPx`), since an app reports no size.
+Pages of Porthole's `/server` tell their host how it went with an own-prefixed notification,
+`porthole/notifications/frame-status`, posted to the host origins only: every status page says
+`blocked` and why; a framed url-mode app is entered through a small page (not a redirect) that
+says `entering`, checks the session cookie its own answer set was kept (`/__porthole/session`),
+then goes on to the app, or says `blocked: cookies`. `issue` marks its locations `reports: true`,
+so a load from which nothing spoke is a page that never ran (`blocked: framing`). A host's own
+gateway may send the same notification. Items 1 and 13 of 0.1.1.
+**Why.** A host needs to show its own fallback ("Open in a new tab") without pages of its own,
+and a cross-origin frame can't be looked into: the only honest signals are the frame's loads,
+its words, and time. Measured on all three engines (`leak/served/outcome.spec.ts`): a framed app
+loads on Chromium and Firefox and is `blocked: cookies` on WebKit (P025); a host the server
+doesn't allow gets `blocked: framing`; a used ticket `blocked: session`; a hanging load a
+timeout; a served shell `loaded`, and `blocked: framing` from a foreign host.
+**Limits.** Without `reports`, a frame the browser refused (its own policy, or the embedding
+page's) still fires `load`, so it reads as loaded: only Porthole's pages (or a gateway that
+speaks the notification) can say otherwise. An app's own `frame-ancestors` after entry likewise.
+**Rejected.** Injecting a script into an app's pages (rewrites someone else's HTML, breaks under
+its CSP); guessing from timing.
+**Revisit when** browsers expose why a cross-origin frame failed, or MCP Apps defines a status
+message (then speak it).
+
+## P041 · 2026-10-11 · Porthole declares no test-only dependency; hosts register the conformance tests · Accepted
+
+**Decision.** The package declares no dependencies, and React only as an optional peer.
+`@playwright/test` and `@modelcontextprotocol/ext-apps` are no longer peers (optional or not):
+`/conformance` runs on the host's own Playwright (and, for the App SDK probes, its own SDK,
+skipped if absent). The tests are exported as entries (`leakTests`, `servedTests`) that a host
+registers with its own `test()` in its own spec file, so they are located there and filtered by
+that file or a probe id (`--grep "\[1\.connect\]"`); `defineLeakSuite`/`defineServedSuite`
+remain for hosts that don't filter. Items 5 and 6 of 0.1.1.
+**Why.** Some installs added the optional peers anyway (the first host's server image got
+Playwright). A conformance runner is a host's test tool, not part of what it ships; and tests
+registered inside the library were located in `node_modules`, so a host couldn't select them.
+`test/package.test.ts` and `test/conformance-listing.test.ts` keep both true.
+**Rejected.** A separate `@botiverse/porthole-conformance` package (a second package to publish
+and version in lockstep, for one import); a CLI wrapper (the host's Playwright config already
+runs its spec).
+**Revisit when** a host's install layout can't resolve its own Playwright from the package (no
+hoisting, Plug'n'Play): then split the package.
+
+## P042 · 2026-10-11 · Confirm says accepted, declined or redirected, and may run the effect in its click · Accepted
+
+**Decision.** A host's `confirm(request, proceed)` resolves `true`/`"accepted"`,
+`false`/`"declined"`, or `"redirected"` (the person took it elsewhere, "Edit first": not sent,
+refusal `redirected`, neither counted nor resetting). Only declines **in a row** mute a display;
+an accepted call resets the count. `proceed()` runs the call's effect at once, inside the
+caller's own gesture, and counts as accepted; the default dialog's yes calls it in its click, so a
+handler that opens a window does so within the person's click. Items 8 and 11 of 0.1.1.
+**Why.** The first host's "Edit first" counted as a decline and three of any declines muted a
+widget, against its own original rule. An effect that needs a gesture (a window) can't wait for
+a promise to settle on engines that end the gesture on the next task. Measured in Playwright on
+all three engines: a yes given 1.5 s later, without `proceed`, still opened a window there, so
+the tests show `proceed` works rather than that it is needed; real browsers' popup blockers are
+stricter than headless ones.
+**Rejected.** Running the effect in the dialog itself (the effect is the host's).
+**Revisit when** a host needs more answers than these three.
+
+## P043 · 2026-10-11 · Theme reads wait for the host's restyle; heights follow a renamed display; defaults can be dropped · Accepted
+
+**Decision.** `setTheme` reads the host's values two animation frames after the flip (a host
+that restyles its page on its next frame has by then); `refreshTheme()` (React: a new `themeKey`)
+reads them again without a flip. A display renamed while it runs keeps its remembered height
+under its new id, and `PortholeFrame`'s `aliases` find it under ids it had for a frame that
+mounts anew. A host drops default theme variables with `null` in a preset's theme. Items 2, 3
+and 9 of 0.1.1.
+**Why.** The first host's design system swaps tokens a frame after its scheme flips, so a frame
+read stale colors; its streamed widgets changed id and jumped when they mounted again; its
+palette needs none of Porthole's chart colors. Each has a React test in a real browser (an async
+restyle, a rename then a remount, an alias) and the agreement test covers a theme without the
+chart colors and the accent.
+**Rejected.** A fixed delay in milliseconds (frames are what a restyle waits on).
+**Revisit when** a host restyles later than its next frame without being able to signal it.

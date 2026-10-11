@@ -11,6 +11,7 @@ import type {
   CapabilityHandler,
   CapabilityHandlers,
   Confirm,
+  ConfirmAnswer,
   ConfirmRequest,
   HostFunctionBridge,
   Refusal,
@@ -204,17 +205,28 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
           return refuse<Result>(capability, "no-user-activation");
         }
       }
+      // The effect, run once: when the person's "yes" calls `proceed` (inside its own click, so an
+      // effect that needs a gesture gets one), or after `confirm` resolves accepted.
+      let effect: Promise<CallOutcome<Result>> | null = null;
+      const run = (): Promise<CallOutcome<Result>> => (effect ??= perform(capability, args));
       if (confirms) {
         if (options.confirm === undefined) {
           return refuse<Result>(capability, "no-confirm");
         }
-        let accepted = false;
+        let answer: ConfirmAnswer = false;
         try {
-          accepted = await options.confirm({ capability, args, display } as ConfirmRequest);
+          answer = await options.confirm(
+            { capability, args, display } as ConfirmRequest,
+            () => void run(),
+          );
         } catch {
-          accepted = false;
+          answer = effect === null ? false : "accepted";
         }
-        if (!accepted) {
+        if (effect === null && answer !== true && answer !== "accepted") {
+          if (answer === "redirected") {
+            return refuse<Result>(capability, "redirected");
+          }
+          // Declines in a row mute the display; a yes starts the count again.
           declines += 1;
           if (declines >= config.limits.declinesBeforeMute && !muted) {
             muted = true;
@@ -222,8 +234,18 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
           }
           return refuse<Result>(capability, "declined");
         }
+        declines = 0;
       }
+      return run();
+    },
+  };
 
+  async function perform<N extends CapabilityName>(
+    capability: N,
+    args: CapabilityArgs[N],
+  ): Promise<CallOutcome<CapabilityResults[N]>> {
+    type Result = CapabilityResults[N];
+    {
       if (capabilitySpec(capability).served === "event") {
         if (capability === "resize") {
           const size = args as CapabilityArgs["resize"];
@@ -251,6 +273,6 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
           error instanceof Error ? error.message : String(error),
         );
       }
-    },
-  };
+    }
+  }
 }

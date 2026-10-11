@@ -445,15 +445,44 @@ describe("url mode", () => {
     return { calls, porthole: server({ upstream }) };
   }
 
-  it("trades the ticket for a cookie and lands on the app's own path", async () => {
+  it("trades the ticket for a cookie: a tab lands on the app's own path", async () => {
     const { porthole } = withUpstream();
     const location = await porthole.issue(app, { viewer: "dev" });
     expect(location.url).toMatch(/\/__porthole\/enter\?ticket=/u);
-    const entered = await porthole.handle(get(location.url));
+    expect(location.reports).toBe(true);
+    const entered = await porthole.handle(get(location.url, { "sec-fetch-dest": "document" }));
     expect(entered?.status).toBe(303);
     expect(entered?.headers.get("location")).toBe("/dash?x=1");
-    expect(entered?.headers.get("set-cookie")).toContain("Partitioned");
-    expect((await porthole.handle(get(location.url)))?.status).toBe(403);
+    expect(entered?.headers.get("set-cookie")).toContain("SameSite=Lax");
+    const again = await porthole.handle(get(location.url));
+    expect(again?.status).toBe(403);
+    expect(await again?.text()).toContain('data-porthole-reason="session"');
+  });
+
+  it("enters a framed app through a page that checks the cookie was kept, and says so", async () => {
+    const { porthole } = withUpstream();
+    const location = await porthole.issue(app, { viewer: "dev" });
+    const entered = (await porthole.handle(get(location.url))) as Response;
+    expect(entered.status).toBe(200);
+    expect(entered.headers.get("set-cookie")).toContain("Partitioned");
+    expect(entered.headers.get("content-security-policy")).toBe(
+      `default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors ${HOST}`,
+    );
+    const html = await entered.text();
+    expect(html).toContain('data-porthole-target="/dash?x=1"');
+    expect(html).toContain(`data-porthole-hosts="[&#34;${HOST}&#34;]"`);
+    expect(html).toContain('<script src="/__porthole/enter.js"></script>');
+    // The session check the page makes: the kept cookie opens the app; none doesn't.
+    const cookie = cookieOf(entered);
+    expect(
+      (await porthole.handle(get(`${location.origin}/__porthole/session`, { cookie })))?.status,
+    ).toBe(204);
+    expect((await porthole.handle(get(`${location.origin}/__porthole/session`)))?.status).toBe(401);
+    const script = (await porthole.handle(
+      get(`${location.origin}/__porthole/enter.js`),
+    )) as Response;
+    expect(script.headers.get("content-type")).toContain("javascript");
+    expect(await script.text()).toContain("porthole/notifications/frame-status");
   });
 
   it("lets the cookie through to the upstream, without Porthole's cookies", async () => {
@@ -473,11 +502,12 @@ describe("url mode", () => {
     expect((await porthole.access(get(`${location.origin}/`, { cookie })))?.viewer).toBe("dev");
   });
 
-  it("gives nothing of the app without the cookie", async () => {
+  it("gives nothing of the app without the cookie, and tells the host why", async () => {
     const { porthole, calls } = withUpstream();
     const location = await porthole.issue(app, { viewer: "dev" });
     const response = await porthole.handle(get(`${location.origin}/`));
     expect(response?.status).toBe(401);
+    expect(await response?.text()).toContain('data-porthole-reason="session"');
     expect(calls).toHaveLength(0);
     expect(await porthole.access(get(`${location.origin}/`))).toBeNull();
   });

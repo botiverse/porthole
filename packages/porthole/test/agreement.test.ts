@@ -48,6 +48,15 @@ const CASES: Record<string, PortholeConfig> = {
     capabilities: { sendPrompt: {} },
     theme: { event: "app:theme" },
   }),
+  "inline widget, chart colors and the accent dropped": presets.inlineWidget({
+    theme: {
+      variables: Object.fromEntries(
+        Object.keys(presets.inlineWidget().theme.variables)
+          .filter((name) => name.startsWith("--color-chart-") || name.startsWith("--color-accent"))
+          .map((name) => [name, null]),
+      ),
+    },
+  }),
   "artifact page": presets.artifact(),
   "artifact page, served on its own domain": presets.artifact({
     isolation: "domain",

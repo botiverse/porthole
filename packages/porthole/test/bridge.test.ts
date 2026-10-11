@@ -1,13 +1,18 @@
 import { describe, expect, test } from "vitest";
 import { createBridge, linkTarget, type BridgeEvent } from "../src/bridge/bridge.ts";
-import type { CapabilityHandlers, ConfirmRequest } from "../src/bridge/types.ts";
+import type {
+  CapabilityHandlers,
+  ConfirmAnswer,
+  ConfirmRequest,
+  Proceed,
+} from "../src/bridge/types.ts";
 import { presets, type PresetOptions } from "../src/index.ts";
 
 /** A bridge over a preset, recording its events, the handler calls and the confirmations asked. */
 function setup(
   options: PresetOptions,
   extra: {
-    confirm?: (request: ConfirmRequest) => Promise<boolean>;
+    confirm?: (request: ConfirmRequest, proceed: Proceed) => Promise<ConfirmAnswer>;
     activation?: boolean;
     handlers?: CapabilityHandlers;
   } = {},
@@ -36,9 +41,9 @@ function setup(
     ...(extra.confirm === undefined
       ? {}
       : {
-          confirm: (request: ConfirmRequest) => {
+          confirm: (request: ConfirmRequest, proceed: Proceed) => {
             asked.push(request);
-            return extra.confirm?.(request) ?? Promise.resolve(false);
+            return extra.confirm?.(request, proceed) ?? Promise.resolve(false);
           },
         }),
     userActivation: () => extra.activation,
@@ -164,6 +169,72 @@ describe("the bridge's order: declared → valid → muted → rate → gesture 
     expect(events.filter((event) => event.type === "muted")).toHaveLength(1);
     expect(await bridge.call("sendPrompt", { text: "3" })).toMatchObject({ refusal: "muted" });
     expect(asked).toHaveLength(2);
+  });
+
+  test("only declines in a row mute: a yes starts the count again", async () => {
+    const answers = [false, true, false, false, false];
+    const { bridge, events } = setup(
+      { capabilities: { sendPrompt: {} }, limits: { declinesBeforeMute: 3 } },
+      { confirm: () => Promise.resolve(answers.shift() ?? false), activation: true },
+    );
+    for (let index = 0; index < 4; index += 1) {
+      await bridge.call("sendPrompt", { text: `${index}` });
+    }
+    expect(
+      events.some((event) => event.type === "muted"),
+      "muted after 1 + 2 declines",
+    ).toBe(false);
+    await bridge.call("sendPrompt", { text: "4" });
+    expect(events.filter((event) => event.type === "muted")).toHaveLength(1);
+  });
+
+  test("a redirected answer (edit first) sends nothing and neither counts nor resets", async () => {
+    const answers: ConfirmAnswer[] = ["declined", "redirected", "redirected", "declined"];
+    const { bridge, events, handled } = setup(
+      { capabilities: { sendPrompt: {} }, limits: { declinesBeforeMute: 2 } },
+      { confirm: () => Promise.resolve(answers.shift() ?? false), activation: true },
+    );
+    expect(await bridge.call("sendPrompt", { text: "a" })).toMatchObject({ refusal: "declined" });
+    expect(await bridge.call("sendPrompt", { text: "b" })).toMatchObject({ refusal: "redirected" });
+    expect(await bridge.call("sendPrompt", { text: "c" })).toMatchObject({ refusal: "redirected" });
+    expect(events.some((event) => event.type === "muted")).toBe(false);
+    await bridge.call("sendPrompt", { text: "d" });
+    expect(
+      events.some((event) => event.type === "muted"),
+      "two declines, not in between yeses",
+    ).toBe(true);
+    expect(handled).toEqual([]);
+  });
+
+  test("proceed runs the effect inside the confirm call itself, once, and counts as yes", async () => {
+    let inside = false;
+    let ranInside = false;
+    let runs = 0;
+    const { bridge } = setup(
+      { capabilities: { openLink: {} } },
+      {
+        activation: true,
+        handlers: {
+          openLink: () => {
+            runs += 1;
+            ranInside = inside;
+            return true;
+          },
+        },
+        confirm: (_request, proceed) => {
+          inside = true;
+          proceed();
+          inside = false;
+          // The answer after proceed doesn't undo it.
+          return Promise.resolve(false);
+        },
+      },
+    );
+    expect(await bridge.call("openLink", { url: "https://example.com" })).toEqual({
+      ok: true,
+      value: true,
+    });
+    expect({ runs, ranInside }).toEqual({ runs: 1, ranInside: true });
   });
 
   test("a rate limit refuses calls past it within a minute, and frees up after", async () => {

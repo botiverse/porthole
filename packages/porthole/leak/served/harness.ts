@@ -9,7 +9,7 @@ import { stripTypeScriptTypes } from "node:module";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { Readable } from "node:stream";
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { compile, embedderCsp, presets, type PortholeConfig } from "../../src/index.ts";
 import type { ServedConformanceHost, ServedDisplay } from "../../src/conformance/served.ts";
 import { checkFrameLocation } from "../../src/isolation/served.ts";
@@ -157,10 +157,39 @@ async function sourceOf(pathname: string): Promise<Response | null> {
   }
 }
 
+/**
+ * A host page on Porthole's own `createHost`, mounting served instances at the locations a test
+ * gives it and recording their outcomes (P040). Served on the host origin and the foreign one.
+ */
+const PORTHOLE_HOST_PAGE = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Porthole host</title></head>
+<body><main id="displays"></main><script type="module">
+  import { createHost } from "/src/index.ts";
+  window.portholeHost = {
+    records: [],
+    mount(config, location, instance) {
+      const index = this.records.length;
+      const record = { outcomes: [], initialized: false, errors: [] };
+      this.records.push(record);
+      const box = document.createElement("section");
+      box.style.cssText = "width: 600px; height: 300px";
+      document.getElementById("displays").append(box);
+      const host = createHost(config, { locator: { locate: async () => location } });
+      const display = host.mount(box, { displayId: "d" + index, title: "Probe", scheme: "light", instance });
+      display.on("outcome", (outcome) => record.outcomes.push(outcome));
+      display.on("initialized", () => (record.initialized = true));
+      display.on("error", ({ message }) => record.errors.push(message));
+      return index;
+    },
+  };
+</script></body></html>`;
+
 /** A host page for MCP Apps views, on Porthole's own adapter (`leak/mcp/host.ts`). */
 const MCP_HOST_PAGE = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Porthole MCP Apps host</title></head>
 <body><main id="displays"></main><script type="module" src="/leak/mcp/host.ts"></script></body></html>`;
+
+let hostCspOf = (): string => "frame-src 'none'";
 
 async function start(): Promise<Harness> {
   const hits = new Map<string, number>();
@@ -189,6 +218,21 @@ async function start(): Promise<Harness> {
     if (canary?.[1] !== undefined) {
       hits.set(canary[1], (hits.get(canary[1]) ?? 0) + 1);
       response.writeHead(204).end();
+      return;
+    }
+    if (url.pathname === "/porthole-host") {
+      response.writeHead(200, {
+        "content-type": "text/html",
+        "content-security-policy": hostCspOf(),
+      });
+      response.end(PORTHOLE_HOST_PAGE);
+      return;
+    }
+    if (url.pathname.startsWith("/src/")) {
+      void sourceOf(url.pathname).then(async (source) => {
+        response.writeHead(source === null ? 404 : 200, { "content-type": "text/javascript" });
+        response.end(source === null ? "" : await source.text());
+      });
       return;
     }
     const target = url.searchParams.get("frame") ?? "";
@@ -230,7 +274,12 @@ async function start(): Promise<Harness> {
     upstream: proxyTo({ target: () => `http://127.0.0.1:${appPort}` }),
   });
   const hostCsp = embedderCsp(Object.values(configs));
+  hostCspOf = () => hostCsp;
   handle = async (request) => {
+    // A content address that never answers: a load that never settles.
+    if (new URL(request.url).pathname === "/__hang") {
+      return new Promise<Response>(() => {});
+    }
     const served = await porthole.handle(request);
     if (served !== null) {
       return served;
@@ -238,6 +287,9 @@ async function start(): Promise<Harness> {
     const pathname = new URL(request.url).pathname;
     if (pathname === "/host") {
       return html(HOST_PAGE, { "content-security-policy": hostCsp });
+    }
+    if (pathname === "/porthole-host") {
+      return html(PORTHOLE_HOST_PAGE, { "content-security-policy": hostCsp });
     }
     if (pathname === "/mcp-host") {
       return html(MCP_HOST_PAGE, { "content-security-policy": hostCsp });
@@ -309,9 +361,22 @@ export async function showServed(
       if (frame === null || frame === undefined) {
         throw new Error("the display has no frame");
       }
-      await frame.waitForURL(
-        (url) => url.origin === location.origin && !url.pathname.startsWith("/__porthole/enter"),
-      );
+      await frame.waitForURL((url) => url.origin === location.origin);
+      // A framed app is entered through a page that goes on to the app or, where the browser
+      // keeps no cookie in a frame (WebKit, P025), stays and says so (P040): wait for either.
+      await expect
+        .poll(
+          () =>
+            frame
+              .evaluate(
+                () =>
+                  document.querySelector("[data-porthole-enter]") === null ||
+                  /new tab/u.test(document.querySelector("h1")?.textContent ?? ""),
+              )
+              .catch(() => false),
+          { timeout: 10_000 },
+        )
+        .toBe(true);
       await frame.waitForLoadState("load");
       return frame;
     },

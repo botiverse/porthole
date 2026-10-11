@@ -11,7 +11,8 @@
  * Each case attempts one escape or access channel and asserts, with an out-of-band oracle where
  * one exists (a canary URL the host counts requests to), that nothing got through.
  */
-import { expect, type Frame, type Page, type TestType } from "@playwright/test";
+import { expect, type Frame, type Page, type TestInfo, type TestType } from "@playwright/test";
+import type { ConformanceTest } from "./probes.ts";
 import type { EgressConfig } from "../config/schema.ts";
 import type { FrameLocation, InstanceRef } from "../isolation/types.ts";
 import { MCP_APPS_METHODS } from "../protocol/mcp-apps.ts";
@@ -137,22 +138,49 @@ async function plantHostSecrets(page: Page): Promise<void> {
 }
 
 /** Registers every served-mode case as a test. */
+/**
+ * Registers every served-mode case as a test. A host that wants to select them by its own spec
+ * file registers `servedTests` itself (see `ConformanceTest`).
+ */
 export function defineServedSuite(
   test: TestType<object, object>,
   host: ServedConformanceHost,
   options: ServedSuiteOptions = {},
 ): void {
   const typed = test as unknown as TestType<Fixtures, object>;
+  typed.describe(`served modes (${host.name})`, () => {
+    for (const each of servedTests(host, options)) {
+      // Playwright reads the fixtures a test uses from its parameter's destructuring.
+      typed(each.title, ({ page, browserName }, info) => each.run({ page, browserName }, info));
+    }
+  });
+}
+
+/** Every served-mode case as a test entry (see `ConformanceTest`). */
+export function servedTests(
+  host: ServedConformanceHost,
+  options: ServedSuiteOptions = {},
+): ConformanceTest[] {
+  const tests: ConformanceTest[] = [];
+  let info: TestInfo | null = null;
+  // The case being run's own TestInfo (for an expected failure measured on one engine).
+  const typed = {
+    fail: (condition: boolean, reason: string) => info?.fail(condition, reason),
+  };
   const define = (id: string, title: string, body: (fixtures: Fixtures) => Promise<void>) => {
-    const reason = options.skip?.[id];
-    // Playwright reads the fixtures a test uses from its parameter's destructuring.
-    typed(`${id}: ${title}`, async ({ page, browserName }) => {
-      typed.skip(reason !== undefined, reason);
-      await body({ page, browserName });
+    tests.push({
+      id,
+      title: `${id}: ${title}`,
+      async run({ page, browserName }, testInfo) {
+        const reason = options.skip?.[id];
+        testInfo.skip(reason !== undefined, reason);
+        info = testInfo;
+        await body({ page, browserName });
+      },
     });
   };
 
-  typed.describe(`served modes (${host.name})`, () => {
+  {
     const modes = [
       ["domain", (scope: string) => host.shell(scope)],
       ["url", (scope: string) => host.app(scope)],
@@ -468,5 +496,6 @@ export function defineServedSuite(
           .toBe("ready");
       },
     );
-  });
+  }
+  return tests;
 }

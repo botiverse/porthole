@@ -16,5 +16,10 @@ export async function locateServed(
 ): Promise<FrameSource> {
   const location = await locator.locate(instance, signal);
   checkFrameLocation(location, config.contentOrigins, hostOrigin);
-  return { kind: "url", url: new URL(location.url).href, origin: location.origin };
+  return {
+    kind: "url",
+    url: new URL(location.url).href,
+    origin: location.origin,
+    ...(location.reports === true ? { reports: true } : {}),
+  };
 }

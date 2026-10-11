@@ -1,4 +1,5 @@
 import { expect, test, type FrameLocator, type Page } from "@playwright/test";
+import { embedderCsp, presets } from "../src/index.ts";
 import type { AppState, FrameSpec } from "./react/app.tsx";
 
 /**
@@ -12,11 +13,47 @@ interface App {
   render(state: AppState): void;
   log(): { display: string; event: string; detail?: unknown }[];
   answerCustom(accepted: boolean): void;
+  restyle(value: string): void;
+  restyleLater(value: string): void;
 }
+
+/** Samples the wrapper of `id`'s height every frame for 60 frames, from its first. */
+async function sampleHeights(page: Page, id: string): Promise<void> {
+  await page.evaluate((each) => {
+    const seen: number[] = [];
+    (window as unknown as { seen: number[] }).seen = seen;
+    const sample = () => {
+      const element = document.querySelector(`[data-porthole-display="${each}"]`);
+      if (element !== null) {
+        seen.push(element.getBoundingClientRect().height);
+      }
+      if (seen.length < 60) {
+        requestAnimationFrame(sample);
+      }
+    };
+    requestAnimationFrame(sample);
+  }, id);
+}
+
+async function lowestSampled(page: Page): Promise<number> {
+  await page.waitForFunction(() => (window as unknown as { seen: number[] }).seen.length >= 60);
+  return Math.min(...(await page.evaluate(() => (window as unknown as { seen: number[] }).seen)));
+}
+
+const textVariable = (inside: FrameLocator) =>
+  inside
+    .locator("html")
+    .evaluate((element) =>
+      getComputedStyle(element).getPropertyValue("--color-text-primary").trim(),
+    );
 
 async function open(page: Page, state: AppState): Promise<void> {
   if (!page.url().includes("/leak/react/")) {
-    await page.goto("/leak/react/");
+    // The page frames its url-mode app on this server under another name (another site).
+    const port = new URL(test.info().project.use.baseURL ?? "http://127.0.0.1:8797").port;
+    await page.goto(
+      `/leak/react/?csp=${encodeURIComponent(embedderCsp([presets.url({ contentOrigins: [`http://localhost:${port}`] })]))}`,
+    );
     await page.waitForFunction(() => "app" in window);
   }
   await page.evaluate((next) => (window as unknown as { app: App }).app.render(next), state);
@@ -330,4 +367,153 @@ test("a whole page shows through the artifact config", async ({ page }) => {
     ],
   });
   await expect(frameOf(page, "a").locator("h1")).toHaveText("Report");
+});
+
+test("a url-mode frame shows without a handshake, and says it loaded", async ({ page }) => {
+  await open(page, { provider: "default", frames: [frame({ displayId: "u", config: "url" })] });
+  await expect(frameOf(page, "u").locator("#app")).toHaveText("A running app.");
+  await expect(wrapper(page, "u").locator("[data-porthole-ready]")).toHaveAttribute(
+    "data-porthole-ready",
+    "true",
+  );
+  // It fills the box the host gave it (an app reports no size).
+  expect(
+    Math.round(
+      (await page.locator('[data-porthole-display="u"] iframe').boundingBox())?.height ?? 0,
+    ),
+  ).toBe(400);
+  await expect
+    .poll(() => events(page, "u", "outcome"))
+    .toEqual([{ display: "u", event: "outcome", detail: { state: "loaded" } }]);
+});
+
+test("url mode's sandbox: popups only when the host opts in; never top navigation", async ({
+  page,
+}) => {
+  const popups: string[] = [];
+  page.on("popup", (popup) => popups.push(popup.url()));
+  await open(page, { provider: "default", frames: [frame({ displayId: "u1", config: "url" })] });
+  const before = page.url();
+  const closed = frameOf(page, "u1");
+  await closed.locator("#popup").click();
+  await expect(closed.locator("body")).toHaveAttribute("data-popup", "false");
+  await closed.locator("#top").click();
+  await expect(closed.locator("body")).toHaveAttribute("data-top", "refused");
+  await open(page, {
+    provider: "default",
+    frames: [
+      frame({ displayId: "u1", config: "url" }),
+      frame({ displayId: "u2", config: "urlPopups" }),
+    ],
+  });
+  const open2 = frameOf(page, "u2");
+  await expect(open2.locator("#app")).toHaveText("A running app.");
+  const opening = page.waitForEvent("popup");
+  await open2.locator("#popup").click();
+  await opening;
+  await open2.locator("#top").click();
+  await expect(open2.locator("body")).toHaveAttribute("data-top", "refused");
+  expect(page.url()).toBe(before);
+  expect(popups).toHaveLength(1);
+});
+
+test("heights follow a display renamed while it runs, and other ids it had", async ({ page }) => {
+  const tall = '<div style="height: 300px">tall</div>';
+  await open(page, {
+    provider: "default",
+    frames: [frame({ key: "seg", displayId: "call-9", content: tall })],
+  });
+  await expect
+    .poll(async () => Math.round((await wrapper(page, "call-9").boundingBox())?.height ?? 0))
+    .toBe(300);
+  await open(page, {
+    provider: "default",
+    frames: [frame({ key: "seg", displayId: "dsp-9", content: tall })],
+  });
+  await expect(wrapper(page, "dsp-9")).toBeVisible();
+  // Mounted again under its new id (another key): it starts at its height.
+  await open(page, { provider: "default", frames: [] });
+  await sampleHeights(page, "dsp-9");
+  await open(page, {
+    provider: "default",
+    frames: [frame({ key: "final", displayId: "dsp-9", content: tall })],
+  });
+  expect(await lowestSampled(page)).toBeGreaterThanOrEqual(299);
+  // A host that knows the old id passes it: the height is found under it.
+  await open(page, { provider: "default", frames: [] });
+  await sampleHeights(page, "dsp-10");
+  await open(page, {
+    provider: "default",
+    frames: [frame({ displayId: "dsp-10", aliases: ["call-9"], content: tall })],
+  });
+  expect(await lowestSampled(page)).toBeGreaterThanOrEqual(299);
+});
+
+test("a theme flip reads the host's values after a host that restyles on its next frame has", async ({
+  page,
+}) => {
+  await open(page, { provider: "default", frames: [] });
+  await page.evaluate(() => (window as unknown as { app: App }).app.restyle("rgb(10, 20, 30)"));
+  const content = "<p>t</p>";
+  await open(page, {
+    provider: "default",
+    frames: [frame({ displayId: "th", content, scheme: "light" })],
+  });
+  const inside = frameOf(page, "th");
+  await expect.poll(() => textVariable(inside)).toBe("rgb(10, 20, 30)");
+  // The flip and the host's restyle on its next frame, as a host's theme provider does it.
+  await page.evaluate(
+    ([state]) => {
+      const app = (window as unknown as { app: App }).app;
+      app.render(state);
+      app.restyleLater("rgb(200, 210, 220)");
+    },
+    [
+      { provider: "default", frames: [frame({ displayId: "th", content, scheme: "dark" })] },
+    ] as const,
+  );
+  await expect.poll(() => textVariable(inside)).toBe("rgb(200, 210, 220)");
+  await expect(inside.locator("html")).toHaveAttribute("data-theme", "dark");
+  // Values that change without a flip: a new themeKey reads them again.
+  await page.evaluate(() => (window as unknown as { app: App }).app.restyle("rgb(1, 2, 3)"));
+  await open(page, {
+    provider: "default",
+    frames: [frame({ displayId: "th", content, scheme: "dark", themeKey: 1 })],
+  });
+  await expect.poll(() => textVariable(inside)).toBe("rgb(1, 2, 3)");
+});
+
+test("the default dialog's yes runs the effect inside its own click: a window opens", async ({
+  page,
+  browserName,
+}) => {
+  const target = `${new URL(page.url() === "about:blank" ? "http://127.0.0.1:8797" : page.url()).origin}/leak/host/app.html`;
+  const content = `<a id="l" href="${target}">open</a>`;
+  await open(page, {
+    provider: "default",
+    frames: [frame({ displayId: "o", config: "prompt", content })],
+  });
+  await frameOf(page, "o").locator("#l").click();
+  const dialog = page.locator("dialog[data-porthole-confirm=openLink]");
+  await expect(dialog.locator("[data-porthole-accept]")).toHaveAttribute("data-armed", "true");
+  const opening = page.waitForEvent("popup");
+  await dialog.locator("[data-porthole-accept]").click();
+  await opening;
+  await expect
+    .poll(() => events(page, "o", "openLink"))
+    .toEqual([{ display: "o", event: "openLink", detail: { url: target, opened: true } }]);
+  // Measured: a yes that comes later, out of any click (no proceed), opens no window on some engines.
+  await open(page, {
+    provider: "late",
+    frames: [frame({ displayId: "o2", config: "prompt", content })],
+  });
+  await frameOf(page, "o2").locator("#l").click();
+  await expect
+    .poll(async () => (await events(page, "o2", "openLink")).length, { timeout: 5_000 })
+    .toBe(1);
+  const late = (await events(page, "o2", "openLink"))[0]?.detail as { opened: boolean };
+  test.info().annotations.push({
+    type: "measured",
+    description: `${browserName}: a yes given 1.5 s later, without proceed, ${late.opened ? "still opens" : "opens no"} window`,
+  });
 });

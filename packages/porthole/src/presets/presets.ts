@@ -10,6 +10,7 @@ import type {
   Limits,
   PortholeConfig,
   ThemeValue,
+  UrlSandboxExtra,
 } from "../config/schema.ts";
 import { validateConfig } from "../config/validate.ts";
 import { DEFAULT_THEME_EVENT, DEFAULT_THEME_VARIABLES } from "../theme/variables.ts";
@@ -27,10 +28,14 @@ export interface PresetOptions {
   readonly capabilities?: { readonly [N in CapabilityName]?: CapabilityConfig | false };
   /** Origins to open, added to the preset's (closed) egress. */
   readonly egress?: EgressConfig;
-  /** Theme defaults to change or variables to add, and the theme event's name. */
+  /**
+   * Theme defaults to change, variables to add, or (null) defaults to drop; the theme event's
+   * name; and whether whole documents follow the person's scheme (`ThemeConfig.documents`).
+   */
   readonly theme?: {
-    readonly variables?: Readonly<Record<string, ThemeValue>>;
+    readonly variables?: Readonly<Record<string, ThemeValue | null>>;
     readonly event?: string;
+    readonly documents?: "declared" | "always";
   };
   readonly limits?: Partial<Limits>;
   readonly layout?: Partial<LayoutConfig>;
@@ -44,6 +49,8 @@ export interface PresetOptions {
 /** The url preset's options: where the app is served, and the embedding page's extra frames. */
 export interface UrlPresetOptions {
   readonly contentOrigins: readonly string[];
+  /** Sandbox tokens to add for the app (popups for an OAuth flow, modals, downloads; P037). */
+  readonly sandbox?: readonly UrlSandboxExtra[];
   readonly limits?: Partial<Limits>;
   readonly layout?: Partial<LayoutConfig>;
   readonly embedder?: EmbedderConfig;
@@ -116,6 +123,21 @@ const mergeEgress = (base: EgressConfig, extra: EgressConfig | undefined): Egres
   return merged;
 };
 
+/** The default variables, with the host's changes and additions, less those it dropped (null). */
+function themeVariables(
+  changes: Readonly<Record<string, ThemeValue | null>> | undefined,
+): Record<string, ThemeValue> {
+  const variables: Record<string, ThemeValue> = { ...DEFAULT_THEME_VARIABLES };
+  for (const [name, value] of Object.entries(changes ?? {})) {
+    if (value === null) {
+      delete variables[name];
+    } else {
+      variables[name] = value;
+    }
+  }
+  return variables;
+}
+
 function build(
   mode: PortholeConfig["mode"],
   defaults: { readonly limits?: Partial<Limits> },
@@ -140,8 +162,9 @@ function build(
     capabilities,
     egress: mergeEgress({}, options.egress),
     theme: {
-      variables: { ...DEFAULT_THEME_VARIABLES, ...options.theme?.variables },
+      variables: themeVariables(options.theme?.variables),
       event: options.theme?.event ?? DEFAULT_THEME_EVENT,
+      ...(options.theme?.documents === undefined ? {} : { documents: options.theme.documents }),
     },
     limits: { ...BASE_LIMITS, ...defaults.limits, ...options.limits },
     layout: { ...BASE_LAYOUT, ...options.layout },
@@ -187,6 +210,7 @@ export const presets = {
       guide: {},
       contentOrigins: options.contentOrigins,
       embedder: options.embedder ?? {},
+      ...(options.sandbox === undefined ? {} : { sandbox: options.sandbox }),
     }),
 } as const;
 

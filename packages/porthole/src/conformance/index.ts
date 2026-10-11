@@ -1,11 +1,17 @@
 /**
  * `@botiverse/porthole/conformance`: the leak/conformance suite (P008), runnable by any host
  * against its own integration. A host implements `ConformanceHost` (how to show one display in a
- * page and drive it), then registers the suite in its Playwright project:
+ * page and drive it), then registers the tests in a spec file of its own, so they are located
+ * there (`playwright test conformance.spec.ts`, `--grep "\[1\.connect\]"`):
  *
  *   import { test } from "@playwright/test";
- *   import { defineLeakSuite } from "@botiverse/porthole/conformance";
- *   defineLeakSuite(test, myHost);
+ *   import { leakTests } from "@botiverse/porthole/conformance";
+ *   for (const each of leakTests(myHost)) {
+ *     test(each.title, ({ page, browserName }, info) => each.run({ page, browserName }, info));
+ *   }
+ *
+ * The host's own `@playwright/test` (and, for the App SDK probes, `@modelcontextprotocol/ext-apps`)
+ * is what runs it: Porthole declares neither (P041).
  *
  * Each probe attempts one egress or escape channel (DESIGN.md § Egress hardening) and asserts,
  * with an out-of-band oracle where one exists (an HTTP canary that also counts connections, a UDP
@@ -90,12 +96,20 @@ export interface LeakSuiteOptions {
   readonly skip?: Readonly<Record<string, string>>;
 }
 
-export { defineLeakSuite, PROBES, type Probe } from "./probes.ts";
+export {
+  defineLeakSuite,
+  leakTests,
+  PROBES,
+  type ConformanceFixtures,
+  type ConformanceTest,
+  type Probe,
+} from "./probes.ts";
 export { httpOracle, settle, udpOracle, type HttpOracle, type UdpOracle } from "./oracles.ts";
 
 // The served modes' cases (domain and url mode), with their own host interface.
 export {
   defineServedSuite,
+  servedTests,
   type ServedConformanceHost,
   type ServedDisplay,
   type ServedSuiteOptions,

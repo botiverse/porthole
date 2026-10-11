@@ -18,13 +18,15 @@ import type {
   CallContext,
   CapabilityHandlers,
   Confirm,
+  ConfirmAnswer,
   ConfirmRequest,
+  Proceed,
   Refusal,
 } from "../bridge/types.ts";
 import type { CapabilityName } from "../config/capabilities.ts";
 import type { ColorScheme, PortholeConfig } from "../config/schema.ts";
 import { createHost } from "../host/create-host.ts";
-import type { DisplayEvents, DisplayHandle } from "../host/types.ts";
+import type { DisplayEvents, DisplayHandle, FrameOutcome } from "../host/types.ts";
 import type { InstanceLocator, InstanceRef } from "../isolation/types.ts";
 import { ConfirmDialog } from "./dialog.tsx";
 import { createLiveFrames, type FrameState, type LiveFrames } from "./live.ts";
@@ -72,7 +74,8 @@ export interface PortholeProviderProps {
 
 interface Pending {
   readonly request: ConfirmRequest;
-  readonly resolve: (accepted: boolean) => void;
+  readonly resolve: (answer: ConfirmAnswer) => void;
+  readonly proceed: Proceed;
 }
 
 export function PortholeProvider(props: PortholeProviderProps): ReactElement {
@@ -85,11 +88,11 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
     own.current = props.confirm;
   });
   const confirm = useCallback<Confirm>(
-    (request) =>
+    (request, proceed) =>
       own.current !== undefined
-        ? own.current(request)
-        : new Promise<boolean>((resolve) =>
-            setQueue((waiting) => [...waiting, { request, resolve }]),
+        ? own.current(request, proceed)
+        : new Promise<ConfirmAnswer>((resolve) =>
+            setQueue((waiting) => [...waiting, { request, resolve, proceed }]),
           ),
     [],
   );
@@ -113,7 +116,11 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
           request={current?.request ?? null}
           {...(props.dialogClassName === undefined ? {} : { className: props.dialogClassName })}
           onAnswer={(accepted) => {
-            current?.resolve(accepted);
+            // A yes runs the effect inside this very click (a window it opens is the person's).
+            if (accepted) {
+              current?.proceed();
+            }
+            current?.resolve(accepted ? "accepted" : "declined");
             setQueue((waiting) => waiting.slice(1));
           }}
         />
@@ -164,6 +171,21 @@ export interface PortholeFrameProps {
   readonly onRefused?: (capability: CapabilityName, refusal: Refusal) => void;
   /** Too many declines: the display stops asking until it runs again. */
   readonly onMuted?: () => void;
+  /**
+   * How the frame's first document went: loaded, blocked (and why), or a timeout. A host shows its
+   * own fallback (a url-mode app "Open in a new tab") on anything but loaded.
+   */
+  readonly onOutcome?: (outcome: FrameOutcome) => void;
+  /**
+   * Other ids this display had (the call's id, before the display's own settled): its remembered
+   * height is found under them, for a frame that mounts again under its new id.
+   */
+  readonly aliases?: readonly string[];
+  /**
+   * Change it when the host's theme values change without a scheme flip (or after an async
+   * restyle): the running frame reads them again.
+   */
+  readonly themeKey?: string | number;
   /** Draws the placeholder instead of the default one. */
   readonly renderPlaceholder?: (props: PlaceholderProps) => ReactNode;
   readonly className?: string;
@@ -196,6 +218,21 @@ function DefaultPlaceholder({ state, title, run }: PlaceholderProps): ReactEleme
       ) : null}
     </div>
   );
+}
+
+/** A display's remembered height: under its id, else under the first of its other ids that has one. */
+function rememberedHeight(
+  heights: ReadonlyMap<string, number>,
+  displayId: string,
+  aliases: readonly string[] | undefined,
+): number {
+  for (const id of [displayId, ...(aliases ?? [])]) {
+    const height = heights.get(id);
+    if (height !== undefined) {
+      return height;
+    }
+  }
+  return 0;
 }
 
 export function PortholeFrame(props: PortholeFrameProps): ReactElement {
@@ -240,7 +277,17 @@ export function PortholeFrame(props: PortholeFrameProps): ReactElement {
     };
   }, [page, key, max, eager]);
 
-  const height = page.heights.get(props.displayId) ?? 0;
+  const height = rememberedHeight(page.heights, props.displayId, props.aliases);
+  // A display renamed while it runs (its id settled) keeps its height under its new id.
+  const previousId = useRef(props.displayId);
+  useLayoutEffect(() => {
+    const before = previousId.current;
+    previousId.current = props.displayId;
+    const kept = page.heights.get(before);
+    if (before !== props.displayId && kept !== undefined && !page.heights.has(props.displayId)) {
+      page.heights.set(props.displayId, kept);
+    }
+  }, [page, props.displayId]);
   const run = () => page.live.admit(key, max);
   const placeholder = props.renderPlaceholder ?? DefaultPlaceholder;
   return (
@@ -290,6 +337,7 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
   // The height this display started at: later reports don't make it start again.
   const [startHeight] = useState(initialHeightPx);
   const { config, document: view, instance, content, partial, scheme } = frame;
+  const fills = config.mode === "url";
 
   // The latest props, read when the display calls back (never during render).
   const latest = useEffectEvent(() => frame);
@@ -319,6 +367,9 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
         }
         case "muted":
           frame.onMuted?.();
+          return;
+        case "outcome":
+          frame.onOutcome?.(detail as DisplayEvents["outcome"]);
           return;
       }
     },
@@ -353,11 +404,11 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
         handlers,
         ...(asks
           ? {
-              confirm: (request: ConfirmRequest) =>
-                (latest().confirm ?? page.confirm ?? (() => Promise.resolve(false)))({
-                  ...request,
-                  display: { id: latest().displayId, title: latest().title },
-                }),
+              confirm: (request: ConfirmRequest, proceed: Proceed) =>
+                (latest().confirm ?? page.confirm ?? (() => Promise.resolve(false)))(
+                  { ...request, display: { id: latest().displayId, title: latest().title } },
+                  proceed,
+                ),
             }
           : {}),
         theme: (each) => latest().theme?.(each) ?? {},
@@ -383,6 +434,7 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
       "navigated",
       "refused",
       "muted",
+      "outcome",
     ];
     for (const event of events) {
       display.on(event, (detail) => notify(event, detail));
@@ -406,16 +458,28 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
   useEffect(() => {
     handle.current?.setTheme(scheme);
   }, [scheme]);
+  const { themeKey } = frame;
+  useEffect(() => {
+    if (themeKey !== undefined) {
+      handle.current?.refreshTheme();
+    }
+  }, [themeKey]);
 
   return (
     <div
       data-porthole-ready={String(ready)}
       style={{
         position: "relative",
+        // A url-mode app fills the frame's box (give PortholeFrame a height); the rest size to content.
+        ...(fills ? { height: "100%" } : {}),
         ...(ready ? {} : { minHeight: Math.max(startHeight, PLACEHOLDER_HEIGHT_PX) }),
       }}
     >
-      <div ref={holder} data-porthole-mount="" style={{ opacity: ready ? 1 : 0 }} />
+      <div
+        ref={holder}
+        data-porthole-mount=""
+        style={{ opacity: ready ? 1 : 0, ...(fills ? { height: "100%" } : {}) }}
+      />
       {ready ? null : placeholder({ state: "loading", title: frame.title, run })}
     </div>
   );

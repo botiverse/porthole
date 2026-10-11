@@ -295,6 +295,61 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
     },
   },
 
+  {
+    id: "11.document-theme",
+    item: 11,
+    title:
+      "a whole page takes the person's scheme only when it declares it supports it (or the host says always)",
+    async run(context) {
+      const page = (head: string, id: string) =>
+        `<!doctype html><html><head><title>Page</title>${head}</head><body><p id="${id}">page</p></body></html>`;
+      const scheme = (display: LaunchedDisplay, id: string) =>
+        display.frame().then(async (frame) => {
+          await expect(frame.locator(`#${id}`)).toHaveText("page");
+          return frame.evaluate(() => ({
+            scheme: getComputedStyle(document.documentElement).colorScheme,
+            theme: document.documentElement.getAttribute("data-theme"),
+            variable:
+              getComputedStyle(document.documentElement)
+                .getPropertyValue("--color-text-primary")
+                .trim() !== "",
+          }));
+        });
+      const plain = await context.launch({
+        config: presets.artifact(),
+        scheme: "dark",
+        content: page("", "plain"),
+      });
+      // An author's own page, declaring nothing: shown as styled, in light; the variables are there.
+      expect(await scheme(plain, "plain")).toEqual({
+        scheme: "normal",
+        theme: null,
+        variable: true,
+      });
+      await plain.setTheme("light");
+      await plain.setTheme("dark");
+      await settle(300);
+      expect(await scheme(plain, "plain")).toEqual({
+        scheme: "normal",
+        theme: null,
+        variable: true,
+      });
+      const declared = await context.launch({
+        config: presets.artifact(),
+        scheme: "dark",
+        content: page('<meta name="color-scheme" content="light dark">', "declared"),
+      });
+      await expect.poll(async () => (await scheme(declared, "declared")).theme).toBe("dark");
+      expect((await scheme(declared, "declared")).scheme).toBe("dark");
+      const always = await context.launch({
+        config: presets.artifact({ theme: { documents: "always" } }),
+        scheme: "dark",
+        content: page("", "always"),
+      });
+      await expect.poll(async () => (await scheme(always, "always")).theme).toBe("dark");
+    },
+  },
+
   // ── 12: the host-function gates ────────────────────────────────────────────────────────────
   {
     id: "12.prompt-gesture-confirm",

@@ -57,7 +57,16 @@ export interface FrameLocation {
   readonly url: string;
   /** Its origin: the host takes messages only from this origin, from this frame. */
   readonly origin: string;
+  /**
+   * Whether the pages there report how loading went (`porthole/notifications/frame-status`):
+   * Porthole's `/server` does, so a page that never ran (refused framing) can be told apart from
+   * one that loaded. A host's own gateway may send the same message without this.
+   */
+  readonly reports?: boolean;
 }
+
+/** The message a served page sends its host about loading (own-prefixed, P040). */
+export const FRAME_STATUS_METHOD = "porthole/notifications/frame-status";
 
 /**
  * Turns an instance into the URL its frame loads. Implemented by the host, usually by asking its
@@ -74,4 +83,9 @@ export interface InstanceLocator {
  */
 export type FrameSource =
   | { readonly kind: "srcdoc"; readonly html: string }
-  | { readonly kind: "url"; readonly url: string; readonly origin: string };
+  | {
+      readonly kind: "url";
+      readonly url: string;
+      readonly origin: string;
+      readonly reports?: boolean;
+    };
