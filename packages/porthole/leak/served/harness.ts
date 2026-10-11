@@ -299,6 +299,12 @@ async function start(): Promise<Harness> {
   const configs: Record<string, PortholeConfig> = {
     inlineWidget: presets.inlineWidget({ isolation: "domain", contentOrigins: [contentSource] }),
     artifact: presets.artifact({ isolation: "domain", contentOrigins: [contentSource] }),
+    // A shell whose images and media load from any https site (P059).
+    inlineAnyHttps: presets.inlineWidget({
+      isolation: "domain",
+      contentOrigins: [contentSource],
+      egress: { anyHttps: ["img", "media"] },
+    }),
     artifactCdn: presets.artifact({
       isolation: "domain",
       contentOrigins: [contentSource],

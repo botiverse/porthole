@@ -380,33 +380,85 @@ export function servedTests(
 
     define(
       "served.domain.egress",
-      "the CSP in the document's headers closes egress",
+      "the CSP in the document's headers closes egress; only what the config opens to any https site (images, media) reaches it",
       async ({ page }) => {
         const display = await host.show(page, host.shell("egress"), { content: SHELL_CONTENT });
         const frame = await display.frame();
-        const fetched = await frame.evaluate(
-          async (url) => {
-            try {
-              await fetch(url, { mode: "no-cors" });
-              return "sent";
-            } catch {
-              return "blocked";
-            }
-          },
-          await host.canary("egress-fetch"),
-        );
-        await frame.evaluate(
-          (url) => {
-            const image = new Image();
-            image.src = url;
-            document.body.append(image);
-          },
-          await host.canary("egress-img"),
-        );
+        const kinds = ["fetch", "img", "media", "script", "style", "frame"] as const;
+        const urls = Object.fromEntries(
+          await Promise.all(kinds.map(async (kind) => [kind, await host.canary(`egress-${kind}`)])),
+        ) as Record<(typeof kinds)[number], string>;
+        // Each kind tried once; the policy that applied is read from the violations it raises.
+        const seen = await frame.evaluate(async (each) => {
+          const policies: string[] = [];
+          document.addEventListener("securitypolicyviolation", (event) =>
+            policies.push(event.originalPolicy),
+          );
+          let fetched = "sent";
+          try {
+            await fetch(each.fetch, { mode: "no-cors" });
+          } catch {
+            fetched = "blocked";
+          }
+          const image = new Image();
+          image.src = each.img;
+          document.body.append(image);
+          const audio = document.createElement("audio");
+          audio.preload = "auto";
+          audio.src = each.media;
+          document.body.append(audio);
+          const script = document.createElement("script");
+          script.src = each.script;
+          document.body.append(script);
+          const link = document.createElement("link");
+          link.rel = "stylesheet";
+          link.href = each.style;
+          document.head.append(link);
+          const nested = document.createElement("iframe");
+          nested.src = each.frame;
+          document.body.append(nested);
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          return { fetched, policy: policies.find((policy) => /connect-src/u.test(policy)) ?? "" };
+        }, urls);
         await page.waitForTimeout(SETTLE_MS);
-        expect(fetched).toBe("blocked");
-        expect(await host.canaryHits("egress-fetch")).toBe(0);
-        expect(await host.canaryHits("egress-img")).toBe(0);
+        expect(seen.fetched).toBe("blocked");
+        expect(seen.policy, "a CSP applied to the document").not.toBe("");
+        const sources = new Map(
+          seen.policy
+            .split(";")
+            .map((directive) => directive.trim().split(/\s+/u))
+            .map(([name = "", ...rest]) => [name, rest] as const),
+        );
+        // What runs or talks never opens to any site (P059), whatever the config.
+        for (const name of ["script-src", "style-src", "connect-src", "frame-src", "default-src"]) {
+          expect(sources.get(name) ?? [], `${name} opens no scheme`).not.toContain("https:");
+        }
+        for (const kind of ["fetch", "script", "style", "frame"] as const) {
+          expect(await host.canaryHits(`egress-${kind}`), kind).toBe(0);
+        }
+        // Images and media: closed, unless the config opened them to any https site (P059);
+        // then, the canary being an https site, an image reaches it, as the config means.
+        const https = (kind: "img" | "media") =>
+          (sources.get(`${kind}-src`) ?? []).includes("https:") &&
+          new URL(urls[kind]).protocol === "https:";
+        const opened = (["img", "media"] as const).filter(https);
+        if (opened.length > 0) {
+          info?.annotations.push({
+            type: "expected",
+            description: `${opened.join(" and ")} load from any https site under this config (anyHttps, P059): ${opened.includes("img") ? "the image is asserted to reach the outside site" : "measured, not asserted"}; script, style, connect and frames still can't`,
+          });
+        }
+        if (https("img")) {
+          expect(
+            await host.canaryHits("egress-img"),
+            "the image, as the config opens it",
+          ).toBeGreaterThan(0);
+        } else {
+          expect(await host.canaryHits("egress-img"), "img").toBe(0);
+        }
+        if (!https("media")) {
+          expect(await host.canaryHits("egress-media"), "media").toBe(0);
+        }
       },
     );
 

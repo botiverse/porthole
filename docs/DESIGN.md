@@ -328,6 +328,12 @@ opens its content once; only the host origins may frame content; the CSP in head
 closes egress; each version of an artifact page shows as stored, hardened before it runs; an app shows nothing without its cookie, runs on a tab, and runs
 framed where the engine keeps partitioned cookies; the sandbox proxy becomes a
 hardened view, takes it only from its host, and opens only what the view declares.
+`served.domain.egress` reads the policy that applied to the document (from the
+violations its attempts raise) and holds the host to its config: scripts, styles,
+fetches and frames never reach the canary, and no directive for them opens a scheme;
+images and media are closed unless the config opened them to any https site
+(`anyHttps`, P059), where an image then must reach an https canary, reported as
+expected rather than as a leak (P062; `leak/served/any-https.spec.ts`).
 A served shell draws nothing, and reports no height, until its host sends content,
 so the suite gives `show` a line of content for each shell (`options.content`) and a
 host that speaks to the shell sends it (P057). The shell cases also run against a

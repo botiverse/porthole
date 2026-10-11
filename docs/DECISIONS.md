@@ -1436,3 +1436,24 @@ within those frames, the content heard a "flip" to its own scheme. `[11.theme-fl
 
 **Revisit when** content needs an event for values that change while the scheme doesn't (it gets
 one now; the rule is "changed", not "flipped").
+
+## P062 · 2026-10-11 · `served.domain.egress` holds a host to its own config's egress · Accepted
+
+**Decision.** The served egress case no longer assumes images are closed. It tries a fetch, an
+image, an audio element, a script, a stylesheet and a nested frame toward the host's canaries. It
+reads the policy that applied to the document from the violations those attempts raise.
+- **Always.** Scripts, styles, fetches and frames never reach the canary, and none of their
+  directives (nor `default-src`) opens a scheme.
+- **Images and media** must stay closed, unless the config opened them to any https site
+  (`anyHttps`, P059). Then, with an https canary, the image must reach it. The case reports this
+  as expected (an annotation naming P059), not as a failure, the way P058 reports a page's own
+  policy. Media is measured, not asserted (engines differ on preloading).
+
+Follow-up to 0.1.5 (the second host's adoption).
+**Why.** A host that opts into `anyHttps` had to skip the built-in case and write its own
+(`served.domain.egress-any-https`). Its logic is folded in here, so the host can drop it.
+**Tested.**
+- The case passes against the reference serving and a `createHost` host, both closed.
+- It passes against a host whose shells open images and media (`leak/served/any-https.spec.ts`,
+  with its canaries on a routed https site). The image and the audio reached the site; the fetch,
+  script, stylesheet and frame didn't.

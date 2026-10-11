@@ -1,6 +1,6 @@
 {
   "name": "@botiverse/porthole",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "A host-side sandbox for agent-made HTML: isolation, egress hardening, a themed shell, gated host functions, and the agent manual, from one config.",
   "license": "Apache-2.0",
   "files": [
