@@ -54,6 +54,12 @@ export interface ServedConformanceHost {
    * `document.documentElement.dataset.app = "ready"`.
    */
   app(scope: string): InstanceRef;
+  /**
+   * A stored artifact page (domain isolation) for `scope`: version `"1"` and `"2"` of one page,
+   * each with `<main id="artifact">version N</main>` and a script that records
+   * `document.documentElement.dataset.rtc = typeof RTCPeerConnection`.
+   */
+  artifact(scope: string, version: "1" | "2"): InstanceRef;
   /** The MCP Apps sandbox proxy (domain isolation) for `scope`, opening the view's `egress`. */
   proxy(scope: string, egress?: EgressConfig): InstanceRef;
 }
@@ -250,6 +256,26 @@ export function defineServedSuite(
         const other = await host.show(page, host.shell("scope-b"));
         expect(other.origin).not.toBe(first.origin);
         expect(await (await other.frame()).evaluate(() => localStorage.getItem("kept"))).toBeNull();
+      },
+    );
+
+    define(
+      "served.artifact.versions",
+      "each version of a page shows as stored, on its scope's origin, hardened before it runs",
+      async ({ page }) => {
+        const one = await host.show(page, host.artifact("artifact-scope", "1"));
+        const two = await host.show(page, host.artifact("artifact-scope", "2"));
+        expect(two.origin).toBe(one.origin);
+        for (const [display, version] of [
+          [one, "1"],
+          [two, "2"],
+        ] as const) {
+          const frame = await display.frame();
+          await expect(frame.locator("#artifact")).toHaveText(`version ${version}`);
+          expect(await frame.evaluate(() => document.documentElement.dataset.rtc)).toBe(
+            "undefined",
+          );
+        }
       },
     );
 

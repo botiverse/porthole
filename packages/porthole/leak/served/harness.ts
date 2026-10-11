@@ -164,7 +164,12 @@ const MCP_HOST_PAGE = `<!doctype html>
 
 async function start(): Promise<Harness> {
   const hits = new Map<string, number>();
-  const pages = new Map<string, string>();
+  const pages = new Map<string, string>(
+    ["1", "2"].map((version) => [
+      `page@${version}`,
+      `<!doctype html><html><head><title>Page</title></head><body><main id="artifact">version ${version}</main><script>document.documentElement.dataset.rtc = typeof RTCPeerConnection;</script></body></html>`,
+    ]),
+  );
 
   const app = createHttpServer((request, response) => {
     const pathname = new URL(request.url ?? "/", "http://app").pathname;
@@ -344,6 +349,10 @@ export const servedHost: ServedConformanceHost = {
   shell: (scope) => ({ scope, document: { kind: "shell", preset: "inlineWidget" } }),
   // The upstream finds the app itself (`proxyTo`'s target): the URL only gives the landing path.
   app: (scope) => ({ scope, document: { kind: "external", url: "http://app.test/" } }),
+  artifact: (scope, version) => ({
+    scope,
+    document: { kind: "artifact", id: "page", version },
+  }),
   proxy: (scope, egress) => ({
     scope,
     document: { kind: "mcp-proxy", ...(egress === undefined ? {} : { egress }) },

@@ -251,7 +251,7 @@ runs on its own origin and can't reach the host's DOM, storage, cookies or URL,
 navigate the host's page or open a window (domain and url mode, each also after a
 click); storage persists within a scope and is never shared across scopes; a ticket
 opens its content once; only the host origins may frame content; the CSP in headers
-closes egress; an app shows nothing without its cookie, runs on a tab, and runs
+closes egress; each version of an artifact page shows as stored, hardened before it runs; an app shows nothing without its cookie, runs on a tab, and runs
 framed where the engine keeps partitioned cookies; the sandbox proxy becomes a
 hardened view, takes it only from its host, and opens only what the view declares.
 
