@@ -4,7 +4,10 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import { readFile } from "node:fs/promises";
+import { stripTypeScriptTypes } from "node:module";
 import type { AddressInfo } from "node:net";
+import path from "node:path";
 import { Readable } from "node:stream";
 import type { Page } from "@playwright/test";
 import { compile, embedderCsp, presets, type PortholeConfig } from "../../src/index.ts";
@@ -26,6 +29,8 @@ import { createServer, proxyTo, type PortholeServer } from "../../src/server/ind
 
 export interface Harness {
   readonly hostOrigin: string;
+  /** The frame source every content origin matches. */
+  readonly contentSource: string;
   readonly foreignOrigin: string;
   readonly porthole: PortholeServer;
   readonly configs: Readonly<Record<string, PortholeConfig>>;
@@ -134,19 +139,42 @@ const HOST_PAGE = `<!doctype html>
 const APP_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>App</title></head>
 <body><p>A running app.</p><script src="/app.js"></script></body></html>`;
 
+const PACKAGE = path.resolve(import.meta.dirname, "../..");
+
+/** The package's own TypeScript, stripped as Node strips it, for a host page to import. */
+async function sourceOf(pathname: string): Promise<Response | null> {
+  const relative = pathname.replace(/^\/+/u, "");
+  if (!/^(src|leak\/mcp)\/[\w/.-]+\.ts$/u.test(relative) || relative.includes("..")) {
+    return null;
+  }
+  try {
+    const text = await readFile(path.join(PACKAGE, relative), "utf8");
+    return new Response(stripTypeScriptTypes(text), {
+      headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" },
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** A host page for MCP Apps views, on Porthole's own adapter (`leak/mcp/host.ts`). */
+const MCP_HOST_PAGE = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Porthole MCP Apps host</title></head>
+<body><main id="displays"></main><script type="module" src="/leak/mcp/host.ts"></script></body></html>`;
+
 async function start(): Promise<Harness> {
   const hits = new Map<string, number>();
   const pages = new Map<string, string>();
 
   const app = createHttpServer((request, response) => {
-    const path = new URL(request.url ?? "/", "http://app").pathname;
-    if (path === "/app.js") {
+    const pathname = new URL(request.url ?? "/", "http://app").pathname;
+    if (pathname === "/app.js") {
       response.writeHead(200, { "content-type": "text/javascript" });
       response.end('document.documentElement.dataset.app = "ready";');
       return;
     }
-    response.writeHead(path === "/" ? 200 : 404, { "content-type": "text/html" });
-    response.end(path === "/" ? APP_PAGE : "not found");
+    response.writeHead(pathname === "/" ? 200 : 404, { "content-type": "text/html" });
+    response.end(pathname === "/" ? APP_PAGE : "not found");
   });
   const appPort = await listen(app);
 
@@ -202,13 +230,19 @@ async function start(): Promise<Harness> {
     if (served !== null) {
       return served;
     }
-    const path = new URL(request.url).pathname;
-    return path === "/host"
-      ? html(HOST_PAGE, { "content-security-policy": hostCsp })
-      : new Response("not found", { status: 404 });
+    const pathname = new URL(request.url).pathname;
+    if (pathname === "/host") {
+      return html(HOST_PAGE, { "content-security-policy": hostCsp });
+    }
+    if (pathname === "/mcp-host") {
+      return html(MCP_HOST_PAGE, { "content-security-policy": hostCsp });
+    }
+    const source = await sourceOf(pathname);
+    return source ?? new Response("not found", { status: 404 });
   };
   return {
     hostOrigin,
+    contentSource,
     foreignOrigin: `http://127.0.0.1:${foreignPort}`,
     porthole,
     configs,

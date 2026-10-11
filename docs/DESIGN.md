@@ -161,6 +161,7 @@ functions not built yet throw `NotBuiltYet` naming their milestone.
 | Transport | `src/transport/types.ts` | core (M2) | adapters |
 | Protocol adapter: `ProtocolAdapter`, `AdapterSession`, `AdapterConnection`, `ShellConnection` | `src/protocol/adapter.ts` | core (shell adapter, M2–M3) | MCP adapter |
 | MCP Apps names: `MCP_APPS_METHODS`, `HostContext`; JSON-RPC parsing | `src/protocol/mcp-apps.ts`, `src/protocol/jsonrpc.ts` | core (M1, done) | shell, both adapters |
+| MCP Apps adapter: `mcpAppsAdapter`, `McpAppConnection`, `viewEgress`, `readViewResource`, `MCP_APPS_STYLE_VARIABLES`, `sandboxProxyDocument` | `src/mcp/` | MCP adapter (done) | hosts showing MCP Apps views |
 | Host-function bridge: `HostFunctionBridge`, `CapabilityHandlers`, `Confirm`, `ConfirmRequest`, `Refusal` | `src/bridge/types.ts` | core (M3) | adapters, hosts |
 | React: `PortholeProvider`, `PortholeFrame`, `ConfirmDialog` props | `src/react/index.ts` | core (M4) | first host |
 | Conformance: `ConformanceHost`, `LaunchSpec`, `LaunchedDisplay`, `defineLeakSuite`; `defineServedSuite`, `ServedConformanceHost` | `src/conformance/index.ts`, `src/conformance/served.ts` | core (M2); served modes (done) | any host |
@@ -265,12 +266,17 @@ Content may also use the official App SDK directly; the adapter answers a second
 `ui/initialize` from the same frame.
 
 The `/mcp` adapter (full MCP Apps views) implements `ProtocolAdapter` with its own
-connection operations (tool input and result, cancellation), carries `tools/call`,
-`resources/read`, `ui/download-file`, `ui/update-model-context` and
-`ui/request-display-mode` through the bridge, maps a view's `_meta.ui.csp` into the
-config's egress, and performs the sandbox-proxy handshake when the frame is the
-proxy. An adapter validates every message and never calls a host handler itself:
-`bridge.call` decides.
+connection operations (`sendToolInputPartial`, `sendToolInput`, `sendToolResult`,
+`sendToolCancelled`), carries `ui/message`, `ui/open-link`, `tools/call`,
+`resources/read`, `ui/download-file` and `ui/update-model-context` through the
+bridge, answers `ui/request-display-mode` with the current mode, sends a view only
+the standard style variables (the official SDK refuses others), and performs the
+sandbox-proxy handshake when the frame is the proxy (P027). A host maps a view's
+`_meta.ui.csp` into its config's egress with `viewEgress` (or `readViewResource`,
+which reads the view and its egress from a `resources/read` result). An adapter
+validates every message and never calls a host handler itself: `bridge.call`
+decides. The leak suite runs the official ext-apps examples, as published, through
+it (`leak/mcp/`), in an opaque frame and behind the sandbox proxy.
 
 ### The host-function bridge
 

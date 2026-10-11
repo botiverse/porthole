@@ -45,6 +45,9 @@
     "test:leak": "playwright test -c leak/playwright.config.ts"
   },
   "devDependencies": {
+    "@modelcontextprotocol/server-basic-react": "2.0.3",
+    "@modelcontextprotocol/server-basic-vanillajs": "2.0.3",
+    "@modelcontextprotocol/server-threejs": "2.0.3",
     "@playwright/test": "1.63.0",
     "@types/node": "26.6.3",
     "@types/react": "19.3.0",

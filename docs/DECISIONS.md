@@ -460,3 +460,41 @@ CSP from a `?csp=` query); a `<meta>` CSP written with the view (the header is i
 HTML arrives and can't be edited by it).
 **Revisit when** the spec makes the relay observable to a view, or a host needs to send a proxy a
 second resource; the framing note goes upstream with the leak runner (P018).
+
+## P027 · 2026-10-11 · The MCP Apps adapter: what a view is sent, and what it may ask · Accepted
+
+**Decision.** `@botiverse/porthole/mcp`'s `mcpAppsAdapter` (P007) answers `ui/initialize` with
+the spec's protocol version, the host's name, the capabilities the config declares (`openLinks`
+for `openLink`, `serverTools` for `callTool`, `message` for `sendPrompt`, …, plus the egress it
+opens as `sandbox.csp`) and the host context; it sends a view nothing else before the view says
+`initialized` (queued tool input, result and cancellation go then, in order, the drafts collapsed
+to the latest). It carries `ui/message`, `ui/open-link`, `ui/download-file`, `tools/call`,
+`resources/read` and `ui/update-model-context` into the bridge with the host page's user
+activation; a refusal answers with JSON-RPC error `-32000` (`-32601` when not declared), a host
+function that ran but couldn't with `{ isError: true }`. Sizes go to `resize`, `notifications/message`
+at error levels and above to `reportError`. Further:
+- **Style variables are cut to the standard's 76 names.** Measured: the official App SDK (2.0.3,
+  zod 4) refuses a host context naming any other, so a view never initializes; Porthole's own
+  names (`--color-accent`, the chart palette) stay with its shell. `MCP_APPS_STYLE_VARIABLES` is
+  exported (a test checks it against the SDK's list).
+- **`ui/request-display-mode` keeps the current mode**, answering with it (the spec's answer
+  when a request isn't granted): how a display is laid out is the host's, and the vocabulary has
+  no capability that could gate it.
+- **A view's `frameDomains` and `baseUriDomains` open nothing** (`viewEgress`): the shell removes
+  nested frames (P006) and `base-uri` stays `'none'`; `connectDomains` and `resourceDomains` that
+  are exact origins (or `https://*.`) become egress, anything else is dropped.
+- **Tool visibility is the host's policy:** its `callTool` handler refuses tools the view may not
+  call (`_meta.ui.visibility`).
+The leak suite runs the official examples as published (`server-basic-vanillajs`,
+`server-basic-react`, `server-threejs`, pinned dev dependencies, unmodified) through the adapter, in
+an opaque frame and behind the sandbox proxy: tool input (streamed) and result, `tools/call`,
+`ui/message`, `ui/open-link`, theme change, size, teardown and model context; all pass on Chromium
+and WebKit. **Measured:** a click in a view, opaque or served, activates the host page on both
+engines (each clicked call reached the bridge with `userActivated: true`).
+**Why.** Interop is decided by the real SDK and examples, not by reading the spec (PRINCIPLE 6);
+everything a view can do beyond drawing stays a declared, gated host function (PRINCIPLE 4).
+**Rejected.** Sending all theme variables (breaks every SDK view); a host callback for display
+modes outside the bridge (an ungated power); honoring `frameDomains` (re-opens P006's nested-realm
+channel).
+**Revisit when** the SDK accepts unknown style keys or the spec adds names (then widen the list),
+or a host needs fullscreen views (then a `displayMode` capability with a gate).
