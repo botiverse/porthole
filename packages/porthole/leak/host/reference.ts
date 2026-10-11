@@ -57,7 +57,13 @@ const reference = {
     const confirmations: Display["confirmations"] = [];
     const host = createHost(spec.config, {
       handlers,
-      confirm: (request) => new Promise((resolve) => confirmations.push({ request, resolve })),
+      ...(spec.confirms === false
+        ? {}
+        : {
+            confirm: (request: ConfirmRequest) =>
+              new Promise<boolean>((resolve) => confirmations.push({ request, resolve })),
+          }),
+      theme: (scheme) => spec.hostTheme?.[scheme] ?? {},
       hostInfo: { name: "porthole-reference", version: "0" },
     });
     const handle = host.mount(box, {
@@ -84,9 +90,14 @@ const reference = {
         handle.setContent(partial, { partial: true });
         await pause(150);
       }
-      handle.setContent(spec.content);
+      if (spec.content !== undefined) {
+        handle.setContent(spec.content);
+      }
     }
     return id;
+  },
+  setContent(id: number, html: string, partial: boolean) {
+    displays.get(id)?.handle.setContent(html, { partial });
   },
   calls: (id: number) => displays.get(id)?.calls ?? [],
   events: (id: number) => displays.get(id)?.events ?? [],

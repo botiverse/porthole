@@ -591,7 +591,8 @@ navigates on load would loop).
 **Decision.** The leak suite's server can serve the core with one defense taken out
 (`PORTHOLE_LEAK_WEAKEN=<name>`: `frame-guard`, `webrtc`, `attach-shadow`,
 `parser-entry-points`, `declarative-shadow`, `sync-guard`, `connect-src`, `self`,
-`sandbox`, `base-uri`, `style-split`, `embedder-csp`). Each names the exact text it
+`sandbox`, `base-uri`, `style-split`, `embedder-csp`; later also `embedder-self`,
+`confirm-gate`, `host-gesture`, `shell-gesture`, `link-scheme`, `draft-inert`). Each names the exact text it
 removes, and the server refuses to start if that text is gone, so a control can't
 silently weaken nothing. DESIGN.md records, per engine, which probes each control makes
 fail. Every probe that asserts "nothing left" also has a positive control (an allowed

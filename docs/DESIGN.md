@@ -163,7 +163,7 @@ functions not built yet throw `NotBuiltYet` naming their milestone.
 | Protocol adapter: `ProtocolAdapter`, `AdapterSession`, `AdapterConnection`, `ShellConnection`; `shellAdapter` | `src/protocol/adapter.ts`, `src/protocol/shell-adapter.ts` | core (shell adapter, M2, built) | MCP adapter |
 | MCP Apps names: `MCP_APPS_METHODS`, `MCP_APPS_STYLE_VARIABLES`, `PORTHOLE_STYLES`, `HostContext`; JSON-RPC parsing | `src/protocol/mcp-apps.ts`, `src/protocol/jsonrpc.ts` | core | shell, both adapters |
 | MCP Apps adapter: `mcpAppsAdapter`, `McpAppConnection`, `viewEgress`, `readViewResource`, `MCP_APPS_STYLE_VARIABLES`, `sandboxProxyDocument` | `src/mcp/` | MCP adapter (done) | hosts showing MCP Apps views |
-| Host-function bridge: `HostFunctionBridge`, `CapabilityHandlers`, `Confirm`, `ConfirmRequest`, `Refusal`; `createBridge` | `src/bridge/` | core (M2 built; gating tests M3) | adapters, hosts |
+| Host-function bridge: `HostFunctionBridge`, `CapabilityHandlers`, `Confirm`, `ConfirmRequest`, `Refusal`; `createBridge` | `src/bridge/` | core (M2–M3, built and proven) | adapters, hosts |
 | React: `PortholeProvider`, `PortholeFrame`, `ConfirmDialog` props | `src/react/index.ts` | core (M4) | first host |
 | Conformance: `ConformanceHost`, `LaunchSpec`, `LaunchedDisplay`, `defineLeakSuite`, `PROBES`, the oracles; `defineServedSuite`, `ServedConformanceHost` | `src/conformance/` | core (M2, built); served modes (done) | any host |
 | Server: `createServer`, `PortholeServer`, `TicketStore`, `ArtifactStore`, `ContentDomain`, `Grant`, `Access`, `Upstream`, `proxyTo`, `memoryTicketStore` | `src/server/` | served modes (done) | host backends |
@@ -368,10 +368,22 @@ variables; streamed content is drawn inert and runs once; and content using the
 official App SDK connects under the inline, artifact and MCP Apps presets
 (`style-split` → all three, P028).
 
-Gating tests (capabilities, M3): `sendPrompt` without a user gesture is refused by
-the shell and, when gated `confirm`, nothing is sent until the host confirms;
-`openLink` is http(s) only and confirmed; a muted frame stops asking; a
-`confirm`-gated call with no `confirm` function is refused.
+### Behavior and gates, each with its test
+
+| # | What | Mechanism | Probes | Negative control → fails (both engines) |
+|---|------|-----------|--------|------------------------------------------|
+| 11 | streaming | `setContent(html, { partial: true })` any number of times, then whole once; the shell draws a draft from a template with everything that runs or navigates removed (scripts, frames, `on*`, `javascript:`), changing only what changed | `11.streaming`: each draft shows; a drawn node is kept across drafts (an image doesn't reload); nothing runs (no script, handler or `javascript:` href) until the whole, which runs once; a repeat or a late draft changes nothing | `draft-inert` → `11.streaming` |
+| 11 | auto-size | the shell reports its height (`size-changed`) as it changes; the host clamps it to `minHeightPx`..`maxHeightPx` and sizes the frame; past the cap the content scrolls inside | `11.size` (grows, shrinks, stops at the cap and scrolls, floors at the minimum; events carry the clamped height), `11.size-document` (a whole page's height; its own `load` fires; its title kept) | — |
+| 11 | theming | `setTheme(scheme)`: the host sends the resolved variables (the host's live values over the defaults, P028), the shell sets them in place, with `data-theme` and `color-scheme`, then fires the config's theme event once; the frame element's `color-scheme` follows | `11.theme-flip` (in place: content state kept, the event fired once per flip, back and forth), `11.theme-host-values` (live values for standard and own names; undeclared names dropped) | — |
+| 11 | base styles | plain CSS at zero specificity (`:where`): native buttons, inputs, selects and text areas take the theme's borders, radius, colors and focus ring, 44 px tall (the manual's touch size); the manual says so for inline widgets | `11.base-styles` (themed; content's own CSS overrides them) | — |
+| 12 | `sendPrompt` | the shell refuses a call without a gesture; the host refuses one without its page's user activation, then asks `confirm` with the whole text; declines count toward a mute | `12.prompt-gesture-confirm` (a call on load is refused; a click asks; a no sends nothing; a yes reaches the handler), `12.raw-message` (a raw `ui/message` around the shell, no click: refused by the host), `12.mute`, `12.no-confirm` | `confirm-gate` → prompt-gesture-confirm, link, mute, no-confirm; `shell-gesture` → prompt-gesture-confirm, mute; `host-gesture` → raw-message |
+| 12 | `openLink` | link clicks go out through `openLink`; the bridge takes http(s) only, without credentials in the URL; confirmed | `12.link` (a web link asks and opens; `javascript:` links and `openLink("javascript:…")` do nothing and are refused) | `link-scheme` → `12.link` |
+
+Measured: a click in the frame gives the host page user activation (it propagates to
+ancestors) on Chromium and WebKit, so the host-side gesture check holds for real
+clicks; it is still advisory, since a person may have clicked the host a moment
+before. Playwright's own page evaluations count as gestures, so the gate probes wait
+for that to lapse and click with raw input.
 
 ## The shell runtime
 
@@ -530,10 +542,12 @@ The core (this repository's lead work), in order; each lands when its tests pass
    the reference host and `defineLeakSuite`, items 1–10 above each with its probes,
    positive controls and negative controls, green on Chromium and WebKit; the
    official App SDK connecting under every preset.
-3. **M3 — streaming, auto-size, theming, the gated bridge.** Streaming drafts
-   through the host API and their leak tests, size reporting under the limits,
-   theme apply and flip, base styles for native form elements, and the
-   host-function bridge's gating tests (unit and in real frames).
+3. **M3 — streaming, auto-size, theming, the gated bridge** (done). Streaming
+   drafts through the host API, size reporting under the limits, theme apply and
+   flip with the host's live values, base styles for native form elements, and the
+   host-function bridge's gates, each proven in real frames (items 11, 12) with
+   negative controls, and in unit tests (`test/bridge.test.ts`,
+   `test/shell-adapter.test.ts`).
 4. **M4 — the React binding and its default confirmation dialog.**
    `<PortholeProvider>`, `<PortholeFrame>`, `ConfirmDialog`.
 5. **M5 — Firefox** in the leak suite gate.

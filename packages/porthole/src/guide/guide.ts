@@ -201,6 +201,9 @@ function widget(c: Context): string {
       `Don't use --color-background-primary as a card's fill: it is the app's own surface, so a card on it vanishes.`,
     ),
     `A theme change updates the variables in place and fires window "${config.theme.event}": CSS that uses var(...) follows by itself; a canvas or a library you gave colors to must redraw.`,
+    config.mode === "inline"
+      ? "Buttons and inputs already match the app (its borders, radius, colors and focus ring, 44 px tall): use them as they are, or restyle them with your own CSS."
+      : null,
     "",
     "Diagrams (boxes and arrows): show the mechanism asked about (what calls what, where data goes), only the parts the ask names; label each arrow with what moves.",
     `- Top to bottom, at most 2 boxes a row, in the phone viewBox; the title in HTML above. Too much for one glance on a phone: make two.`,

@@ -21,8 +21,11 @@ import type { DisplayEvents } from "../host/types.ts";
 
 export interface LaunchSpec {
   readonly config: PortholeConfig;
-  /** The whole content (a fragment, or a document for artifact mode). */
-  readonly content: string;
+  /**
+   * The whole content (a fragment, or a document for artifact mode). Omitted: nothing is sent,
+   * and the test drives the content with `LaunchedDisplay.setContent`.
+   */
+  readonly content?: string;
   /** Content to stream first, each step sent as partial, before the whole. */
   readonly partials?: readonly string[];
   /** A whole document the frame starts with instead (an MCP Apps view). */
@@ -31,6 +34,13 @@ export interface LaunchSpec {
   readonly scheme?: ColorScheme;
   /** The frame's width, px. */
   readonly widthPx?: number;
+  /** The host's live values for theme variables, per scheme (as `HostOptions.theme` answers). */
+  readonly hostTheme?: {
+    readonly light?: Readonly<Record<string, string>>;
+    readonly dark?: Readonly<Record<string, string>>;
+  };
+  /** Whether the host has a `confirm` function (default true): without one, gated calls are refused. */
+  readonly confirms?: boolean;
 }
 
 export interface RecordedCall {
@@ -45,6 +55,10 @@ export type RecordedEvent = {
 export interface LaunchedDisplay {
   /** The display's frame as it is now (a restart makes a new one), to probe from inside. */
   frame(): Promise<Frame>;
+  /** The frame element's size on the host's page, px. */
+  box(): Promise<{ readonly width: number; readonly height: number }>;
+  /** Sends content: partial (drawn inert) any number of times, then whole (runs once). */
+  setContent(html: string, options?: { readonly partial?: boolean }): Promise<void>;
   setTheme(scheme: ColorScheme): Promise<void>;
   /** Waits for the next confirmation the host is asked for, answers it, and returns it. */
   answerNextConfirmation(

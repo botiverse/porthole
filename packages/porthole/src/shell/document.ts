@@ -51,7 +51,28 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 #porthole-root { display: flow-root; }
-#porthole-root > svg { display: block; max-width: 100%; height: auto; }`;
+#porthole-root > svg { display: block; max-width: 100%; height: auto; }
+:where(button, input, select, textarea) { font: inherit; color: inherit; box-sizing: border-box; }
+:where(button, select, input:is([type="button" i], [type="submit" i], [type="reset" i])) {
+  min-height: 44px;
+  padding: 0 14px;
+  border: var(--border-width-regular, 1px) solid var(--color-border-primary, ButtonBorder);
+  border-radius: var(--border-radius-md, 8px);
+  background: var(--color-background-secondary, ButtonFace);
+  color: var(--color-text-primary, ButtonText);
+  cursor: pointer;
+}
+:where(input:not([type]), input:is([type="text" i], [type="search" i], [type="number" i], [type="email" i], [type="url" i], [type="tel" i], [type="password" i], [type="date" i], [type="time" i]), textarea) {
+  min-height: 44px;
+  padding: 0 10px;
+  border: var(--border-width-regular, 1px) solid var(--color-border-primary, FieldText);
+  border-radius: var(--border-radius-md, 8px);
+  background: var(--color-background-secondary, Field);
+}
+:where(textarea) { padding: 8px 10px; }
+:where(input:is([type="checkbox" i], [type="radio" i], [type="range" i])) { accent-color: var(--color-accent, auto); }
+:where(button, input, select, textarea):focus-visible { outline: 2px solid var(--color-ring-primary, Highlight); outline-offset: 1px; }
+:where(button, input, select, textarea):disabled { color: var(--color-text-disabled, GrayText); cursor: default; }`;
 
 /**
  * The frame's document: its policy first, then the base styles, an empty root, and the runtime.

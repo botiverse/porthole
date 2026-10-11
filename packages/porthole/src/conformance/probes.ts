@@ -1,15 +1,16 @@
 import {
   expect,
-  type Page,
   type PlaywrightTestArgs,
   type PlaywrightTestOptions,
   type PlaywrightWorkerArgs,
   type PlaywrightWorkerOptions,
   type TestType,
 } from "@playwright/test";
-import { presets, type PresetOptions } from "../presets/presets.ts";
+import { presets } from "../presets/presets.ts";
 import { resolveTheme } from "../theme/variables.ts";
-import type { ConformanceHost, LaunchedDisplay, LaunchSpec, LeakSuiteOptions } from "./index.ts";
+import type { ConformanceHost, LaunchedDisplay, LeakSuiteOptions } from "./index.ts";
+import { attack, inline, js, type Probe, type ProbeContext } from "./kit.ts";
+import { BEHAVIOR_PROBES } from "./behavior.ts";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import {
@@ -25,60 +26,6 @@ import {
  * The probes, one per channel and variant, numbered by DESIGN.md's egress table. Each attacks from
  * inside the content, as an agent's code would, and asserts with an oracle that nothing left.
  */
-
-export interface ProbeContext {
-  readonly page: Page;
-  readonly engine: string;
-  launch(spec: LaunchSpec): Promise<LaunchedDisplay>;
-  /** A fresh HTTP oracle (serving `files` at their paths), closed after the probe. */
-  http(files?: Readonly<Record<string, ServedFile>>): Promise<HttpOracle>;
-  /** A fresh UDP oracle, closed after the probe. */
-  udp(): Promise<UdpOracle>;
-  /** Waits for the content's verdict (`window.portholeProbe`, set by `attack`) and returns it. */
-  result(display: LaunchedDisplay, timeoutMs?: number): Promise<Record<string, unknown>>;
-  /**
-   * The URLs on `origin` that answered the page (any of its frames): requests that left the
-   * browser and came back. A load the browser blocked itself never has a response.
-   */
-  requestsTo(origin: string): string[];
-  /** Records a measured engine fact in the report. */
-  measured(text: string): void;
-}
-
-export interface Probe {
-  /** Stable id, `<item>.<channel>`: what `LeakSuiteOptions.skip` names. */
-  readonly id: string;
-  /** The DESIGN.md egress-table item it proves (0: the shell's own wiring). */
-  readonly item: number;
-  readonly title: string;
-  run(context: ProbeContext): Promise<void>;
-}
-
-/** A JS literal safe inside an inline `<script>` (no `</script>` can end it early). */
-const js = (value: unknown): string => JSON.stringify(value).replace(/</gu, "\\u003c");
-
-/**
- * Content that runs `code` (an async body with `r`, its verdict, in scope) once the shell has
- * drawn it, then publishes `r` as `window.portholeProbe`. A `#marker` shows the content is still there.
- */
-export function attack(code: string, markup = ""): string {
-  return `<div id="marker">content</div>${markup}
-<script>
-(async () => {
-  const r = {};
-  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  try {
-${code}
-  } catch (error) {
-    r.error = String((error && error.message) || error);
-  }
-  r.done = true;
-  window.portholeProbe = r;
-})();
-</script>`;
-}
-
-const inline = (options: PresetOptions = {}) => presets.inlineWidget(options);
 
 /** Whether this engine sends STUN from an unsandboxed page: the WebRTC oracle's positive control. */
 async function rtcSendsHere(context: ProbeContext, udp: UdpOracle): Promise<boolean> {
@@ -381,6 +328,9 @@ const sdkProbe = (preset: "inline" | "artifact" | "mcp-app"): Probe => ({
     expect(verdict.styles).toBeGreaterThan(0);
   },
 });
+
+export type { Probe, ProbeContext } from "./kit.ts";
+export { attack } from "./kit.ts";
 
 export const PROBES: readonly Probe[] = [
   // ── 0: the shell's own wiring, in a real frame ─────────────────────────────────────────────
@@ -1072,6 +1022,7 @@ export const PROBES: readonly Probe[] = [
       expect(context.requestsTo(host).filter((url) => url.includes("/portholeProbe/"))).toEqual([]);
     },
   },
+  ...BEHAVIOR_PROBES,
 ];
 
 type AnyTest = TestType<

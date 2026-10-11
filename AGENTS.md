@@ -17,10 +17,11 @@ Read these first:
 
 ## Status
 
-Phase 1 is being built, milestone by milestone (DESIGN.md § Milestones). M1 and
-M2 are in: the config, compiler and presets; the isolation core (`createHost`, the
-web platform, the shell runtime, the shell adapter, the bridge); the leak suite with
-its oracles and negative controls. Unbuilt functions throw `NotBuiltYet`.
+Phase 1 is being built, milestone by milestone (DESIGN.md § Milestones). M1–M3
+are in: the config, compiler and presets; the isolation core (`createHost`, the web
+platform, the shell runtime, the shell adapter, the gated bridge); streaming,
+sizing and theming; the leak suite with its oracles and negative controls. Unbuilt
+functions throw `NotBuiltYet`.
 
 ## Setup
 

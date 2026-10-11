@@ -25,6 +25,7 @@ interface Edit {
 }
 const RUNTIME = "src/shell/runtime.ts";
 const POLICY = "src/compile/policy.ts";
+const BRIDGE = "src/bridge/bridge.ts";
 const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp">> = {
   "frame-guard": [{ file: RUNTIME, find: "  guardRoot(document);\n", replace: "\n" }],
   webrtc: [{ file: RUNTIME, find: "      lock(window, name, undefined);", replace: "" }],
@@ -110,6 +111,47 @@ const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp">> = {
       file: "src/host/create-host.ts",
       find: "(STANDARD.has(name) ? standard : own)[name] = value;",
       replace: "standard[name] = value;",
+    },
+  ],
+  "confirm-gate": [
+    {
+      file: BRIDGE,
+      find: '      const confirms = gates.includes("confirm");',
+      replace: "      const confirms = false;",
+    },
+  ],
+  "host-gesture": [
+    {
+      file: BRIDGE,
+      find: "        if (activated === false) {",
+      replace: "        if (activated === false && false) {",
+    },
+  ],
+  "link-scheme": [
+    {
+      file: BRIDGE,
+      find: '  if (\n    (url.protocol !== "https:" && url.protocol !== "http:") ||',
+      replace: "  if (\n    false ||",
+    },
+  ],
+  "shell-gesture": [
+    {
+      file: RUNTIME,
+      find: "    return !(capability && capability.userActivation) || !activation || activation.isActive;",
+      replace: "    return true;",
+    },
+  ],
+  "draft-inert": [
+    {
+      file: RUNTIME,
+      find: '  const INERT = "script,iframe,frame,frameset,object,embed,applet,portal,fencedframe,meta,base,noscript,link:not([rel~=stylesheet i])";',
+      replace:
+        '  const INERT = "iframe,frame,frameset,object,embed,applet,portal,fencedframe,meta,base,noscript,link:not([rel~=stylesheet i])";',
+    },
+    {
+      file: RUNTIME,
+      find: '        if (name.startsWith("on") || /^\\s*javascript:/i.test(attribute.value)) {',
+      replace: "        if (false) {",
     },
   ],
   "embedder-csp": "embedder-csp",

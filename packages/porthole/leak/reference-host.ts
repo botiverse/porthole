@@ -18,6 +18,7 @@ interface Reference {
   pendingConfirmations(id: number): number;
   answer(id: number, accept: boolean): ConfirmRequest | null;
   setTheme(id: number, scheme: "light" | "dark"): void;
+  setContent(id: number, html: string, partial: boolean): void;
   destroy(id: number): void;
 }
 
@@ -54,6 +55,17 @@ export const referenceHost: ConformanceHost = {
     };
     return {
       frame,
+      async box() {
+        const element = await page.locator(`#display-${id} iframe`).elementHandle();
+        const box = await element?.boundingBox();
+        return { width: box?.width ?? 0, height: box?.height ?? 0 };
+      },
+      setContent: (html, options) =>
+        page.evaluate(
+          ([each, text, partial]) =>
+            (window as unknown as WithReference).reference.setContent(each, text, partial),
+          [id, html, options?.partial === true] as const,
+        ),
       setTheme: (scheme) =>
         page.evaluate(
           ([each, next]) => (window as unknown as WithReference).reference.setTheme(each, next),
