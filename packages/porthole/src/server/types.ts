@@ -19,10 +19,13 @@ export interface ContentDomain {
    */
   readonly name?: (scope: string) => string;
   /**
-   * Labels this server never serves or names (another server's namespace under the same domain,
-   * `f` for `<instance>.f.<domain>`, or `www`). Requests for them get null (the host's routes).
+   * Labels this server never serves or names: another server's namespace under the same domain
+   * (`f` for `<instance>.f.<domain>`, `www`), or the host's own (`p-*`: every label starting
+   * `p-`). Each entry is a whole label, or a prefix ending in `*`; or a function that says
+   * whether a label is reserved. Requests for them, and for the names under them, get null (the
+   * host's routes), so a host routes them without wrapping `handle`.
    */
-  readonly reserved?: readonly string[];
+  readonly reserved?: readonly string[] | ((label: string) => boolean);
 }
 
 /**

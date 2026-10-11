@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { compile, embedderCsp, LIBRARY_CDNS, presets } from "../src/index.ts";
+import {
+  compile,
+  embedderCsp,
+  embedderFrameSourcesOf,
+  LIBRARY_CDNS,
+  presets,
+} from "../src/index.ts";
 
 describe("the frame's CSP", () => {
   test("is closed by default: nothing loads, nothing connects, no frames, no forms, no WebRTC", () => {
@@ -111,5 +117,19 @@ describe("the embedding page's CSP", () => {
       "frame-src https://*.example-usercontent.com https://*.preview.example.com https://www.youtube-nocookie.com",
     );
     expect(csp).not.toContain("default-src");
+  });
+});
+
+describe("the embedding page's frame sources as a list (0.1.4)", () => {
+  test("are embedderCsp's, for a host that writes its own policy", () => {
+    const served = presets.artifact({
+      isolation: "domain",
+      contentOrigins: ["https://*.example-usercontent.com"],
+    });
+    expect(embedderFrameSourcesOf([served, presets.inlineWidget()])).toEqual([
+      "https://*.example-usercontent.com",
+    ]);
+    expect(embedderFrameSourcesOf([presets.inlineWidget()])).toEqual([]);
+    expect(embedderCsp([presets.inlineWidget()])).toBe("frame-src 'none'");
   });
 });

@@ -943,3 +943,104 @@ describe("the D1 ticket store (P045)", () => {
     expect(d1TicketSchema("tickets")).toContain("CREATE TABLE IF NOT EXISTS tickets (");
   });
 });
+
+describe("0.1.4: routing a host can rely on", () => {
+  it("reserves label prefixes and a host's own predicate, for the host's routes", async () => {
+    const byPrefix = server({
+      content: {
+        domain: DOMAIN,
+        scheme: "https",
+        name: prefixedName("a-"),
+        reserved: ["p-*", "w-*", "www"],
+      },
+    });
+    for (const url of [
+      `https://p-123.${DOMAIN}/`,
+      `https://w-x.${DOMAIN}/a`,
+      `https://x.p-1.${DOMAIN}/`,
+    ]) {
+      expect(await byPrefix.handle(get(url)), url).toBeNull();
+    }
+    expect((await byPrefix.handle(get(`https://a-1.${DOMAIN}/x`)))?.status).toBe(404);
+    expect(() =>
+      server({
+        content: { domain: DOMAIN, scheme: "https", name: () => "p-1", reserved: ["p-*"] },
+      }).originFor("x"),
+    ).toThrow(/reserved/u);
+    for (const bad of ["P-*", "*", "p-**", "a.b*"]) {
+      expect(
+        () => server({ content: { domain: DOMAIN, scheme: "https", reserved: [bad] } }),
+        bad,
+      ).toThrow(/reserved/u);
+    }
+    const byFunction = server({
+      content: {
+        domain: DOMAIN,
+        scheme: "https",
+        name: prefixedName("a-"),
+        reserved: (label) => {
+          if (label === "boom") {
+            throw new Error("broken");
+          }
+          return label.endsWith("-preview");
+        },
+      },
+    });
+    expect(await byFunction.handle(get(`https://x-preview.${DOMAIN}/`))).toBeNull();
+    // A predicate that throws reserves the label: it goes to the host, never served as ours.
+    expect(await byFunction.handle(get(`https://boom.${DOMAIN}/`))).toBeNull();
+    expect((await byFunction.handle(get(`https://a-1.${DOMAIN}/`)))?.status).toBe(404);
+  });
+
+  it("refuses a request whose Host header names another host than its URL", async () => {
+    const porthole = server();
+    const location = await porthole.issue(shell, { viewer: "v" });
+    const elsewhere = `https://${porthole.originFor("someone-else").slice("https://".length)}`;
+    const crafted = (await porthole.handle(
+      get(location.url, { host: new URL(elsewhere).host }),
+    )) as Response;
+    expect(crafted.status).toBe(400);
+    expect(crafted.headers.get("content-security-policy")).toContain(`frame-ancestors ${HOST}`);
+    // Absolute-form for another host, routed here by a Host of ours.
+    expect(
+      (
+        await porthole.handle(
+          get("https://other.example/x", { host: new URL(location.origin).host }),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(await porthole.access(get(location.url, { host: "app.example.com" }))).toBeNull();
+    // Agreeing (case, default port), or a local address as a test runner sends: served.
+    const agreeing = (await porthole.handle(
+      get(location.url, { host: `${new URL(location.origin).host.toUpperCase()}:443` }),
+    )) as Response;
+    expect(agreeing.status).toBe(200);
+    const again = await porthole.issue(shell, { viewer: "v" });
+    expect((await porthole.handle(get(again.url, { host: "127.0.0.1:8787" })))?.status).toBe(200);
+    // Neither under the content domain: not ours at all.
+    expect(
+      await porthole.handle(get("https://app.example.com/", { host: "api.example.com" })),
+    ).toBeNull();
+  });
+
+  it("tells search engines to keep out of content origins", async () => {
+    const porthole = server();
+    const location = await porthole.issue(shell, { viewer: "v" });
+    for (const response of [
+      (await porthole.handle(get(location.url))) as Response,
+      (await porthole.handle(get(`${location.origin}/nothing`))) as Response,
+    ]) {
+      expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+    }
+  });
+
+  it("answers a path that isn't Porthole's with a plain 404 when it serves no apps", async () => {
+    const porthole = server();
+    const location = await porthole.issue(shell, { viewer: "v" });
+    for (const path of ["/", "/favicon.ico", "/api/anything"]) {
+      const response = (await porthole.handle(get(`${location.origin}${path}`))) as Response;
+      expect(response.status, path).toBe(404);
+      expect(await response.text()).toContain('data-porthole-reason="not-found"');
+    }
+  });
+});

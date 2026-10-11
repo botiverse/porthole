@@ -31,6 +31,9 @@
 export const SHELL_RUNTIME = String.raw`(() => {
   "use strict";
   const plan = __PLAN__;
+  // The embedding page's nonce, where it gave one (a srcdoc frame inherits its policy): every
+  // script the shell runs for the content carries it.
+  const nonce = document.currentScript && document.currentScript.nonce ? document.currentScript.nonce : "";
   const declared = (name) => Object.prototype.hasOwnProperty.call(plan.capabilities, name);
   // Fixed in place: content can neither restore what is removed nor replace what is wrapped.
   const lock = (target, name, value) => {
@@ -485,6 +488,9 @@ export const SHELL_RUNTIME = String.raw`(() => {
       }
       // A script made by a script is async unless told otherwise: keep the page's order.
       live.async = script.hasAttribute("async");
+      if (nonce !== "") {
+        live.nonce = nonce;
+      }
       live.textContent = script.textContent;
       const external = live.hasAttribute("src") && !live.async && live.type !== "module";
       const loaded = external
@@ -507,6 +513,27 @@ export const SHELL_RUNTIME = String.raw`(() => {
   const announceLoaded = () => {
     document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
     window.dispatchEvent(new Event("load"));
+  };
+
+  // Whether the content is in place: a fragment or page the shell draws, once drawn whole; a
+  // view the plan carries, once rendered; a view that is the document itself, from the start.
+  const contentHooks = [];
+  let contentIn = typeof plan.document !== "string" && plan.protocol !== "shell";
+  const contentIsIn = () => contentIn;
+  const whenContentIsIn = (run) => {
+    if (contentIn) {
+      run();
+    } else {
+      contentHooks.push(run);
+    }
+  };
+  const contentArrived = () => {
+    if (!contentIn) {
+      contentIn = true;
+      for (const run of contentHooks.splice(0)) {
+        run();
+      }
+    }
   };
 
   // A fragment takes the person's scheme; a whole document only if it declares that it supports
@@ -544,6 +571,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
     schemeFollows();
     await runScripts(scripts);
     announceLoaded();
+    contentArrived();
   };
 
   // A document the plan carries (a served page, an MCP Apps view) is rendered once the shell's own
@@ -672,7 +700,10 @@ export const SHELL_RUNTIME = String.raw`(() => {
   window.addEventListener("error", (event) => {
     const error = event.error;
     const where = event.lineno ? " (line " + event.lineno + ")" : "";
-    report(error && error.stack ? String(error.stack).split("\n").slice(0, 3).join(" ") : event.message + where);
+    // V8's stack starts with the message; WebKit's and Firefox's don't, so it goes first there.
+    const stack = error && error.stack ? String(error.stack).split("\n").slice(0, 3).join(" ") : "";
+    const said = error && error.message !== undefined ? String(error.name || "Error") + ": " + String(error.message) : event.message;
+    report(stack === "" ? said + where : stack.indexOf(String(error.message)) === -1 ? said + " " + stack : stack);
   });
   window.addEventListener("unhandledrejection", (event) => {
     const reason = event.reason;
@@ -804,6 +835,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
     schedule();
     await runScripts(scripts);
     announceLoaded();
+    contentArrived();
     schedule();
   };
 

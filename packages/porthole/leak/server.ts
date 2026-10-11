@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { stripTypeScriptTypes } from "node:module";
@@ -86,6 +87,19 @@ function embedderPolicy(url: URL): string {
     : policy;
 }
 
+/**
+ * `?nonce=1`: the host page as a strict host serves it (P054): a nonce-based `script-src` (no
+ * 'unsafe-inline', no 'strict-dynamic'), which opaque frames inherit, its own scripts carrying
+ * the nonce, and the nonce handed to `createHost`.
+ */
+function strictPolicy(html: string): { policy: string; body: string } {
+  const nonce = randomBytes(18).toString("base64");
+  return {
+    policy: `script-src 'nonce-${nonce}'; object-src 'none'; base-uri 'none'`,
+    body: html.replaceAll("<script ", `<script nonce="${nonce}" `),
+  };
+}
+
 createServer((request, response) => {
   const url = new URL(request.url ?? "/", "http://localhost");
   serve(url.pathname).then(
@@ -94,15 +108,20 @@ createServer((request, response) => {
         response.writeHead(404, { "content-type": "text/plain" }).end("not found");
         return;
       }
+      const html = found.type.startsWith("text/html");
+      const strict =
+        html && url.searchParams.get("nonce") === "1" ? strictPolicy(found.body) : null;
+      const policies = [
+        ...(html && !weakened.includes("embedder-csp") ? [embedderPolicy(url)] : []),
+        ...(strict === null ? [] : [strict.policy]),
+      ];
       response
         .writeHead(200, {
           "content-type": found.type,
           "cache-control": "no-store",
-          ...(found.type.startsWith("text/html") && !weakened.includes("embedder-csp")
-            ? { "content-security-policy": embedderPolicy(url) }
-            : {}),
+          ...(policies.length === 0 ? {} : { "content-security-policy": policies.join("; ") }),
         })
-        .end(found.body);
+        .end(strict === null ? found.body : strict.body);
     },
     (error: unknown) => {
       console.error(error);

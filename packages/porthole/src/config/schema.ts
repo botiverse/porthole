@@ -175,4 +175,16 @@ export interface PortholeConfig {
   readonly sandbox?: readonly UrlSandboxExtra[];
   /** Url mode only: features delegated to the frame (`URL_PERMISSIONS`); none by default. */
   readonly permissions?: readonly UrlPermission[];
+  /**
+   * Domain isolation: how far a display's storage reaches, for the manual. Storage is per origin,
+   * and the host picks each display's origin (`InstanceRef.scope`); a host that gives several
+   * displays one scope (all of a conversation's widgets) names it here (`{ shared:
+   * "conversation" }`), so the manual says storage is shared across it and keys need a prefix.
+   */
+  readonly storage?: StorageConfig;
+}
+
+export interface StorageConfig {
+  /** What the displays sharing one origin have in common, as a noun ("conversation"). */
+  readonly shared?: string;
 }

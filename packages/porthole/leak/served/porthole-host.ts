@@ -11,12 +11,26 @@ import type { FrameLocation, InstanceRef } from "../../src/isolation/types.ts";
 export interface DisplayRecord {
   readonly outcomes: FrameOutcome[];
   readonly initialized: boolean;
+  /** `<source>: <message>`, from the `error` event. */
   readonly errors: string[];
+  readonly contentErrors: string[];
+  readonly hostErrors: { readonly message: string; readonly kind: string }[];
 }
 
 interface PortholeHostPage {
   records: DisplayRecord[];
-  mount(config: PortholeConfig, location: FrameLocation, instance: InstanceRef): number;
+  mount(
+    config: PortholeConfig,
+    location: FrameLocation | null,
+    instance: InstanceRef,
+    options?: MountExtras,
+  ): number;
+}
+
+/** What else a mount is given: content to send a shell, and whether the frame fills its box. */
+export interface MountExtras {
+  readonly content?: string;
+  readonly fill?: boolean;
 }
 
 export const app = (scope: string): InstanceRef => ({
@@ -34,21 +48,24 @@ export async function mount(
   page: Page,
   origin: string,
   config: PortholeConfig,
-  location: FrameLocation,
+  /** Null: the host's locator fails. */
+  location: FrameLocation | null,
   instance: InstanceRef,
+  extras: MountExtras = {},
 ): Promise<Mounted> {
   if (!page.url().startsWith(`${origin}/porthole-host`)) {
     await page.goto(`${origin}/porthole-host`);
     await page.waitForFunction(() => "portholeHost" in window);
   }
   const index = await page.evaluate(
-    ([each, where, what]) =>
+    ([each, where, what, more]) =>
       (window as unknown as { portholeHost: PortholeHostPage }).portholeHost.mount(
         each,
         where,
         what,
+        more,
       ),
-    [config, location, instance] as const,
+    [config, location, instance, extras] as const,
   );
   const element = page.locator("#displays iframe").nth(index);
   return {

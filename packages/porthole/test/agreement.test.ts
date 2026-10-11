@@ -62,6 +62,12 @@ const CASES: Record<string, PortholeConfig> = {
   }),
   "artifact page": presets.artifact(),
   "artifact page with comments": presets.artifact({ capabilities: { annotate: {} } }),
+  "inline widget, served, storage shared per conversation": presets.inlineWidget({
+    isolation: "domain",
+    contentOrigins: ["https://*.example-usercontent.com"],
+    storage: { shared: "conversation" },
+    capabilities: { copyText: {} },
+  }),
   "artifact page, served on its own domain": presets.artifact({
     isolation: "domain",
     contentOrigins: ["https://*.example-usercontent.com"],

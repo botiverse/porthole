@@ -369,6 +369,9 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         const root = ensureLayer();
         const parts = [];
         const style = createElement.call(document, "style");
+        if (nonce !== "") {
+          style.nonce = nonce;
+        }
         style.textContent = STYLE;
         parts.push(style);
         const flashOn = Date.now() < flashUntil;
@@ -439,9 +442,24 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       let anchorTimer = 0;
       let deadline = 0;
       let reportAll = false;
+      // Nothing is reported before the content is in place (an empty shell would orphan every
+      // mark), nor before a run of changes settles; a focus asked for meanwhile waits for it.
+      let waitingForContent = false;
+      let pendingFocus = null;
+      const settling = () => anchorTimer !== 0 || waitingForContent || marks.some((mark) => mark.state === null);
       const scheduleAnchor = (all) => {
         if (all) {
           reportAll = true;
+        }
+        if (!contentIsIn()) {
+          if (!waitingForContent) {
+            waitingForContent = true;
+            whenContentIsIn(() => {
+              waitingForContent = false;
+              scheduleAnchor(false);
+            });
+          }
+          return;
         }
         const now = Date.now();
         if (deadline === 0) {
@@ -449,10 +467,16 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
         clearTimeout(anchorTimer);
         anchorTimer = setTimeout(() => {
+          anchorTimer = 0;
           deadline = 0;
           const every = reportAll;
           reportAll = false;
           anchorAll(every);
+          if (pendingFocus !== null) {
+            const id = pendingFocus;
+            pendingFocus = null;
+            focus(id);
+          }
         }, Math.max(0, Math.min(150, deadline - now)));
       };
       new MutationObserver((records) => {
@@ -473,6 +497,12 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const focus = (id) => {
         const mark = marks.filter((each) => each.id === id)[0];
         if (!mark) {
+          return;
+        }
+        if (settling()) {
+          // Where it is isn't known yet: focus it once anchoring has settled, then say where.
+          pendingFocus = id;
+          active = id;
           return;
         }
         active = id;
@@ -657,6 +687,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             focus(String(params.id));
             break;
           case M.clear:
+            pendingFocus = null;
             marks = [];
             active = null;
             draw();

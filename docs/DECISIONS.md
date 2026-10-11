@@ -1167,3 +1167,161 @@ never who may see or do anything.
 
 **Revisit when** content needs to cooperate (an author-declared anchor id API), or MCP Apps defines
 annotations.
+
+## P054 · 2026-10-11 · On a page with a nonce-based script-src, the shell carries the host's nonce · Accepted
+
+**Decision.** A host whose page sends a nonce-based `script-src` (no `'unsafe-inline'`) passes its
+nonce to Porthole: `HostOptions.nonce` (a string, or a function read each time a frame starts),
+or `PortholeProvider`'s `nonce`. An opaque frame's shell document then carries it on its
+`<script>` and `<style>`. The shell gives it to every script it runs for the content, and to the
+annotation layer's style. Item 5 of 0.1.4 (the second host's friction).
+
+**Why.** A `srcdoc` frame inherits the embedding page's whole policy, so a strict page blocked the
+shell. The host this was built for had to run the conformance suite on a stripped page. Served
+frames are navigations to an origin of their own, so they inherit nothing and need no nonce.
+
+**Measured.** The whole leak suite runs again on a reference page whose policy is
+`script-src 'nonce-…'; object-src 'none'; base-uri 'none'` (`leak/strict-csp.spec.ts`). It
+passes on Chromium, WebKit and Firefox. Its negative control `nonce` (the shell without the
+nonce) fails it.
+
+**Risk.** The frame learns the page's nonce:
+- its scripts carry it;
+- the shell's own script element is in its document.
+
+A nonce is per response. It helps an attacker only together with a markup injection into that
+same response of the host's page, which the content can't make by itself. A host that also
+renders content-supplied HTML in its own page has a bigger problem than the nonce.
+
+**Limits.** Inline event handlers in content (`onclick="…"`) stay blocked by such a policy, as they
+are on the page itself; scripts and `addEventListener` work. A nonce-based `style-src` would also
+block the content's inline styles; the shell doesn't rewrite those.
+
+**Rejected.**
+- Hash-based sources Porthole publishes for its shell: the content's scripts would still be
+  blocked.
+- `data:` or `blob:` frames to escape inheritance: they inherit too, or need `frame-src` entries.
+- Requiring `'strict-dynamic'`: it's the host's policy to choose.
+
+**Revisit when** browsers let an embedding page give a `srcdoc` frame a policy of its own instead
+of its own.
+
+## P055 · 2026-10-11 · What the content did wrong and what failed on the host's side are separate · Accepted
+
+**Decision.** A display reports `contentError` (what the content threw, what the sandbox blocked,
+that it kept navigating its frame away: the agent's to hear and fix) apart from `hostError`
+(`{ message, kind }`). `kind` is `locate` when the host's locator rejected; in the React binding
+it can also be `mount` (a display that couldn't be made) or `annotations` (an annotation call
+refused). A failed locate also ends the display's load as `outcome: blocked, reason: locate`.
+
+`error` still fires for both, now with `source: "content" | "host"`, so hosts that listened there
+keep working. The React binding adds `onContentError` and `onHostError`; `onError` now gets
+`(message, source)`. Item 1 of 0.1.4 (both hosts' friction).
+
+**Why.** Both hosts forward the content's errors to the agent. A failed locate (the server down,
+access gone) is the host's own, and the agent would have tried to fix a widget for it. One host
+tagged its own messages to tell them apart; the other caught inside its locator. A failed locate
+also used to leave no outcome at all.
+
+**Tested.** On all three engines:
+- core (`leak/served/outcome.spec.ts`): a failing locator gives `blocked: locate` and one host
+  error, no content error; a throwing widget gives a content error only;
+- React (`leak/react.spec.ts`): a throwing widget goes to `onContentError`, a display with an
+  unserved capability to `onHostError` (`mount`), each with its source on `onError`.
+
+Found on the way: on WebKit and Firefox a content error was reported without its message, because
+their `error.stack` doesn't start with it the way V8's does, so the agent heard only a stack. The
+shell now puts the message first there. Measured: WebKit mutes an opaque (`srcdoc`) frame's script
+errors to "Script error.", so there the host gets a content error without its message; served
+frames carry it on all three engines.
+**Rejected.** Dropping host failures from `error` (it would break hosts that relied on seeing a
+failed locate there).
+**Revisit when** `error` can be removed (a major version).
+
+## P056 · 2026-10-11 · `/server` routing a host can rely on · Accepted
+
+**Decision.** Items 3, 4 and 8 of 0.1.4, and the second host's headers:
+- **Reserved labels.** `content.reserved` takes whole labels, prefixes ending in `*` (`p-*`), or a
+  function of the label. A function that throws reserves the label, so the request goes to the
+  host's routes rather than being served as content. Requests in a reserved namespace return
+  null, so a host routes its own `p-`/`w-` labels without wrapping `handle`. A host's naming may
+  never produce a reserved label.
+- **Host header.** The label is read from the request URL. If the Host header names another host
+  and either of the two is under the content domain, the answer is a 400 page. A Host that is a
+  local address (an IP literal, `localhost`, as Miniflare's `dispatchFetch` or a dev proxy sends)
+  is not a name and isn't compared.
+- **No upstream.** A server without an `upstream` serves only Porthole's own paths
+  (`/__porthole/…`). Any other path gets a plain 404, not url mode's 401 "Open this from the
+  app".
+- **Indexing.** Every answer of Porthole's own says `x-robots-tag: noindex, nofollow`. Content
+  origins are behind tickets.
+- **Frame sources.** `embedderFrameSourcesOf(configs)` returns the embedding page's `frame-src`
+  sources as a list, for a host that writes its own policy around them.
+
+**Why.**
+- One host shares its content domain with its own preview gateway on `p-…` labels. It had to
+  route by label before `handle`.
+- A Node adapter (Hono's `getRequestListener`) builds the URL from an absolute-form target
+  (`GET http://other/…`) while the host, and any cache in front of it, routes by Host. A crafted
+  request could get content served under another host's name.
+- The second host rewrote every non-Porthole path to `/__porthole/not-found` to avoid the
+  misleading 401, and sliced `embedderCsp`'s string to merge it.
+
+**Tested.** Server tests cover:
+- prefixes, a predicate, and a throwing predicate;
+- names that would be reserved;
+- a crafted Host, an absolute-form target, an agreeing Host with a default port, and a local
+  address;
+- the 404 without an upstream;
+- the noindex header.
+
+The Workers test (where Miniflare sends a local Host) still passes.
+**Rejected.** Reading the label from the Host header instead: on Workers the URL is the routed
+truth, and test runners send a local Host. Refusing every mismatch: it would refuse those runners.
+**Revisit when** a host needs Porthole behind a proxy that rewrites Host (then
+`X-Forwarded-Host`, by a decision).
+
+## P057 · 2026-10-11 · Hosts lay out, identify and annotate displays as they write them · Accepted
+
+**Decision.** Items 2, 6, 7, 9 and 10 of 0.1.4:
+- **Shared storage, in the manual.** A config may say what the displays sharing an origin share
+  (`storage: { shared: "conversation" }`, domain isolation only). The manual then says storage is
+  shared across that scope and that keys need a prefix of the display's own.
+- **Fill.** `MountOptions.fill` (React: `fill`) makes the frame fill its container, with the content
+  scrolling inside, instead of growing with the content. Sizes are still reported.
+- **Identity in React.** `config`, `instance`, `annotations` and the provider's `hostInfo` are
+  compared by value. The provider's `locator` (like `confirm`) is read when used. An inline object
+  no longer starts a running frame again.
+- **Annotations settle.** Nothing is reported before the content is in place, nor while a run of
+  changes settles. A `focus` asked for meanwhile waits, then scrolls and reports, so a focus right
+  after `show` says where the mark is, never `orphaned` first. React's `focusedAnnotation` takes
+  `{ id, key }` to focus the same mark again.
+- **Served shells in the conformance suite.** `ServedConformanceHost.show` gets `options.content`
+  for each shell, and a host that speaks to the shell sends it. A shell draws nothing, and reports
+  no height, until it has content.
+
+**Why.**
+- One host scopes storage per conversation, so its widgets overwrote each other's keys untold.
+- The second host needed `!important` CSS on Porthole's internal attributes to make an artifact
+  fill its viewer.
+- Hosts memoized config, instance, hostInfo and marks by hand, and one compared marks as JSON
+  itself.
+- Both hosts worked around a focus that said `orphaned` first.
+- The first host's conformance host had to give shells content by itself.
+
+**Tested.** On all three engines:
+- React: inline objects across re-renders keep one display; an artifact fills its 300 px box and
+  scrolls inside, and without `fill` grows to its cap.
+- Annotations: a focus right after `show` gives two reports, both attached, the focused mark in
+  view; marks shown before the content are reported once it arrives.
+- The served shell cases pass against a `createHost` host whose frames take their content's height.
+  Without content they time out clicking (checked by hand).
+
+Unit tests cover the storage note and its validation.
+
+**Rejected.**
+- A dev-only warning for unstable props: comparing by value removes the need.
+- `fill` in the config: it is the host's layout, per mount.
+
+**Revisit when** a host's config or instance carries something that isn't plain data (then
+compare it otherwise).

@@ -38,8 +38,17 @@ export interface ServedConformanceHost {
    * Shows `instance` in `page` as the host does: a fresh ticket from its backend, framed under
    * the config's sandbox, in an embedding page that sends the config's `embedderCsp`. The same page
    * may show several, one after another.
+   *
+   * For a served shell the suite gives `options.content`, a line of HTML: a host that speaks to
+   * the shell (`createHost`, the React binding) sends it as the display's content, since a shell
+   * draws nothing (and reports no height) until it has content, and the cases click inside it. A
+   * host whose frame has a height of its own may ignore it.
    */
-  show(page: Page, instance: InstanceRef): Promise<ServedDisplay>;
+  show(
+    page: Page,
+    instance: InstanceRef,
+    options?: { readonly content?: string },
+  ): Promise<ServedDisplay>;
   /** A fresh ticketed location for `instance`, as the host's backend issues it. */
   locate(instance: InstanceRef): Promise<FrameLocation>;
   /** Navigates `page` to a page on an origin that is not one of the host's, framing `url`. */
@@ -73,6 +82,9 @@ export interface ServedSuiteOptions {
 type Fixtures = { page: Page; browserName: string };
 
 const SETTLE_MS = 800;
+
+/** What a served shell is given to draw (`ServedConformanceHost.show`'s `content`). */
+const SHELL_CONTENT = '<p id="porthole-probe-content">Porthole conformance probe</p>';
 
 /** What the frame can see of its host: everything here must be closed to it. */
 async function reachIntoHost(frame: Frame): Promise<Record<string, string>> {
@@ -185,13 +197,16 @@ export function servedTests(
       ["domain", (scope: string) => host.shell(scope)],
       ["url", (scope: string) => host.app(scope)],
     ] as const;
+    // A served shell draws (and has a height to click in) once its host gives it content.
+    const showMode = (page: Page, mode: "domain" | "url", instance: InstanceRef) =>
+      host.show(page, instance, mode === "domain" ? { content: SHELL_CONTENT } : {});
 
     for (const [mode, instance] of modes) {
       define(
         `served.${mode}.origin`,
         "content runs on its own origin, never the host's",
         async ({ page }) => {
-          const display = await host.show(page, instance(`${mode}-origin`));
+          const display = await showMode(page, mode, instance(`${mode}-origin`));
           const frame = await display.frame();
           const origin = await frame.evaluate(() => window.origin);
           expect(origin).toBe(display.origin);
@@ -203,7 +218,7 @@ export function servedTests(
         `served.${mode}.no-reach`,
         "content can't reach the host's DOM, storage, cookies or URL",
         async ({ page }) => {
-          const display = await host.show(page, instance(`${mode}-reach`));
+          const display = await showMode(page, mode, instance(`${mode}-reach`));
           await plantHostSecrets(page);
           expect(await reachIntoHost(await display.frame())).toEqual(CLOSED);
         },
@@ -213,7 +228,7 @@ export function servedTests(
         `served.${mode}.no-top-navigation`,
         "content can't navigate the host's page, even after a click",
         async ({ page }) => {
-          const display = await host.show(page, instance(`${mode}-top`));
+          const display = await showMode(page, mode, instance(`${mode}-top`));
           const frame = await display.frame();
           const before = page.url();
           const target = await host.canary(`${mode}-top`);
@@ -246,7 +261,7 @@ export function servedTests(
         `served.${mode}.no-popups`,
         "content can't open a window, even after a click",
         async ({ page }) => {
-          const display = await host.show(page, instance(`${mode}-popup`));
+          const display = await showMode(page, mode, instance(`${mode}-popup`));
           const frame = await display.frame();
           const target = await host.canary(`${mode}-popup`);
           const opened: Page[] = [];
@@ -283,13 +298,13 @@ export function servedTests(
       "served.domain.storage-scope",
       "storage persists within a scope and is never shared across scopes",
       async ({ page }) => {
-        const first = await host.show(page, host.shell("scope-a"));
+        const first = await host.show(page, host.shell("scope-a"), { content: SHELL_CONTENT });
         await (await first.frame()).evaluate(() => localStorage.setItem("kept", "a"));
         await first.destroy();
-        const again = await host.show(page, host.shell("scope-a"));
+        const again = await host.show(page, host.shell("scope-a"), { content: SHELL_CONTENT });
         expect(await (await again.frame()).evaluate(() => localStorage.getItem("kept"))).toBe("a");
         expect(again.origin).toBe(first.origin);
-        const other = await host.show(page, host.shell("scope-b"));
+        const other = await host.show(page, host.shell("scope-b"), { content: SHELL_CONTENT });
         expect(other.origin).not.toBe(first.origin);
         expect(await (await other.frame()).evaluate(() => localStorage.getItem("kept"))).toBeNull();
       },
@@ -367,7 +382,7 @@ export function servedTests(
       "served.domain.egress",
       "the CSP in the document's headers closes egress",
       async ({ page }) => {
-        const display = await host.show(page, host.shell("egress"));
+        const display = await host.show(page, host.shell("egress"), { content: SHELL_CONTENT });
         const frame = await display.frame();
         const fetched = await frame.evaluate(
           async (url) => {

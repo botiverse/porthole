@@ -29,7 +29,7 @@ import type { CapabilityName } from "../config/capabilities.ts";
 import type { ColorScheme, PortholeConfig } from "../config/schema.ts";
 import { writeClipboard } from "../host/clipboard.ts";
 import { createHost } from "../host/create-host.ts";
-import type { DisplayEvents, DisplayHandle, FrameOutcome } from "../host/types.ts";
+import type { DisplayEvents, DisplayHandle, FrameOutcome, HostErrorKind } from "../host/types.ts";
 import type { InstanceLocator, InstanceRef } from "../isolation/types.ts";
 import { ConfirmDialog } from "./dialog.tsx";
 import { createLiveFrames, type FrameState, type LiveFrames } from "./live.ts";
@@ -53,7 +53,9 @@ interface PageState {
   readonly heights: Map<string, number>;
   readonly confirm?: Confirm;
   readonly hostInfo?: { readonly name: string; readonly version: string };
-  readonly locator?: InstanceLocator;
+  readonly nonce?: string;
+  /** The provider's locator, read when a frame locates (so an inline one restarts nothing). */
+  readonly locate?: InstanceLocator["locate"];
   /** The default `copyText`: copies on the host's page and shows the toast (P052). */
   readonly copyText?: CapabilityHandler<"copyText">;
 }
@@ -77,6 +79,11 @@ export interface PortholeProviderProps {
   readonly dialogClassName?: string;
   /** A class for the default copy toast, to restyle it. */
   readonly toastClassName?: string;
+  /**
+   * The page's CSP nonce, where its `script-src` is nonce-based: opaque frames inherit the page's
+   * policy, so their shell carries it (P054).
+   */
+  readonly nonce?: string;
   readonly children?: ReactNode;
 }
 
@@ -113,7 +120,22 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
     return copied;
   }, []);
   const closeNotice = useCallback(() => setNotice(null), []);
-  const { hostInfo, locator } = props;
+  // Compared by value, and read when used: an inline hostInfo or locator doesn't start every
+  // frame again on each render.
+  const hostInfo = useByValue(props.hostInfo);
+  const ownLocator = useRef(props.locator);
+  useLayoutEffect(() => {
+    ownLocator.current = props.locator;
+  });
+  const locate = useCallback<InstanceLocator["locate"]>(
+    (instance, signal) =>
+      ownLocator.current === undefined
+        ? Promise.reject(new Error("No locator (PortholeProvider.locator)"))
+        : ownLocator.current.locate(instance, signal),
+    [],
+  );
+  const locates = props.locator !== undefined;
+  const { nonce } = props;
   const value = useMemo<PageState>(
     () => ({
       live,
@@ -121,9 +143,10 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
       confirm,
       copyText,
       ...(hostInfo === undefined ? {} : { hostInfo }),
-      ...(locator === undefined ? {} : { locator }),
+      ...(locates ? { locate } : {}),
+      ...(nonce === undefined ? {} : { nonce }),
     }),
-    [live, heights, confirm, copyText, hostInfo, locator],
+    [live, heights, confirm, copyText, hostInfo, locates, locate, nonce],
   );
   const current = queue[0] ?? null;
   return (
@@ -192,9 +215,28 @@ export interface PortholeFrameProps {
   readonly generation?: number;
   /** Run at once, without waiting to near the screen (it still counts toward the page's most). */
   readonly eager?: boolean;
+  /**
+   * Fill the box (give it, or its parent, a height) and let the content scroll inside, instead of
+   * growing with the content: an artifact viewer's page. A url-mode app always fills.
+   */
+  readonly fill?: boolean;
   readonly onInitialized?: () => void;
   readonly onResize?: (size: { readonly height: number; readonly width?: number }) => void;
-  readonly onError?: (message: string) => void;
+  /**
+   * What the content did wrong (what it threw, what the sandbox blocked, that it kept navigating
+   * away): the agent's to hear and fix.
+   */
+  readonly onContentError?: (message: string) => void;
+  /**
+   * What failed on the host's side: its locator (`locate`), a display that couldn't be made
+   * (`mount`), an annotation call refused (`annotations`). Never the agent's.
+   */
+  readonly onHostError?: (error: {
+    readonly message: string;
+    readonly kind: HostErrorKind;
+  }) => void;
+  /** Both, with their source (as before 0.1.4). Prefer `onContentError` and `onHostError`. */
+  readonly onError?: (message: string, source: "content" | "host") => void;
   /** The content navigated its frame away; it was started again (or stopped, after a few). */
   readonly onNavigated?: () => void;
   readonly onRefused?: (capability: CapabilityName, refusal: Refusal) => void;
@@ -223,8 +265,14 @@ export interface PortholeFrameProps {
   readonly annotating?: AnnotateMode | null;
   /** The anchors to mark in the frame (the host's comments). Keep it stable (memoized). */
   readonly annotations?: readonly AnnotationMark[];
-  /** The mark to bring into view and make the active one; each new id focuses it. */
-  readonly focusedAnnotation?: string | null;
+  /**
+   * The mark to bring into view and make the active one; each new id focuses it. To focus the
+   * same mark again (a second click on its comment), give `{ id, key }` with a new key.
+   */
+  readonly focusedAnnotation?:
+    | string
+    | { readonly id: string; readonly key: string | number }
+    | null;
   /**
    * What the frame reported: a selection (an anchor and where it is), its clearing, a cancelled
    * pick, where marks are. The content's word: UI hints, never permissions.
@@ -343,6 +391,8 @@ export function PortholeFrame(props: PortholeFrameProps): ReactElement {
       style={{
         position: "relative",
         width: "100%",
+        // A display that fills takes its parent's height (the host sizes the parent, or this box).
+        ...(props.fill === true || props.config.mode === "url" ? { height: "100%" } : {}),
         ...(state === "running" ? {} : { minHeight: Math.max(height, PLACEHOLDER_HEIGHT_PX) }),
         ...props.style,
       }}
@@ -380,8 +430,11 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
   const [ready, setReady] = useState(false);
   // The height this display started at: later reports don't make it start again.
   const [startHeight] = useState(initialHeightPx);
-  const { config, document: view, instance, content, partial, scheme } = frame;
-  const fills = config.mode === "url";
+  const { document: view, content, partial, scheme } = frame;
+  // By value: a config or instance made inline (each render) is the same display.
+  const config = useByValue(frame.config);
+  const instance = useByValue(frame.instance);
+  const fills = config.mode === "url" || frame.fill === true;
 
   // The latest props, read when the display calls back (never during render).
   const latest = useEffectEvent(() => frame);
@@ -398,9 +451,17 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
           frame.onResize?.(size);
           return;
         }
-        case "error":
-          frame.onError?.((detail as DisplayEvents["error"]).message);
+        case "contentError":
+          frame.onContentError?.((detail as DisplayEvents["contentError"]).message);
           return;
+        case "hostError":
+          frame.onHostError?.(detail as DisplayEvents["hostError"]);
+          return;
+        case "error": {
+          const { message, source } = detail as DisplayEvents["error"];
+          frame.onError?.(message, source);
+          return;
+        }
         case "navigated":
           frame.onNavigated?.();
           return;
@@ -468,7 +529,8 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
           : {}),
         theme: (each) => latest().theme?.(each) ?? {},
         ...(page.hostInfo === undefined ? {} : { hostInfo: page.hostInfo }),
-        ...(page.locator === undefined ? {} : { locator: page.locator }),
+        ...(page.locate === undefined ? {} : { locator: { locate: page.locate } }),
+        ...(page.nonce === undefined ? {} : { nonce: page.nonce }),
       }).mount(container, {
         displayId: first.displayId,
         title: first.title,
@@ -476,9 +538,10 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
         initialHeightPx: startHeight,
         ...(view === undefined ? {} : { document: view }),
         ...(instance === undefined ? {} : { instance }),
+        ...(fills ? { fill: true } : {}),
       });
     } catch (error) {
-      first.onError?.(error instanceof Error ? error.message : String(error));
+      hostFailed(first, error, "mount");
       return;
     }
     handle.current = display;
@@ -491,6 +554,8 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
       "muted",
       "outcome",
       "annotation",
+      "contentError",
+      "hostError",
     ];
     for (const event of events) {
       display.on(event, (detail) => notify(event, detail));
@@ -507,7 +572,7 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
     };
     // A new display only for a new config, document, instance or page (or generation, by key);
     // content, theme, handlers, id and title are fed to the running one.
-  }, [config, view, instance, page, startHeight]);
+  }, [config, view, instance, page, startHeight, fills]);
 
   useEffect(() => {
     if (content !== undefined) {
@@ -516,7 +581,16 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
   }, [content, partial]);
   // Annotations follow their props (a new display gets them all when it is made, above).
   const annotates = config.capabilities.annotate !== undefined;
-  const { annotating, annotations, focusedAnnotation } = frame;
+  const { annotating } = frame;
+  const focusedAnnotation = focusOf(frame.focusedAnnotation);
+  const focusToken =
+    focusedAnnotation === null
+      ? ""
+      : typeof frame.focusedAnnotation === "object" && frame.focusedAnnotation !== null
+        ? JSON.stringify([frame.focusedAnnotation.id, frame.focusedAnnotation.key])
+        : JSON.stringify([focusedAnnotation]);
+  // By value: the same marks given again don't mark them again.
+  const annotations = useByValue(frame.annotations);
   const mode =
     annotating === undefined || annotating === null
       ? ""
@@ -543,10 +617,11 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
   }, [annotates, annotations]);
   useEffect(() => {
     const display = handle.current;
-    if (annotates && display !== null && typeof focusedAnnotation === "string") {
-      attempt(() => display.annotations.focus(focusedAnnotation), latest());
+    const id = focusOf(latest().focusedAnnotation);
+    if (annotates && display !== null && focusToken !== "" && id !== null) {
+      attempt(() => display.annotations.focus(id), latest());
     }
-  }, [annotates, focusedAnnotation]);
+  }, [annotates, focusToken]);
   useEffect(() => {
     handle.current?.setTheme(scheme);
   }, [scheme]);
@@ -577,12 +652,19 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
   );
 }
 
-/** Runs an annotation call, telling the frame's `onError` what it threw (a bad anchor, say). */
+/** Tells the frame's props what failed on the host's side. */
+function hostFailed(frame: PortholeFrameProps, error: unknown, kind: HostErrorKind): void {
+  const message = error instanceof Error ? error.message : String(error);
+  frame.onHostError?.({ message, kind });
+  frame.onError?.(message, "host");
+}
+
+/** Runs an annotation call, telling the frame's props what it threw (a bad anchor, say). */
 function attempt(run: () => void, frame: PortholeFrameProps): void {
   try {
     run();
   } catch (error) {
-    frame.onError?.(error instanceof Error ? error.message : String(error));
+    hostFailed(frame, error, "annotations");
   }
 }
 
@@ -592,11 +674,31 @@ function applyAnnotations(display: DisplayHandle, frame: PortholeFrameProps): vo
     if (frame.annotations !== undefined && frame.annotations.length > 0) {
       display.annotations.show(frame.annotations);
     }
-    if (typeof frame.focusedAnnotation === "string") {
-      display.annotations.focus(frame.focusedAnnotation);
+    const focused = focusOf(frame.focusedAnnotation);
+    if (focused !== null) {
+      display.annotations.focus(focused);
     }
     if (frame.annotating !== undefined && frame.annotating !== null) {
       display.annotations.start(frame.annotating);
     }
   }, frame);
+}
+
+/**
+ * `value` as long as it is equal by value (as JSON): plain data a host builds inline on each
+ * render (a config, an instance, marks, hostInfo) keeps one identity, so effects keyed on it run
+ * only when it really changes.
+ */
+function useByValue<T>(value: T): T {
+  const key = value === undefined ? "" : JSON.stringify(value);
+  return useMemo(() => (key === "" ? undefined : JSON.parse(key)) as T, [key]);
+}
+
+/** The id `focusedAnnotation` names, if any. */
+function focusOf(value: PortholeFrameProps["focusedAnnotation"]): string | null {
+  return typeof value === "string"
+    ? value
+    : value === null || value === undefined
+      ? null
+      : value.id;
 }

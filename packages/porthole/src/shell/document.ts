@@ -25,7 +25,16 @@ export interface ShellDocumentOptions {
    * both apply, and the stricter wins.
    */
   readonly cspMeta?: boolean;
+  /**
+   * The embedding page's CSP nonce, where its `script-src` is nonce-based (P054): a `srcdoc` frame
+   * inherits the embedding page's policy, so the shell's script and style carry it, and so does
+   * every script the shell runs for the content. The frame can read it.
+   */
+  readonly nonce?: string;
 }
+
+/** A CSP nonce: base64 or base64url characters, 8 to 256 of them. */
+const NONCE = /^[A-Za-z0-9+/_=-]{8,256}$/u;
 
 const escapeAttribute = (value: string): string =>
   value.replace(/&/gu, "&amp;").replace(/"/gu, "&quot;").replace(/</gu, "&lt;");
@@ -86,6 +95,10 @@ export function shellDocument(plan: ShellPlan, csp: string, options: ShellDocume
       throw new TypeError(`shellDocument: ${problem}`);
     }
   }
+  if (options.nonce !== undefined && !NONCE.test(options.nonce)) {
+    throw new TypeError("shellDocument: a nonce is 8 to 256 base64 characters");
+  }
+  const nonce = options.nonce === undefined ? "" : ` nonce="${options.nonce}"`;
   // The annotation runtime only where it is declared; spliced in before the plan, which may carry
   // any text (a document) and must not be searched.
   const runtime = SHELL_RUNTIME.replace("__ANNOTATE__", () =>
@@ -113,13 +126,13 @@ export function shellDocument(plan: ShellPlan, csp: string, options: ShellDocume
 ${head.join("\n")}
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeText(options.title ?? "Content")}</title>
-<style>
+<style${nonce}>
 ${BASE_STYLE}
 </style>
 </head>
 <body>
 <div id="porthole-root"></div>
-<script>${runtime}</script>
+<script${nonce}>${runtime}</script>
 </body>
 </html>
 `;

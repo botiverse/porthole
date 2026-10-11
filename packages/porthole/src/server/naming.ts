@@ -40,3 +40,44 @@ export function prefixedName(prefix: string): (scope: string) => string {
     return label;
   };
 }
+
+const PREFIX_ENTRY = /^[a-z0-9]([a-z0-9-]{0,61})?\*$/u;
+
+/**
+ * Whether a label is reserved (`ContentDomain.reserved`): a whole label, a prefix ending in `*`
+ * (`p-*`), or the host's own function. Entries are checked once, here; a function that throws
+ * reserves the label (fail closed: the request goes to the host's routes, never served as ours).
+ */
+export function reservedLabels(
+  reserved: readonly string[] | ((label: string) => boolean) | undefined,
+): (label: string) => boolean {
+  if (reserved === undefined) {
+    return () => false;
+  }
+  if (typeof reserved === "function") {
+    return (label) => {
+      try {
+        return reserved(label);
+      } catch {
+        return true;
+      }
+    };
+  }
+  if (!Array.isArray(reserved)) {
+    throw new TypeError("content.reserved: a list of labels and prefixes, or a function");
+  }
+  const whole = new Set<string>();
+  const prefixes: string[] = [];
+  for (const entry of reserved) {
+    if (typeof entry === "string" && PREFIX_ENTRY.test(entry)) {
+      prefixes.push(entry.slice(0, -1));
+    } else if (isHostLabel(entry)) {
+      whole.add(entry);
+    } else {
+      throw new TypeError(
+        `content.reserved: ${JSON.stringify(entry)} is not a lowercase DNS label or a prefix ending in *`,
+      );
+    }
+  }
+  return (label) => whole.has(label) || prefixes.some((prefix) => label.startsWith(prefix));
+}

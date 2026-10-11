@@ -26,6 +26,8 @@ controls, gating on Chromium, WebKit and Firefox.
 names, anonymous public links and the host's per-request check (0.1.2).
 Content never writes the clipboard (copy buttons call `copyText`, which the host
 performs and shows), and a host can let people annotate content (0.1.3).
+Hosts' friction from adopting it is fixed in 0.1.4: content and host errors apart,
+strict nonce CSPs, fill mode, reserved label prefixes, by-value React props.
 
 ## Setup
 

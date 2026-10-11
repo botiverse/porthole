@@ -118,3 +118,46 @@ test("a served shell is loaded when it finishes its handshake; from a host it do
   );
   expect(await outcomeOf(foreign)).toEqual({ state: "blocked", reason: "framing" });
 });
+
+test("a locator that fails is the host's: blocked (locate) and a host error, never a content error", async ({
+  page,
+}) => {
+  const served = await harness();
+  const instance: InstanceRef = {
+    scope: "outcome-locate",
+    document: { kind: "shell", preset: "inlineWidget" },
+  };
+  const { read } = await mount(
+    page,
+    served.hostOrigin,
+    served.configs.inlineWidget as PortholeConfig,
+    null,
+    instance,
+  );
+  expect(await outcomeOf(read)).toEqual({ state: "blocked", reason: "locate" });
+  const record = await read();
+  expect(record.hostErrors).toEqual([{ message: "The host's backend is down", kind: "locate" }]);
+  expect(record.contentErrors).toEqual([]);
+  expect(record.errors).toEqual(["host: The host's backend is down"]);
+});
+
+test("what the content throws is a content error, never the host's", async ({ page }) => {
+  const served = await harness();
+  const instance: InstanceRef = {
+    scope: "outcome-throws",
+    document: { kind: "shell", preset: "inlineWidget" },
+  };
+  const { read } = await mount(
+    page,
+    served.hostOrigin,
+    served.configs.inlineWidget as PortholeConfig,
+    await served.porthole.issue(instance, { viewer: "probe" }),
+    instance,
+    { content: '<p>x</p><script>throw new Error("widget broke")</script>' },
+  );
+  await expect.poll(async () => (await read()).contentErrors.length).toBeGreaterThan(0);
+  const record = await read();
+  expect(record.contentErrors[0]).toContain("widget broke");
+  expect(record.hostErrors).toEqual([]);
+  expect(record.errors[0]).toMatch(/^content: .*widget broke/u);
+});

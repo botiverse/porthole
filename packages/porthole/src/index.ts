@@ -29,6 +29,7 @@ export type {
   LayoutConfig,
   Limits,
   PortholeConfig,
+  StorageConfig,
   ThemeConfig,
   ThemeValue,
 } from "./config/schema.ts";
@@ -65,6 +66,7 @@ export {
   effectiveGates,
   egressOrigins,
   embedderCsp,
+  embedderFrameSourcesOf,
   type CspDirective,
   type EgressKind,
 } from "./compile/policy.ts";

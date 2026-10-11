@@ -243,8 +243,15 @@ and calls `PortholeServer.issue`.
   host may name its own (`content.name`; `prefixedName("a-")` gives `a-<scope>`,
   one-to-one): one lowercase DNS label, never an IDNA form or a `reserved` one.
   `reserved` labels are other servers' namespaces under the same domain (`f` for
-  `<label>.f.<domain>`): requests for them and anything under them return null, to
-  the host's routes; any other deeper name gets this server's 404.
+  `<label>.f.<domain>`) or the host's own (`p-*`: every label starting `p-`; or a
+  function of the label, P056): requests for them and anything under them return
+  null, to the host's routes; any other deeper name gets this server's 404.
+- **Requests** (P056). The label is the request URL's; a request whose Host header
+  names another host, where either is under the content domain, gets a 400 (a Node
+  adapter builds the URL from an absolute-form target, and a host or a cache routes
+  by Host). A Host that is a local address (an IP literal, `localhost`), as a test
+  runner sends, isn't compared. A server without an `upstream` serves only Porthole's
+  own paths: any other is a plain 404. Every answer says `x-robots-tag: noindex`.
 - **Who** (P046, P050). A grant names a `viewer`, or is `anonymous` (a public link:
   documents only, never a url-mode app), and may carry the host's opaque `subject`
   (a share or session id), signed into the ticket and the cookie. The host's
@@ -302,6 +309,16 @@ A Worker with Hono, D1 and R2 serving artifact pages on `a-<id>.<content domain>
   by `prefixedName` must already be label-safe (lowercase letters, digits, inner
   hyphens); other ids keep the keyed default.
 
+A page whose `script-src` is nonce-based (no `'unsafe-inline'`) blocks an opaque
+frame's shell: a `srcdoc` frame inherits the embedding page's whole policy (P054).
+The host passes its nonce (`HostOptions.nonce`, `PortholeProvider`'s `nonce`); the
+shell's script and style carry it, and the shell gives it to every script it runs
+for the content. Inline event handlers in content (`onclick="…"`) stay blocked by
+such a page's policy, as on the page itself; scripts and `addEventListener` work.
+The whole leak suite runs again on a reference page with a nonce-only `script-src`
+(`leak/strict-csp.spec.ts`), and passes on all three engines; its negative control
+`nonce` (the shell without the nonce) fails it.
+
 The served modes have their own conformance cases (`defineServedSuite`, run against
 `leak/served/`'s reference serving, which starts its own servers per worker): content
 runs on its own origin and can't reach the host's DOM, storage, cookies or URL,
@@ -311,6 +328,11 @@ opens its content once; only the host origins may frame content; the CSP in head
 closes egress; each version of an artifact page shows as stored, hardened before it runs; an app shows nothing without its cookie, runs on a tab, and runs
 framed where the engine keeps partitioned cookies; the sandbox proxy becomes a
 hardened view, takes it only from its host, and opens only what the view declares.
+A served shell draws nothing, and reports no height, until its host sends content,
+so the suite gives `show` a line of content for each shell (`options.content`) and a
+host that speaks to the shell sends it (P057). The shell cases also run against a
+host on `createHost` whose frames take their content's height
+(`leak/served/core-host.spec.ts`), as a React host's do.
 
 ### Protocol adapters
 
@@ -360,7 +382,7 @@ compiles; peer `react` 19.2+ for `useEffectEvent`). All isolation is the core's;
 binding is mounting and lifecycle (P034).
 
 ```ts
-<PortholeProvider confirm? hostInfo? locator? dialogClassName? toastClassName?>   // once per page
+<PortholeProvider confirm? hostInfo? locator? nonce? dialogClassName? toastClassName?>   // once per page
   <PortholeFrame
     config={widgetConfig}            // a preset's config, stable (module scope or memoized)
     displayId={id} title={title}     // height memory and confirmations key on these
@@ -369,7 +391,8 @@ binding is mounting and lifecycle (P034).
     handlers={{ sendPrompt, openLink }}  // one per declared capability; latest are called
     theme={(scheme) => tokens}       // live values for the config's variable names
     generation={n}                   // bump to run again from the start
-    onError onResize onNavigated onRefused onMuted onInitialized onOutcome
+    onContentError onHostError onResize onNavigated onRefused onMuted onInitialized onOutcome
+    fill?                            // fill the box and scroll inside, not grow with the content
     annotating? annotations? focusedAnnotation? onAnnotation?   // where annotate is declared
     aliases? themeKey? renderPlaceholder? eager? confirm? document? instance?
     className? style? />
@@ -403,9 +426,22 @@ binding is mounting and lifecycle (P034).
 - The shell reports no size before it has drawn something, so an empty shell never
   overwrites a remembered height (the first host's frame jumped there).
 - **Annotations** follow props: `annotating` (what the person may point at now, or
-  null), `annotations` (the marks, a stable array), `focusedAnnotation` (each new id
-  is brought into view); `onAnnotation` gets what the frame reported. A frame that
-  mounts again gets them all.
+  null), `annotations` (the marks), `focusedAnnotation` (each new id is brought into
+  view; `{ id, key }` with a new key focuses the same one again); `onAnnotation` gets
+  what the frame reported. A frame that mounts again gets them all.
+- **Errors** (P055): `onContentError` gets what the content did wrong (what it
+  threw, what the sandbox blocked, that it kept navigating away): the agent's to
+  hear. `onHostError` gets what failed on the host's side (`locate`, `mount`,
+  `annotations`): never the agent's. `onError(message, source)` gets both.
+- **Identity** (P057): `config`, `instance`, `annotations` and the provider's
+  `hostInfo` are compared by value, and the provider's `locator` and `confirm` are
+  read when used, so a host may build them inline. A new `config`, `document`,
+  `instance` or `generation` still makes a new display.
+- **Fill** (P057): `fill` makes the frame fill its box (give the box, or its parent,
+  a height) and the content scroll inside it, instead of growing with it; a url-mode
+  app always fills. In the core, `MountOptions.fill`.
+- **A strict page** (P054): `nonce` passes the page's CSP nonce to opaque frames, which
+  inherit the page's policy (`HostOptions.nonce` in the core).
 
 Its tests run in real browsers (`leak/react.spec.ts`, against `leak/react/app.tsx`,
 which the leak server bundles with esbuild because React ships CommonJS only).
@@ -445,8 +481,9 @@ absent.
   Through `/server`, a framed app is entered through a page that checks the browser
   kept its cookie, tells the host (P040), and goes on once it has loaded itself; the host's `outcome` says loaded,
   blocked (and why: `cookies` on WebKit, `framing`, `session`, `upstream`, `denied`
-  with the host's code) or timeout, so it can offer its own "Open in a new tab". A
-  `denied` may follow `loaded`: the host revoked access mid-session (P050).
+  with the host's code, `locate` when the host's own locator failed) or timeout, so
+  it can offer its own "Open in a new tab". A `denied` may follow `loaded`: the host
+  revoked access mid-session (P050).
 
 ## Egress hardening, each with its test
 
@@ -563,6 +600,10 @@ chooses), and the annotation runtime is in the shell only then.
   selector is an id, or it has no words), else the element holding its words. What
   can't be found is `orphaned`, said so; a host keeps the comment and shows it apart.
 - **Rects** are in the frame's viewport, CSS px: add the frame element's position.
+- **Settled.** Nothing is reported before the content is in place (marks shown
+  before it arrives are anchored once it has), nor while a run of changes settles; a
+  `focus` asked for meanwhile waits for anchoring, then scrolls and reports, so a
+  focus right after `show` says where the mark is, never `orphaned` first (P057).
 - **Trust.** The shell shares its realm with the content, which can interfere with
   all of it or fake any report. The host takes a selection only while it asked for
   that kind, a cancel only while picking, results only for its own marks; it

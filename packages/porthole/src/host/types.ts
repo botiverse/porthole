@@ -34,6 +34,13 @@ export interface HostOptions<C extends AdapterConnection = ShellConnection> {
   readonly platform?: PlatformHost;
   /** Required for domain and external isolation: where an instance's frame loads from. */
   readonly locator?: InstanceLocator;
+  /**
+   * The embedding page's CSP nonce, where its `script-src` is nonce-based (P054): an opaque frame
+   * (`srcdoc`) inherits the page's policy, so the shell and the content's scripts carry it. A
+   * function is read each time a frame starts (a page whose nonce changes). Served frames inherit
+   * nothing and need none.
+   */
+  readonly nonce?: string | (() => string | undefined);
 }
 
 export interface MountOptions {
@@ -50,7 +57,22 @@ export interface MountOptions {
   readonly document?: string;
   /** The height to start at, before the content reports its own. */
   readonly initialHeightPx?: number;
+  /**
+   * Fill the container (give it a height) instead of taking the content's height: the content
+   * scrolls inside its frame (an artifact viewer's page). The content's sizes are still reported
+   * (`resize`). A url-mode app always fills.
+   */
+  readonly fill?: boolean;
 }
+
+/** What failed on the host's side (`hostError`). */
+export type HostErrorKind =
+  /** The locator rejected: the host's backend didn't give a location. */
+  | "locate"
+  /** A display couldn't be made (the React binding: a bad config, a missing handler). */
+  | "mount"
+  /** An annotation call was refused (an invalid mark, an unknown id). */
+  | "annotations";
 
 /** What a display reports, by event name. */
 /** Why a display's frame showed nothing of its content (`FrameOutcome`). */
@@ -65,6 +87,8 @@ export type FrameBlock =
   | "upstream"
   /** The host's own check refused it (revoked, no longer a member): `code` says which. */
   | "denied"
+  /** The host's locator failed (its backend down, access gone): see the `hostError` event. */
+  | "locate"
   | "not-found"
   | "error";
 
@@ -93,8 +117,21 @@ export interface DisplayEvents {
   readonly outcome: FrameOutcome;
   /** The content's size, after the config's limits. */
   readonly resize: { readonly height: number; readonly width?: number };
-  /** What the content threw, or what the sandbox blocked (its own words: untrusted). */
-  readonly error: { readonly message: string };
+  /**
+   * What the content did wrong: what it threw, what the sandbox blocked (its own words:
+   * untrusted), or that it kept navigating its frame away. The agent's to hear and fix.
+   */
+  readonly contentError: { readonly message: string };
+  /**
+   * What failed on the host's side (`kind`): its locator, for now. The host's to handle; never
+   * the agent's. The display's `outcome` says `blocked: locate` too.
+   */
+  readonly hostError: { readonly message: string; readonly kind: HostErrorKind };
+  /**
+   * Both of the above, with their `source`: for a host that listened here before they were
+   * split (0.1.3). Prefer `contentError` and `hostError`.
+   */
+  readonly error: { readonly message: string; readonly source: "content" | "host" };
   /** The content navigated its frame away; the frame was started again from its content. */
   readonly navigated: undefined;
   /** A call didn't run. */

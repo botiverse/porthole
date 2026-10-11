@@ -644,3 +644,94 @@ test("annotations through props: picking reports to onAnnotation; marks and focu
     )
     .toBe(true);
 });
+
+test("a host's inline objects (config, instance, hostInfo, locator) don't start a running frame again", async ({
+  page,
+}) => {
+  const state = (content: string): AppState => ({
+    provider: "default",
+    frames: [frame({ displayId: "inline", inline: true, content, partial: true })],
+  });
+  await open(page, state("<p id='v'>one</p>"));
+  const inside = frameOf(page, "inline");
+  await expect(inside.locator("#v")).toHaveText("one");
+  for (let round = 0; round < 3; round += 1) {
+    await open(page, state("<p id='v'>one</p>"));
+  }
+  await open(page, state("<p id='v'>one</p><p id='w'>two</p>"));
+  await expect(inside.locator("#w")).toHaveText("two");
+  await page.waitForTimeout(300);
+  expect(await events(page, "inline", "initialized")).toHaveLength(1);
+});
+
+test("the content's errors go to onContentError, the host's to onHostError, each with its source on onError", async ({
+  page,
+  browserName,
+}) => {
+  await open(page, {
+    provider: "default",
+    frames: [
+      frame({
+        displayId: "broken",
+        content: '<p>x</p><script>throw new Error("widget broke")</script>',
+      }),
+      frame({ displayId: "unserved", config: "unserved", content: "<p>y</p>" }),
+    ],
+  });
+  await expect
+    .poll(async () => (await events(page, "broken", "content-error")).length)
+    .toBeGreaterThan(0);
+  // Measured (P055): WebKit mutes an opaque frame's script errors to "Script error.".
+  expect(String((await events(page, "broken", "content-error"))[0]?.detail)).toContain(
+    browserName === "webkit" ? "Script error." : "widget broke",
+  );
+  expect(await events(page, "broken", "host-error")).toEqual([]);
+  expect((await events(page, "broken", "error"))[0]?.detail).toMatchObject({ source: "content" });
+
+  await expect
+    .poll(async () => (await events(page, "unserved", "host-error")).length)
+    .toBeGreaterThan(0);
+  expect((await events(page, "unserved", "host-error"))[0]?.detail).toMatchObject({
+    kind: "mount",
+    message: expect.stringContaining("callTool") as unknown as string,
+  });
+  expect(await events(page, "unserved", "content-error")).toEqual([]);
+  expect((await events(page, "unserved", "error"))[0]?.detail).toMatchObject({ source: "host" });
+});
+
+const TALL = `<!doctype html><html><head><title>Tall</title></head><body>
+<h1 id="top">Top</h1><div style="height: 2000px">a long page</div><p id="end">End</p></body></html>`;
+
+test("fill: an artifact fills its box and scrolls inside, without the host's CSS", async ({
+  page,
+}) => {
+  await open(page, {
+    provider: "default",
+    frames: [frame({ displayId: "full", config: "artifact", content: TALL, fill: true })],
+  });
+  const inside = frameOf(page, "full");
+  await expect(inside.locator("#end")).toBeAttached();
+  await page.waitForTimeout(500);
+  const box = await page.locator('[data-porthole-display="full"] iframe').boundingBox();
+  expect(Math.round(box?.height ?? 0)).toBe(300);
+  const scrolls = await inside
+    .locator("html")
+    .evaluate(
+      () =>
+        document.scrollingElement !== null &&
+        document.scrollingElement.scrollHeight > window.innerHeight,
+    );
+  expect(scrolls).toBe(true);
+  // Without fill, the same page grows to its config's cap instead.
+  await open(page, {
+    provider: "default",
+    frames: [frame({ displayId: "grown", config: "artifact", content: TALL })],
+  });
+  await expect
+    .poll(async () =>
+      Math.round(
+        (await page.locator('[data-porthole-display="grown"] iframe').boundingBox())?.height ?? 0,
+      ),
+    )
+    .toBe(720);
+});

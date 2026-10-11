@@ -9,7 +9,7 @@ import {
 import type { FrameLocation, InstanceRef, ServedDocument } from "../isolation/types.ts";
 import { sandboxProxyDocument } from "../mcp/proxy.ts";
 import { createKeys, newTicket, ticketId } from "./keys.ts";
-import { isHostLabel } from "./naming.ts";
+import { isHostLabel, reservedLabels } from "./naming.ts";
 import { enterPage, pageScript, SESSION_PATH, statusPage } from "./pages.ts";
 import type { FrameBlock } from "../host/types.ts";
 import { memoryTicketStore } from "./tickets.ts";
@@ -45,6 +45,18 @@ const DEFAULT_SESSION_SECONDS = 3_600;
 const MAX_SESSION_SECONDS = 30 * 24 * 3_600;
 /** Browsers keep a cookie of up to 4 KB, name and attributes included. */
 const MAX_COOKIE_BYTES = 3_800;
+
+/** A host (and port) as it compares: lowercase, no trailing dot, no default port. */
+function normalHost(value: string, protocol: string): string {
+  const host = value
+    .trim()
+    .toLowerCase()
+    .replace(/\.(?=:\d+$|$)/u, "");
+  const defaultPort = protocol === "https:" ? ":443" : protocol === "http:" ? ":80" : "";
+  return defaultPort !== "" && host.endsWith(defaultPort)
+    ? host.slice(0, -defaultPort.length)
+    : host;
+}
 
 /**
  * What a session cookie carries, signed: the instance, its viewer (or anonymous), the host's
@@ -190,21 +202,14 @@ export function createServer(options: ServerOptions): PortholeServer {
     throw new TypeError("content.port must be a port number");
   }
   const keys = createKeys(options.secret);
-  const reserved = new Set(content.reserved ?? []);
-  for (const label of reserved) {
-    if (!isHostLabel(label)) {
-      throw new TypeError(
-        `content.reserved: ${JSON.stringify(label)} is not a lowercase DNS label`,
-      );
-    }
-  }
+  const isReserved = reservedLabels(content.reserved);
   /** The label a scope is served on: the host's naming, checked, or the keyed default. */
   const nameOf = (scope: string): string => {
     if (content.name === undefined) {
       return keys.label(scope);
     }
     const label = content.name(scope);
-    if (!isHostLabel(label) || reserved.has(label)) {
+    if (!isHostLabel(label) || isReserved(label)) {
       throw new TypeError(
         `content.name gave ${JSON.stringify(label)} for a scope: it must be one lowercase DNS label (a-z 0-9 -, at most 63, not xn--), not reserved`,
       );
@@ -213,7 +218,7 @@ export function createServer(options: ServerOptions): PortholeServer {
   };
   /** Whether a request's label may be one this server named. */
   const ours = (label: string): boolean =>
-    !reserved.has(label) && (content.name === undefined ? LABEL.test(label) : isHostLabel(label));
+    !isReserved(label) && (content.name === undefined ? LABEL.test(label) : isHostLabel(label));
   const secure = content.scheme === "https";
   const defaultPort = secure ? 443 : 80;
   const portPart =
@@ -520,6 +525,7 @@ export function createServer(options: ServerOptions): PortholeServer {
       "cache-control": "no-store",
       "referrer-policy": "no-referrer",
       "x-content-type-options": "nosniff",
+      "x-robots-tag": "noindex, nofollow",
     });
   }
 
@@ -686,8 +692,20 @@ export function createServer(options: ServerOptions): PortholeServer {
     }
   }
 
-  /** The label a request is for: null when it isn't under the content domain at all. */
-  function labelOf(request: Request): { readonly url: URL; readonly label: string } | null {
+  const underDomain = (host: string): boolean => host === domain || host.endsWith(`.${domain}`);
+
+  /**
+   * The label a request is for: null when it isn't under the content domain at all (or is in a
+   * reserved namespace), "mismatch" when its Host header names another host than its URL does
+   * and either is under the content domain. A Node adapter may build the URL from an
+   * absolute-form request target (`GET http://other/…`) while a host routes by the Host header
+   * (and a cache keys on it): the two must agree before anything is served. A Host that is a
+   * local server address (an IP literal, `localhost`), as a test runner or a dev proxy sends, is
+   * not a name and isn't compared.
+   */
+  function labelOf(
+    request: Request,
+  ): { readonly url: URL; readonly label: string } | "mismatch" | null {
     let url: URL;
     try {
       url = new URL(request.url);
@@ -695,13 +713,27 @@ export function createServer(options: ServerOptions): PortholeServer {
       return null;
     }
     const host = url.hostname.toLowerCase().replace(/\.$/u, "");
-    if (host !== domain && !host.endsWith(`.${domain}`)) {
+    const header = request.headers.get("host");
+    if (header !== null) {
+      const named = normalHost(header, url.protocol);
+      const name = named.replace(/:\d+$/u, "");
+      const local = name === "localhost" || /^[\d.]+$/u.test(name) || name.startsWith("[");
+      if (
+        !local &&
+        named !== normalHost(url.host, url.protocol) &&
+        (underDomain(host) || underDomain(name))
+      ) {
+        return "mismatch";
+      }
+    }
+    if (!underDomain(host)) {
       return null;
     }
     const label = host.slice(0, Math.max(0, host.length - domain.length - 1));
-    // A reserved label is another server's namespace (`f` for `<x>.f.<domain>`): it and the names
-    // under it go to the host's own routes. Any other deeper name is ours to refuse.
-    if (reserved.has(label.split(".").at(-1) ?? "")) {
+    // A reserved label is another server's namespace (`f` for `<x>.f.<domain>`), or the host's
+    // own: it and the names under it go to the host's own routes. Any other deeper name is ours
+    // to refuse.
+    if (isReserved(label.split(".").at(-1) ?? "")) {
       return null;
     }
     return { url, label };
@@ -779,7 +811,7 @@ export function createServer(options: ServerOptions): PortholeServer {
 
     async access(request) {
       const at = labelOf(request);
-      if (at === null || !ours(at.label)) {
+      if (at === null || at === "mismatch" || !ours(at.label)) {
         return null;
       }
       const access = accessOf(request, at.label, null);
@@ -791,8 +823,16 @@ export function createServer(options: ServerOptions): PortholeServer {
       if (at === null) {
         return null;
       }
-      const { url, label } = at;
       const method = request.method.toUpperCase();
+      if (at === "mismatch") {
+        return page(
+          400,
+          "Bad request",
+          "The request's Host header and its URL name different hosts.",
+          method,
+        );
+      }
+      const { url, label } = at;
       try {
         if (!ours(label)) {
           return page(404, "Nothing here", "This address names no content.", method);
@@ -815,7 +855,8 @@ export function createServer(options: ServerOptions): PortholeServer {
         if (document?.[1] !== undefined) {
           return await serveDocument(request, url, label, document[1]);
         }
-        if (url.pathname.startsWith(PREFIX)) {
+        // Without an upstream, only Porthole's own paths are served here: any other is nothing.
+        if (url.pathname.startsWith(PREFIX) || options.upstream === undefined) {
           return page(404, "Nothing here", "This address names no content.", method);
         }
         return await serveApp(request, label);

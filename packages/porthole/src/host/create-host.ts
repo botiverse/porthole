@@ -26,6 +26,7 @@ import { shellAdapter } from "../protocol/shell-adapter.ts";
 import { resolveTheme } from "../theme/variables.ts";
 import type {
   AnnotationControls,
+  HostErrorKind,
   DisplayEvents,
   DisplayHandle,
   HostOptions,
@@ -95,6 +96,16 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         for (const listener of listeners.get(event) ?? []) {
           (listener as (detail: DisplayEvents[E]) => void)(detail);
         }
+      };
+      // What the content did wrong (the agent's to hear and fix), and what failed on the host's
+      // side (its own to handle), each on its own event and on `error` with its source.
+      const contentError = (message: string) => {
+        emit("contentError", { message });
+        emit("error", { message, source: "content" });
+      };
+      const hostError = (message: string, kind: HostErrorKind) => {
+        emit("hostError", { message, kind });
+        emit("error", { message, source: "host" });
       };
 
       let scheme: ColorScheme = mount.scheme;
@@ -277,7 +288,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             return;
           }
           case "error":
-            emit("error", { message: event.message });
+            contentError(event.message);
             return;
           case "refused":
             emit("refused", { capability: event.capability, refusal: event.refusal });
@@ -311,8 +322,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           allow: compiled.allow,
           referrerPolicy: compiled.referrerPolicy,
           colorScheme: scheme,
-          // An app reports no size: its frame fills the host's container, at least the minimum.
-          ...(speaks
+          // An app reports no size: its frame fills the host's container, at least the minimum;
+          // so does any display the host mounts to fill (its content scrolls inside).
+          ...(speaks && mount.fill !== true
             ? { initialHeightPx: height }
             : { fill: true, initialHeightPx: config.limits.minHeightPx }),
         });
@@ -377,9 +389,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             run();
           } else {
             stop();
-            emit("error", {
-              message: "The content kept navigating its frame away; it was stopped.",
-            });
+            contentError("The content kept navigating its frame away; it was stopped.");
           }
         });
       };
@@ -396,6 +406,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             html: compiled.shellDocument({
               origins: [container.ownerDocument.defaultView?.location.origin ?? ""],
               title: mount.title,
+              ...nonceOf(options.nonce),
               ...(mount.document === undefined ? {} : { document: mount.document }),
             }),
           });
@@ -418,7 +429,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           },
           (error: unknown) => {
             if (mine === generation && !controller.signal.aborted) {
-              emit("error", { message: error instanceof Error ? error.message : String(error) });
+              // The host's own failure (its backend down, access gone): never the content's.
+              hostError(error instanceof Error ? error.message : String(error), "locate");
+              emit("outcome", { state: "blocked", reason: "locate" });
             }
           },
         );
@@ -487,4 +500,10 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       }) as unknown as DisplayHandle<C>;
     },
   };
+}
+
+/** The host's nonce option, read now (`HostOptions.nonce`). */
+function nonceOf(nonce: HostOptions["nonce"]): { nonce?: string } {
+  const value = typeof nonce === "function" ? nonce() : nonce;
+  return value === undefined || value === "" ? {} : { nonce: value };
 }

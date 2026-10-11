@@ -454,3 +454,78 @@ test("an MCP Apps view, where the host declares annotate, is annotated the same 
   const picked: Selected = await next(display, "selected");
   expect(picked.anchor.selectors[0]).toEqual({ type: "CssSelector", value: "#view-title" });
 });
+
+test("focus right after show waits for anchoring to settle: no orphaned report for a mark that is there", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    content: LONG_PAGE,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#far")).toBeAttached();
+  const marks = [
+    {
+      id: "far",
+      anchor: {
+        kind: "element",
+        selectors: [{ type: "CssSelector", value: "#far" }],
+        label: "p#far",
+      },
+    },
+  ];
+  // Back to back, as a viewer opening a comment's link does.
+  await page.evaluate(
+    ([given]) => {
+      const reference = (
+        window as unknown as {
+          reference: { annotate(id: number, operation: string, argument?: unknown): string | null };
+        }
+      ).reference;
+      reference.annotate(0, "show", given);
+      reference.annotate(0, "focus", "far");
+    },
+    [marks] as const,
+  );
+  await expect
+    .poll(async () => (await reports(display)).filter((each) => each.type === "anchored").length)
+    .toBe(2);
+  const anchored = (await reports(display)).filter(
+    (each): each is Extract<AnnotationReport, { type: "anchored" }> => each.type === "anchored",
+  );
+  for (const report of anchored) {
+    expect(
+      report.results.every((each) => each.state === "attached"),
+      JSON.stringify(report),
+    ).toBe(true);
+  }
+  // The focus is told last, where the mark is once scrolled into view.
+  const viewport = await frame.evaluate(() => window.innerHeight);
+  const rect = anchored.at(-1)?.results[0]?.rect;
+  expect(rect?.y).toBeGreaterThanOrEqual(0);
+  expect((rect?.y ?? 0) + (rect?.height ?? 0)).toBeLessThanOrEqual(viewport);
+  expect(await frame.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+});
+
+test("marks shown before the content arrives are reported once it has, not orphaned first", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, { config: annotated() });
+  await display.annotate("show", [
+    {
+      id: "fell",
+      anchor: {
+        kind: "text",
+        selectors: [{ type: "TextQuoteSelector", exact: "fell" }],
+        label: "fell",
+      },
+    },
+  ]);
+  await page.waitForTimeout(800);
+  expect(await reports(display)).toEqual([]);
+  await display.setContent(WIDGET);
+  const anchored = await next(display, "anchored");
+  expect(anchored.results).toEqual([
+    expect.objectContaining({ id: "fell", state: "attached" }) as unknown as AnchorResult,
+  ]);
+});

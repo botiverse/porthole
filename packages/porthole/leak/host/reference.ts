@@ -67,6 +67,8 @@ const reference = {
           }),
       theme: (scheme) => spec.hostTheme?.[scheme] ?? {},
       hostInfo: { name: "porthole-reference", version: "0" },
+      // A page served with a nonce-based script-src (`?nonce=1`) gives its nonce (P054).
+      nonce: () => document.querySelector<HTMLScriptElement>("script[nonce]")?.nonce || undefined,
     });
     const handle = host.mount(box, {
       displayId: `display-${id}`,

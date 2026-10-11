@@ -92,3 +92,23 @@ describe("resolveTheme", () => {
     expect(Object.keys(values)).toEqual(Object.keys(DEFAULT_THEME.variables));
   });
 });
+
+describe("a strict embedding page's nonce (P054)", () => {
+  const compiled = compile(presets.inlineWidget());
+  test("is carried by the shell's own script and style, and taken from its script at run time", () => {
+    const html = compiled.shellDocument({ origins: [ORIGIN], nonce: "r4nd0m+N0nce/=" });
+    expect(html).toContain('<script nonce="r4nd0m+N0nce/=">');
+    expect(html).toContain('<style nonce="r4nd0m+N0nce/=">');
+    expect(html).not.toContain('"nonce"');
+    expect(SHELL_RUNTIME).toContain("document.currentScript.nonce");
+    expect(SHELL_RUNTIME).toContain("live.nonce = nonce;");
+  });
+  test("is a nonce, never markup", () => {
+    for (const bad of ['x" onload="alert(1)', "short", "a b c d e f g h"]) {
+      expect(() => compiled.shellDocument({ origins: [ORIGIN], nonce: bad }), bad).toThrow(
+        /nonce/u,
+      );
+    }
+    expect(compiled.shellDocument({ origins: [ORIGIN] })).not.toContain("nonce=");
+  });
+});

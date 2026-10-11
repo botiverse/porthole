@@ -9,6 +9,7 @@ import type {
   LayoutConfig,
   Limits,
   PortholeConfig,
+  StorageConfig,
   ThemeValue,
   UrlPermission,
   UrlSandboxExtra,
@@ -45,6 +46,8 @@ export interface PresetOptions {
   readonly isolation?: Exclude<IsolationKind, "external">;
   readonly contentOrigins?: readonly string[];
   readonly embedder?: EmbedderConfig;
+  /** Domain isolation: what displays sharing an origin share (`StorageConfig`), for the manual. */
+  readonly storage?: StorageConfig;
 }
 
 /** The url preset's options: where the app is served, and the embedding page's extra frames. */
@@ -174,6 +177,7 @@ function build(
     guide: options.guide ?? {},
     contentOrigins: options.contentOrigins ?? [],
     embedder: options.embedder ?? {},
+    ...(options.storage === undefined ? {} : { storage: options.storage }),
   });
 }
 

@@ -368,7 +368,9 @@ function interactive(c: Context): string {
   const state =
     config.isolation === "opaque"
       ? `- State isn't saved: localStorage works but lasts only while the ${noun} is on screen, and a reload or another device starts fresh. Keep what matters in the ${noun}'s code.`
-      : `- localStorage is kept for this ${noun} in this browser; another device starts fresh.`;
+      : config.storage?.shared === undefined
+        ? `- localStorage is kept for this ${noun} in this browser; another device starts fresh.`
+        : `- localStorage is shared by every ${noun} in this ${config.storage.shared}, in this browser (another device starts fresh): prefix your keys with a name of this ${noun}'s own ("budget:filters", not "filters"), or ${noun}s overwrite each other.`;
   const none =
     entries.length === 0
       ? `- It can only draw: it has no way to send anything to you or the app.`

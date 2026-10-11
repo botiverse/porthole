@@ -180,6 +180,15 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: '  if (typeof value.label !== "string") {',
     },
   ],
+  // The host's nonce, not given to an opaque frame's shell (P054): on a strict host page the
+  // inherited policy stops the shell, so nothing the suite asks of it happens.
+  nonce: [
+    {
+      file: "src/shell/document.ts",
+      find: '  const nonce = options.nonce === undefined ? "" : ` nonce="${options.nonce}"`;',
+      replace: '  const nonce = "";',
+    },
+  ],
   // The shell's clipboard walls (P051): the async API, the copy and cut commands, copy events.
   clipboard: [
     {

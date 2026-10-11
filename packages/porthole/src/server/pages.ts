@@ -93,6 +93,8 @@ const pageHeaders = (frameAncestors: string, connect: boolean) => ({
   "content-security-policy": policy(frameAncestors, connect),
   "referrer-policy": "no-referrer",
   "x-content-type-options": "nosniff",
+  // Content origins are behind tickets: nothing on them is for search engines.
+  "x-robots-tag": "noindex, nofollow",
 });
 
 export function statusPage(

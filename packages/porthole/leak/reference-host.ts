@@ -38,87 +38,101 @@ type WithReference = Window & { reference: Reference };
  * Porthole's own `ConformanceHost`: a page that mounts displays with the real core, served with
  * the embedding CSP `embedderCsp` derives from the display's config.
  */
-export const referenceHost: Omit<ConformanceHost, "launch"> & {
+export const referenceHost = referenceHostWith({});
+
+/**
+ * The reference host, optionally on a page with a strict, nonce-based `script-src` (`nonce`),
+ * as a host with such a policy runs the suite on its real page (P054).
+ */
+export function referenceHostWith(setup: { readonly nonce?: boolean }): Omit<
+  ConformanceHost,
+  "launch"
+> & {
   launch(page: Page, spec: LaunchSpec): Promise<ReferenceDisplay>;
-} = {
-  name: "reference",
-  async launch(page: Page, spec: LaunchSpec): Promise<ReferenceDisplay> {
-    if (!page.url().includes("/?csp=")) {
-      await page.goto(`/?csp=${encodeURIComponent(embedderCsp([spec.config]))}`);
-      await page.waitForFunction(() => "reference" in window);
-    }
-    const id = await page.evaluate(
-      (each) => (window as unknown as WithReference).reference.launch(each),
-      spec,
-    );
-    const frame = async (): Promise<Frame> => {
-      let found: Frame | null = null;
-      await expect
-        .poll(async () => {
-          const element = await page
-            .locator(`#display-${id} iframe`)
-            .elementHandle({ timeout: 2_000 })
-            .catch(() => null);
-          found = (await element?.contentFrame()) ?? null;
-          return found !== null;
-        })
-        .toBe(true);
-      return found as unknown as Frame;
-    };
-    return {
-      frame,
-      async box() {
-        const element = await page.locator(`#display-${id} iframe`).elementHandle();
-        const box = await element?.boundingBox();
-        return { width: box?.width ?? 0, height: box?.height ?? 0 };
-      },
-      setContent: (html, options) =>
-        page.evaluate(
-          ([each, text, partial]) =>
-            (window as unknown as WithReference).reference.setContent(each, text, partial),
-          [id, html, options?.partial === true] as const,
-        ),
-      setTheme: (scheme) =>
-        page.evaluate(
-          ([each, next]) => (window as unknown as WithReference).reference.setTheme(each, next),
-          [id, scheme] as const,
-        ),
-      async answerNextConfirmation(accept, options) {
-        await expect
-          .poll(
-            () =>
-              page.evaluate(
-                (each) => (window as unknown as WithReference).reference.pendingConfirmations(each),
-                id,
-              ),
-            {
-              timeout: options?.timeoutMs ?? 5_000,
-            },
-          )
-          .toBeGreaterThan(0);
-        const request = await page.evaluate(
-          ([each, yes]) => (window as unknown as WithReference).reference.answer(each, yes),
-          [id, accept] as const,
+} {
+  return {
+    name: setup.nonce === true ? "reference, strict CSP" : "reference",
+    async launch(page: Page, spec: LaunchSpec): Promise<ReferenceDisplay> {
+      if (!page.url().includes("/?csp=")) {
+        await page.goto(
+          `/?csp=${encodeURIComponent(embedderCsp([spec.config]))}${setup.nonce === true ? "&nonce=1" : ""}`,
         );
-        if (request === null) {
-          throw new Error("no confirmation was waiting");
-        }
-        return request;
-      },
-      calls: () =>
-        page.evaluate((each) => (window as unknown as WithReference).reference.calls(each), id),
-      errors: () =>
-        page.evaluate((each) => (window as unknown as WithReference).reference.errors(each), id),
-      events: () =>
-        page.evaluate((each) => (window as unknown as WithReference).reference.events(each), id),
-      destroy: () =>
-        page.evaluate((each) => (window as unknown as WithReference).reference.destroy(each), id),
-      annotate: (operation, argument) =>
-        page.evaluate(
-          ([each, what, given]) =>
-            (window as unknown as WithReference).reference.annotate(each, what, given),
-          [id, operation, argument] as const,
-        ),
-    };
-  },
-};
+        await page.waitForFunction(() => "reference" in window);
+      }
+      const id = await page.evaluate(
+        (each) => (window as unknown as WithReference).reference.launch(each),
+        spec,
+      );
+      const frame = async (): Promise<Frame> => {
+        let found: Frame | null = null;
+        await expect
+          .poll(async () => {
+            const element = await page
+              .locator(`#display-${id} iframe`)
+              .elementHandle({ timeout: 2_000 })
+              .catch(() => null);
+            found = (await element?.contentFrame()) ?? null;
+            return found !== null;
+          })
+          .toBe(true);
+        return found as unknown as Frame;
+      };
+      return {
+        frame,
+        async box() {
+          const element = await page.locator(`#display-${id} iframe`).elementHandle();
+          const box = await element?.boundingBox();
+          return { width: box?.width ?? 0, height: box?.height ?? 0 };
+        },
+        setContent: (html, options) =>
+          page.evaluate(
+            ([each, text, partial]) =>
+              (window as unknown as WithReference).reference.setContent(each, text, partial),
+            [id, html, options?.partial === true] as const,
+          ),
+        setTheme: (scheme) =>
+          page.evaluate(
+            ([each, next]) => (window as unknown as WithReference).reference.setTheme(each, next),
+            [id, scheme] as const,
+          ),
+        async answerNextConfirmation(accept, options) {
+          await expect
+            .poll(
+              () =>
+                page.evaluate(
+                  (each) =>
+                    (window as unknown as WithReference).reference.pendingConfirmations(each),
+                  id,
+                ),
+              {
+                timeout: options?.timeoutMs ?? 5_000,
+              },
+            )
+            .toBeGreaterThan(0);
+          const request = await page.evaluate(
+            ([each, yes]) => (window as unknown as WithReference).reference.answer(each, yes),
+            [id, accept] as const,
+          );
+          if (request === null) {
+            throw new Error("no confirmation was waiting");
+          }
+          return request;
+        },
+        calls: () =>
+          page.evaluate((each) => (window as unknown as WithReference).reference.calls(each), id),
+        errors: () =>
+          page.evaluate((each) => (window as unknown as WithReference).reference.errors(each), id),
+        events: () =>
+          page.evaluate((each) => (window as unknown as WithReference).reference.events(each), id),
+        destroy: () =>
+          page.evaluate((each) => (window as unknown as WithReference).reference.destroy(each), id),
+        annotate: (operation, argument) =>
+          page.evaluate(
+            ([each, what, given]) =>
+              (window as unknown as WithReference).reference.annotate(each, what, given),
+            [id, operation, argument] as const,
+          ),
+      };
+    },
+  };
+}

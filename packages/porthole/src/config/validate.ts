@@ -131,6 +131,7 @@ export function validateConfig(input: unknown): PortholeConfig {
       "embedder",
       "sandbox",
       "permissions",
+      "storage",
     ],
     "config",
   );
@@ -313,6 +314,20 @@ export function validateConfig(input: unknown): PortholeConfig {
         );
       }
     });
+  }
+
+  if (config.storage !== undefined) {
+    const storage = object(config.storage, "config.storage");
+    only(storage, ["shared"], "config.storage");
+    if (config.isolation !== "domain") {
+      fail("config.storage", "only domain isolation keeps storage across displays");
+    }
+    if (
+      storage.shared !== undefined &&
+      (typeof storage.shared !== "string" || !/^[a-z][a-z -]{0,39}$/u.test(storage.shared))
+    ) {
+      fail("config.storage.shared", 'must be a short lowercase noun ("conversation")');
+    }
   }
 
   if (config.permissions !== undefined) {

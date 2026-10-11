@@ -264,6 +264,25 @@ describe("0.1.1: what a host may change", () => {
     expect(refusal({ ...base, permissions: ["fullscreen"] })).toMatch(/only url mode/u);
   });
 
+  test("a host that shares storage across displays says so, and the manual tells authors to prefix keys", () => {
+    const shared = presets.inlineWidget({
+      isolation: "domain",
+      contentOrigins: ["https://*.example-usercontent.com"],
+      storage: { shared: "conversation" },
+    });
+    expect(compile(shared).guide(["interactive"])).toContain(
+      'localStorage is shared by every widget in this conversation, in this browser (another device starts fresh): prefix your keys with a name of this widget\'s own ("budget:filters", not "filters")',
+    );
+    const own = presets.inlineWidget({
+      isolation: "domain",
+      contentOrigins: ["https://*.example-usercontent.com"],
+    });
+    expect(compile(own).guide(["interactive"])).toContain("localStorage is kept for this widget");
+    expect(refusal({ ...base, storage: { shared: "conversation" } })).toMatch(/only domain/u);
+    expect(refusal({ ...own, storage: { shared: "A Conversation!" } })).toMatch(/noun/u);
+    expect(refusal({ ...own, storage: { scope: "x" } })).toMatch(/not a known field/u);
+  });
+
   test("a whole document takes the person's scheme when it declares it, unless the host says always", () => {
     expect(compile(presets.artifact()).shell?.themeDocuments).toBe("declared");
     expect(

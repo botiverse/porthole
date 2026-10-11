@@ -129,6 +129,15 @@ export function embedderFrameSources(config: PortholeConfig): string[] {
  * engine Porthole supports reads frames from `frame-src`, P038).
  */
 export function embedderCsp(configs: readonly PortholeConfig[]): string {
-  const sources = unique(configs.flatMap(embedderFrameSources));
+  const sources = embedderFrameSourcesOf(configs);
   return serializeCsp([["frame-src", ...(sources.length === 0 ? ["'none'"] : sources)]]);
+}
+
+/**
+ * The `frame-src` sources the embedding page must allow for every kind of display it shows, as a
+ * list, for a host that writes its own policy around them (empty: it frames nothing of
+ * Porthole's but `srcdoc`, which needs none).
+ */
+export function embedderFrameSourcesOf(configs: readonly PortholeConfig[]): string[] {
+  return unique(configs.flatMap(embedderFrameSources));
 }

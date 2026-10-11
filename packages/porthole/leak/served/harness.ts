@@ -181,18 +181,35 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
   import { createHost } from "/src/index.ts";
   window.portholeHost = {
     records: [],
-    mount(config, location, instance) {
+    displays: [],
+    mount(config, location, instance, options = {}) {
       const index = this.records.length;
-      const record = { outcomes: [], initialized: false, errors: [] };
+      const record = { outcomes: [], initialized: false, errors: [], contentErrors: [], hostErrors: [] };
       this.records.push(record);
       const box = document.createElement("section");
       box.style.cssText = "width: 600px; height: 300px";
       document.getElementById("displays").append(box);
-      const host = createHost(config, { locator: { locate: async () => location } });
-      const display = host.mount(box, { displayId: "d" + index, title: "Probe", scheme: "light", instance });
+      // A null location: the host's backend failing to give one.
+      const host = createHost(config, {
+        locator: {
+          locate: async () => {
+            if (location === null) {
+              throw new Error("The host's backend is down");
+            }
+            return location;
+          },
+        },
+      });
+      const display = host.mount(box, { displayId: "d" + index, title: "Probe", scheme: "light", instance, ...(options.fill ? { fill: true } : {}) });
+      this.displays.push(display);
+      if (typeof options.content === "string") {
+        display.setContent(options.content);
+      }
       display.on("outcome", (outcome) => record.outcomes.push(outcome));
       display.on("initialized", () => (record.initialized = true));
-      display.on("error", ({ message }) => record.errors.push(message));
+      display.on("error", ({ message, source }) => record.errors.push(source + ": " + message));
+      display.on("contentError", ({ message }) => record.contentErrors.push(message));
+      display.on("hostError", (error) => record.hostErrors.push(error));
       return index;
     },
   };

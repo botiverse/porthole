@@ -25,6 +25,8 @@ const CONFIGS: Readonly<Record<string, PortholeConfig>> = {
   artifact: presets.artifact(),
   copy: presets.inlineWidget({ capabilities: { copyText: {} } }),
   notes: presets.artifact({ capabilities: { annotate: {} } }),
+  // Declares a capability the test app serves no handler for: a display that can't be made.
+  unserved: presets.inlineWidget({ capabilities: { callTool: {} } }),
   url: presets.url({ contentOrigins: [APP_ORIGIN] }),
   urlPopups: presets.url({
     contentOrigins: [APP_ORIGIN],
@@ -48,6 +50,10 @@ export interface FrameSpec {
   /** Space above the frame, px (to push it off screen). */
   readonly gapPx?: number;
   readonly annotating?: AnnotateMode | null;
+  /** Fill the box (300 px tall here) and scroll inside. */
+  readonly fill?: boolean;
+  /** Give the frame copies of its config and instance on every render (a host that builds them inline). */
+  readonly inline?: boolean;
   readonly annotations?: readonly AnnotationMark[];
   readonly focusedAnnotation?: string | null;
 }
@@ -85,7 +91,11 @@ function render(state: AppState): void {
       { key: frame.key ?? frame.displayId },
       frame.gapPx === undefined ? null : h("div", { style: { height: frame.gapPx } }),
       h(PortholeFrame, {
-        config: CONFIGS[frame.config] as PortholeConfig,
+        config:
+          frame.inline === true
+            ? (JSON.parse(JSON.stringify(CONFIGS[frame.config])) as PortholeConfig)
+            : (CONFIGS[frame.config] as PortholeConfig),
+        ...(frame.fill === true ? { fill: true, style: { height: 300 } } : {}),
         displayId: frame.displayId,
         title: frame.title,
         scheme: frame.scheme ?? "light",
@@ -125,7 +135,9 @@ function render(state: AppState): void {
         },
         onInitialized: () => record(frame.displayId, "initialized"),
         onResize: ({ height }) => record(frame.displayId, "resize", height),
-        onError: (message) => record(frame.displayId, "error", message),
+        onError: (message, source) => record(frame.displayId, "error", { message, source }),
+        onContentError: (message) => record(frame.displayId, "content-error", message),
+        onHostError: (error) => record(frame.displayId, "host-error", error),
         onNavigated: () => record(frame.displayId, "navigated"),
         onOutcome: (outcome) => record(frame.displayId, "outcome", outcome),
         onRefused: (capability, refusal) =>
@@ -147,8 +159,17 @@ function render(state: AppState): void {
         ? (_request: ConfirmRequest, _proceed: Proceed) =>
             new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 1_500))
         : undefined;
+  // Inline objects, new on every render, as a host writes them.
   root.render(
-    h(PortholeProvider, { locator, ...(confirm === undefined ? {} : { confirm }) }, frames),
+    h(
+      PortholeProvider,
+      {
+        locator: { locate: locator.locate },
+        hostInfo: { name: "react-test-host", version: "1" },
+        ...(confirm === undefined ? {} : { confirm }),
+      },
+      frames,
+    ),
   );
 }
 
