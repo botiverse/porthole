@@ -1,17 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Porthole">
-  <!-- The large mark: a riveted porthole onto HTML, the word drawn as strokes (no shadow on the letters, so they stay crisp). Below about 64 px use
-       porthole-mark.svg, where </> stays legible. Ferry's family: Raft's yellow and ink, hard offset shadow. -->
+  <!-- The large mark: the small mark (a riveted porthole onto HTML, </>) with an HTML name plate riveted to the rim. Ferry's family: Raft's yellow and ink, hard offset shadow. -->
   <rect width="100" height="100" rx="23" fill="#ffd441"/>
   <g fill="none" stroke-linecap="round" stroke-linejoin="round">
     <g stroke="#d3ad03" transform="translate(3.5 3.5)">
       <circle cx="50" cy="50" r="30" stroke-width="9"/>
+      <path d="M40 40 L31 50 L40 60" stroke-width="5.5"/>
+      <path d="M60 40 L69 50 L60 60" stroke-width="5.5"/>
+      <path d="M54 37 L46 63" stroke-width="5.5"/>
     </g>
     <g stroke="#191815">
       <circle cx="50" cy="50" r="30" stroke-width="9"/>
-      <path d="M30 44 L30 56 M38 44 L38 56 M30 50 L38 50" stroke-width="4"/>
-      <path d="M41 44 L49 44 M45 44 L45 56" stroke-width="4"/>
-      <path d="M52 56 L52 44 L56.5 51.5 L61 44 L61 56" stroke-width="4"/>
-      <path d="M64.5 44 L64.5 56 L70.5 56" stroke-width="4"/>
+      <path d="M40 40 L31 50 L40 60" stroke-width="5.5"/>
+      <path d="M60 40 L69 50 L60 60" stroke-width="5.5"/>
+      <path d="M54 37 L46 63" stroke-width="5.5"/>
     </g>
   </g>
   <g fill="#ffd441">
@@ -24,4 +25,8 @@
     <circle cx="61.48" cy="22.28" r="2.3"/>
     <circle cx="77.72" cy="38.52" r="2.3"/>
   </g>
+  <!-- label plate -->
+  <rect x="33.5" y="76.0" width="40" height="15" rx="7.5" fill="#d3ad03"/>
+  <rect x="30.0" y="72.5" width="40" height="15" rx="7.5" fill="#191815"/>
+  <g fill="none" stroke="#ffd441" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round" transform="translate(50 80) scale(0.62) translate(-50.25 -50)"><path d="M30 44 L30 56 M38 44 L38 56 M30 50 L38 50"/><path d="M41 44 L49 44 M45 44 L45 56"/><path d="M52 56 L52 44 L56.5 51.5 L61 44 L61 56"/><path d="M64.5 44 L64.5 56 L70.5 56"/></g>
 </svg>
