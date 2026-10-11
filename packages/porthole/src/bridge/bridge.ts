@@ -1,9 +1,12 @@
 import {
+  MAX_COPY_CHARS,
   capabilitySpec,
   type CapabilityArgs,
   type CapabilityName,
   type CapabilityResults,
 } from "../config/capabilities.ts";
+import type { AnnotationReport } from "../annotate/types.ts";
+import { parseReport } from "../annotate/validate.ts";
 import type { PortholeConfig } from "../config/schema.ts";
 import { effectiveGates } from "../compile/policy.ts";
 import type {
@@ -26,6 +29,7 @@ import type {
 export type BridgeEvent =
   | { readonly type: "resize"; readonly height: number; readonly width?: number }
   | { readonly type: "error"; readonly message: string }
+  | { readonly type: "annotation"; readonly report: AnnotationReport }
   | { readonly type: "refused"; readonly capability: CapabilityName; readonly refusal: Refusal }
   | { readonly type: "muted" };
 
@@ -129,6 +133,13 @@ const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
       ? { message: message.slice(0, 2_000) }
       : null;
   },
+  copyText: (args) => {
+    const text = isRecord(args) ? args.text : undefined;
+    return typeof text === "string" && text !== "" && text.length <= MAX_COPY_CHARS
+      ? { text }
+      : null;
+  },
+  annotate: (args) => parseReport(args),
   resize: (args) => {
     if (
       !isRecord(args) ||
@@ -250,6 +261,8 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
         if (capability === "resize") {
           const size = args as CapabilityArgs["resize"];
           onEvent({ type: "resize", ...size });
+        } else if (capability === "annotate") {
+          onEvent({ type: "annotation", report: args as CapabilityArgs["annotate"] });
         } else {
           onEvent({ type: "error", message: (args as CapabilityArgs["reportError"]).message });
         }

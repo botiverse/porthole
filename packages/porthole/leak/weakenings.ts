@@ -156,13 +156,44 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "url-permissions": [
     {
       file: POLICY,
-      find: '  return config.mode === "url" ? (config.permissions ?? []).join("; ") : "";',
-      replace:
-        '  return config.mode === "url" ? (config.permissions ?? ["clipboard-write", "fullscreen"]).join("; ") : "";',
+      find: '    ? (config.permissions ?? []).join("; ")',
+      replace: '    ? (config.permissions ?? ["clipboard-write", "fullscreen"]).join("; ")',
     },
   ],
   // The served harness's server without the host's per-request check (P050).
   authorize: "harness",
+  // The host's checks on annotation reports (P053): taken only while asked for, within limits.
+  "annotation-checks": [
+    {
+      file: "src/host/create-host.ts",
+      find: '              annotating === null ||\n              !(kind === "element" ? annotating.elements : annotating.text)\n',
+      replace: "              false\n",
+    },
+    {
+      file: "src/annotate/validate.ts",
+      find: "        !text(exact, LIMITS.exact, 1) ||",
+      replace: '        typeof exact !== "string" ||',
+    },
+    {
+      file: "src/annotate/validate.ts",
+      find: "  if (value.selectors.length > 3 || !text(value.label, LIMITS.label)) {",
+      replace: '  if (typeof value.label !== "string") {',
+    },
+  ],
+  // The shell's clipboard walls (P051): the async API, the copy and cut commands, copy events.
+  clipboard: [
+    {
+      file: RUNTIME,
+      find: '  const REFUSED_COMMANDS = ["inserthtml", "copy", "cut", "paste"];',
+      replace: '  const REFUSED_COMMANDS = ["inserthtml"];',
+    },
+    { file: RUNTIME, find: "        lock(Clipboard.prototype, name, noClipboard);\n", replace: "" },
+    {
+      file: RUNTIME,
+      find: "    window.addEventListener(type, (event) => event.stopImmediatePropagation(), true);\n",
+      replace: "",
+    },
+  ],
 };
 export const weakened = (process.env.PORTHOLE_LEAK_WEAKEN ?? "")
   .split(",")

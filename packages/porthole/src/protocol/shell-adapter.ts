@@ -8,7 +8,12 @@ import {
   type JsonRpcRequest,
   type JsonRpcResponse,
 } from "./jsonrpc.ts";
-import { MCP_APPS_METHODS as M, MCP_APPS_PROTOCOL_VERSION, type HostContext } from "./mcp-apps.ts";
+import {
+  COPY_TEXT_METHOD,
+  MCP_APPS_METHODS as M,
+  MCP_APPS_PROTOCOL_VERSION,
+  type HostContext,
+} from "./mcp-apps.ts";
 
 /**
  * The core's adapter: the host side of the MCP Apps subset the shell speaks, which content using
@@ -42,6 +47,7 @@ const REQUESTS: Readonly<
     }),
   },
   [M.openLink]: { capability: "openLink", args: (params) => ({ url: params.url }) },
+  [COPY_TEXT_METHOD]: { capability: "copyText", args: (params) => ({ text: params.text }) },
   [M.downloadFile]: {
     capability: "downloadFile",
     args: (params) => ({ contents: params.contents }),
@@ -63,7 +69,10 @@ function answer(
   outcome: CallOutcome<unknown>,
 ): { result: unknown } | { error: { code: number; message: string } } {
   const flagged =
-    capability === "sendPrompt" || capability === "openLink" || capability === "downloadFile";
+    capability === "sendPrompt" ||
+    capability === "openLink" ||
+    capability === "downloadFile" ||
+    capability === "copyText";
   if (!outcome.ok) {
     return flagged
       ? { result: { isError: true } }

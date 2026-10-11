@@ -222,7 +222,10 @@ only the declared content origins.
 
 3. **Message boundary.** Every message crossing the frame is validated against a
    schema and checked for sender identity before use; the shell accepts messages
-   only from its host, and the host only from its frame.
+   only from its host, and the host only from its frame. What the frame says about
+   itself (its size, its errors, an annotation's anchor and where it is) is the
+   content's word even when the shell says it, since they share a realm: the host
+   bounds it and uses it as a UI hint, never as a permission (P053).
 
 4. **Host's decision ↔ content domain.** Authentication and authorization
    *policy* are the host's; carrying the host's decision safely onto the content
@@ -243,6 +246,11 @@ only the declared content origins.
   contract stays standard (PRINCIPLE 2).
 - **Theme variables.** The theme map is config; the standard MCP Apps variable
   names are the default vocabulary.
+- **The person's clipboard** is the host's alone: content asks for a copy
+  (`copyText`), the host performs it and shows what it copied (P051, P052).
+- **Annotations** (`annotate`): the host drives a select mode and marks anchors in
+  the shell; anchors are W3C Web Annotation selectors a host stores with its own
+  comments (P053).
 - **Served content.** A host plugs its own policy and infrastructure into `/server`:
   who may see what (`authorize`), where tickets live (`TicketStore`: memory, D1),
   how origins are named (`content.name`, other servers' `reserved` namespaces),

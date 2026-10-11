@@ -1,4 +1,5 @@
 import { hostOriginProblem } from "../isolation/served.ts";
+import { ANNOTATE_RUNTIME } from "./annotate.ts";
 import { SHELL_RUNTIME } from "./runtime.ts";
 import type { ShellPlan } from "./plan.ts";
 
@@ -85,7 +86,11 @@ export function shellDocument(plan: ShellPlan, csp: string, options: ShellDocume
       throw new TypeError(`shellDocument: ${problem}`);
     }
   }
-  const runtime = SHELL_RUNTIME.replace("__PLAN__", () =>
+  // The annotation runtime only where it is declared; spliced in before the plan, which may carry
+  // any text (a document) and must not be searched.
+  const runtime = SHELL_RUNTIME.replace("__ANNOTATE__", () =>
+    plan.capabilities.annotate === undefined ? "" : ANNOTATE_RUNTIME,
+  ).replace("__PLAN__", () =>
     scriptJson({
       ...plan,
       origins: options.origins,

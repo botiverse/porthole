@@ -14,7 +14,7 @@ import {
   MCP_APPS_PROTOCOL_VERSION,
   type HostContext,
 } from "../protocol/mcp-apps.ts";
-import { MCP_APPS_STYLE_VARIABLES } from "../protocol/mcp-apps.ts";
+import { COPY_TEXT_METHOD, MCP_APPS_STYLE_VARIABLES } from "../protocol/mcp-apps.ts";
 
 /**
  * The MCP Apps adapter (P004, P007): the host side of the protocol for full MCP Apps views, written
@@ -282,6 +282,15 @@ function connect(session: AdapterSession, options: McpAppsAdapterOptions): McpAp
           },
           () => ({}),
         );
+        return;
+      case COPY_TEXT_METHOD:
+        // Porthole's own request (the standard has no clipboard request): the host copies, and
+        // shows the person what (P052).
+        if (typeof params.text !== "string") {
+          invalid("needs text");
+          return;
+        }
+        await call(request, "copyText", { text: params.text }, done);
         return;
       case MCP_APPS_METHODS.requestDisplayMode: {
         if (typeof params.mode !== "string" || !DISPLAY_MODES.has(params.mode)) {

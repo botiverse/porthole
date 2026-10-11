@@ -57,13 +57,17 @@ const CASES: Record<string, PortholeConfig> = {
       ),
     },
   }),
+  "inline widget, copy buttons and comments": presets.inlineWidget({
+    capabilities: { copyText: {}, annotate: {}, sendPrompt: {} },
+  }),
   "artifact page": presets.artifact(),
+  "artifact page with comments": presets.artifact({ capabilities: { annotate: {} } }),
   "artifact page, served on its own domain": presets.artifact({
     isolation: "domain",
     contentOrigins: ["https://*.example-usercontent.com"],
   }),
   "MCP Apps view": presets.mcpApp({
-    capabilities: ALL_HANDLED,
+    capabilities: { ...ALL_HANDLED, copyText: {}, annotate: {} },
     egress: { connect: ["https://api.example.com"], img: ["https://images.example.com"] },
   }),
 };
@@ -108,6 +112,8 @@ const ENTRY_PREFIXES: { readonly [N in Exclude<CapabilityName, "resize">]: reado
   readData: ["- Data:"],
   setModelContext: ["- Context for the agent:"],
   reportError: ["- Errors:"],
+  copyText: ["- copyText(", "- Copying:"],
+  annotate: ["- Comments:"],
 };
 
 const GLOBALS = CAPABILITY_NAMES.flatMap((name) => {
@@ -166,6 +172,10 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
         ENTRY_PREFIXES[name].some((prefix) => line.startsWith(prefix)),
       );
       expect(entry, `the manual has no entry for ${name}`).toBeDefined();
+      if (name === "annotate") {
+        // The person comments; the content calls nothing: its gates bound the frame's reports.
+        continue;
+      }
       const gates = effectiveGates(config, name);
       expect(entry?.includes("unless they confirm"), `${name}: confirm`).toBe(
         gates.includes("confirm"),

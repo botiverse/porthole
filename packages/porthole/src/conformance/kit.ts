@@ -29,7 +29,7 @@ export interface Probe {
   readonly id: string;
   /**
    * The DESIGN.md egress-table item it proves; 0 for the shell's own wiring and interop, 11 for
-   * behavior (streaming, sizing, theming), 12 for host-function gates.
+   * behavior (streaming, sizing, theming), 12 for host-function gates, 13 for the clipboard.
    */
   readonly item: number;
   readonly title: string;

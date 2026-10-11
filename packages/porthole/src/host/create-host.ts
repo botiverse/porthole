@@ -1,4 +1,12 @@
+import {
+  ANNOTATE_METHODS,
+  type AnnotateMode,
+  type AnnotationMark,
+  type AnnotationReport,
+} from "../annotate/types.ts";
+import { annotateMode, checkMarks, parseReport } from "../annotate/validate.ts";
 import { createBridge, type BridgeEvent } from "../bridge/bridge.ts";
+import type { HostFunctionBridge } from "../bridge/types.ts";
 import { compile } from "../compile/compile.ts";
 import { declaredCapabilities } from "../compile/policy.ts";
 import { capabilitySpec } from "../config/capabilities.ts";
@@ -17,6 +25,7 @@ import {
 import { shellAdapter } from "../protocol/shell-adapter.ts";
 import { resolveTheme } from "../theme/variables.ts";
 import type {
+  AnnotationControls,
   DisplayEvents,
   DisplayHandle,
   HostOptions,
@@ -31,6 +40,17 @@ const DEFAULT_LOAD_TIMEOUT_MS = 15_000;
 const MAX_RESTARTS = 3;
 
 const BASE_KEYS = new Set(["hostContextChanged", "teardown", "close"]);
+
+/** The frame's annotation reports, by method. */
+const REPORTS: Readonly<Record<string, AnnotationReport["type"]>> = {
+  [ANNOTATE_METHODS.selected]: "selected",
+  [ANNOTATE_METHODS.unselected]: "unselected",
+  [ANNOTATE_METHODS.cancelled]: "cancelled",
+  [ANNOTATE_METHODS.anchored]: "anchored",
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
 const STANDARD = new Set(MCP_APPS_STYLE_VARIABLES);
 
 /**
@@ -90,6 +110,129 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       const view = container.ownerDocument.defaultView;
       // The adapter's own operations, the last call of each, replayed into every new frame.
       const replay = new Map<string, unknown[]>();
+      // Annotations: the host's state, given to each frame once it finished its handshake.
+      const annotates = config.capabilities.annotate !== undefined;
+      let annotating: Required<AnnotateMode> | null = null;
+      let marks: AnnotationMark[] = [];
+      let activeMark: string | null = null;
+      let handshaken = false;
+      const toFrame = (method: string, params: Record<string, unknown>) => {
+        if (handshaken && surface !== null) {
+          surface.transport.send({ jsonrpc: "2.0", method, params });
+        }
+      };
+      const giveAnnotations = () => {
+        if (marks.length > 0) {
+          toFrame(ANNOTATE_METHODS.show, {
+            marks,
+            ...(activeMark === null ? {} : { active: activeMark }),
+          });
+        }
+        if (annotating !== null) {
+          toFrame(ANNOTATE_METHODS.start, { ...annotating });
+        }
+      };
+      /**
+       * A report from the frame: checked, taken only while the host asked for it (a selection
+       * only in select mode, results only for its own marks), then through the bridge's gates.
+       */
+      const onAnnotation = (raw: unknown, bridge: HostFunctionBridge) => {
+        if (
+          !isRecord(raw) ||
+          raw.jsonrpc !== "2.0" ||
+          "id" in raw ||
+          typeof raw.method !== "string"
+        ) {
+          return;
+        }
+        const type = REPORTS[raw.method];
+        if (type === undefined) {
+          return;
+        }
+        let report = parseReport({ ...(isRecord(raw.params) ? raw.params : {}), type });
+        if (report === null) {
+          void bridge.call("annotate", null);
+          return;
+        }
+        switch (report.type) {
+          case "selected": {
+            const kind = report.anchor.kind;
+            if (
+              annotating === null ||
+              !(kind === "element" ? annotating.elements : annotating.text)
+            ) {
+              return;
+            }
+            if (kind === "element") {
+              annotating = annotating.text ? { elements: false, text: true } : null;
+            }
+            break;
+          }
+          case "unselected":
+            if (annotating?.text !== true) {
+              return;
+            }
+            break;
+          case "cancelled":
+            if (annotating?.elements !== true) {
+              return;
+            }
+            annotating = annotating.text ? { elements: false, text: true } : null;
+            break;
+          case "anchored": {
+            const known = new Set(marks.map((mark) => mark.id));
+            const results = report.results.filter((result) => known.has(result.id));
+            if (results.length === 0) {
+              return;
+            }
+            report = { type: "anchored", results };
+            break;
+          }
+        }
+        void bridge.call("annotate", report);
+      };
+      const needsAnnotate = (operation: string) => {
+        if (!annotates) {
+          throw new TypeError(`annotations.${operation}: the config doesn't declare annotate`);
+        }
+      };
+      const annotations: AnnotationControls = {
+        start(mode) {
+          needsAnnotate("start");
+          annotating = annotateMode(mode);
+          toFrame(ANNOTATE_METHODS.start, { ...annotating });
+        },
+        stop() {
+          needsAnnotate("stop");
+          annotating = null;
+          toFrame(ANNOTATE_METHODS.stop, {});
+        },
+        show(next) {
+          needsAnnotate("show");
+          marks = checkMarks(next);
+          if (activeMark !== null && !marks.some((mark) => mark.id === activeMark)) {
+            activeMark = null;
+          }
+          toFrame(ANNOTATE_METHODS.show, {
+            marks,
+            ...(activeMark === null ? {} : { active: activeMark }),
+          });
+        },
+        focus(id) {
+          needsAnnotate("focus");
+          if (!marks.some((mark) => mark.id === id)) {
+            throw new TypeError(`annotations.focus: no mark ${JSON.stringify(id)} is shown`);
+          }
+          activeMark = id;
+          toFrame(ANNOTATE_METHODS.focus, { id });
+        },
+        clear() {
+          needsAnnotate("clear");
+          marks = [];
+          activeMark = null;
+          toFrame(ANNOTATE_METHODS.clear, {});
+        },
+      };
 
       const hostContext = (): HostContext => {
         const width = container.getBoundingClientRect().width;
@@ -142,10 +285,14 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           case "muted":
             emit("muted", undefined);
             return;
+          case "annotation":
+            emit("annotation", event.report);
+            return;
         }
       };
 
       const stop = () => {
+        handshaken = false;
         abort?.abort();
         abort = null;
         outcomeWatch?.stop();
@@ -197,6 +344,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           userActivation: () => created.userActivation(),
           onEvent: onBridge,
         });
+        if (annotates) {
+          created.transport.listen((raw) => onAnnotation(raw, bridge));
+        }
         const opened = adapter.connect({
           display: { id: mount.displayId, title: mount.title },
           compiled,
@@ -207,6 +357,10 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           emit: (event) => {
             if (event.type === "initialized") {
               watch.initialized();
+              if (!handshaken) {
+                handshaken = true;
+                giveAnnotations();
+              }
               emit("initialized", undefined);
             }
           },
@@ -274,6 +428,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
 
       const controls = {
         displayId: mount.displayId,
+        annotations,
         setTheme(next: ColorScheme) {
           scheme = next;
           surface?.setColorScheme(next);

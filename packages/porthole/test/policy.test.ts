@@ -55,7 +55,8 @@ describe("the frame's attributes", () => {
   test("an opaque frame may run scripts and nothing else", () => {
     const compiled = compile(presets.inlineWidget());
     expect(compiled.sandbox).toBe("allow-scripts");
-    expect(compiled.allow).toBe("");
+    // No feature delegated; the clipboard denied by name (P051).
+    expect(compiled.allow).toBe("clipboard-read 'none'; clipboard-write 'none'");
     expect(compiled.referrerPolicy).toBe("no-referrer");
   });
 
@@ -67,6 +68,7 @@ describe("the frame's attributes", () => {
       }),
     );
     expect(compiled.sandbox).toBe("allow-scripts allow-same-origin");
+    expect(compiled.allow).toBe("clipboard-read 'none'; clipboard-write 'none'");
   });
 
   test("no preset grants popups, downloads, modals or top navigation", () => {

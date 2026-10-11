@@ -1,5 +1,5 @@
 import { expect, test, type FrameLocator, type Page } from "@playwright/test";
-import { embedderCsp, presets } from "../src/index.ts";
+import { embedderCsp, presets, type AnnotationMark } from "../src/index.ts";
 import type { AppState, FrameSpec } from "./react/app.tsx";
 
 /**
@@ -516,4 +516,131 @@ test("the default dialog's yes runs the effect inside its own click: a window op
     type: "measured",
     description: `${browserName}: a yes given 1.5 s later, without proceed, ${late.opened ? "still opens" : "opens no"} window`,
   });
+});
+
+/** What is on the clipboard: pasted into a text area on the host's page. */
+async function pasted(page: Page): Promise<string> {
+  await page.evaluate(() => {
+    let area = document.getElementById("paste-oracle") as HTMLTextAreaElement | null;
+    if (area === null) {
+      area = document.createElement("textarea");
+      area.id = "paste-oracle";
+      document.body.prepend(area);
+    }
+    area.value = "";
+  });
+  await page.locator("#paste-oracle").click();
+  await page.keyboard.press("ControlOrMeta+V");
+  await page.waitForTimeout(200);
+  return page.evaluate(
+    () => (document.getElementById("paste-oracle") as HTMLTextAreaElement).value,
+  );
+}
+
+const LONG_COPY = Array.from(
+  { length: 8 },
+  (_, line) => `line ${line + 1}: ${"x".repeat(60)}`,
+).join("\n");
+
+const COPY = `<button id="short">Copy the command</button><button id="long">Copy the log</button>
+<script>
+  document.getElementById("short").addEventListener("click", () => copyText("npm test -- --run"));
+  document.getElementById("long").addEventListener("click", () => copyText(${JSON.stringify(LONG_COPY)}));
+</script>`;
+
+test("the default copy toast: a copy button's text goes on the clipboard, and the person sees it, clipped", async ({
+  page,
+}) => {
+  await open(page, {
+    provider: "default",
+    frames: [frame({ displayId: "copy", title: "Build steps", config: "copy", content: COPY })],
+  });
+  const inside = frameOf(page, "copy");
+  await inside.locator("#short").click();
+  const toast = page.locator("[data-porthole-toast]");
+  await expect(toast).toHaveAttribute("data-porthole-copied", "true");
+  await expect(toast.locator("[data-porthole-copied-text]")).toHaveText("npm test -- --run");
+  await expect(toast.locator("[data-porthole-source]")).toHaveText("from “Build steps”");
+  expect(await pasted(page)).toBe("npm test -- --run");
+
+  await inside.locator("#long").click();
+  await expect(toast.locator("[data-porthole-copied-text]")).toContainText("line 4");
+  await expect(toast.locator("[data-porthole-copied-text]")).not.toContainText("line 5");
+  await expect(toast.locator("[data-porthole-length]")).toHaveText(
+    `${LONG_COPY.length.toLocaleString("en-US")} characters in all`,
+  );
+  expect(await pasted(page)).toBe(LONG_COPY);
+});
+
+test("when the host's page couldn't write, the toast shows the text and the person's own Copy writes it", async ({
+  page,
+}) => {
+  await open(page, {
+    provider: "default",
+    frames: [frame({ displayId: "copy", title: "Build steps", config: "copy", content: COPY })],
+  });
+  await page.evaluate(() => {
+    const clipboard = navigator.clipboard as Clipboard & { writeText: Clipboard["writeText"] };
+    const writeText = clipboard.writeText.bind(clipboard);
+    const execCommand = document.execCommand.bind(document);
+    clipboard.writeText = () => Promise.reject(new Error("not now"));
+    document.execCommand = () => false;
+    (window as unknown as { restore: () => void }).restore = () => {
+      clipboard.writeText = writeText;
+      document.execCommand = execCommand;
+    };
+  });
+  await frameOf(page, "copy").locator("#short").click();
+  const toast = page.locator("[data-porthole-toast]");
+  await expect(toast).toHaveAttribute("data-porthole-copied", "false");
+  await expect(toast.locator("[data-porthole-copied-text]")).toHaveText("npm test -- --run");
+  await page.evaluate(() => (window as unknown as { restore: () => void }).restore());
+  await toast.locator("[data-porthole-copy]").click();
+  await expect(toast).toHaveAttribute("data-porthole-copied", "true");
+  expect(await pasted(page)).toBe("npm test -- --run");
+});
+
+const NOTES = `<!doctype html><html><head><title>Notes</title></head><body>
+<h2 id="revenue">Revenue grew 12%</h2><p>Costs fell by 3%.</p></body></html>`;
+
+test("annotations through props: picking reports to onAnnotation; marks and focus follow their props", async ({
+  page,
+}) => {
+  const notes = (more: Partial<FrameSpec>) =>
+    frame({ displayId: "notes", title: "Notes", config: "notes", content: NOTES, ...more });
+  await open(page, {
+    provider: "default",
+    frames: [notes({ annotating: { elements: true, text: false } })],
+  });
+  const inside = frameOf(page, "notes");
+  await expect(inside.locator("#revenue")).toBeVisible();
+  await expect
+    .poll(async () => {
+      await inside.locator("#revenue").click();
+      return (await events(page, "notes", "annotation")).length;
+    })
+    .toBeGreaterThan(0);
+  const [picked] = (await events(page, "notes", "annotation")).map(
+    (entry) => entry.detail as { type: string; anchor: AnnotationMark["anchor"] },
+  );
+  expect(picked?.type).toBe("selected");
+  const anchor = picked?.anchor as AnnotationMark["anchor"];
+  await open(page, {
+    provider: "default",
+    frames: [
+      notes({ annotating: null, annotations: [{ id: "c1", anchor }], focusedAnnotation: "c1" }),
+    ],
+  });
+  await expect
+    .poll(async () =>
+      (await events(page, "notes", "annotation")).some(
+        (entry) =>
+          (entry.detail as { type: string; results?: { id: string; state: string }[] }).type ===
+            "anchored" &&
+          (entry.detail as { results: { id: string; state: string }[] }).results.some(
+            (result) => result.id === "c1" && result.state === "attached",
+          ),
+      ),
+    )
+    .toBe(true);
 });

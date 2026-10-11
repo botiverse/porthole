@@ -1,4 +1,9 @@
-import { capabilitySpec, type CapabilityName, type Gate } from "../config/capabilities.ts";
+import {
+  MAX_COPY_CHARS,
+  capabilitySpec,
+  type CapabilityName,
+  type Gate,
+} from "../config/capabilities.ts";
 import type { PortholeConfig } from "../config/schema.ts";
 import { BUILT_IN_TOPICS } from "../config/validate.ts";
 import {
@@ -115,7 +120,7 @@ const loadsScripts = (config: PortholeConfig): boolean =>
   egressOrigins(config, "script").length > 0;
 
 /** What the sandbox withholds, from the sandbox tokens and the shell's own walls. */
-function forbidden(config: PortholeConfig): string {
+function forbidden(config: PortholeConfig, c: Context): string {
   const tokens = sandboxTokens(config);
   const items = ["position: fixed", "full screen"];
   if (!tokens.includes("allow-modals")) {
@@ -130,7 +135,11 @@ function forbidden(config: PortholeConfig): string {
   if (!tokens.includes("allow-downloads")) {
     items.push("downloads");
   }
-  items.push("clipboard writes", "frames (iframe, object, embed)", "WebRTC");
+  items.push(
+    c.global("copyText") ? "the clipboard (copy buttons call copyText)" : "the clipboard",
+    "frames (iframe, object, embed)",
+    "WebRTC",
+  );
   return `Not allowed: ${items.join(", ")}.`;
 }
 
@@ -172,7 +181,7 @@ function widget(c: Context): string {
     "- Cards in a row wrap (flex-wrap: wrap; flex: 1 1 100px), or a grid of repeat(auto-fit, minmax(160px, 1fr)): at most 2 columns under 500 px, never a fixed repeat(3, …).",
     "- Touch: anything clickable is at least 44 px tall. Phones don't hover: what a hover shows, a tap (click) shows too.",
     "",
-    `${forbidden(config)} ${network(config)} Keep it under ${Math.floor(limits.maxBytes / 1000)} KB.`,
+    `${forbidden(config, c)} ${network(config)} Keep it under ${Math.floor(limits.maxBytes / 1000)} KB.`,
     loadsScripts(config)
       ? "\nLibraries: pin an exact version at least two weeks old (chart.js@4.4.1 in its URL), never @latest or a range, so the code can't be swapped under you and draws the same every time."
       : null,
@@ -337,6 +346,12 @@ const ENTRIES: { readonly [N in CapabilityName]: (c: Context, gates: readonly Ga
       `- Data: the MCP Apps request resources/read (with the App SDK, app.readServerResource). ${gateWords(gates, "the request")}`,
     setModelContext: (_c, gates) =>
       `- Context for the agent: the MCP Apps request ui/update-model-context (with the App SDK, app.updateModelContext). ${gateWords(gates, "it")}`,
+    copyText: (c, gates) =>
+      c.global("copyText")
+        ? `- copyText(text): copies text to the person's clipboard (at most ${MAX_COPY_CHARS.toLocaleString("en-US")} characters), and the app shows them what was copied. Use it for every copy button: nothing else in the ${c.noun} can write the clipboard. ${gateWords(gates, "the text")} It returns a promise: true if it was copied.`
+        : `- Copying: the request porthole/copy-text with { text } (at most ${MAX_COPY_CHARS.toLocaleString("en-US")} characters) copies text to the person's clipboard, and the app shows them what was copied; nothing else in the ${c.noun} can write the clipboard. ${gateWords(gates, "the text")}`,
+    annotate: (c) =>
+      `- Comments: the person may point at parts of the ${c.noun} to comment on them. Give headings and the parts that matter stable ids (id="revenue"), so comments stay on them when the ${c.noun} is written again.`,
     reportError: (c, gates) =>
       `- Errors: what your code throws, and anything the sandbox blocks, is reported to the app (at most ${c.config.limits.maxErrorReports} a run). ${gateWords(gates, "it")}`.trim(),
     resize: () => "",

@@ -7,6 +7,7 @@
 export {
   CAPABILITIES,
   CAPABILITY_NAMES,
+  MAX_COPY_CHARS,
   capabilitySpec,
   isCapabilityName,
   type CapabilityArgs,
@@ -105,6 +106,7 @@ export type {
   ShellConnection,
 } from "./protocol/adapter.ts";
 export {
+  COPY_TEXT_METHOD,
   MCP_APPS_METHODS,
   MCP_APPS_PROTOCOL_VERSION,
   MCP_APPS_STYLE_VARIABLES,
@@ -124,7 +126,9 @@ export type {
   Refusal,
 } from "./bridge/types.ts";
 export { createHost } from "./host/create-host.ts";
+export { writeClipboard } from "./host/clipboard.ts";
 export type {
+  AnnotationControls,
   DisplayControls,
   DisplayEvents,
   FrameBlock,
@@ -134,3 +138,21 @@ export type {
   MountOptions,
   PortholeHost,
 } from "./host/types.ts";
+
+// Annotations (P053): anchors, what a frame reports, and the host's checks on both.
+export {
+  ANNOTATE_METHODS,
+  ANNOTATION_LIMITS,
+  type AnchorResult,
+  type AnchorState,
+  type AnnotateMode,
+  type AnnotationAnchor,
+  type AnnotationMark,
+  type AnnotationRect,
+  type AnnotationReport,
+  type AnnotationSelector,
+  type CssSelector,
+  type TextPositionSelector,
+  type TextQuoteSelector,
+} from "./annotate/types.ts";
+export { parseAnchor, parseRect, parseReport } from "./annotate/validate.ts";

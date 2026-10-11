@@ -107,6 +107,8 @@ no `components` field (P015).
 | `setModelContext` | 30/min | handler | — | `ui/update-model-context` (`app.updateModelContext`) |
 | `reportError` | 10/min | event | (automatic) | `notifications/message`, level `error` |
 | `resize` | none | event | (automatic) | `ui/notifications/size-changed` |
+| `copyText` | user-activation, 30/min | handler | `copyText(text)` | `porthole/copy-text` (none in the standard) |
+| `annotate` | 120/min (the frame's reports) | event | — | `porthole/annotate.*` (the host drives it, P053) |
 
 Every preset declares only `resize` and `reportError` (they report to the host and
 carry nothing out); the host declares the rest. Gates are explained in P021: all
@@ -358,7 +360,7 @@ compiles; peer `react` 19.2+ for `useEffectEvent`). All isolation is the core's;
 binding is mounting and lifecycle (P034).
 
 ```ts
-<PortholeProvider confirm? hostInfo? locator? dialogClassName?>   // once per page
+<PortholeProvider confirm? hostInfo? locator? dialogClassName? toastClassName?>   // once per page
   <PortholeFrame
     config={widgetConfig}            // a preset's config, stable (module scope or memoized)
     displayId={id} title={title}     // height memory and confirmations key on these
@@ -368,6 +370,7 @@ binding is mounting and lifecycle (P034).
     theme={(scheme) => tokens}       // live values for the config's variable names
     generation={n}                   // bump to run again from the start
     onError onResize onNavigated onRefused onMuted onInitialized onOutcome
+    annotating? annotations? focusedAnnotation? onAnnotation?   // where annotate is declared
     aliases? themeKey? renderPlaceholder? eager? confirm? document? instance?
     className? style? />
 </PortholeProvider>
@@ -381,7 +384,11 @@ binding is mounting and lifecycle (P034).
   call's whole effect and the display's title, Cancel focused, the accept button
   ignoring presses for `ARM_DELAY_MS` after it opens, Escape cancels; a modal in the
   host page, outside every frame. `confirm` replaces it. Without a provider frames
-  still run (one page-wide registry) and calls that need a person are refused.
+  still run (one page-wide registry) and calls that need a person are refused. It
+  also serves `copyText` for frames whose handlers don't (P052): the host's page
+  writes the clipboard and the copy toast (`CopyToast`) shows the person what went on
+  it, clipped to four lines and `TOAST_CHARS`; if the write failed it says so and
+  offers a Copy button, a click on the host's own page.
 - **Frame**: mounts when it nears the screen (800 px) unless `eager`; until its
   content reports a size it holds its remembered height (at least
   `PLACEHOLDER_HEIGHT_PX`) and is hidden behind its placeholder (`data-porthole-state`:
@@ -395,6 +402,10 @@ binding is mounting and lifecycle (P034).
   each time, then stopped with an error.
 - The shell reports no size before it has drawn something, so an empty shell never
   overwrites a remembered height (the first host's frame jumped there).
+- **Annotations** follow props: `annotating` (what the person may point at now, or
+  null), `annotations` (the marks, a stable array), `focusedAnnotation` (each new id
+  is brought into view); `onAnnotation` gets what the frame reported. A frame that
+  mounts again gets them all.
 
 Its tests run in real browsers (`leak/react.spec.ts`, against `leak/react/app.tsx`,
 which the leak server bundles with esbuild because React ships CommonJS only).
@@ -495,6 +506,82 @@ for that to lapse and click with raw input.
 | Url-mode delegation (P049) | `allow` from `permissions`, `""` by default | `leak/served/permissions.spec.ts`: full screen follows it on all three; clipboard writes on Chromium only (WebKit and Firefox let any frame write in a click) | `url-permissions` → the default case (all three) |
 | Library CDNs for artifacts (P048) | `egress: LIBRARY_CDNS` in the host's artifact config; closed by default (P022) | `leak/cdn.spec.ts`: opaque and served, a CDN library loads only when opened; another origin never | — (the CSP of rows 1–2) |
 | Workers (P044, P045) | no Node module in `/server`; D1 tickets taken by one `DELETE … RETURNING` | `test/workers.test.ts` (workerd, no `nodejs_compat`, real D1: once per ticket, a race, anonymous, a revocation, flat names, reserved namespaces) | — |
+
+### The clipboard, and copy buttons
+
+Content never writes the clipboard (P051). The frame's `allow` denies
+`clipboard-read` and `clipboard-write` by name; the shell makes the async Clipboard
+API refuse (`write`, `writeText`, `read`, `readText`), makes `execCommand` refuse
+`copy`, `cut` and `paste`, and stops copy and cut events at the window before any
+listener of the content's, so a copy the person makes copies their selection as the
+browser makes it. Copy buttons call `copyText(text)` (P052): the host's page
+writes the clipboard, inside the person's click (a click in a frame activates its
+ancestors), and shows them what went on it.
+
+| # | Channel | Mechanism | Probes | Negative control → fails |
+|---|---------|-----------|--------|--------------------------|
+| 13 | the async Clipboard API in a click (`writeText`, `write`, `readText`) | the shell's lock; Chromium also by the `allow` denial | `13.clipboard-api` | `clipboard` → WebKit, Firefox (Chromium holds by the `allow` denial) |
+| 13 | `execCommand("copy")`/`("cut")` of the content's own selected text | the shell refuses the commands | `13.clipboard-command` | `clipboard` → all three |
+| 13 | a copy listener swapping what the person copies (`clipboardData.setData`) | copy and cut events stopped at the window, first | `13.clipboard-event` (the person's own copy works: positive control) | `clipboard` → all three |
+| 12 | `copyText` | a click (shell and host), 30 a minute, the host's handler | `12.copy-text` (refused on load; the whole text reaches the handler from a click) | — |
+
+Measured before the walls (0.1.2): a click in an opaque widget wrote the clipboard
+on all three engines (the async API on WebKit and Firefox, the copy command and copy
+listeners everywhere). The oracle is the person's clipboard: text copied on the
+host's page, then pasted back there. What the shell can't stop: text hidden by CSS
+inside what the person selects goes with their copy (the browser's own copy); hosts
+that care point people at copy buttons, whose toast shows exactly what was copied.
+
+### Annotations
+
+A person points at part of a display to comment on it (P053). The host drives the
+shell with Porthole's own messages and the shell reports back; the config declares
+`annotate` (inline widgets and artifact pages; MCP Apps views where the host
+chooses), and the annotation runtime is in the shell only then.
+
+| Direction | Message | Params |
+|-----------|---------|--------|
+| host → frame | `porthole/annotate.start` | `{ elements, text }`: picking elements (the one under the pointer or finger outlined with its name; a click or tap picks it, never reaching the content; Escape cancels; one pick), selecting text (each settled selection), or both (a click picks, a drag selects) |
+| host → frame | `porthole/annotate.stop` | — |
+| host → frame | `porthole/annotate.show` | `{ marks: [{ id, anchor }], active? }`: drawn over the content in the shell's own layer (a closed shadow root), found again whenever the content changes |
+| host → frame | `porthole/annotate.focus` | `{ id }`: scrolled into view inside the frame, made the active mark, flashed |
+| host → frame | `porthole/annotate.clear` | — |
+| frame → host | `porthole/annotate.selected` | `{ anchor, rect }` |
+| frame → host | `porthole/annotate.unselected` | — (the text selection went away) |
+| frame → host | `porthole/annotate.cancelled` | — (Escape) |
+| frame → host | `porthole/annotate.anchored` | `{ results: [{ id, state: "attached" \| "orphaned", rect? }] }`: every mark after `show`, the one after `focus`, and when the content changed, only if a state did |
+
+- **Anchors** are W3C Web Annotation selectors, at most one of each:
+  `CssSelector` (unique: the nearest id, else a path of `nth-of-type` steps),
+  `TextQuoteSelector` (the words, with 32 characters of context each side), and
+  `TextPositionSelector` (offsets into the body's text, without scripts, styles and
+  templates). An element anchor has its selector and its first 300 characters of
+  text; a text anchor its words (at most 4,000), position and nearest element.
+- **Found again**, best-effort: a text anchor where it was, else its words anywhere
+  (the occurrence whose context matches best), else its words with any spacing; an
+  element anchor by its selector if its text still starts with its words (or the
+  selector is an id, or it has no words), else the element holding its words. What
+  can't be found is `orphaned`, said so; a host keeps the comment and shows it apart.
+- **Rects** are in the frame's viewport, CSS px: add the frame element's position.
+- **Trust.** The shell shares its realm with the content, which can interfere with
+  all of it or fake any report. The host takes a selection only while it asked for
+  that kind, a cancel only while picking, results only for its own marks; it
+  rebuilds each from known fields within `ANNOTATION_LIMITS` and drops the rest,
+  through the bridge's rate limit. UI hints only, never permissions: what a
+  report says decides where a comment is drawn, never who may see or do anything.
+- **Host API.** `display.annotations.start(mode?)`, `stop()`, `show(marks)`,
+  `focus(id)`, `clear()`, and the `annotation` event (`AnnotationReport`); the state
+  is given to every frame the display runs. `parseAnchor` checks an anchor a host
+  stores (its server, before saving a comment).
+
+Tests (`leak/annotate.spec.ts`, all three engines): a pick outlines and picks
+without the content seeing the click, by id or by path; Escape cancels; a text
+selection and its clearing; both modes together; marks shown, one focused into
+view, one orphaned, all cleared; re-anchoring on a revised page (by id, by words
+moved, by words respaced, one deleted and orphaned); live changes reported only as
+they change; an MCP Apps view; and a hostile page faking every report (not asked,
+malformed, too large, the wrong kind, no such mark, a flood), whose negative
+control is `annotation-checks`.
 
 ## The shell runtime
 
@@ -690,12 +777,5 @@ migration**.
 1. ~~URL mode's sandbox tokens~~: popups, modals and downloads are a host's
    opt-in (P037); clipboard writes and full screen too (P049).
 2. ~~`'self'` in the embedding page's `frame-src`~~: measured and dropped (P033).
-3. **Clipboard writes from agent-written content.** Measured for 0.1.2: a click in
-   an opaque widget writes the clipboard on all three engines (the async Clipboard
-   API on WebKit and Firefox; `document.execCommand("copy")` on Chromium and
-   Firefox; Chromium refuses the async API to an undelegated frame). Nothing leaves
-   the frame, so it isn't a leak, but it is a deception channel (pastejacking:
-   copying other text than a "copy" button shows). Closing it means a gated
-   `copy` capability (the host shows what goes on the clipboard) and the shell
-   removing the clipboard entry points, at the cost of widgets' own copy buttons.
-   Needs the first host's call and a decision entry.
+3. ~~Clipboard writes from agent-written content~~: closed (P051); copy buttons go
+   through the host (`copyText`, P052).

@@ -1,3 +1,4 @@
+import type { AnnotateMode, AnnotationMark, AnnotationReport } from "../annotate/types.ts";
 import type { Confirm, CapabilityHandlers, Refusal } from "../bridge/types.ts";
 import type { CompiledConfig } from "../compile/compile.ts";
 import type { CapabilityName } from "../config/capabilities.ts";
@@ -100,6 +101,28 @@ export interface DisplayEvents {
   readonly refused: { readonly capability: CapabilityName; readonly refusal: Refusal };
   /** Too many declines: the display stops asking until it runs again. */
   readonly muted: undefined;
+  /**
+   * What the frame reported about annotations (`annotate`, P053), checked and taken only while
+   * the host asked for it: a selection, its clearing, a cancelled pick, where marks are. The
+   * content's word: UI hints, never permissions.
+   */
+  readonly annotation: AnnotationReport;
+}
+
+/**
+ * Annotations on a display whose config declares `annotate` (P053). The host's state is kept and
+ * given to every frame the display runs (a reload, a navigation recovered from).
+ */
+export interface AnnotationControls {
+  /** Lets the person point at elements, select text, or both (default both). */
+  start(mode?: AnnotateMode): void;
+  stop(): void;
+  /** Marks these anchors (replacing the marks before); the frame reports where they are. */
+  show(marks: readonly AnnotationMark[]): void;
+  /** Brings a mark into view in the frame and makes it the active one. */
+  focus(id: string): void;
+  /** Removes every mark. */
+  clear(): void;
 }
 
 export interface DisplayControls {
@@ -115,6 +138,8 @@ export interface DisplayControls {
     event: E,
     listener: (detail: DisplayEvents[E]) => void,
   ): () => void;
+  /** Annotations (`annotate`): throws on use where the config doesn't declare it. */
+  readonly annotations: AnnotationControls;
   /** Runs the content again from the start, in a new frame. */
   reload(): void;
   /** Tears the view down and removes the frame. */

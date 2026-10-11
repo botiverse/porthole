@@ -19,7 +19,17 @@ interface Reference {
   answer(id: number, accept: boolean): ConfirmRequest | null;
   setTheme(id: number, scheme: "light" | "dark"): void;
   setContent(id: number, html: string, partial: boolean): void;
+  annotate(id: number, operation: AnnotateOperation, argument?: unknown): string | null;
   destroy(id: number): void;
+}
+
+/** The annotation controls the reference host exposes (`DisplayHandle.annotations`). */
+export type AnnotateOperation = "start" | "stop" | "show" | "focus" | "clear";
+
+/** A reference display, with its annotations (`annotate`) to drive. */
+export interface ReferenceDisplay extends LaunchedDisplay {
+  /** Runs an annotation control; resolves with what it threw, or null. */
+  annotate(operation: AnnotateOperation, argument?: unknown): Promise<string | null>;
 }
 
 type WithReference = Window & { reference: Reference };
@@ -28,9 +38,11 @@ type WithReference = Window & { reference: Reference };
  * Porthole's own `ConformanceHost`: a page that mounts displays with the real core, served with
  * the embedding CSP `embedderCsp` derives from the display's config.
  */
-export const referenceHost: ConformanceHost = {
+export const referenceHost: Omit<ConformanceHost, "launch"> & {
+  launch(page: Page, spec: LaunchSpec): Promise<ReferenceDisplay>;
+} = {
   name: "reference",
-  async launch(page: Page, spec: LaunchSpec): Promise<LaunchedDisplay> {
+  async launch(page: Page, spec: LaunchSpec): Promise<ReferenceDisplay> {
     if (!page.url().includes("/?csp=")) {
       await page.goto(`/?csp=${encodeURIComponent(embedderCsp([spec.config]))}`);
       await page.waitForFunction(() => "reference" in window);
@@ -101,6 +113,12 @@ export const referenceHost: ConformanceHost = {
         page.evaluate((each) => (window as unknown as WithReference).reference.events(each), id),
       destroy: () =>
         page.evaluate((each) => (window as unknown as WithReference).reference.destroy(each), id),
+      annotate: (operation, argument) =>
+        page.evaluate(
+          ([each, what, given]) =>
+            (window as unknown as WithReference).reference.annotate(each, what, given),
+          [id, operation, argument] as const,
+        ),
     };
   },
 };

@@ -24,6 +24,8 @@ React binding with its default dialog; the leak suite with its oracles and negat
 controls, gating on Chromium, WebKit and Firefox.
 `/server` runs on Node and Cloudflare Workers (D1 tickets), with a host's own
 names, anonymous public links and the host's per-request check (0.1.2).
+Content never writes the clipboard (copy buttons call `copyText`, which the host
+performs and shows), and a host can let people annotate content (0.1.3).
 
 ## Setup
 

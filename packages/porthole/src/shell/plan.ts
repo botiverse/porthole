@@ -1,4 +1,4 @@
-import { capabilitySpec, type CapabilityName } from "../config/capabilities.ts";
+import { MAX_COPY_CHARS, capabilitySpec, type CapabilityName } from "../config/capabilities.ts";
 import type { PortholeConfig } from "../config/schema.ts";
 import { declaredCapabilities, effectiveGates } from "../compile/policy.ts";
 import { MCP_APPS_PROTOCOL_VERSION } from "../protocol/mcp-apps.ts";
@@ -31,6 +31,8 @@ export interface ShellPlan {
   readonly storage: "memory" | "native";
   readonly maxErrorReports: number;
   readonly maxPromptChars: number;
+  /** The most text `copyText` carries. */
+  readonly maxCopyChars: number;
   readonly protocolVersion: string;
 }
 
@@ -64,6 +66,7 @@ export function shellPlan(config: PortholeConfig): ShellPlan | null {
     storage: config.isolation === "opaque" ? "memory" : "native",
     maxErrorReports: config.limits.maxErrorReports,
     maxPromptChars: config.limits.maxPromptChars,
+    maxCopyChars: MAX_COPY_CHARS,
     protocolVersion: MCP_APPS_PROTOCOL_VERSION,
   };
 }

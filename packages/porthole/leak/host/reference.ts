@@ -1,4 +1,4 @@
-import { createHost } from "../../src/index.ts";
+import { createHost, type AnnotateMode, type AnnotationMark } from "../../src/index.ts";
 import type { CapabilityHandlers, ConfirmRequest } from "../../src/bridge/types.ts";
 import type { LaunchSpec, RecordedCall, RecordedEvent } from "../../src/conformance/index.ts";
 import type { DisplayEvents, DisplayHandle } from "../../src/host/types.ts";
@@ -26,6 +26,7 @@ const EVENTS: readonly (keyof DisplayEvents)[] = [
   "navigated",
   "refused",
   "muted",
+  "annotation",
 ];
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -53,6 +54,7 @@ const reference = {
       callTool: record("callTool", { content: [] }),
       readData: record("readData", { contents: [] }),
       setModelContext: record("setModelContext", undefined),
+      copyText: record("copyText", true),
     };
     const confirmations: Display["confirmations"] = [];
     const host = createHost(spec.config, {
@@ -115,6 +117,39 @@ const reference = {
     return waiting.request;
   },
   setTheme: (id: number, scheme: "light" | "dark") => displays.get(id)?.handle.setTheme(scheme),
+  /** Drives a display's annotations (`annotate`); what it throws comes back as a string. */
+  annotate(
+    id: number,
+    operation: "start" | "stop" | "show" | "focus" | "clear",
+    argument?: AnnotateMode | readonly AnnotationMark[] | string,
+  ): string | null {
+    const controls = displays.get(id)?.handle.annotations;
+    if (controls === undefined) {
+      return "no display";
+    }
+    try {
+      switch (operation) {
+        case "start":
+          controls.start(argument as AnnotateMode | undefined);
+          break;
+        case "stop":
+          controls.stop();
+          break;
+        case "show":
+          controls.show(argument as readonly AnnotationMark[]);
+          break;
+        case "focus":
+          controls.focus(argument as string);
+          break;
+        case "clear":
+          controls.clear();
+          break;
+      }
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  },
   destroy(id: number) {
     displays.get(id)?.handle.destroy();
     displays.delete(id);

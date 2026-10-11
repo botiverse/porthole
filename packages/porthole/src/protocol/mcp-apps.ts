@@ -115,6 +115,12 @@ export const MCP_APPS_STYLE_VARIABLES: readonly string[] = [
  */
 export const PORTHOLE_STYLES = "porthole/styles";
 
+/**
+ * Porthole's own request for copying text (`copyText`, P052): `{ text }`, answered `{}` when the
+ * host copied it and `{ isError: true }` when it didn't. The standard has no clipboard request.
+ */
+export const COPY_TEXT_METHOD = "porthole/copy-text";
+
 /** The logger name the shell's error reports (`notifications/message`, level `error`) carry. */
 export const SHELL_LOGGER = "porthole";
 

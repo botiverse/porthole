@@ -1,7 +1,12 @@
 import { createElement as h, Fragment } from "react";
 import { createRoot } from "react-dom/client";
 import type { ConfirmRequest, Proceed } from "../../src/bridge/types.ts";
-import { presets, type PortholeConfig } from "../../src/index.ts";
+import {
+  presets,
+  type AnnotateMode,
+  type AnnotationMark,
+  type PortholeConfig,
+} from "../../src/index.ts";
 import { PortholeFrame, PortholeProvider } from "../../src/react/index.ts";
 
 /**
@@ -18,6 +23,8 @@ const CONFIGS: Readonly<Record<string, PortholeConfig>> = {
   prompt: presets.inlineWidget({ capabilities: { sendPrompt: {}, openLink: {} } }),
   capped: presets.inlineWidget({ limits: { maxLiveFrames: 3 } }),
   artifact: presets.artifact(),
+  copy: presets.inlineWidget({ capabilities: { copyText: {} } }),
+  notes: presets.artifact({ capabilities: { annotate: {} } }),
   url: presets.url({ contentOrigins: [APP_ORIGIN] }),
   urlPopups: presets.url({
     contentOrigins: [APP_ORIGIN],
@@ -40,6 +47,9 @@ export interface FrameSpec {
   readonly themeKey?: number;
   /** Space above the frame, px (to push it off screen). */
   readonly gapPx?: number;
+  readonly annotating?: AnnotateMode | null;
+  readonly annotations?: readonly AnnotationMark[];
+  readonly focusedAnnotation?: string | null;
 }
 
 export interface AppState {
@@ -86,6 +96,12 @@ function render(state: AppState): void {
         ...(frame.eager === undefined ? {} : { eager: frame.eager }),
         ...(frame.aliases === undefined ? {} : { aliases: frame.aliases }),
         ...(frame.themeKey === undefined ? {} : { themeKey: frame.themeKey }),
+        ...(frame.annotating === undefined ? {} : { annotating: frame.annotating }),
+        ...(frame.annotations === undefined ? {} : { annotations: frame.annotations }),
+        ...(frame.focusedAnnotation === undefined
+          ? {}
+          : { focusedAnnotation: frame.focusedAnnotation }),
+        onAnnotation: (report) => record(frame.displayId, "annotation", report),
         ...(frame.config.startsWith("url")
           ? {
               instance: {

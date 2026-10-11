@@ -1027,3 +1027,143 @@ suite on Chromium under load. The entry page now leaves only once it has loaded.
 sessions as revocation (still a window, and more tickets).
 **Revisit when** a host needs Porthole to push a revocation into a loaded frame (it can't today:
 a cross-origin frame is the content's).
+
+## P051 · 2026-10-11 · Content never writes the clipboard · Accepted
+
+**Decision.** Content cannot write to the clipboard by itself, on any engine. The first host's
+owner decided this.
+
+The walls are:
+- The frame's `allow` denies `clipboard-read` and `clipboard-write` by name.
+- The shell makes the async Clipboard API refuse (`write`, `writeText`, `read`, `readText`).
+- `execCommand` refuses `copy`, `cut` and `paste`.
+- Copy and cut events are stopped at the window before any listener of the content's runs. A
+  copy the person makes still copies their selection as the browser makes it.
+
+Copy buttons go through the host instead (P052). Url mode is unchanged: an app is someone's own
+running app, and only the host can delegate clipboard writes to it (P049). Item 1 of 0.1.3.
+
+**Why.** Measured on 0.1.2: a click in an opaque widget wrote the clipboard on all three engines.
+- WebKit and Firefox allowed the async API.
+- All three allowed the copy command and copy listeners that swap what the person copied.
+
+Pastejacking into a terminal is a real risk for coding-agent hosts. A "copy this command" button
+that copies something else needs only a click.
+
+**Measured** (`13.clipboard-api`, `13.clipboard-command`, `13.clipboard-event`; the oracle is the
+person's own clipboard, written and pasted on the host's page): every wall holds on Chromium,
+WebKit and Firefox. The negative control `clipboard` takes out the shell's walls:
+- The async API then writes on WebKit and Firefox. Chromium still refuses it through the `allow`
+  denial.
+- The copy command and copy listeners then write on all three.
+
+Moving the person's selection on their copy keystroke changed nothing on any engine, so no wall
+is claimed for it.
+
+**What stays open.** Text hidden by CSS inside what the person selects goes with their copy. That
+copy is the browser's own, which the shell doesn't rewrite. Hosts point people at copy buttons,
+whose toast shows exactly what was copied.
+
+**Rejected.**
+- A per-widget opt-in for direct writes: any widget would opt in.
+- Rewriting the person's own copy to "visible text only": an arms race with CSS, and it breaks
+  honest copies.
+
+**Revisit when** browsers let a page veto a cross-origin frame's clipboard writes (then the shell
+wall is a second one), or the person's copy can be shown before it lands.
+
+## P052 · 2026-10-11 · Copy buttons call `copyText`: the host copies, and shows what · Accepted
+
+**Decision.** A new capability, `copyText({ text })`:
+- **Gates:** a click (`user-activation`, which the shell and the host check), and 30 a minute.
+- **Limit:** at most `MAX_COPY_CHARS` (20,000) characters.
+- **Served by the host:** its handler writes the clipboard on the host's own page (the core's
+  `writeClipboard` helper tries the async API, then the copy command) and shows the person what
+  was copied.
+- **Reached by:** the shell global `copyText(text)` in inline widgets and artifact pages, or
+  Porthole's own request `porthole/copy-text` (MCP Apps has no clipboard request).
+
+The React binding serves it by default. The provider's handler writes the clipboard and shows a
+small toast (`CopyToast`) with the text, clipped to four lines and 280 characters, plus its length
+when clipped. If the write failed, the toast says so and offers a Copy button: a click on the
+host's own page, which writes it. A host's own `copyText` handler replaces it.
+
+The manual tells authors to use `copyText` for every copy button; the widget topic says the
+clipboard is closed to them otherwise. Item 1 of 0.1.3.
+
+**Why.**
+- Copy buttons are common in agent-made content.
+- The host's page can write the clipboard in the person's click, because a click in a frame gives
+  its ancestors user activation (measured on all three engines in 0.1.2, and the copy itself in
+  0.1.3).
+- Showing the text lets the person see what they are about to paste.
+- No confirmation dialog: a copy has no effect until the person pastes, and the toast shows it
+  then.
+
+**Measured:**
+- `12.copy-text`: a call on load is refused, and the whole text reaches the handler from a click.
+- `leak/react.spec.ts`: the toast shows the clipped text, the person's clipboard holds the whole
+  text, and a failed write is recovered by the toast's own button. All on three engines.
+
+**Rejected.** A confirm gate by default (too heavy for a copy; a host can add one, and its dialog
+shows the text); writing from inside the frame (P051).
+**Revisit when** MCP Apps defines a clipboard request (then the adapter maps it).
+
+## P053 · 2026-10-11 · Annotations are mechanism: the host's comments, anchored in content it can't trust · Accepted
+
+**Decision.** A new optional capability, `annotate`, declared by the host. It is for inline widgets
+and artifact pages, and for MCP Apps views where the host chooses. With it, the host can:
+- let a person pick an element or select text to comment on;
+- mark existing anchors over the content;
+- bring one into view;
+- learn where each anchor is now, or that it is orphaned.
+
+Policy (who may comment, where comments are stored, what they look like next to the frame) stays
+the host's (PRINCIPLE 8). The runtime is spliced into the shell only where `annotate` is declared.
+
+**Messages.** Porthole's own (P002):
+- Host to frame: `porthole/annotate.start | stop | show | focus | clear`.
+- Frame to host: `selected` (an anchor plus a rect in the frame's viewport), `unselected`,
+  `cancelled` and `anchored`.
+
+**Anchors.** W3C Web Annotation selectors, so an anchor can be found again after the content
+changes: `CssSelector`, `TextQuoteSelector` (with prefix and suffix) and `TextPositionSelector`,
+at most one of each. Finding one again is best-effort, with an explicit `orphaned`.
+
+**Item.** 2 of 0.1.3. The host this matches (an artifact viewer with its own injected bridge) can
+drop its bridge. Its features are covered:
+- element grab with a hover outline and a name tag;
+- selection to comment, with a host-drawn affordance at the reported rect;
+- jump with a flash;
+- live updates.
+
+It also gains persistent marks and re-anchoring across versions, which it lacked.
+
+**Trust.** The shell shares the content's realm, so content can interfere or fake any report. The
+host therefore:
+- takes a selection only while it asked for that kind, a cancel only while picking, and results
+  only for its own marks;
+- rebuilds every report from known fields within `ANNOTATION_LIMITS` and drops the rest;
+- rate-limits reports at 120 a minute through the bridge.
+
+What a frame reports is a UI hint, never a permission. It decides where a comment is drawn,
+never who may see or do anything.
+
+**Measured** (`leak/annotate.spec.ts`, on Chromium, WebKit and Firefox):
+- picking, cancelling, selecting, and both together;
+- marks, focus and clear;
+- re-anchoring on a revised page (by id, by moved words, by respaced words, and a deleted one
+  orphaned);
+- live changes reported only when they change;
+- an MCP Apps view;
+- a hostile page faking every kind of report. The negative control `annotation-checks` fails it.
+
+**Rejected.**
+- Wrapping anchors in `<mark>` elements: it rewrites the content's DOM and breaks its scripts and
+  styles.
+- The CSS Custom Highlight API alone: it can't outline elements and isn't in every engine
+  Porthole supports.
+- XPath selectors: brittle to the edits agents make.
+
+**Revisit when** content needs to cooperate (an author-declared anchor id API), or MCP Apps defines
+annotations.

@@ -1,3 +1,5 @@
+import type { AnnotationReport } from "../annotate/types.ts";
+
 /**
  * The capability vocabulary (PRINCIPLE 4): every power content has beyond drawing is one of these
  * host functions, named in the config. A capability the config doesn't declare is not wired into
@@ -17,6 +19,8 @@ export const CAPABILITY_NAMES = [
   "setModelContext",
   "reportError",
   "resize",
+  "copyText",
+  "annotate",
 ] as const;
 
 export type CapabilityName = (typeof CAPABILITY_NAMES)[number];
@@ -44,13 +48,17 @@ export interface CapabilitySpec {
   /** The global the shell defines for it (sugar over the protocol message), if any. */
   readonly global?: string;
   /**
-   * How content reaches it without the shell's global: the MCP Apps request, and the official
-   * App SDK's method for it. Absent for what the shell does by itself (sizes, errors).
+   * How content reaches it without the shell's global: the MCP Apps request (or Porthole's own,
+   * `porthole/…`, where the standard has none), and the official App SDK's method for it, if any.
+   * Absent for what the shell does by itself (sizes, errors, annotations).
    */
-  readonly request?: { readonly method: string; readonly sdk: string };
+  readonly request?: { readonly method: string; readonly sdk?: string };
 }
 
 const rate = (perMinute: number): Gate => ({ rateLimit: { perMinute } });
+
+/** The most text one `copyText` call carries. */
+export const MAX_COPY_CHARS = 20_000;
 
 export const CAPABILITIES = {
   sendPrompt: {
@@ -87,6 +95,22 @@ export const CAPABILITIES = {
   },
   reportError: { defaultGates: [rate(10)], served: "event" },
   resize: { defaultGates: [], served: "event" },
+  /**
+   * Copies text to the person's clipboard, done by the host, which shows them what was copied
+   * (P052). Content can't write the clipboard any other way (P051).
+   */
+  copyText: {
+    defaultGates: ["user-activation", rate(30)],
+    served: "handler",
+    global: "copyText",
+    request: { method: "porthole/copy-text" },
+  },
+  /**
+   * Annotations (P053): the host asks the shell to let the person point at an element or select
+   * text, and to mark anchors already made. What the frame reports back is the content's word
+   * (it shares the realm): UI hints for the host, never permissions.
+   */
+  annotate: { defaultGates: [rate(120)], served: "event" },
 } as const satisfies { readonly [N in CapabilityName]: CapabilitySpec };
 
 /** The arguments a call carries, once the adapter has validated them. */
@@ -106,6 +130,9 @@ export interface CapabilityArgs {
   };
   readonly reportError: { readonly message: string };
   readonly resize: { readonly height: number; readonly width?: number };
+  readonly copyText: { readonly text: string };
+  /** What the frame reported, once checked (`AnnotationReport`). */
+  readonly annotate: AnnotationReport;
 }
 
 /** What a call resolves to. Protocol-shaped results (a tool's result) stay opaque to the core. */
@@ -121,6 +148,9 @@ export interface CapabilityResults {
   readonly setModelContext: undefined;
   readonly reportError: undefined;
   readonly resize: undefined;
+  /** Whether the text was copied. */
+  readonly copyText: boolean;
+  readonly annotate: undefined;
 }
 
 /** The capabilities a host serves with a handler. */

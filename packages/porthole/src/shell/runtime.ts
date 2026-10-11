@@ -13,7 +13,10 @@
  *    engine enforces `frame-src 'none'` for `srcdoc`/`about:blank` children); and the resource
  *    hints and refreshes a CSP doesn't govern;
  * 4. closes the parser entry points that could build a shadow root step 3 can't see (declarative
- *    shadow DOM through `setHTMLUnsafe`, `parseHTMLUnsafe`, `document.write`).
+ *    shadow DOM through `setHTMLUnsafe`, `parseHTMLUnsafe`, `document.write`);
+ * 5. keeps content off the clipboard: the async Clipboard API refuses, `execCommand` won't copy or
+ *    cut, and copy and cut events never reach content, so what a person copies is what they
+ *    selected (P051). Copy buttons go through the host (`copyText`, P052).
  * A whole document (an artifact page, an MCP Apps view) is never written in: it is parsed inert,
  * imported, and its scripts run in order, as a fragment's are.
  *
@@ -263,11 +266,30 @@ export const SHELL_RUNTIME = String.raw`(() => {
       this.innerHTML = String(html);
     });
   }
+  // insertHTML parses markup outside these guards; copy, cut and paste reach the clipboard (P051).
+  const REFUSED_COMMANDS = ["inserthtml", "copy", "cut", "paste"];
   const execCommand = Document.prototype.execCommand;
   if (typeof execCommand === "function") {
     lock(Document.prototype, "execCommand", function (command, ...rest) {
-      return String(command).toLowerCase() === "inserthtml" ? false : execCommand.call(this, command, ...rest);
+      return REFUSED_COMMANDS.indexOf(String(command).toLowerCase()) !== -1 ? false : execCommand.call(this, command, ...rest);
     });
+  }
+
+  // The clipboard is the host's to write (P051): content can neither write nor read it. A copy
+  // the person makes (their keys, their menu) copies their selection as the browser makes it: no
+  // copy or cut listener of the content's runs, so none can swap what goes on the clipboard.
+  const noClipboard = function () {
+    return Promise.reject(new DOMException("Content can't use the clipboard here" + (declared("copyText") ? ": call copyText(text) from a click" : ""), "NotAllowedError"));
+  };
+  if (typeof Clipboard === "function") {
+    for (const name of ["write", "writeText", "read", "readText"]) {
+      if (typeof Clipboard.prototype[name] === "function") {
+        lock(Clipboard.prototype, name, noClipboard);
+      }
+    }
+  }
+  for (const type of ["copy", "cut"]) {
+    window.addEventListener(type, (event) => event.stopImmediatePropagation(), true);
   }
 
   // A connected link or meta can't become a guarded one: the change is tried on a detached copy
@@ -534,6 +556,8 @@ export const SHELL_RUNTIME = String.raw`(() => {
     }
   };
 
+  __ANNOTATE__
+
   if (plan.protocol !== "shell") {
     // A view that speaks for itself.
     if (typeof plan.document === "string") {
@@ -622,6 +646,18 @@ export const SHELL_RUNTIME = String.raw`(() => {
       return request("ui/message", { role: "user", content: [{ type: "text", text: words }] }).then(
         (result) => !(result && result.isError),
       );
+    });
+  }
+  if (declared("copyText")) {
+    lock(window, "copyText", (text) => {
+      if (!gestured("copyText")) {
+        return refuse("copyText needs a click: call it from a button's handler");
+      }
+      const words = String(text);
+      if (words === "" || words.length > plan.maxCopyChars) {
+        return refuse("copyText takes 1 to " + plan.maxCopyChars + " characters");
+      }
+      return request("porthole/copy-text", { text: words }).then((result) => !(result && result.isError));
     });
   }
   if (declared("openLink")) {

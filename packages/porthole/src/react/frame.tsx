@@ -14,8 +14,10 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
+import type { AnnotateMode, AnnotationMark, AnnotationReport } from "../annotate/types.ts";
 import type {
   CallContext,
+  CapabilityHandler,
   CapabilityHandlers,
   Confirm,
   ConfirmAnswer,
@@ -25,11 +27,13 @@ import type {
 } from "../bridge/types.ts";
 import type { CapabilityName } from "../config/capabilities.ts";
 import type { ColorScheme, PortholeConfig } from "../config/schema.ts";
+import { writeClipboard } from "../host/clipboard.ts";
 import { createHost } from "../host/create-host.ts";
 import type { DisplayEvents, DisplayHandle, FrameOutcome } from "../host/types.ts";
 import type { InstanceLocator, InstanceRef } from "../isolation/types.ts";
 import { ConfirmDialog } from "./dialog.tsx";
 import { createLiveFrames, type FrameState, type LiveFrames } from "./live.ts";
+import { CopyToast, type CopyNotice } from "./toast.tsx";
 
 /**
  * The React binding: a `<PortholeProvider>` near the root owns what is per page (which frames
@@ -50,6 +54,8 @@ interface PageState {
   readonly confirm?: Confirm;
   readonly hostInfo?: { readonly name: string; readonly version: string };
   readonly locator?: InstanceLocator;
+  /** The default `copyText`: copies on the host's page and shows the toast (P052). */
+  readonly copyText?: CapabilityHandler<"copyText">;
 }
 
 /** Without a provider: one registry for the page, and no one to confirm (gated calls refused). */
@@ -69,6 +75,8 @@ export interface PortholeProviderProps {
   readonly locator?: InstanceLocator;
   /** A class for the default dialog, to restyle it. */
   readonly dialogClassName?: string;
+  /** A class for the default copy toast, to restyle it. */
+  readonly toastClassName?: string;
   readonly children?: ReactNode;
 }
 
@@ -96,16 +104,26 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
           ),
     [],
   );
+  // The default copyText: the host's page writes the clipboard (in the frame's click, which
+  // activated this page too) and shows the person what went on it, or offers to copy it.
+  const [notice, setNotice] = useState<CopyNotice | null>(null);
+  const copyText = useCallback<CapabilityHandler<"copyText">>(async ({ text }, context) => {
+    const copied = await writeClipboard(text, globalThis.document);
+    setNotice({ text, copied, title: context.title });
+    return copied;
+  }, []);
+  const closeNotice = useCallback(() => setNotice(null), []);
   const { hostInfo, locator } = props;
   const value = useMemo<PageState>(
     () => ({
       live,
       heights,
       confirm,
+      copyText,
       ...(hostInfo === undefined ? {} : { hostInfo }),
       ...(locator === undefined ? {} : { locator }),
     }),
-    [live, heights, confirm, hostInfo, locator],
+    [live, heights, confirm, copyText, hostInfo, locator],
   );
   const current = queue[0] ?? null;
   return (
@@ -125,6 +143,17 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
           }}
         />
       ) : null}
+      <CopyToast
+        notice={notice}
+        {...(props.toastClassName === undefined ? {} : { className: props.toastClassName })}
+        onClose={closeNotice}
+        onCopy={(failed) => {
+          // A click on the host's own page: the write has the gesture it needs now.
+          void writeClipboard(failed.text, globalThis.document).then((copied) =>
+            setNotice({ ...failed, copied }),
+          );
+        }}
+      />
     </Page.Provider>
   );
 }
@@ -186,6 +215,21 @@ export interface PortholeFrameProps {
    * restyle): the running frame reads them again.
    */
   readonly themeKey?: string | number;
+  /**
+   * Annotations, where the config declares `annotate` (P053): what the person may point at now
+   * (elements, text, or both), or null to stop. A picked element ends element picking: set it
+   * again to pick again.
+   */
+  readonly annotating?: AnnotateMode | null;
+  /** The anchors to mark in the frame (the host's comments). Keep it stable (memoized). */
+  readonly annotations?: readonly AnnotationMark[];
+  /** The mark to bring into view and make the active one; each new id focuses it. */
+  readonly focusedAnnotation?: string | null;
+  /**
+   * What the frame reported: a selection (an anchor and where it is), its clearing, a cancelled
+   * pick, where marks are. The content's word: UI hints, never permissions.
+   */
+  readonly onAnnotation?: (report: AnnotationReport) => void;
   /** Draws the placeholder instead of the default one. */
   readonly renderPlaceholder?: (props: PlaceholderProps) => ReactNode;
   readonly className?: string;
@@ -371,6 +415,9 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
         case "outcome":
           frame.onOutcome?.(detail as DisplayEvents["outcome"]);
           return;
+        case "annotation":
+          frame.onAnnotation?.(detail as DisplayEvents["annotation"]);
+          return;
       }
     },
   );
@@ -396,6 +443,14 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
           args,
           named(context),
         );
+    }
+    // Copy buttons without a handler of the host's: the provider's, which shows a toast.
+    if (config.capabilities.copyText !== undefined && handlers.copyText === undefined) {
+      const fallback = page.copyText;
+      if (fallback !== undefined) {
+        handlers.copyText = (args, context) =>
+          fallback(args as { readonly text: string }, named(context));
+      }
     }
     const asks = first.confirm !== undefined || page.confirm !== undefined;
     let display: DisplayHandle;
@@ -435,9 +490,13 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
       "refused",
       "muted",
       "outcome",
+      "annotation",
     ];
     for (const event of events) {
       display.on(event, (detail) => notify(event, detail));
+    }
+    if (config.capabilities.annotate !== undefined) {
+      applyAnnotations(display, first);
     }
     if (first.content !== undefined) {
       display.setContent(first.content, { partial: first.partial === true });
@@ -455,6 +514,39 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
       handle.current?.setContent(content, { partial: partial === true });
     }
   }, [content, partial]);
+  // Annotations follow their props (a new display gets them all when it is made, above).
+  const annotates = config.capabilities.annotate !== undefined;
+  const { annotating, annotations, focusedAnnotation } = frame;
+  const mode =
+    annotating === undefined || annotating === null
+      ? ""
+      : JSON.stringify([annotating.elements ?? true, annotating.text ?? true]);
+  useEffect(() => {
+    const display = handle.current;
+    if (!annotates || display === null) {
+      return;
+    }
+    const wanted = mode === "" ? null : (JSON.parse(mode) as [boolean, boolean]);
+    attempt(
+      () =>
+        wanted === null
+          ? display.annotations.stop()
+          : display.annotations.start({ elements: wanted[0], text: wanted[1] }),
+      latest(),
+    );
+  }, [annotates, mode]);
+  useEffect(() => {
+    const display = handle.current;
+    if (annotates && display !== null) {
+      attempt(() => display.annotations.show(annotations ?? []), latest());
+    }
+  }, [annotates, annotations]);
+  useEffect(() => {
+    const display = handle.current;
+    if (annotates && display !== null && typeof focusedAnnotation === "string") {
+      attempt(() => display.annotations.focus(focusedAnnotation), latest());
+    }
+  }, [annotates, focusedAnnotation]);
   useEffect(() => {
     handle.current?.setTheme(scheme);
   }, [scheme]);
@@ -483,4 +575,28 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
       {ready ? null : placeholder({ state: "loading", title: frame.title, run })}
     </div>
   );
+}
+
+/** Runs an annotation call, telling the frame's `onError` what it threw (a bad anchor, say). */
+function attempt(run: () => void, frame: PortholeFrameProps): void {
+  try {
+    run();
+  } catch (error) {
+    frame.onError?.(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/** A new display's annotations, from the props as they are. */
+function applyAnnotations(display: DisplayHandle, frame: PortholeFrameProps): void {
+  attempt(() => {
+    if (frame.annotations !== undefined && frame.annotations.length > 0) {
+      display.annotations.show(frame.annotations);
+    }
+    if (typeof frame.focusedAnnotation === "string") {
+      display.annotations.focus(frame.focusedAnnotation);
+    }
+    if (frame.annotating !== undefined && frame.annotating !== null) {
+      display.annotations.start(frame.annotating);
+    }
+  }, frame);
 }
