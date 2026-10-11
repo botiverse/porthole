@@ -1,0 +1,33 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "import", "promise", "react", "react-hooks"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error"
+  },
+  "rules": {
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": "error",
+    "typescript/await-thenable": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/consistent-type-imports": "error",
+    "no-console": "error",
+    "eqeqeq": ["error", "always", { "null": "ignore" }],
+    "react/react-in-jsx-scope": "off",
+    "unicorn/no-array-sort": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "import/no-unassigned-import": "off",
+    "typescript/no-extraneous-class": "off",
+    "typescript/no-unsafe-type-assertion": "off",
+    "typescript/consistent-return": "off",
+    "promise/always-return": "off",
+    "react/no-danger": "error"
+  },
+  "overrides": [
+    {
+      "files": ["**/test/**", "**/leak/**", "**/*.test.ts"],
+      "rules": { "no-console": "off" }
+    }
+  ],
+  "ignorePatterns": ["**/dist/**", "**/.dev/**"]
+}

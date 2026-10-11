@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="frame-src 'self'; child-src 'self'" />
+    <title>Porthole reference host</title>
+  </head>
+  <body>
+    <main id="displays"></main>
+    <script>
+      // A minimal host for probing a compiled shell directly: it frames a document, answers the
+      // handshake with a theme, records what the frame says, and sends what a test asks it to.
+      // (The full reference host, on the core's createHost, replaces this as the core lands.)
+      window.harness = {
+        received: [],
+        frame: null,
+        hostContext: null,
+        mount(html, sandbox, hostContext) {
+          const frame = document.createElement("iframe");
+          frame.setAttribute("sandbox", sandbox);
+          frame.setAttribute("allow", "");
+          frame.setAttribute("referrerpolicy", "no-referrer");
+          frame.style.width = "600px";
+          frame.style.border = "0";
+          frame.srcdoc = html;
+          this.frame = frame;
+          this.hostContext = hostContext;
+          document.getElementById("displays").append(frame);
+        },
+        send(message) {
+          this.frame.contentWindow.postMessage(Object.assign({ jsonrpc: "2.0" }, message), "*");
+        },
+      };
+      window.addEventListener("message", (event) => {
+        const harness = window.harness;
+        if (harness.frame === null || event.source !== harness.frame.contentWindow) {
+          return;
+        }
+        const data = event.data;
+        harness.received.push({ origin: event.origin, data });
+        if (data && data.method === "ui/initialize" && data.id !== undefined) {
+          harness.send({
+            id: data.id,
+            result: {
+              protocolVersion: "2026-01-26",
+              hostInfo: { name: "reference", version: "0" },
+              hostCapabilities: {},
+              hostContext: harness.hostContext,
+            },
+          });
+        }
+      });
+    </script>
+  </body>
+</html>

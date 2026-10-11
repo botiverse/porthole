@@ -1,5 +1,8 @@
 node_modules/
 dist/
+.dev/
+coverage/
+*.log
 *.tsbuildinfo
 .DS_Store
 test-results/

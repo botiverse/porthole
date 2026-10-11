@@ -16,10 +16,11 @@ config, so the sandbox, the shell and the manual never drift apart.
   the in-frame shell runtime, streaming render, auto-sizing, theming, the
   host-function bridge, and the guide generator.
 - **A preset policy layer** — ready-made, safe-by-default bundles a host picks up
-  with near-zero config: **inline widget**, **artifact** (a standalone page), and
-  **MCP Apps** (the standard protocol). Each preset fixes the CSP and allowed
-  origins, which host functions are exposed and how they are gated, the preset
-  components, and the generated manual.
+  with near-zero config: **inline widget**, **artifact** (a standalone page),
+  **MCP Apps** (the standard protocol), and **URL** (a running app, such as a dev
+  server's preview). Each preset fixes the CSP and allowed origins, which host
+  functions are exposed and how they are gated, the theme vocabulary, and the
+  generated manual.
 
 The external contract for agent-written UI is the **MCP Apps** standard
 (`io.modelcontextprotocol/ui`, spec 2026-01-26). Porthole does not define a new
@@ -39,8 +40,10 @@ that proves the isolation holds.
 
 ## Status
 
-**Private. Phase 1 in design.** This repository currently holds the design only
-(`docs/`); no code is scaffolded yet. Read, in order:
+**Private. Phase 1 in progress.** One package, `@botiverse/porthole`, with
+`/react`, `/mcp`, `/conformance` and `/server` subpaths. The config, compiler,
+presets and public interfaces are in; the runtime pieces land milestone by
+milestone (see DESIGN.md). Read, in order:
 
 1. [docs/PRINCIPLES.md](docs/PRINCIPLES.md) — the rules decisions are made by.
 2. [docs/OBJECTIVES.md](docs/OBJECTIVES.md) — what Porthole is for, with success criteria and non-goals.

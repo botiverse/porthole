@@ -17,24 +17,41 @@ Read these first:
 
 ## Status
 
-Phase 1 is in design. The repository holds docs only; there is no code to build
-yet. The tooling below is the agreed target (see DESIGN.md), written down now so
-it is not re-litigated later.
+Phase 1 is being built, milestone by milestone (DESIGN.md § Milestones). M1 is
+in: the config, the compiler, the presets, and the public interfaces as typed
+stubs (an unbuilt function throws `NotBuiltYet`).
 
-## Setup (target)
+## Setup
 
 - Node ≥ 24 (TypeScript runs directly via type stripping — erasable syntax only:
   no enums, no parameter properties, no namespaces; relative imports carry `.ts`).
-- pnpm workspace.
-- The web core is framework-agnostic TypeScript; the React binding is a thin,
-  separate package.
+- pnpm 11 workspace; one package, `packages/porthole` (`@botiverse/porthole`,
+  with `/react`, `/mcp`, `/conformance`, `/server` as subpath exports, P013).
+- The core is framework-agnostic TypeScript; the React binding is a thin subpath.
 
-## Commands (target)
+## Commands
 
 ```bash
 pnpm check            # typecheck + lint + format check + unit tests (run before every commit)
-pnpm test             # unit tests (vitest or node:test)
-pnpm test:leak        # the Playwright conformance/leak suite (Chromium, WebKit, Firefox)
+pnpm test             # unit tests (vitest; packages/porthole/test)
+pnpm test:leak        # the Playwright conformance/leak suite (Chromium + WebKit; Firefox from M5)
+PORTHOLE_LEAK_ENGINES=chromium pnpm test:leak   # a subset, where an engine can't run
+pnpm --filter @botiverse/porthole build         # dist/ (JS + .d.ts) for packing
+pnpm exec oxfmt <file>                          # format (never prettier)
+```
+
+WebKit needs system libraries a shared Linux box may lack (no sudo there): run the
+WebKit half of the leak suite on a machine that has them (`playwright install
+--with-deps webkit`). Scratch files go under `.dev/scratch/` (gitignored).
+
+## Layout
+
+```
+packages/porthole/src/   config/ compile/ shell/ guide/ theme/ presets/   the compiler side
+                         protocol/ bridge/ transport/ platform/ isolation/ host/   the seams
+                         react/ mcp/ conformance/ server/                 the subpath entries
+packages/porthole/test/  unit tests; agreement.test.ts is the config ↔ CSP ↔ shell ↔ manual check
+packages/porthole/leak/  the leak suite run against Porthole's reference host
 ```
 
 ## Conventions
@@ -59,7 +76,8 @@ pnpm test:leak        # the Playwright conformance/leak suite (Chromium, WebKit,
    host-function gate, run `pnpm test:leak` on every engine it supports. A
    hardening item without a passing test does not exist (PRINCIPLE 5).
 3. If you changed the config schema, regenerate and re-read the example CSP,
-   shell and guide, and confirm all three still agree.
+   shell and guide, and confirm all three still agree (`test/agreement.test.ts`
+   must pass, and must still cover what you added).
 4. If behavior changed, add or extend a test at the lowest layer that can
    observe it. For a leak, first write the test that fails, then fix it.
 5. If you touched the MCP Apps adapter, run the official ext-apps example servers

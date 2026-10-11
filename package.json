@@ -1,0 +1,28 @@
+{
+  "name": "@botiverse/porthole-root",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p packages/porthole --noEmit",
+    "lint": "oxlint --type-aware",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "test": "vitest run",
+    "test:leak": "pnpm --filter @botiverse/porthole test:leak",
+    "check": "run-p -l typecheck lint format:check test"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.3",
+    "npm-run-all2": "9.0.3",
+    "oxfmt": "0.70.0",
+    "oxlint": "1.85.0",
+    "oxlint-tsgolint": "7.0.2003",
+    "typescript": "7.0.2",
+    "vitest": "5.0.2"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@11.25.0"
+}
