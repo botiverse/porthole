@@ -1,4 +1,13 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  base64url,
+  fromBase64url,
+  fromUtf8,
+  hmacSha256,
+  randomBytes,
+  sha256,
+  timingSafeEqual,
+  utf8,
+} from "./crypto.ts";
 
 /**
  * The server's secrets, derived from the one it is given: one key per use, so a value made for
@@ -26,8 +35,6 @@ export function base32(bytes: Uint8Array): string {
   }
   return out;
 }
-
-const base64url = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64url");
 
 /** JSON with object keys in a fixed order, so equal values always serialize alike. */
 export function canonicalJson(value: unknown): string {
@@ -58,19 +65,17 @@ export function createKeys(secret: Uint8Array): Keys {
   if (secret.byteLength < 32) {
     throw new TypeError("The server's secret must be at least 32 random bytes");
   }
-  const derive = (use: string): Buffer =>
-    createHmac("sha256", secret).update(`porthole/${use}`).digest();
+  const derive = (use: string): Uint8Array => hmacSha256(secret, utf8(`porthole/${use}`));
   const labelKey = derive("label");
   const instanceKey = derive("instance");
   const signKey = derive("session");
-  const mac = (key: Buffer, text: string): Buffer =>
-    createHmac("sha256", key).update(text).digest();
+  const mac = (key: Uint8Array, text: string): Uint8Array => hmacSha256(key, utf8(text));
 
   return {
     label: (scope) => base32(mac(labelKey, scope).subarray(0, 15)),
     instanceKey: (instance) => base32(mac(instanceKey, canonicalJson(instance)).subarray(0, 10)),
     sign: (value) => {
-      const payload = Buffer.from(JSON.stringify(value)).toString("base64url");
+      const payload = base64url(utf8(JSON.stringify(value)));
       return `${payload}.${base64url(mac(signKey, payload))}`;
     },
     verify: (token) => {
@@ -79,12 +84,16 @@ export function createKeys(secret: Uint8Array): Keys {
         return null;
       }
       const expected = mac(signKey, payload);
-      const given = Buffer.from(signature, "base64url");
-      if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
+      const given = fromBase64url(signature);
+      if (given === null || !timingSafeEqual(given, expected)) {
+        return null;
+      }
+      const bytes = fromBase64url(payload);
+      if (bytes === null) {
         return null;
       }
       try {
-        return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as unknown;
+        return JSON.parse(fromUtf8(bytes)) as unknown;
       } catch {
         return null;
       }
@@ -96,5 +105,4 @@ export function createKeys(secret: Uint8Array): Keys {
 export const newTicket = (): string => `pt_${base32(randomBytes(20))}`;
 
 /** What a ticket is stored under: its hash, so a leaked store holds no usable ticket. */
-export const ticketId = (ticket: string): string =>
-  createHash("sha256").update(ticket).digest("base64url");
+export const ticketId = (ticket: string): string => base64url(sha256(utf8(ticket)));

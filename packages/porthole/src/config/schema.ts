@@ -116,6 +116,14 @@ export const URL_SANDBOX_EXTRAS = [
 
 export type UrlSandboxExtra = (typeof URL_SANDBOX_EXTRAS)[number];
 
+/**
+ * Powerful features a url-mode frame may be delegated, by the host's choice (P049): writing the
+ * clipboard (a "copy" button in the person's app) and going full screen. Nothing for other modes.
+ */
+export const URL_PERMISSIONS = ["clipboard-write", "fullscreen"] as const;
+
+export type UrlPermission = (typeof URL_PERMISSIONS)[number];
+
 /** Where the host shows the content, for the manual's size rules. */
 export interface LayoutConfig {
   /** The narrowest the frame ever is (a small phone). */
@@ -165,4 +173,6 @@ export interface PortholeConfig {
   readonly embedder: EmbedderConfig;
   /** Url mode only: sandbox tokens added to its baseline (`URL_SANDBOX_EXTRAS`). */
   readonly sandbox?: readonly UrlSandboxExtra[];
+  /** Url mode only: features delegated to the frame (`URL_PERMISSIONS`); none by default. */
+  readonly permissions?: readonly UrlPermission[];
 }

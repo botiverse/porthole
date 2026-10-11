@@ -113,12 +113,19 @@ policy (whether to confirm an action, what the confirmation says, which origins
 are allowed, what the theme is). We prefer deleting options to adding them, and
 presets over knobs.
 
+Authentication and authorization *policy* are the host's; carrying the host's
+decision safely onto the content domain is Porthole's *mechanism*. Porthole never
+knows who someone is or what they may see: the host decides before it issues a
+ticket and on every request after (`authorize`), and Porthole carries that decision
+in tickets and cookies, opaque to it (P046, P050).
+
 - **Why.** Policy is product-specific and changes faster than mechanism. A small,
   opinionated surface with safe presets is easier to audit and harder to misuse
   than a large configurable one.
 - **Rules out.** Drawing our own confirmation UI the host can't control; config
   options that exist only to avoid a decision; a second way to do something the
-  presets already cover.
+  presets already cover; users, roles, share lists or revocation lists inside
+  Porthole.
 
 ## 9. No special first user
 

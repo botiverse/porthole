@@ -30,13 +30,15 @@ const STATUS_SCRIPT = `(() => {
   if (main === null) return;
   const hosts = JSON.parse(main.dataset.portholeHosts || "[]");
   ${say()}
-  say({ state: "blocked", reason: main.dataset.portholeReason || "error", status: Number(main.dataset.portholeStatus) });
+  const blocked = { state: "blocked", reason: main.dataset.portholeReason || "error", status: Number(main.dataset.portholeStatus) };
+  if (main.dataset.portholeCode) blocked.code = main.dataset.portholeCode;
+  say(blocked);
 })();`;
 
 /**
  * Enters a framed app: says so, checks that the browser kept the session cookie this page's own
- * answer set (WebKit keeps none in a cross-site frame, P025), then goes on to the app, or says it
- * is blocked and why.
+ * answer set (WebKit keeps none in a cross-site frame, P025), then, once this page has loaded,
+ * goes on to the app, or says it is blocked and why.
  */
 const ENTER_SCRIPT = `(async () => {
   const main = document.querySelector("[data-porthole-enter]");
@@ -49,6 +51,12 @@ const ENTER_SCRIPT = `(async () => {
     kept = (await fetch(${JSON.stringify(SESSION_PATH)}, { credentials: "same-origin", cache: "no-store" })).ok;
   } catch (_) {}
   if (kept) {
+    // The host counts this page's load, then the app's (P040): leave only once this page has
+    // loaded, or a fast answer would leave first and its load would never be seen.
+    if (document.readyState !== "complete") {
+      await new Promise((resolve) => addEventListener("load", resolve, { once: true }));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
     location.replace(main.dataset.portholeTarget || "/");
     return;
   }
@@ -95,8 +103,9 @@ export function statusPage(
   method = "GET",
   reason: FrameBlock = "error",
   hostOrigins: readonly string[] = [],
+  code?: string,
 ): Response {
-  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(title)}</title><style>${STYLE}</style></head><body><main data-porthole-status="${status}" data-porthole-reason="${escape(reason)}" data-porthole-hosts="${escape(JSON.stringify(hostOrigins))}"><h1>${escape(title)}</h1><p>${escape(detail)}</p></main><script src="${STATUS_SCRIPT_PATH}"></script></body></html>`;
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(title)}</title><style>${STYLE}</style></head><body><main data-porthole-status="${status}" data-porthole-reason="${escape(reason)}"${code === undefined ? "" : ` data-porthole-code="${escape(code)}"`} data-porthole-hosts="${escape(JSON.stringify(hostOrigins))}"><h1>${escape(title)}</h1><p>${escape(detail)}</p></main><script src="${STATUS_SCRIPT_PATH}"></script></body></html>`;
   return new Response(method === "HEAD" ? null : body, {
     status,
     headers: pageHeaders(frameAncestors, false),

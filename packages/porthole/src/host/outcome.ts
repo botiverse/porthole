@@ -25,6 +25,7 @@ const BLOCKS: readonly FrameBlock[] = [
   "cookies",
   "session",
   "upstream",
+  "denied",
   "not-found",
   "error",
 ];
@@ -33,6 +34,7 @@ interface FrameStatus {
   readonly state: "entering" | "blocked";
   readonly reason?: FrameBlock;
   readonly status?: number;
+  readonly code?: string;
 }
 
 /** A frame-status message, or null for anything else. */
@@ -44,7 +46,12 @@ export function parseFrameStatus(data: unknown): FrameStatus | null {
   if (message.jsonrpc !== "2.0" || message.method !== FRAME_STATUS_METHOD) {
     return null;
   }
-  const params = message.params as { state?: unknown; reason?: unknown; status?: unknown } | null;
+  const params = message.params as {
+    state?: unknown;
+    reason?: unknown;
+    status?: unknown;
+    code?: unknown;
+  } | null;
   if (params === null || typeof params !== "object") {
     return null;
   }
@@ -62,6 +69,9 @@ export function parseFrameStatus(data: unknown): FrameStatus | null {
     reason,
     ...(typeof params.status === "number" && Number.isInteger(params.status)
       ? { status: params.status }
+      : {}),
+    ...(typeof params.code === "string" && /^[a-z0-9-]{1,40}$/u.test(params.code)
+      ? { code: params.code }
       : {}),
   };
 }
@@ -82,7 +92,8 @@ export function watchOutcome(options: {
 }): OutcomeWatch {
   const { surface, source, speaks } = options;
   const reports = source.kind === "url" && source.reports === true;
-  let decided = false;
+  // The first outcome; after a load, only a later block (a status page, access revoked) is told.
+  let decided: FrameOutcome["state"] | null = null;
   let heard = false;
   let entering = false;
   let loads = 0;
@@ -94,18 +105,24 @@ export function watchOutcome(options: {
     }, ms);
     timers.add(timer);
   };
-  const stop = () => {
+  const clearTimers = () => {
     for (const timer of timers) {
       clearTimeout(timer);
     }
     timers.clear();
+  };
+  const stop = () => {
+    clearTimers();
     unlisten();
     unload();
   };
   const decide = (outcome: FrameOutcome) => {
-    if (!decided) {
-      decided = true;
-      stop();
+    if (decided === null) {
+      decided = outcome.state;
+      clearTimers();
+      options.onOutcome(outcome);
+    } else if (decided === "loaded" && outcome.state === "blocked") {
+      decided = "blocked";
       options.onOutcome(outcome);
     }
   };
@@ -119,6 +136,7 @@ export function watchOutcome(options: {
         state: "blocked",
         reason: status.reason ?? "error",
         ...(status.status === undefined ? {} : { status: status.status }),
+        ...(status.code === undefined ? {} : { code: status.code }),
       });
     }
   });
@@ -130,7 +148,7 @@ export function watchOutcome(options: {
     });
   const unload = surface.onLoad(() => {
     loads += 1;
-    if (decided) {
+    if (decided !== null) {
       return;
     }
     if (speaks) {

@@ -9,10 +9,18 @@ import {
 import type { FrameLocation, InstanceRef, ServedDocument } from "../isolation/types.ts";
 import { sandboxProxyDocument } from "../mcp/proxy.ts";
 import { createKeys, newTicket, ticketId } from "./keys.ts";
+import { isHostLabel } from "./naming.ts";
 import { enterPage, pageScript, SESSION_PATH, statusPage } from "./pages.ts";
 import type { FrameBlock } from "../host/types.ts";
 import { memoryTicketStore } from "./tickets.ts";
-import type { Access, PortholeServer, ServerOptions, TicketRecord, TicketStore } from "./types.ts";
+import type {
+  Access,
+  AuthorizeAnswer,
+  PortholeServer,
+  ServerOptions,
+  TicketRecord,
+  TicketStore,
+} from "./types.ts";
 
 /**
  * Paths on a content origin. Porthole's own live under `/__porthole/`; on a url-mode app's origin
@@ -25,6 +33,9 @@ const DOCUMENT_PATH = /^\/__porthole\/d\/([a-z2-7]{16})$/u;
 const ENTER_PATH = "/__porthole/enter";
 
 const LABEL = /^[a-z2-7]{24}$/u;
+/** A host's opaque subject and reason codes. */
+const SUBJECT_MAX = 512;
+const CODE = /^[a-z0-9-]{1,40}$/u;
 const DNS_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/u;
 const NAME = /^[A-Za-z0-9._:-]{1,200}$/u;
 
@@ -35,11 +46,16 @@ const MAX_SESSION_SECONDS = 30 * 24 * 3_600;
 /** Browsers keep a cookie of up to 4 KB, name and attributes included. */
 const MAX_COOKIE_BYTES = 3_800;
 
-/** What a session cookie carries, signed: the instance, its viewer, and when it stops. */
+/**
+ * What a session cookie carries, signed: the instance, its viewer (or anonymous), the host's
+ * opaque subject, and when it stops.
+ */
 interface Session {
   readonly i: InstanceRef;
   readonly w: string;
   readonly x: number;
+  readonly a?: 1;
+  readonly s?: string;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -174,6 +190,30 @@ export function createServer(options: ServerOptions): PortholeServer {
     throw new TypeError("content.port must be a port number");
   }
   const keys = createKeys(options.secret);
+  const reserved = new Set(content.reserved ?? []);
+  for (const label of reserved) {
+    if (!isHostLabel(label)) {
+      throw new TypeError(
+        `content.reserved: ${JSON.stringify(label)} is not a lowercase DNS label`,
+      );
+    }
+  }
+  /** The label a scope is served on: the host's naming, checked, or the keyed default. */
+  const nameOf = (scope: string): string => {
+    if (content.name === undefined) {
+      return keys.label(scope);
+    }
+    const label = content.name(scope);
+    if (!isHostLabel(label) || reserved.has(label)) {
+      throw new TypeError(
+        `content.name gave ${JSON.stringify(label)} for a scope: it must be one lowercase DNS label (a-z 0-9 -, at most 63, not xn--), not reserved`,
+      );
+    }
+    return label;
+  };
+  /** Whether a request's label may be one this server named. */
+  const ours = (label: string): boolean =>
+    !reserved.has(label) && (content.name === undefined ? LABEL.test(label) : isHostLabel(label));
   const secure = content.scheme === "https";
   const defaultPort = secure ? 443 : 80;
   const portPart =
@@ -183,6 +223,12 @@ export function createServer(options: ServerOptions): PortholeServer {
   const contentSource = `${content.scheme}://*.${domain}${portPart}`;
   const sampleHost = `${keys.label("")}.${domain}`;
   const sampleOrigin = originOfLabel(keys.label(""));
+  const authorize = options.authorize;
+  const authorizeTtl = authorize?.ttlSeconds ?? 0;
+  if (!Number.isInteger(authorizeTtl) || authorizeTtl < 0 || authorizeTtl > 300) {
+    throw new TypeError("authorize.ttlSeconds must be an integer from 0 to 300");
+  }
+  const answers = new Map<string, { readonly answer: AuthorizeAnswer; readonly until: number }>();
 
   if (options.hostOrigins.length === 0) {
     throw new TypeError("hostOrigins must name the origins that embed content");
@@ -222,8 +268,63 @@ export function createServer(options: ServerOptions): PortholeServer {
     detail: string,
     method?: string,
     reason: FrameBlock = status === 404 ? "not-found" : status === 502 ? "upstream" : "error",
+    code?: string,
   ): Response =>
-    statusPage(status, title, detail, frameAncestors, method, reason, options.hostOrigins);
+    statusPage(status, title, detail, frameAncestors, method, reason, options.hostOrigins, code);
+
+  /**
+   * The host's check on a request its cookie (or ticket) let in (P050): null to go on, or the
+   * page saying it's denied. Answers are reused only for the host's own `ttlSeconds`.
+   */
+  async function denied(request: Request, access: Access): Promise<Response | null> {
+    if (authorize === undefined) {
+      return null;
+    }
+    const key = JSON.stringify([
+      keys.instanceKey(access.instance),
+      access.viewer,
+      access.subject ?? null,
+      access.expiresAt,
+    ]);
+    const at = Date.now();
+    let answer = authorizeTtl > 0 ? answers.get(key) : undefined;
+    if (answer === undefined || answer.until <= at) {
+      let given: AuthorizeAnswer;
+      try {
+        given = await authorize.check({
+          scope: access.instance.scope,
+          instance: access.instance,
+          viewer: access.viewer,
+          anonymous: access.anonymous === true,
+          ...(access.subject === undefined ? {} : { subject: access.subject }),
+          request,
+        });
+      } catch {
+        given = { allow: false };
+      }
+      answer = { answer: given, until: at + authorizeTtl * 1_000 };
+      if (authorizeTtl > 0) {
+        if (answers.size > 10_000) {
+          answers.clear();
+        }
+        answers.set(key, answer);
+      }
+    }
+    // Only an explicit allow lets the request on: anything else the check gives is a deny.
+    const given = answer.answer as Partial<{ allow: unknown; code: unknown }> | null | undefined;
+    if (given?.allow === true) {
+      return null;
+    }
+    const code = typeof given?.code === "string" && CODE.test(given.code) ? given.code : undefined;
+    return page(
+      403,
+      "You can't open this anymore",
+      "The app that showed it no longer lets you see it here.",
+      request.method.toUpperCase(),
+      "denied",
+      code,
+    );
+  }
 
   /** The config a served document is served under, checked to fit it and this server. */
   function configFor(name: string, kind: keyof typeof MODES): CompiledConfig {
@@ -331,6 +432,8 @@ export function createServer(options: ServerOptions): PortholeServer {
       i: record.instance,
       w: record.viewer,
       x: Date.now() + sessionSeconds * 1_000,
+      ...(record.anonymous === true ? { a: 1 as const } : {}),
+      ...(record.subject === undefined ? {} : { s: record.subject }),
     };
     const framed = request.headers.get("sec-fetch-dest") !== "document";
     return [
@@ -356,7 +459,8 @@ export function createServer(options: ServerOptions): PortholeServer {
         !isRecord(session) ||
         typeof session.w !== "string" ||
         typeof session.x !== "number" ||
-        session.x <= Date.now()
+        session.x <= Date.now() ||
+        (session.s !== undefined && typeof session.s !== "string")
       ) {
         continue;
       }
@@ -366,14 +470,27 @@ export function createServer(options: ServerOptions): PortholeServer {
       } catch {
         continue;
       }
+      let named: string;
+      try {
+        named = nameOf(instance.scope);
+      } catch {
+        continue;
+      }
       if (
-        keys.label(instance.scope) !== label ||
+        named !== label ||
         (key === null ? instance.document.kind !== "external" : keys.instanceKey(instance) !== key)
       ) {
         continue;
       }
       if (best === null || session.x > best.expiresAt) {
-        best = { instance, viewer: session.w, origin: originOfLabel(label), expiresAt: session.x };
+        best = {
+          instance,
+          viewer: session.w,
+          origin: originOfLabel(label),
+          expiresAt: session.x,
+          ...(session.a === 1 ? { anonymous: true } : {}),
+          ...(typeof session.s === "string" ? { subject: session.s } : {}),
+        };
       }
     }
     return best;
@@ -390,7 +507,7 @@ export function createServer(options: ServerOptions): PortholeServer {
     }
     try {
       const instance = cleanInstance(record.instance);
-      return keys.label(instance.scope) === label ? { ...record, instance } : null;
+      return nameOf(instance.scope) === label ? { ...record, instance } : null;
     } catch {
       return null;
     }
@@ -432,6 +549,8 @@ export function createServer(options: ServerOptions): PortholeServer {
         viewer: record.viewer,
         origin: originOfLabel(label),
         expiresAt: Date.now() + (record.sessionSeconds ?? DEFAULT_SESSION_SECONDS) * 1_000,
+        ...(record.anonymous === true ? { anonymous: true } : {}),
+        ...(record.subject === undefined ? {} : { subject: record.subject }),
       };
     }
     access ??= accessOf(request, label, key);
@@ -443,6 +562,10 @@ export function createServer(options: ServerOptions): PortholeServer {
         method,
         "session",
       );
+    }
+    const refusal = await denied(request, access);
+    if (refusal !== null) {
+      return refusal;
     }
     const served = await documentOf(access.instance);
     if (served === null) {
@@ -469,6 +592,16 @@ export function createServer(options: ServerOptions): PortholeServer {
         method,
         "session",
       );
+    }
+    const refusal = await denied(request, {
+      instance: record.instance,
+      viewer: record.viewer,
+      origin: originOfLabel(label),
+      expiresAt: record.expiresAt,
+      ...(record.subject === undefined ? {} : { subject: record.subject }),
+    });
+    if (refusal !== null) {
+      return refusal;
     }
     const target = new URL(record.instance.document.url);
     const landing = `${target.pathname}${target.search}${target.hash}`;
@@ -539,6 +672,10 @@ export function createServer(options: ServerOptions): PortholeServer {
         "session",
       );
     }
+    const refusal = await denied(request, access);
+    if (refusal !== null) {
+      return refusal;
+    }
     if (options.upstream === undefined) {
       return page(502, "Nothing serves this app", "The server has no upstream for apps.", method);
     }
@@ -561,23 +698,43 @@ export function createServer(options: ServerOptions): PortholeServer {
     if (host !== domain && !host.endsWith(`.${domain}`)) {
       return null;
     }
-    return { url, label: host.slice(0, Math.max(0, host.length - domain.length - 1)) };
+    const label = host.slice(0, Math.max(0, host.length - domain.length - 1));
+    // A reserved label is another server's namespace (`f` for `<x>.f.<domain>`): it and the names
+    // under it go to the host's own routes. Any other deeper name is ours to refuse.
+    if (reserved.has(label.split(".").at(-1) ?? "")) {
+      return null;
+    }
+    return { url, label };
   }
 
   return {
     contentSource,
 
-    originFor: (scope) => originOfLabel(keys.label(scope)),
+    originFor: (scope) => originOfLabel(nameOf(scope)),
 
     async issue(instance, grant): Promise<FrameLocation> {
       const clean = cleanInstance(instance);
       check(clean);
-      if (
+      const anonymous = grant.anonymous === true;
+      if (anonymous) {
+        if (grant.viewer !== undefined) {
+          throw new TypeError("An anonymous grant names no viewer");
+        }
+        if (clean.document.kind === "external") {
+          throw new TypeError("A url-mode app is never opened anonymously (P046)");
+        }
+      } else if (
         typeof grant.viewer !== "string" ||
         grant.viewer.length === 0 ||
         grant.viewer.length > 512
       ) {
-        throw new TypeError("A grant's viewer is 1 to 512 characters");
+        throw new TypeError("A grant's viewer is 1 to 512 characters (or the grant is anonymous)");
+      }
+      if (
+        grant.subject !== undefined &&
+        (typeof grant.subject !== "string" || grant.subject.length > SUBJECT_MAX)
+      ) {
+        throw new TypeError(`A grant's subject is a string of at most ${SUBJECT_MAX} characters`);
       }
       const ttl = seconds(
         grant.ttlSeconds,
@@ -592,18 +749,27 @@ export function createServer(options: ServerOptions): PortholeServer {
         "sessionSeconds",
       );
       const key = keys.instanceKey(clean);
-      const probe = keys.sign({ i: clean, w: grant.viewer, x: Number.MAX_SAFE_INTEGER });
+      const viewer = anonymous ? "" : grant.viewer;
+      const probe = keys.sign({
+        i: clean,
+        w: viewer,
+        x: Number.MAX_SAFE_INTEGER,
+        ...(anonymous ? { a: 1 } : {}),
+        ...(grant.subject === undefined ? {} : { s: grant.subject }),
+      });
       if (cookieName(key).length + probe.length + 120 > MAX_COOKIE_BYTES) {
         throw new TypeError("This instance is too large to carry in a cookie (fewer origins?)");
       }
       const ticket = newTicket();
       await tickets.put(ticketId(ticket), {
         instance: clean,
-        viewer: grant.viewer,
+        viewer,
         expiresAt: Date.now() + ttl * 1_000,
         ...(grant.sessionSeconds === undefined ? {} : { sessionSeconds }),
+        ...(anonymous ? { anonymous: true } : {}),
+        ...(grant.subject === undefined ? {} : { subject: grant.subject }),
       });
-      const origin = originOfLabel(keys.label(clean.scope));
+      const origin = originOfLabel(nameOf(clean.scope));
       const path =
         clean.document.kind === "external"
           ? `${ENTER_PATH}?ticket=${ticket}`
@@ -613,7 +779,11 @@ export function createServer(options: ServerOptions): PortholeServer {
 
     async access(request) {
       const at = labelOf(request);
-      return at === null || !LABEL.test(at.label) ? null : accessOf(request, at.label, null);
+      if (at === null || !ours(at.label)) {
+        return null;
+      }
+      const access = accessOf(request, at.label, null);
+      return access === null || (await denied(request, access)) !== null ? null : access;
     },
 
     async handle(request) {
@@ -624,7 +794,7 @@ export function createServer(options: ServerOptions): PortholeServer {
       const { url, label } = at;
       const method = request.method.toUpperCase();
       try {
-        if (!LABEL.test(label)) {
+        if (!ours(label)) {
           return page(404, "Nothing here", "This address names no content.", method);
         }
         if (url.pathname === ENTER_PATH) {
@@ -636,10 +806,10 @@ export function createServer(options: ServerOptions): PortholeServer {
         }
         if (url.pathname === SESSION_PATH) {
           // Whether this request's cookie opens its origin's app: the entry page asks.
-          return new Response(null, {
-            status: accessOf(request, label, null) === null ? 401 : 204,
-            headers: { "cache-control": "no-store" },
-          });
+          const access = accessOf(request, label, null);
+          const status =
+            access === null ? 401 : (await denied(request, access)) === null ? 204 : 403;
+          return new Response(null, { status, headers: { "cache-control": "no-store" } });
         }
         const document = DOCUMENT_PATH.exec(url.pathname);
         if (document?.[1] !== undefined) {

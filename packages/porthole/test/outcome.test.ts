@@ -138,4 +138,40 @@ describe("a display's load outcome", () => {
     say(status({ state: "blocked", reason: "<script>" }));
     expect(seen).toEqual([{ state: "blocked", reason: "error" }]);
   });
+
+  test("a loaded app later denied by the host is blocked, once, with the host's code (P050)", () => {
+    vi.useFakeTimers();
+    const { seen, say, load } = watch(served(true), false);
+    say(status({ state: "entering" }));
+    load();
+    load();
+    vi.advanceTimersByTime(60_000);
+    say(status({ state: "blocked", reason: "denied", status: 403, code: "revoked" }));
+    say(status({ state: "blocked", reason: "session", status: 401 }));
+    expect(seen).toEqual([
+      { state: "loaded" },
+      { state: "blocked", reason: "denied", status: 403, code: "revoked" },
+    ]);
+  });
+
+  test("a code that isn't a short lowercase token is dropped", () => {
+    vi.useFakeTimers();
+    const { seen, say } = watch(served(false), false);
+    say(status({ state: "blocked", reason: "denied", code: "<b>Revoked</b>" }));
+    expect(seen).toEqual([{ state: "blocked", reason: "denied" }]);
+  });
+
+  test("a timeout stays a timeout; stop ends the watch", () => {
+    vi.useFakeTimers();
+    const late = watch(served(true), false);
+    vi.advanceTimersByTime(5_000);
+    late.say(status({ state: "blocked", reason: "denied" }));
+    expect(late.seen).toEqual([{ state: "timeout" }]);
+    const stopped = watch(served(false), false);
+    stopped.load();
+    vi.advanceTimersByTime(1_000);
+    stopped.handle.stop();
+    stopped.say(status({ state: "blocked", reason: "denied" }));
+    expect(stopped.seen).toEqual([{ state: "loaded" }]);
+  });
 });

@@ -1,5 +1,5 @@
 import { CAPABILITY_NAMES, isCapabilityName, type Gate } from "./capabilities.ts";
-import { URL_SANDBOX_EXTRAS, type PortholeConfig } from "./schema.ts";
+import { URL_PERMISSIONS, URL_SANDBOX_EXTRAS, type PortholeConfig } from "./schema.ts";
 
 /**
  * Checks a config before anything is derived from it. Every string that ends up in a CSP, an
@@ -130,6 +130,7 @@ export function validateConfig(input: unknown): PortholeConfig {
       "contentOrigins",
       "embedder",
       "sandbox",
+      "permissions",
     ],
     "config",
   );
@@ -310,6 +311,20 @@ export function validateConfig(input: unknown): PortholeConfig {
             ? `${JSON.stringify(token)} is never granted (P037)`
             : `must be one of ${URL_SANDBOX_EXTRAS.join(", ")}`,
         );
+      }
+    });
+  }
+
+  if (config.permissions !== undefined) {
+    if (config.mode !== "url") {
+      fail("config.permissions", "only url mode may be delegated features");
+    }
+    if (!Array.isArray(config.permissions)) {
+      fail("config.permissions", "must be an array of features");
+    }
+    (config.permissions as unknown[]).forEach((feature, index) => {
+      if (!(URL_PERMISSIONS as readonly unknown[]).includes(feature)) {
+        fail(`config.permissions[${index}]`, `must be one of ${URL_PERMISSIONS.join(", ")}`);
       }
     });
   }

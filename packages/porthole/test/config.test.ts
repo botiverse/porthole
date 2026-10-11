@@ -245,6 +245,25 @@ describe("0.1.1: what a host may change", () => {
     expect(refusal({ ...base, sandbox: ["allow-popups"] })).toMatch(/only url mode/u);
   });
 
+  test("url mode may delegate clipboard-write and fullscreen, and nothing by default (P049)", () => {
+    const url = presets.url({ contentOrigins: ["https://*.preview.example.com"] });
+    expect(compile(url).allow).toBe("");
+    expect(
+      compile(
+        presets.url({
+          contentOrigins: ["https://*.preview.example.com"],
+          permissions: ["clipboard-write", "fullscreen"],
+        }),
+      ).allow,
+    ).toBe("clipboard-write; fullscreen");
+    expect(refusal({ ...url, permissions: ["camera"] })).toMatch(
+      /permissions\[0\].*clipboard-write, fullscreen/u,
+    );
+    expect(refusal({ ...url, permissions: ["clipboard-read"] })).toMatch(/must be one of/u);
+    expect(refusal({ ...url, permissions: "fullscreen" })).toMatch(/array/u);
+    expect(refusal({ ...base, permissions: ["fullscreen"] })).toMatch(/only url mode/u);
+  });
+
   test("a whole document takes the person's scheme when it declares it, unless the host says always", () => {
     expect(compile(presets.artifact()).shell?.themeDocuments).toBe("declared");
     expect(

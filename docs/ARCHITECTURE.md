@@ -224,6 +224,15 @@ only the declared content origins.
    schema and checked for sender identity before use; the shell accepts messages
    only from its host, and the host only from its frame.
 
+4. **Host's decision ↔ content domain.** Authentication and authorization
+   *policy* are the host's; carrying the host's decision safely onto the content
+   domain is Porthole's *mechanism*. The host decides who may open an instance
+   before it calls `issue` (a viewer it knows, or a public link), and may decide
+   again on every request (`ServerOptions.authorize`). Porthole carries the decision
+   as a one-time ticket, then a signed cookie of that origin and instance only,
+   with the host's opaque `subject` inside, and never interprets identity. A deny
+   ends access from the next request on and tells the display why.
+
 ## Extension points
 
 - **Capabilities.** New host functions are added to the capability vocabulary
@@ -234,6 +243,11 @@ only the declared content origins.
   contract stays standard (PRINCIPLE 2).
 - **Theme variables.** The theme map is config; the standard MCP Apps variable
   names are the default vocabulary.
+- **Served content.** A host plugs its own policy and infrastructure into `/server`:
+  who may see what (`authorize`), where tickets live (`TicketStore`: memory, D1),
+  how origins are named (`content.name`, other servers' `reserved` namespaces),
+  and where apps and artifact versions come from (`upstream`, `artifacts`). It runs
+  on any runtime with web-standard `Request`/`Response` (Node, Workers).
 
 ## How a new protocol or platform plugs in
 

@@ -9,12 +9,18 @@
  *
  * and calls `issue` from its own authenticated API when a viewer opens served content.
  *
+ * Runs on any runtime with web-standard `Request`/`Response` and `crypto.getRandomValues`: Node,
+ * Cloudflare Workers (no `nodejs_compat` needed), Deno, Bun (P044). On Workers, keep tickets in D1
+ * (`d1TicketStore`, P045).
+ *
  * Origins: each storage scope gets `<label>.<domain>`, the label keyed from the scope by the
- * secret (stable, DNS-safe, not guessable from the scope). The domain is a registrable domain the
+ * secret (stable, DNS-safe, not guessable from the scope), or a host's own flat name
+ * (`content.name`, `prefixedName("a-")` for `a-<id>`), with other servers' namespaces reserved (P047). The domain is a registrable domain the
  * host uses for nothing else, so no content origin is ever same-site with the host. Documents go
  * out with their CSP (from the config) plus `frame-ancestors` (the host origins) in headers.
  *
- * Tickets: `issue` mints a one-time ticket for an instance and a viewer, good for a short time;
+ * Tickets: `issue` mints a one-time ticket for an instance and a viewer (or anonymously, for a
+ * public link, P046), good for a short time;
  * the frame's first request carries it, and the content origin takes it (once). A served document
  * comes back in that same answer, with a cookie of that origin only (`__Host-`, `Secure`,
  * `HttpOnly`, `SameSite=None; Partitioned` in a frame) for what follows; a url-mode app's ticket
@@ -22,11 +28,22 @@
  * content without a valid ticket or cookie gets nothing of the content.
  */
 export { createServer } from "./server.ts";
-export { memoryTicketStore } from "./tickets.ts";
+export {
+  d1TicketSchema,
+  d1TicketStore,
+  memoryTicketStore,
+  type D1Like,
+  type D1StatementLike,
+} from "./tickets.ts";
+export { FRAME_STATUS_METHOD } from "../isolation/types.ts";
+export { isHostLabel, prefixedName } from "./naming.ts";
 export { proxyTo, type ProxyOptions } from "./proxy.ts";
 export type {
   Access,
   ArtifactStore,
+  AuthorizeAnswer,
+  AuthorizeRequest,
+  Authorizer,
   ContentDomain,
   Grant,
   PortholeServer,

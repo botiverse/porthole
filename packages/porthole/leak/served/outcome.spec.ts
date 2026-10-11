@@ -1,65 +1,14 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { presets, type PortholeConfig } from "../../src/index.ts";
-import type { FrameOutcome } from "../../src/host/types.ts";
-import type { FrameLocation, InstanceRef } from "../../src/isolation/types.ts";
+import type { InstanceRef } from "../../src/isolation/types.ts";
 import { harness } from "./harness.ts";
+import { app, mount, outcomeOf } from "./porthole-host.ts";
 
 /**
  * A served display's load outcome (P040), through Porthole's own `createHost` and `/server`: what a
  * host subscribes to so it can show its own fallback ("Open in a new tab") without pages of its
  * own. Each case on Chromium, WebKit and Firefox.
  */
-
-interface Record {
-  readonly outcomes: FrameOutcome[];
-  readonly initialized: boolean;
-  readonly errors: string[];
-}
-
-interface PortholeHostPage {
-  records: Record[];
-  mount(config: PortholeConfig, location: FrameLocation, instance: InstanceRef): number;
-}
-
-const app = (scope: string): InstanceRef => ({
-  scope,
-  document: { kind: "external", url: "http://app.test/" },
-});
-
-async function mount(
-  page: Page,
-  origin: string,
-  config: PortholeConfig,
-  location: FrameLocation,
-  instance: InstanceRef,
-): Promise<() => Promise<Record>> {
-  if (!page.url().startsWith(`${origin}/porthole-host`)) {
-    await page.goto(`${origin}/porthole-host`);
-    await page.waitForFunction(() => "portholeHost" in window);
-  }
-  const index = await page.evaluate(
-    ([each, where, what]) =>
-      (window as unknown as { portholeHost: PortholeHostPage }).portholeHost.mount(
-        each,
-        where,
-        what,
-      ),
-    [config, location, instance] as const,
-  );
-  return () =>
-    page.evaluate(
-      (each) =>
-        (window as unknown as { portholeHost: PortholeHostPage }).portholeHost.records[
-          each
-        ] as Record,
-      index,
-    );
-}
-
-const outcomeOf = async (read: () => Promise<Record>, timeout = 10_000): Promise<FrameOutcome> => {
-  await expect.poll(async () => (await read()).outcomes.length, { timeout }).toBe(1);
-  return (await read()).outcomes[0] as FrameOutcome;
-};
 
 test("a framed app is loaded where the engine keeps its cookie; blocked (cookies) where it doesn't", async ({
   page,
@@ -69,7 +18,7 @@ test("a framed app is loaded where the engine keeps its cookie; blocked (cookies
   const instance = app("outcome-framed");
   const location = await served.porthole.issue(instance, { viewer: "probe" });
   expect(location.reports).toBe(true);
-  const read = await mount(
+  const { read } = await mount(
     page,
     served.hostOrigin,
     served.configs.url as PortholeConfig,
@@ -97,7 +46,7 @@ test("a page whose server doesn't let this host frame it never runs: blocked (fr
   const instance = app("outcome-framing");
   const location = await served.porthole.issue(instance, { viewer: "probe" });
   // The foreign origin isn't one of the server's host origins: frame-ancestors refuses it.
-  const read = await mount(
+  const { read } = await mount(
     page,
     served.foreignOrigin,
     served.configs.url as PortholeConfig,
@@ -116,7 +65,7 @@ test("a used ticket opens nothing: blocked (session), told by the server's own p
   await served.porthole.handle(
     new Request(location.url, { headers: { "sec-fetch-dest": "document" } }),
   );
-  const read = await mount(
+  const { read } = await mount(
     page,
     served.hostOrigin,
     served.configs.url as PortholeConfig,
@@ -133,7 +82,7 @@ test("a load that never settles is a timeout", async ({ page }) => {
     limits: { loadTimeoutMs: 1_500 },
   });
   const origin = served.porthole.originFor("outcome-hang");
-  const read = await mount(
+  const { read } = await mount(
     page,
     served.hostOrigin,
     config,
@@ -152,7 +101,7 @@ test("a served shell is loaded when it finishes its handshake; from a host it do
     document: { kind: "shell", preset: "inlineWidget" },
   };
   const config = served.configs.inlineWidget as PortholeConfig;
-  const read = await mount(
+  const { read } = await mount(
     page,
     served.hostOrigin,
     config,
@@ -160,7 +109,7 @@ test("a served shell is loaded when it finishes its handshake; from a host it do
     instance,
   );
   expect(await outcomeOf(read)).toEqual({ state: "loaded" });
-  const foreign = await mount(
+  const { read: foreign } = await mount(
     page,
     served.foreignOrigin,
     config,

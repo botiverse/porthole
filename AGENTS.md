@@ -22,6 +22,8 @@ compiler and presets; the isolation core (`createHost`, the web platform, the sh
 runtime, the shell adapter, the gated bridge); streaming, sizing and theming; the
 React binding with its default dialog; the leak suite with its oracles and negative
 controls, gating on Chromium, WebKit and Firefox.
+`/server` runs on Node and Cloudflare Workers (D1 tickets), with a host's own
+names, anonymous public links and the host's per-request check (0.1.2).
 
 ## Setup
 
@@ -35,7 +37,7 @@ controls, gating on Chromium, WebKit and Firefox.
 
 ```bash
 pnpm check            # typecheck + lint + format check + unit tests (run before every commit)
-pnpm test             # unit tests (vitest; packages/porthole/test)
+pnpm test             # unit tests (vitest; packages/porthole/test), with /server in workerd (Miniflare)
 pnpm test:leak        # every Playwright suite (leak, served, MCP examples, React) on Chromium, WebKit, Firefox
 PORTHOLE_LEAK_ENGINES=chromium pnpm test:leak   # a subset, where an engine can't run
 PORTHOLE_LEAK_WEAKEN=sync-guard pnpm test:leak  # a negative control: its probes must fail (P032)

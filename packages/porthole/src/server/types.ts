@@ -11,12 +11,45 @@ export interface ContentDomain {
   /** `http` only for `localhost`. */
   readonly scheme: "https" | "http";
   readonly port?: number;
+  /**
+   * The label under `domain` a storage scope is served on (P047). Default: 24 base32 characters
+   * keyed from the scope with the server's secret (stable, not guessable). A host's own (flat
+   * names like `a-<id>`) must return one lowercase DNS label, the same for the same scope, a
+   * different one for a different scope, and never a `reserved` one.
+   */
+  readonly name?: (scope: string) => string;
+  /**
+   * Labels this server never serves or names (another server's namespace under the same domain,
+   * `f` for `<instance>.f.<domain>`, or `www`). Requests for them get null (the host's routes).
+   */
+  readonly reserved?: readonly string[];
 }
 
-/** Who may open an instance, decided by the host before it calls `issue`. */
-export interface Grant {
-  /** The host's id for the viewer: recorded with the ticket, never shown to content. */
-  readonly viewer: string;
+/**
+ * Who may open an instance, decided by the host before it calls `issue`: a viewer the host
+ * knows, or (a public link) nobody in particular. Porthole never interprets either: identity and
+ * authorization policy are the host's (P050).
+ */
+export type Grant = (
+  | {
+      /** The host's id for the viewer: recorded with the ticket, never shown to content. */
+      readonly viewer: string;
+      readonly anonymous?: never;
+    }
+  | {
+      /**
+       * A public link: no viewer (P046). Only for documents (a shell, an artifact version, the
+       * sandbox proxy), never for a url-mode app.
+       */
+      readonly anonymous: true;
+      readonly viewer?: never;
+    }
+) & {
+  /**
+   * The host's own opaque claim, carried in the ticket and the session cookie and handed back to
+   * `authorize` on every request (a session id, a share id). At most 512 characters.
+   */
+  readonly subject?: string;
   /** How long the ticket is good for, seconds (default 60). */
   readonly ttlSeconds?: number;
   /**
@@ -24,11 +57,14 @@ export interface Grant {
    * url-mode app's every request, rides on.
    */
   readonly sessionSeconds?: number;
-}
+};
 
 export interface TicketRecord {
   readonly instance: InstanceRef;
+  /** The grant's viewer; "" for an anonymous grant. */
   readonly viewer: string;
+  readonly anonymous?: boolean;
+  readonly subject?: string;
   /** Epoch milliseconds. */
   readonly expiresAt: number;
   /** The grant's `sessionSeconds`, if it set one. */
@@ -50,7 +86,11 @@ export interface ArtifactStore {
 /** What a request's cookie lets in: one instance, for one viewer, on one origin, until a time. */
 export interface Access {
   readonly instance: InstanceRef;
+  /** The grant's viewer; "" for an anonymous one. */
   readonly viewer: string;
+  readonly anonymous?: boolean;
+  /** The grant's opaque subject, if it had one. */
+  readonly subject?: string;
   /** The content origin the access is for. */
   readonly origin: string;
   /** When the cookie stops being good, epoch milliseconds. */
@@ -63,6 +103,40 @@ export interface Access {
  * Porthole's cookie; the answer gets `frame-ancestors` added, and loses any cookie named as ours.
  */
 export type Upstream = (request: Request, access: Access) => Response | Promise<Response>;
+
+/** What `authorize` is asked about: a request the cookie (or ticket) let in. */
+export interface AuthorizeRequest {
+  readonly scope: string;
+  readonly instance: InstanceRef;
+  readonly viewer: string;
+  readonly anonymous: boolean;
+  readonly subject?: string;
+  /** The request itself (its path, method; never its Porthole cookie's value). */
+  readonly request: Request;
+}
+
+/** The host's answer: let it in, or not (with a short reason code for the host's own UI). */
+export type AuthorizeAnswer =
+  | { readonly allow: true }
+  | {
+      readonly allow: false;
+      /** A short code (`revoked`, `left-workspace`): lowercase letters, digits and dashes. */
+      readonly code?: string;
+    };
+
+/**
+ * The host's check on every request its cookie lets in (P050): revocation, membership,
+ * liveness. Porthole calls it after the cookie (or ticket) verifies and before anything of the
+ * content is served; a deny is a 403 page that tells the host why (`blocked: denied`).
+ */
+export interface Authorizer {
+  check(request: AuthorizeRequest): AuthorizeAnswer | Promise<AuthorizeAnswer>;
+  /**
+   * How long an answer may be reused for the same session and scope, seconds. Default 0: asked
+   * on every request. A host opts into a short time for apps with many requests.
+   */
+  readonly ttlSeconds?: number;
+}
 
 export interface ServerOptions {
   readonly content: ContentDomain;
@@ -79,6 +153,8 @@ export interface ServerOptions {
   readonly tickets?: TicketStore;
   /** Url mode: where an external instance's requests go once let in. Absent: nothing serves them. */
   readonly upstream?: Upstream;
+  /** The host's per-request check (P050). Absent: a good cookie is enough until it ends. */
+  readonly authorize?: Authorizer;
 }
 
 export interface PortholeServer {
@@ -95,8 +171,9 @@ export interface PortholeServer {
    */
   issue(instance: InstanceRef, grant: Grant): Promise<FrameLocation>;
   /**
-   * The access a request's cookie carries for a url-mode app on the request's origin, or null:
-   * for a host's own WebSocket upgrade path, which a fetch-style handler can't take.
+   * The access a request's cookie carries for a url-mode app on the request's origin, or null
+   * (no good cookie, or the host's check denies it): for a host's own WebSocket upgrade path,
+   * which a fetch-style handler can't take.
    */
   access(request: Request): Promise<Access | null>;
   /** The frame source every content origin matches (`https://*.example-usercontent.com`). */

@@ -10,11 +10,18 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { expect, type Page } from "@playwright/test";
-import { compile, embedderCsp, presets, type PortholeConfig } from "../../src/index.ts";
+import {
+  compile,
+  embedderCsp,
+  LIBRARY_CDNS,
+  presets,
+  type PortholeConfig,
+} from "../../src/index.ts";
 import type { ServedConformanceHost, ServedDisplay } from "../../src/conformance/served.ts";
 import { checkFrameLocation } from "../../src/isolation/served.ts";
 import type { FrameLocation, InstanceRef } from "../../src/isolation/types.ts";
 import { createServer, proxyTo, type PortholeServer } from "../../src/server/index.ts";
+import { weaken, weakened } from "../weakenings.ts";
 
 /**
  * Porthole's reference serving for the served-mode cases, started in each test worker on ports of
@@ -25,6 +32,8 @@ import { createServer, proxyTo, type PortholeServer } from "../../src/server/ind
  * - foreign: a page on another origin that frames content (frame-ancestors must refuse it), and
  *   the canaries, whose requests the cases count;
  * - app: a running app for url mode, reached through `proxyTo`.
+ *
+ * The server asks the host's check on every request (P050): a subject in `revoked` is denied.
  */
 
 export interface Harness {
@@ -37,7 +46,12 @@ export interface Harness {
   readonly hits: Map<string, number>;
   /** Artifact pages by `id@version`. */
   readonly pages: Map<string, string>;
+  /** Subjects the host has revoked: their tickets and cookies are denied from the next request. */
+  readonly revoked: Set<string>;
 }
+
+/** A library as a CDN serves it, for the CDN cases (routed by the test, never fetched). */
+export const CDN_LIBRARY = "https://cdn.jsdelivr.net/npm/porthole-probe-lib@1.0.0/index.min.js";
 
 export const SECRET = new Uint8Array(32).fill(42);
 
@@ -148,7 +162,7 @@ async function sourceOf(pathname: string): Promise<Response | null> {
     return null;
   }
   try {
-    const text = await readFile(path.join(PACKAGE, relative), "utf8");
+    const text = weaken(relative, await readFile(path.join(PACKAGE, relative), "utf8"));
     return new Response(stripTypeScriptTypes(text), {
       headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" },
     });
@@ -200,8 +214,19 @@ async function start(): Promise<Harness> {
     ]),
   );
 
+  pages.set(
+    "cdn@1",
+    `<!doctype html><html><head><title>Chart</title><script src="${CDN_LIBRARY}"></script></head><body><main id="artifact">a page with a library</main></body></html>`,
+  );
+  const revoked = new Set<string>();
+
   const app = createHttpServer((request, response) => {
     const pathname = new URL(request.url ?? "/", "http://app").pathname;
+    if (pathname === "/api") {
+      response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      response.end('{"ok":true}');
+      return;
+    }
     if (pathname === "/app.js") {
       response.writeHead(200, { "content-type": "text/javascript" });
       response.end('document.documentElement.dataset.app = "ready";');
@@ -257,6 +282,11 @@ async function start(): Promise<Harness> {
   const configs: Record<string, PortholeConfig> = {
     inlineWidget: presets.inlineWidget({ isolation: "domain", contentOrigins: [contentSource] }),
     artifact: presets.artifact({ isolation: "domain", contentOrigins: [contentSource] }),
+    artifactCdn: presets.artifact({
+      isolation: "domain",
+      contentOrigins: [contentSource],
+      egress: LIBRARY_CDNS,
+    }),
     mcpApp: presets.mcpApp({ isolation: "domain", contentOrigins: [contentSource] }),
     url: presets.url({ contentOrigins: [contentSource] }),
   };
@@ -272,6 +302,16 @@ async function start(): Promise<Harness> {
       },
     },
     upstream: proxyTo({ target: () => `http://127.0.0.1:${appPort}` }),
+    ...(weakened.includes("authorize")
+      ? {}
+      : {
+          authorize: {
+            check: ({ subject }: { readonly subject?: string }) =>
+              subject !== undefined && revoked.has(subject)
+                ? ({ allow: false, code: "revoked" } as const)
+                : ({ allow: true } as const),
+          },
+        }),
   });
   const hostCsp = embedderCsp(Object.values(configs));
   hostCspOf = () => hostCsp;
@@ -305,6 +345,7 @@ async function start(): Promise<Harness> {
     configs,
     hits,
     pages,
+    revoked,
   };
 }
 

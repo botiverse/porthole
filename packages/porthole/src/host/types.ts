@@ -62,18 +62,27 @@ export type FrameBlock =
   | "session"
   /** Its app didn't answer. */
   | "upstream"
+  /** The host's own check refused it (revoked, no longer a member): `code` says which. */
+  | "denied"
   | "not-found"
   | "error";
 
 /**
- * How a display's first document went, once per run: it loaded (a shell or view finished its
- * handshake; a url-mode app's document loaded), it was blocked (and why), or nothing settled in
- * `limits.loadTimeoutMs`. A host shows its own fallback ("Open in a new tab") on anything but
- * loaded.
+ * How a display's document went: it loaded (a shell or view finished its handshake; a url-mode
+ * app's document loaded), it was blocked (and why), or nothing settled in
+ * `limits.loadTimeoutMs`. Once per run, plus a later `blocked` if the frame shows a status page
+ * after it loaded (access revoked mid-session). A host shows its own fallback ("Open in a new
+ * tab") on anything but loaded.
  */
 export type FrameOutcome =
   | { readonly state: "loaded" }
-  | { readonly state: "blocked"; readonly reason: FrameBlock; readonly status?: number }
+  | {
+      readonly state: "blocked";
+      readonly reason: FrameBlock;
+      readonly status?: number;
+      /** The host's own reason code, for `denied` (`Authorizer`). */
+      readonly code?: string;
+    }
   | { readonly state: "timeout" };
 
 export interface DisplayEvents {

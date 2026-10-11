@@ -237,16 +237,68 @@ and calls `PortholeServer.issue`.
 - **Separation is checked.** The content domain is a registrable domain the host
   uses for nothing else, and a mount refuses a located origin that doesn't match
   `contentOrigins` or is same-site with the host.
+- **Names** (P047). By default a scope's label is keyed (24 base32 characters). A
+  host may name its own (`content.name`; `prefixedName("a-")` gives `a-<scope>`,
+  one-to-one): one lowercase DNS label, never an IDNA form or a `reserved` one.
+  `reserved` labels are other servers' namespaces under the same domain (`f` for
+  `<label>.f.<domain>`): requests for them and anything under them return null, to
+  the host's routes; any other deeper name gets this server's 404.
+- **Who** (P046, P050). A grant names a `viewer`, or is `anonymous` (a public link:
+  documents only, never a url-mode app), and may carry the host's opaque `subject`
+  (a share or session id), signed into the ticket and the cookie. The host's
+  `authorize.check` runs after a ticket or cookie verifies and before anything is
+  served: document loads, url-mode entry, every app request, `/__porthole/session`
+  and `access()`. A deny is a 403 status page (`denied`, the host's code); answers
+  are not reused unless the host sets `ttlSeconds` (at most 300).
+- **Runtimes** (P044, P045). `/server` uses no Node module (hashing in plain
+  JavaScript, randomness from `crypto.getRandomValues`), so it runs on Cloudflare
+  Workers without `nodejs_compat`; tickets there live in D1 (`d1TicketStore`, taken
+  by one `DELETE … RETURNING`), never KV (eventually consistent). Sessions are
+  signed cookies: no store.
 
 `/server`'s handler is fetch-style (`Request → Response | null`, null for requests
-that aren't for the content domain), so a backend mounts it in front of its own
-routes. Dev and tests use `*.localhost` subdomains, which browsers resolve to
+that aren't for the content domain or are in a reserved namespace), so a backend
+mounts it in front of its own routes. Dev and tests use `*.localhost` subdomains, which browsers resolve to
 loopback. In url mode an app's requests go, once its cookie checks out, to the
 host's `upstream` (`proxyTo` relays them by HTTP, telling the app it is on its own
 origin and nothing of the proxy); WebSockets take the host's own upgrade path, let
 in by `PortholeServer.access`. The MCP Apps sandbox proxy is served the same way,
 its CSP from the config plus the view's declared egress, signed into the ticket; it
 becomes the view rather than nesting it (P026).
+
+#### Wiring on Cloudflare Workers
+
+A Worker with Hono, D1 and R2 serving artifact pages on `a-<id>.<content domain>`
+(`test/workers/` runs one like it in workerd, with real D1):
+
+- **Bindings.** A D1 database (`DB`) with `d1TicketSchema()` applied once as a
+  migration; a secret of at least 32 random bytes (`wrangler secret put
+  PORTHOLE_SECRET`); the host's own artifact source (R2, D1) behind `artifacts.get`.
+  No `nodejs_compat`.
+- **Routes.** The content domain's wildcard (`*.<content domain>/*`, with wildcard
+  DNS and a certificate for every level served, `*.f.<domain>` included) and the
+  host's own domain, to the same Worker, or the content domain to a Worker of its own.
+- **Handler.** One server per isolate, made on first use from `env`:
+
+  ```ts
+  const porthole = createServer({
+    content: { domain: "example-usercontent.com", scheme: "https", name: prefixedName("a-"), reserved: ["f", "www"] },
+    secret: new TextEncoder().encode(env.PORTHOLE_SECRET),
+    hostOrigins: ["https://app.example.com"],
+    configs: { artifact: presets.artifact({ isolation: "domain", contentOrigins: ["https://*.example-usercontent.com"] }) },
+    artifacts: { get: (id, version) => env.ARTIFACTS.get(`${id}/${version}`).then((o) => o && o.text()).then((html) => html && { html }) },
+    tickets: d1TicketStore(env.DB),
+    authorize: { check: ({ subject }) => stillShared(env, subject) },   // the host's policy
+  });
+  app.all("*", async (c, next) => (await porthole.handle(c.req.raw)) ?? next());
+  ```
+
+  and from the host's own authenticated API, once it has decided the person may see
+  it, `porthole.issue({ scope: id, document: { kind: "artifact", id, version } },
+  { viewer: userId, subject: shareId })` (a public share route: `{ anonymous: true,
+  subject: shareId }`) returns the `FrameLocation` the host page frames. Scopes named
+  by `prefixedName` must already be label-safe (lowercase letters, digits, inner
+  hyphens); other ids keep the keyed default.
 
 The served modes have their own conformance cases (`defineServedSuite`, run against
 `leak/served/`'s reference serving, which starts its own servers per worker): content
@@ -377,11 +429,13 @@ absent.
   preview): frame, isolation and access auth; no shell, no egress control (P020).
   It has no handshake: its first load makes it ready, and it fills its container (an
   app reports no size; give the frame a height), at least `minHeightPx`. A host may
-  add popups, modals and downloads to its sandbox, never top navigation (P037).
+  add popups, modals and downloads to its sandbox, never top navigation (P037), and
+  delegate clipboard writes and full screen (`permissions`, P049; none by default).
   Through `/server`, a framed app is entered through a page that checks the browser
-  kept its cookie and tells the host (P040); the host's `outcome` says loaded,
-  blocked (and why: `cookies` on WebKit, `framing`, `session`, `upstream`) or
-  timeout, so it can offer its own "Open in a new tab".
+  kept its cookie, tells the host (P040), and goes on once it has loaded itself; the host's `outcome` says loaded,
+  blocked (and why: `cookies` on WebKit, `framing`, `session`, `upstream`, `denied`
+  with the host's code) or timeout, so it can offer its own "Open in a new tab". A
+  `denied` may follow `loaded`: the host revoked access mid-session (P050).
 
 ## Egress hardening, each with its test
 
@@ -432,6 +486,15 @@ ancestors) on Chromium, WebKit and Firefox, so the host-side gesture check holds
 clicks; it is still advisory, since a person may have clicked the host a moment
 before. Playwright's own page evaluations count as gestures, so the gate probes wait
 for that to lapse and click with raw input.
+
+### Served content, each with its test
+
+| What | Mechanism | Tests (all three engines unless noted) | Negative control → fails |
+|------|-----------|-------|------------------|
+| The host's check (P050) | `authorize.check` after a ticket or cookie verifies, before anything is served; a deny is a 403 page saying `denied` and the host's code, and the display's `outcome` says so even after `loaded` | `leak/served/authorize.spec.ts`: a revoked subject's ticket (a page, an app); a framed app's next request and reload mid-session (Chromium, Firefox: WebKit keeps no framed cookie, P025); a framed page's next load; an app and a page in a tab | `authorize` → every case but WebKit's framed page (`session` either way) |
+| Url-mode delegation (P049) | `allow` from `permissions`, `""` by default | `leak/served/permissions.spec.ts`: full screen follows it on all three; clipboard writes on Chromium only (WebKit and Firefox let any frame write in a click) | `url-permissions` → the default case (all three) |
+| Library CDNs for artifacts (P048) | `egress: LIBRARY_CDNS` in the host's artifact config; closed by default (P022) | `leak/cdn.spec.ts`: opaque and served, a CDN library loads only when opened; another origin never | — (the CSP of rows 1–2) |
+| Workers (P044, P045) | no Node module in `/server`; D1 tickets taken by one `DELETE … RETURNING` | `test/workers.test.ts` (workerd, no `nodejs_compat`, real D1: once per ticket, a race, anonymous, a revocation, flat names, reserved namespaces) | — |
 
 ## The shell runtime
 
@@ -624,7 +687,15 @@ migration**.
 
 ## Open questions
 
-1. **URL mode's sandbox tokens.** The baseline is `allow-scripts allow-same-origin
-   allow-forms`; does a dev-server preview need more (popups for OAuth flows,
-   downloads)? The served-modes work decides with a probe and a decision entry.
+1. ~~URL mode's sandbox tokens~~: popups, modals and downloads are a host's
+   opt-in (P037); clipboard writes and full screen too (P049).
 2. ~~`'self'` in the embedding page's `frame-src`~~: measured and dropped (P033).
+3. **Clipboard writes from agent-written content.** Measured for 0.1.2: a click in
+   an opaque widget writes the clipboard on all three engines (the async Clipboard
+   API on WebKit and Firefox; `document.execCommand("copy")` on Chromium and
+   Firefox; Chromium refuses the async API to an undelegated frame). Nothing leaves
+   the frame, so it isn't a leak, but it is a deception channel (pastejacking:
+   copying other text than a "copy" button shows). Closing it means a gated
+   `copy` capability (the host shows what goes on the clipboard) and the shell
+   removing the clipboard entry points, at the cost of widgets' own copy buttons.
+   Needs the first host's call and a decision entry.

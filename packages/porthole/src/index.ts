@@ -38,8 +38,14 @@ export {
   originSourceProblem,
   validateConfig,
 } from "./config/validate.ts";
-export { URL_SANDBOX_EXTRAS, type UrlSandboxExtra } from "./config/schema.ts";
+export {
+  URL_PERMISSIONS,
+  URL_SANDBOX_EXTRAS,
+  type UrlPermission,
+  type UrlSandboxExtra,
+} from "./config/schema.ts";
 export { hostOriginProblem, isHostOrigin } from "./isolation/served.ts";
+export { FRAME_STATUS_METHOD } from "./isolation/types.ts";
 
 // Presets.
 export {
@@ -121,6 +127,8 @@ export { createHost } from "./host/create-host.ts";
 export type {
   DisplayControls,
   DisplayEvents,
+  FrameBlock,
+  FrameOutcome,
   DisplayHandle,
   HostOptions,
   MountOptions,

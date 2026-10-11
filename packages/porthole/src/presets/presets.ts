@@ -10,6 +10,7 @@ import type {
   Limits,
   PortholeConfig,
   ThemeValue,
+  UrlPermission,
   UrlSandboxExtra,
 } from "../config/schema.ts";
 import { validateConfig } from "../config/validate.ts";
@@ -51,6 +52,8 @@ export interface UrlPresetOptions {
   readonly contentOrigins: readonly string[];
   /** Sandbox tokens to add for the app (popups for an OAuth flow, modals, downloads; P037). */
   readonly sandbox?: readonly UrlSandboxExtra[];
+  /** Features to delegate to the app (clipboard writes, full screen; P049). */
+  readonly permissions?: readonly UrlPermission[];
   readonly limits?: Partial<Limits>;
   readonly layout?: Partial<LayoutConfig>;
   readonly embedder?: EmbedderConfig;
@@ -211,6 +214,7 @@ export const presets = {
       contentOrigins: options.contentOrigins,
       embedder: options.embedder ?? {},
       ...(options.sandbox === undefined ? {} : { sandbox: options.sandbox }),
+      ...(options.permissions === undefined ? {} : { permissions: options.permissions }),
     }),
 } as const;
 

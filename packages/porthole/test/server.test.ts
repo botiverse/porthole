@@ -1,13 +1,22 @@
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { presets, type EgressConfig } from "../src/index.ts";
 import type { InstanceRef } from "../src/isolation/types.ts";
 import { sandboxProxyDocument } from "../src/mcp/proxy.ts";
 import {
   createServer,
+  d1TicketSchema,
+  d1TicketStore,
+  isHostLabel,
   memoryTicketStore,
+  prefixedName,
   proxyTo,
   type Access,
+  type AuthorizeRequest,
+  type D1Like,
+  type D1StatementLike,
   type ServerOptions,
+  type TicketRecord,
   type Upstream,
 } from "../src/server/index.ts";
 import { compile } from "../src/compile/compile.ts";
@@ -482,7 +491,10 @@ describe("url mode", () => {
       get(`${location.origin}/__porthole/enter.js`),
     )) as Response;
     expect(script.headers.get("content-type")).toContain("javascript");
-    expect(await script.text()).toContain("porthole/notifications/frame-status");
+    const text = await script.text();
+    expect(text).toContain("porthole/notifications/frame-status");
+    // It leaves for the app only after its own load, which the host counts (P040).
+    expect(text.indexOf('addEventListener("load"')).toBeLessThan(text.indexOf("location.replace"));
   });
 
   it("lets the cookie through to the upstream, without Porthole's cookies", async () => {
@@ -567,5 +579,367 @@ describe("proxyTo", () => {
     expect(response.headers.getSetCookie()).toEqual(["sid=1; Path=/"]);
     expect(response.headers.get("content-encoding")).toBeNull();
     expect(response.headers.get("connection")).toBeNull();
+  });
+});
+
+describe("a host's own names (P047)", () => {
+  const flat = (extra: Partial<ServerOptions> = {}) =>
+    server({
+      content: {
+        domain: DOMAIN,
+        scheme: "https",
+        name: prefixedName("a-"),
+        reserved: ["f", "www"],
+      },
+      ...extra,
+    });
+  const page1: InstanceRef = {
+    scope: "101",
+    document: { kind: "artifact", id: "page", version: "1" },
+  };
+
+  it("serves each scope on the name the host gives it", async () => {
+    const porthole = flat();
+    expect(porthole.originFor("101")).toBe(`https://a-101.${DOMAIN}`);
+    const location = await porthole.issue(page1, { viewer: "v" });
+    expect(location.origin).toBe(`https://a-101.${DOMAIN}`);
+    const first = (await porthole.handle(get(location.url))) as Response;
+    expect(first.status).toBe(200);
+    expect(await first.text()).toContain("Version one");
+    const reload = get(location.url.replace(/\?ticket=.*/u, ""), { cookie: cookieOf(first) });
+    expect((await porthole.handle(reload))?.status).toBe(200);
+  });
+
+  it("refuses a ticket on another scope's name", async () => {
+    const porthole = flat();
+    const location = await porthole.issue(page1, { viewer: "v" });
+    const elsewhere = location.url.replace("://a-101.", "://a-102.");
+    expect((await porthole.handle(get(elsewhere)))?.status).toBe(401);
+    expect((await porthole.handle(get(location.url)))?.status).toBe(401);
+  });
+
+  it("takes only one lowercase DNS label that isn't reserved, from the host's naming", () => {
+    for (const bad of [
+      "A-1",
+      "a.b",
+      "",
+      "-a",
+      "a-",
+      "xn--bcher-kva",
+      "ab--c",
+      "f",
+      "www",
+      "a".repeat(64),
+    ]) {
+      const porthole = server({
+        content: { domain: DOMAIN, scheme: "https", name: () => bad, reserved: ["f", "www"] },
+      });
+      expect(() => porthole.originFor("x"), bad).toThrow(/content\.name/u);
+    }
+    const nonString = server({
+      content: { domain: DOMAIN, scheme: "https", name: () => 7 as unknown as string },
+    });
+    expect(() => nonString.originFor("x")).toThrow(/content\.name/u);
+    expect(() => server({ content: { domain: DOMAIN, scheme: "https", reserved: ["F"] } })).toThrow(
+      /reserved/u,
+    );
+  });
+
+  it("leaves a reserved namespace and the names under it to the host's routes", async () => {
+    const porthole = flat();
+    for (const url of [
+      `https://f.${DOMAIN}/`,
+      `https://x.f.${DOMAIN}/__porthole/session`,
+      `https://www.${DOMAIN}/`,
+    ]) {
+      expect(await porthole.handle(get(url)), url).toBeNull();
+      expect(await porthole.access(get(url)), url).toBeNull();
+    }
+    for (const url of [
+      `https://${DOMAIN}/`,
+      `https://a-1.b.${DOMAIN}/`,
+      `https://xn--bcher-kva.${DOMAIN}/`,
+    ]) {
+      expect((await porthole.handle(get(url)))?.status, url).toBe(404);
+    }
+  });
+
+  it("keeps keyed and prefixed names apart: neither can be the other or a reserved one", () => {
+    const name = prefixedName("a-");
+    expect(name("k3x9")).toBe("a-k3x9");
+    expect(name("0f8e2c1a-9b7d-4e1f-8a2b-3c4d5e6f7a8b")).toBe(
+      "a-0f8e2c1a-9b7d-4e1f-8a2b-3c4d5e6f7a8b",
+    );
+    for (const scope of ["", "K3", "a.b", "a_b", "-a", "a-", "x".repeat(62)]) {
+      expect(() => name(scope), scope).toThrow(/can't be named/u);
+    }
+    for (const prefix of ["a", "-", "1-", "A-", "a--", "a.b-"]) {
+      expect(() => prefixedName(prefix), prefix).toThrow(/prefix/u);
+    }
+    // A keyed label is 24 base32 characters, without a hyphen; a prefixed one always has one.
+    expect(server().originFor("101")).toMatch(/^https:\/\/[a-z2-7]{24}\./u);
+    expect(isHostLabel("a-101")).toBe(true);
+    expect(isHostLabel("xn--a-ecp")).toBe(false);
+  });
+});
+
+describe("anonymous grants (P046)", () => {
+  const artifact: InstanceRef = {
+    scope: "public-7",
+    document: { kind: "artifact", id: "page", version: "2" },
+  };
+
+  it("open a public page once per ticket, with a cookie of its origin for reloads", async () => {
+    const porthole = server();
+    const location = await porthole.issue(artifact, { anonymous: true });
+    const first = (await porthole.handle(get(location.url))) as Response;
+    expect(first.status).toBe(200);
+    expect(await first.text()).toContain("Version two");
+    expect(cookieOf(first)).toMatch(/^__Host-porthole-/u);
+    expect((await porthole.handle(get(location.url)))?.status).toBe(401);
+    const reload = get(location.url.replace(/\?ticket=.*/u, ""), { cookie: cookieOf(first) });
+    expect((await porthole.handle(reload))?.status).toBe(200);
+  });
+
+  it("don't open another instance, and never a url-mode app", async () => {
+    const porthole = server();
+    const location = await porthole.issue(artifact, { anonymous: true });
+    const cookie = cookieOf((await porthole.handle(get(location.url))) as Response);
+    const other = await porthole.issue(
+      { ...artifact, document: { kind: "artifact", id: "page", version: "1" } },
+      { anonymous: true },
+    );
+    expect(
+      (await porthole.handle(get(other.url.replace(/\?ticket=.*/u, ""), { cookie })))?.status,
+    ).toBe(401);
+    const withApp = server({ upstream: () => new Response("app") });
+    await expect(
+      withApp.issue(
+        { scope: "s", document: { kind: "external", url: "http://localhost:5173/" } },
+        {
+          anonymous: true,
+        },
+      ),
+    ).rejects.toThrow(/anonymously/u);
+    await expect(
+      porthole.issue(artifact, { anonymous: true, viewer: "v" } as unknown as Parameters<
+        typeof porthole.issue
+      >[1]),
+    ).rejects.toThrow(/no viewer/u);
+  });
+});
+
+describe("the host's check on every request (P050)", () => {
+  const artifact: InstanceRef = {
+    scope: "shared-1",
+    document: { kind: "artifact", id: "page", version: "1" },
+  };
+  const revocable = (ttlSeconds?: number) => {
+    const revoked = new Set<string>();
+    const seen: AuthorizeRequest[] = [];
+    const porthole = server({
+      authorize: {
+        check: (request) => {
+          seen.push(request);
+          return request.subject !== undefined && revoked.has(request.subject)
+            ? { allow: false, code: "revoked" }
+            : { allow: true };
+        },
+        ...(ttlSeconds === undefined ? {} : { ttlSeconds }),
+      },
+    });
+    return { porthole, revoked, seen };
+  };
+
+  it("carries the host's opaque subject from issue through the ticket and the cookie", async () => {
+    const { porthole, seen } = revocable();
+    const subject = 'share:9 ✓ {"any": "thing"}';
+    const location = await porthole.issue(artifact, { viewer: "person-1", subject });
+    const first = (await porthole.handle(get(location.url))) as Response;
+    const reload = get(location.url.replace(/\?ticket=.*/u, ""), { cookie: cookieOf(first) });
+    await porthole.handle(reload);
+    expect(seen.map((each) => each.subject)).toEqual([subject, subject]);
+    expect(seen[1]).toMatchObject({ scope: "shared-1", viewer: "person-1", anonymous: false });
+    expect(seen[1]?.instance).toEqual(artifact);
+    expect(seen[1]?.request).toBe(reload);
+    await expect(
+      porthole.issue(artifact, { viewer: "v", subject: "x".repeat(513) }),
+    ).rejects.toThrow(/subject/u);
+    await expect(
+      porthole.issue(artifact, { viewer: "v", subject: 7 as unknown as string }),
+    ).rejects.toThrow(/subject/u);
+  });
+
+  it("takes effect on the next request: a revoked subject's live cookie gets a denied page", async () => {
+    const { porthole, revoked } = revocable();
+    const location = await porthole.issue(artifact, { viewer: "v", subject: "share-9" });
+    const cookie = cookieOf((await porthole.handle(get(location.url))) as Response);
+    const reload = () => get(location.url.replace(/\?ticket=.*/u, ""), { cookie });
+    expect((await porthole.handle(reload()))?.status).toBe(200);
+    revoked.add("share-9");
+    const denied = (await porthole.handle(reload())) as Response;
+    expect(denied.status).toBe(403);
+    const html = await denied.text();
+    expect(html).toContain('data-porthole-reason="denied" data-porthole-code="revoked"');
+    expect(html).not.toContain("Version one");
+  });
+
+  it("denies a ticket's own first load, and an app's every request, before the upstream", async () => {
+    const calls: Request[] = [];
+    const revoked = new Set(["s-1"]);
+    const porthole = server({
+      upstream: (request) => {
+        calls.push(request);
+        return new Response("app");
+      },
+      authorize: { check: ({ subject }) => ({ allow: !revoked.has(subject ?? "") }) },
+    });
+    const page1 = await porthole.issue(artifact, { viewer: "v", subject: "s-1" });
+    const first = (await porthole.handle(get(page1.url))) as Response;
+    expect(first.status).toBe(403);
+    expect(first.headers.get("set-cookie")).toBeNull();
+    const app: InstanceRef = {
+      scope: "app-1",
+      document: { kind: "external", url: "http://localhost:5173/" },
+    };
+    const entry = await porthole.issue(app, { viewer: "v", subject: "s-2" });
+    const entered = (await porthole.handle(get(entry.url))) as Response;
+    expect(entered.status).toBe(200);
+    const cookie = cookieOf(entered);
+    const session = () => get(`${entry.origin}/__porthole/session`, { cookie });
+    expect(await (await porthole.handle(get(`${entry.origin}/x`, { cookie })))?.text()).toBe("app");
+    expect((await porthole.handle(session()))?.status).toBe(204);
+    expect((await porthole.access(get(`${entry.origin}/ws`, { cookie })))?.subject).toBe("s-2");
+    revoked.add("s-2");
+    const denied = (await porthole.handle(get(`${entry.origin}/x`, { cookie }))) as Response;
+    expect(denied.status).toBe(403);
+    expect(await denied.text()).toContain('data-porthole-reason="denied"');
+    expect((await porthole.handle(session()))?.status).toBe(403);
+    expect(await porthole.access(get(`${entry.origin}/ws`, { cookie }))).toBeNull();
+    expect(calls).toHaveLength(1);
+    const late = await porthole.issue(app, { viewer: "v", subject: "s-2" });
+    expect((await porthole.handle(get(late.url)))?.status).toBe(403);
+  });
+
+  it("denies without a reason when the check throws, answers anything but an allow, or gives a malformed code", async () => {
+    for (const check of [
+      () => {
+        throw new Error("down");
+      },
+      () => ({ allow: false as const, code: "Not A Code!" }),
+      () => Promise.reject(new Error("down")),
+      () => ({ allow: "yes" }) as unknown as { allow: true },
+      () => undefined as unknown as { allow: true },
+    ]) {
+      const porthole = server({ authorize: { check } });
+      const location = await porthole.issue(artifact, { viewer: "v" });
+      const response = (await porthole.handle(get(location.url))) as Response;
+      expect(response.status).toBe(403);
+      const html = await response.text();
+      expect(html).toContain('data-porthole-reason="denied"');
+      expect(html).not.toContain("data-porthole-code");
+    }
+  });
+
+  it("asks every time by default, and reuses an answer only for the host's own short TTL", async () => {
+    vi.useFakeTimers({ now: 1_000_000, toFake: ["Date"] });
+    const fresh = revocable();
+    const a = await fresh.porthole.issue(artifact, { viewer: "v", subject: "s" });
+    const ca = cookieOf((await fresh.porthole.handle(get(a.url))) as Response);
+    for (let i = 0; i < 3; i += 1) {
+      await fresh.porthole.handle(get(a.url.replace(/\?ticket=.*/u, ""), { cookie: ca }));
+    }
+    expect(fresh.seen).toHaveLength(4);
+
+    const cached = revocable(30);
+    const b = await cached.porthole.issue(artifact, { viewer: "v", subject: "s" });
+    const cb = cookieOf((await cached.porthole.handle(get(b.url))) as Response);
+    const again = () =>
+      cached.porthole.handle(get(b.url.replace(/\?ticket=.*/u, ""), { cookie: cb }));
+    await again();
+    await again();
+    // The ticket's load and the cookie's reloads carry the same claims: one answer serves them.
+    expect(cached.seen).toHaveLength(1);
+    cached.revoked.add("s");
+    expect((await again())?.status).toBe(200);
+    vi.setSystemTime(1_000_000 + 31_000);
+    expect((await again())?.status).toBe(403);
+    expect(cached.seen).toHaveLength(2);
+
+    for (const ttlSeconds of [-1, 1.5, 301]) {
+      expect(() => server({ authorize: { check: () => ({ allow: true }), ttlSeconds } })).toThrow(
+        /ttlSeconds/u,
+      );
+    }
+  });
+});
+
+describe("the D1 ticket store (P045)", () => {
+  /** node:sqlite in D1's shape: the same SQL D1 runs, on SQLite. */
+  function sqliteD1(): D1Like {
+    const db = new DatabaseSync(":memory:");
+    for (const statement of d1TicketSchema()
+      .split(";")
+      .map((each) => each.trim())
+      .filter(Boolean)) {
+      db.exec(statement);
+    }
+    return {
+      prepare(query) {
+        let values: unknown[] = [];
+        const statement: D1StatementLike = {
+          bind(...given) {
+            values = given;
+            return statement;
+          },
+          run() {
+            return Promise.resolve(db.prepare(query).run(...(values as never[])));
+          },
+          first<T>() {
+            return Promise.resolve(
+              (db.prepare(query).get(...(values as never[])) ?? null) as T | null,
+            );
+          },
+        };
+        return statement;
+      },
+    };
+  }
+  const record = (expiresAt: number): TicketRecord => ({
+    instance: shell,
+    viewer: "v",
+    expiresAt,
+    subject: "s",
+  });
+
+  it("gives a ticket once, and nothing once it's expired; sweeps expired ones as new ones go in", async () => {
+    let now = 1_000;
+    const db = sqliteD1();
+    const store = d1TicketStore(db, { now: () => now });
+    await store.put("a", record(2_000));
+    await store.put("b", record(1_500));
+    expect(await store.take("a")).toEqual(record(2_000));
+    expect(await store.take("a")).toBeNull();
+    now = 1_600;
+    expect(await store.take("b")).toBeNull();
+    await store.put("c", record(1_550));
+    await store.put("d", record(9_000));
+    const left = await db
+      .prepare("SELECT count(*) AS n FROM porthole_tickets")
+      .first<{ n: number }>();
+    expect(left?.n).toBe(1);
+  });
+
+  it("serves a server as its ticket store", async () => {
+    const porthole = server({ tickets: d1TicketStore(sqliteD1()) });
+    const location = await porthole.issue(shell, { viewer: "v" });
+    expect((await porthole.handle(get(location.url)))?.status).toBe(200);
+    expect((await porthole.handle(get(location.url)))?.status).toBe(401);
+  });
+
+  it("names its table with a-z 0-9 _ only", () => {
+    expect(() => d1TicketSchema("t; DROP TABLE x")).toThrow(/table/u);
+    expect(() => d1TicketStore(sqliteD1(), { table: "a-b" })).toThrow(/table/u);
+    expect(d1TicketSchema("tickets")).toContain("CREATE TABLE IF NOT EXISTS tickets (");
   });
 });

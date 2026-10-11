@@ -821,3 +821,209 @@ restyle, a rename then a remount, an alias) and the agreement test covers a them
 chart colors and the accent.
 **Rejected.** A fixed delay in milliseconds (frames are what a restyle waits on).
 **Revisit when** a host restyles later than its next frame without being able to signal it.
+
+## P044 · 2026-10-11 · `/server` runs on any web-standard runtime: its hashing is plain JavaScript · Accepted
+
+**Decision.** `/server` loads no Node module. SHA-256 and HMAC-SHA-256 are plain JavaScript
+(`src/server/crypto.ts`, FIPS 180-4 and RFC 2104), randomness comes from
+`crypto.getRandomValues`, and base64url and the constant-time compare are its own. It runs on
+Cloudflare Workers without `nodejs_compat`, and on Node, Deno and Bun. Its outputs are byte for
+byte those of 0.1.1's `node:crypto`, so labels, tickets and cookies issued before still hold.
+Item 1 of 0.1.2.
+**Why.** Web Crypto's HMAC is asynchronous, and `originFor` is synchronous (a host computes an
+origin while it renders): async hashing would have changed the API. The inputs are a few dozen
+bytes (a scope, a ticket, a cookie), so speed doesn't matter. `nodejs_compat` is a flag a host
+may not want, and it pulls in polyfills. Tested three ways:
+- the standard vectors (NIST, RFC 4231) and agreement with `node:crypto` (`test/crypto.test.ts`);
+- a static check that nothing `/server` loads imports a `node:` module or uses `Buffer`,
+  `process` or `require`;
+- a Worker bundled from `/server`, run in workerd (Miniflare) with no compatibility flags and a
+  real D1 database (`test/workers.test.ts`).
+
+The Worker test covers the flat names, a ticket once, the cookie on a reload, a race, an
+anonymous link, a revocation, and the reserved namespaces.
+**Rejected.** `nodejs_compat` (the host's flag to set, not ours to require); Web Crypto (async);
+a hashing dependency (P041: none).
+**Revisit when** Web Crypto has a synchronous HMAC, or a profile shows the hashing costs.
+
+## P045 · 2026-10-11 · On Workers, tickets live in D1, taken by one `DELETE … RETURNING`; never in KV · Accepted
+
+**Decision.** `d1TicketStore(db)` keeps tickets in a D1 table (`d1TicketSchema()`, applied once as
+a migration). A ticket is taken by a single statement, `DELETE … WHERE id = ? RETURNING`, so two
+requests racing for one ticket can't both get it. Expired tickets are swept as new ones go in.
+The rows hold the ticket's hash only, as in memory. Sessions stay signed cookies with no store;
+the host revokes them through its per-request check (P050). The in-memory store remains the
+default. Item 2 of 0.1.2.
+**Why.** A ticket must open its content once, across every isolate of a Worker. D1 runs writes
+on its single primary, one statement at a time. Workers KV is eventually consistent (a write or a
+delete may take up to a minute to be seen elsewhere) and has no atomic read-and-delete, so a
+ticket read in two places could be used twice. Measured on real D1 in workerd: two requests
+racing for a ticket get one 200 and one 401. Unit tests run the same SQL on SQLite (expiry, the
+sweep, table names).
+**Rejected.** KV (above). A Durable Object store would be just as strict, but each host would
+need a class binding and its migrations; the host this was built for already has D1. A session
+store (a cookie is enough; revocation is the host's check).
+**Revisit when** a host uses D1 read replicas through the Sessions API. A `DELETE` is a write and
+goes to the primary, but a store that read first would not be safe.
+
+## P046 · 2026-10-11 · Anonymous grants for public links · Accepted
+
+**Decision.** `issue(instance, { anonymous: true, subject? })` mints a ticket that names no
+viewer, for public links. Only documents qualify (a shell, an artifact version, the MCP Apps
+sandbox proxy), never a url-mode app. Every other rule is the same as for a named viewer:
+- the ticket works once, for a short time, and is bound to one instance (for an artifact, one
+  version);
+- the cookie it buys is `__Host-`, `HttpOnly`, of that origin and that instance only;
+- only the host origins may frame the content.
+
+The host's check sees `anonymous: true` and an empty viewer. A grant naming both a viewer and
+`anonymous` is refused. Item 3 of 0.1.2.
+**Risk it re-opens.** Whoever reaches the host's public route gets the content. That route is
+the only gate, because Porthole can't tell a link's holder from anyone else. A cookie bought
+anonymously keeps opening that instance until its `sessionSeconds` end. Unsharing takes effect
+at once only if the host's check looks at the share: give the grant the share id as its
+`subject`, and deny it once unshared (P050). Anyone can make the public route mint tickets, so
+the host rate-limits it (tickets expire and are swept).
+**Bounded by** the server tests (once per ticket, never another instance, never an app, a viewer
+and `anonymous` together refused) and the Worker test.
+**Rejected.**
+- A long-lived public URL without a ticket: a reusable bearer URL that shows up in logs and
+  referrers and never expires.
+- Public content without a cookie: a reload would show nothing.
+- Anonymous url-mode apps: every request to someone's running app, with its data and sessions,
+  would be open.
+
+**Revisit when** a host needs anonymous access to an app (then a decision of its own).
+
+## P047 · 2026-10-11 · A host may name content origins itself; other servers' namespaces are reserved · Accepted
+
+**Decision.** `content.name(scope)` gives the label a scope is served on, and Porthole checks the
+answer:
+- it is one lowercase DNS label (`a-z0-9-`, at most 63, no hyphen at either end);
+- it is not in an IDNA form (`xn--`, any `??--`);
+- it is not `reserved`.
+
+`prefixedName("a-")` is the one-to-one naming most hosts want (`a-<scope>`, scopes already
+label-safe, anything else throws rather than fold into another scope's name). `content.reserved`
+lists labels that belong to other servers under the same domain: `f`, for a server whose domain
+is `f.<domain>` and whose origins are `<label>.f.<domain>`, or `www`. This server never names
+them, and a request for one, or for anything under one, gets null and goes to the host's routes.
+Any other deeper name still gets this server's 404. The keyed label (24 base32 characters) stays
+the default. A keyed label never has a hyphen and a prefixed one always does, so the two
+namespaces never meet. Item 4 of 0.1.2.
+**Why.** A host with ids of its own wants stable, readable origins (`a-<id>.example-usercontent.com`)
+next to another host's under the same content domain (`<instance>.f.example-usercontent.com`).
+**Risks.**
+- A host's names are guessable. Nothing opens without a ticket or a cookie, but the keyed
+  default also hides which scopes exist.
+- A naming that maps two scopes to one label merges their origins (storage, cookies). The helper
+  is one-to-one; a host's own function must be too.
+- Every label under one registrable domain is same-site with every other. `__Host-` cookies
+  can't be set across labels, but SameSite doesn't separate them. Put the content domain on the
+  Public Suffix List, and each nested namespace with it (`example-usercontent.com` and
+  `f.example-usercontent.com`), so each origin is a site of its own.
+
+**Rejected.** Free-form names (dots would nest namespaces, uppercase and IDNA forms would make
+names that read as something else); a registry of names in Porthole (the host's ids are the
+host's).
+**Revisit when** the Public Suffix List entry lands: then the same-site note above can go.
+
+## P048 · 2026-10-11 · Artifact pages reach library CDNs only by the host's config · Accepted
+
+**Decision.** For artifact pages to load libraries, a host passes `egress: LIBRARY_CDNS` to
+`presets.artifact`. For served pages it does so under a config name of its own that the
+instance's `document.preset` selects (the harness's `artifactCdn`). Nothing else changes. The
+default artifact preset stays closed (P022). Item 5 of 0.1.2.
+**Why.** Agent-made pages often load a chart or diagram library. Opening the CDNs is a fair
+choice for a host to make, but it is the host's (P022). Tested on all three engines, both opaque
+and served in domain mode (`leak/cdn.spec.ts`):
+- a page's `<script src>` from a listed CDN loads;
+- one from any other origin doesn't reach the network;
+- under the default preset, nothing does.
+
+The CDN is routed inside the test, so nothing leaves the machine, and a request reaches the
+route only if the frame's CSP let it out.
+**Risk (the host's, as P022 says).** Code from the CDNs is code the host doesn't control (a
+compromised or typo-squatted package runs in the frame). It still runs inside the sandbox and
+egress, but a path requested from an open CDN is a narrow write channel whose reader is the CDN's
+operator. The manual teaches pinning versions.
+**Revisit when** hosts want subresource integrity required on CDN scripts (the manual could
+demand it, and the shell could check it).
+
+## P049 · 2026-10-11 · A url-mode frame may be delegated clipboard writes and full screen · Accepted
+
+**Decision.** `presets.url({ permissions: ["clipboard-write", "fullscreen"] })` (config
+`permissions`, url mode only, from `URL_PERMISSIONS`) sets the frame's `allow` attribute. By
+default it delegates nothing (`allow=""`), and the other modes always delegate nothing. Item 6 of
+0.1.2 (the first host's backlog).
+**Risk it re-opens.**
+- Clipboard writes: the app can put any text on the clipboard in a click (pastejacking: a
+  command that looks like one thing and is another).
+- Full screen: the app can cover the whole screen and draw a fake host or OS. The browser shows
+  its own notice, and Esc leaves.
+
+Both need the person's click. A url-mode app is a running app the host chose to show, on an
+origin of its own.
+**Measured** (`leak/served/permissions.spec.ts`, with the clipboard permission granted, so the
+delegation alone stands in the way):
+- Full screen follows the delegation on Chromium, WebKit and Firefox (`fullscreenEnabled`, and
+  `requestFullscreen` in a click).
+- Clipboard writes follow it only on Chromium. WebKit and Firefox let any frame write the
+  clipboard in a click, delegated or not, so there default-off is no wall.
+
+Negative control: `url-permissions` (delegate both by default) fails the default case on all
+three engines.
+**Rejected.** `clipboard-read` (reads what the person copied anywhere); camera, microphone,
+location and the rest (a decision each, if ever); delegation in opaque or domain mode
+(agent-written HTML).
+**Revisit when** WebKit or Firefox enforce the clipboard-write policy feature (then the
+measurement changes), or a host needs another feature.
+
+## P050 · 2026-10-11 · The host's check runs on every request; Porthole carries the host's decision and never makes it · Accepted
+
+**Decision.** `ServerOptions.authorize = { check(request), ttlSeconds? }`. Porthole calls it after
+a ticket or cookie verifies and before anything of the content is served: a document's first
+load and its reloads, a url-mode app's entry and its every request, `/__porthole/session`, and
+`access()` (a host's WebSocket path).
+- **Input.** The scope, the instance, the viewer (or `anonymous`), the request, and the host's
+  own opaque `subject`. The host sets the subject at `issue` (512 characters at most); it is
+  signed into the ticket and the cookie and never interpreted.
+- **Answer.** `{ allow: true }` or `{ allow: false, code? }`. A deny, or a check that throws, is
+  a 403 status page with reason `denied` and the host's code (`[a-z0-9-]{1,40}`, dropped
+  otherwise). The page tells the display, whose `outcome` is `blocked: denied` with the code,
+  even after `loaded`.
+- **Caching.** None by default. `ttlSeconds` (at most 300) reuses an answer for the same
+  instance, viewer, subject and session.
+
+The scope line, now in PRINCIPLE 8 and ARCHITECTURE: authentication and authorization *policy*
+are the host's; carrying the host's decision safely onto the content domain is Porthole's
+*mechanism*. Item 7 of 0.1.2.
+**Why.** A session cookie good for an hour outlived a revoked share or a member who left.
+Sessions are stateless (P045), so revocation needed either a session store in Porthole (and with
+it a notion of who someone is) or the host's own check. The check lets the host apply its own
+policy (shares, membership, deletion) while Porthole knows nobody.
+**Measured** on all three engines (`leak/served/authorize.spec.ts`):
+- A framed url-mode app mid-session: its very next request is a 403, its reload shows the denied
+  page, and the host gets `[loaded, blocked: denied (revoked)]`. This runs on Chromium and
+  Firefox; WebKit keeps no cookie in a cross-site frame (P025), so a framed app never has a
+  session there.
+- A framed page's next load (WebKit: `session`, for the same reason).
+- A revoked subject's ticket, framed: denied on all three.
+- In a tab of its own, an app's next request and a page's reload: denied on all three.
+
+Negative control: `authorize` (the harness's server without the check) fails every case except
+WebKit's framed page, which expects `session` either way.
+**Limits.**
+- What is already loaded keeps running until its next request. An app's own fetches get a 403
+  the app must handle; the host hears of it at the next load.
+- A `ttlSeconds` delays revocation by up to that long.
+- The check's latency is on every request (a host caches its own lookups, or sets a short TTL).
+
+Found on the way: the url-mode entry page could leave for the app before its own load, and then
+the host never counted that load and never decided `loaded`. It happened reliably in the full
+suite on Chromium under load. The entry page now leaves only once it has loaded.
+
+**Rejected.** Identity, sessions or revocation lists inside Porthole (PRINCIPLE 8); short
+sessions as revocation (still a window, and more tickets).
+**Revisit when** a host needs Porthole to push a revocation into a loaded frame (it can't today:
+a cross-origin frame is the content's).

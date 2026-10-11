@@ -100,10 +100,11 @@ export function sandboxTokens(config: PortholeConfig): string[] {
 
 /**
  * The frame's `allow` attribute (Permissions Policy). Empty: no camera, microphone, geolocation,
- * clipboard, fullscreen or other powerful feature is delegated to the frame.
+ * clipboard, fullscreen or other powerful feature is delegated to the frame; a url-mode config
+ * may delegate clipboard writes and full screen to the app's own origin (P049).
  */
-export function allowAttribute(_config: PortholeConfig): string {
-  return "";
+export function allowAttribute(config: PortholeConfig): string {
+  return config.mode === "url" ? (config.permissions ?? []).join("; ") : "";
 }
 
 /**
