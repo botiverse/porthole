@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/assets/porthole-mark.svg" width="112" alt="Porthole"></p>
+
 # Porthole
 
 A host-side library for safely showing agent-made HTML inside an app, like the
