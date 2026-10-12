@@ -1,7 +1,8 @@
 /**
- * The check page's script as a module (`@botiverse/porthole/check/page`): from the sources, bundled
- * now (Node, esbuild); the package ships it built (`dist/check/page-source.js`), for a Worker to
- * import and pass to `checkPage` as `page`.
+ * The check page's script as a module (`@botiverse/porthole/check/page`), which `checkPage`
+ * imports: from the sources, bundled now (Node, esbuild, Porthole's own development dependency);
+ * the package ships it built (`dist/check/page-source.js`, a string and nothing else), so a
+ * bundler takes it in like any module (P075).
  */
 import { fileURLToPath } from "node:url";
 

@@ -566,7 +566,8 @@ What both adopters still wrote after 0.2 moves into Porthole (ADOPTING.md is the
   document taken as its body) and returns the warnings as a note.
 - **`checkPage({ config, content, driver })`** (`/check`): the content in the real sandbox at each
   width and scheme (defaults: the manual's phone and desktop widths, light and dark unless
-  unthemed). The check page (`src/check/page.ts`, bundled and shipped as `/check/page`) is served
+  unthemed). The check page (`src/check/page.ts`, bundled and shipped as `/check/page`, a module
+  `checkPage` imports, so a bundle carries it, P075) is served
   by the driver at a fixed origin (`https://porthole-check.invalid`), mounts the content with a
   small instrument first in it, and hears errors, rejections, CSP blocks, failed loads, the
   console and the document's width by `postMessage`; heights come from the display's resize

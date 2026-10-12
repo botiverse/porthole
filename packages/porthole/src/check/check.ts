@@ -4,6 +4,9 @@ import { presets } from "../presets/presets.ts";
 import { createServer } from "../server/server.ts";
 import { CHECK_CONTENT_DOMAIN, CHECK_ORIGIN } from "./drivers.ts";
 import { lintContent, type Finding } from "./lint.ts";
+// The check page's script, imported as a module so a bundler takes it in (P075): no file is
+// looked up beside this one at run time.
+import PAGE_SCRIPT from "./page-source.ts";
 import {
   instrumented,
   namedScripts,
@@ -70,8 +73,8 @@ export interface CheckOptions {
   /** The most distinct problems `text` names (default 8): the rest are counted. */
   readonly maxProblems?: number;
   /**
-   * The check page's script (`import page from "@botiverse/porthole/check/page"`). Node finds it
-   * itself; a bundled runtime (a Worker) passes it.
+   * The check page's script. Default: Porthole's own (`@botiverse/porthole/check/page`), imported
+   * with this module, so a bundle (a Worker, a single executable) has it too (P075).
    */
   readonly page?: string;
 }
@@ -125,20 +128,6 @@ function checkedAs(config: PortholeConfig): PortholeConfig {
     : opaque;
 }
 
-/** The check page's script: given, or (Node) the package's own. */
-async function pageScript(given: string | undefined): Promise<string> {
-  if (given !== undefined) {
-    return given;
-  }
-  // Not a literal: a bundler for a Worker leaves it alone (a Worker passes `page`).
-  const where = new URL(
-    import.meta.url.endsWith(".ts") ? "./page-source.ts" : "./page-source.js",
-    import.meta.url,
-  ).href;
-  const loaded = (await import(where)) as { default: string };
-  return loaded.default;
-}
-
 const escapeScript = (code: string) => code.replace(/<\/script/giu, "<\\/script");
 
 export async function checkPage(options: CheckOptions): Promise<CheckReport> {
@@ -157,7 +146,7 @@ export async function checkPage(options: CheckOptions): Promise<CheckReport> {
   const schemes = options.schemes ?? (unthemed ? ["light"] : ["light", "dark"]);
   const settle = options.settleMs ?? 1_500;
   const fills = config.layout.kind === "fill";
-  const script = await pageScript(options.page);
+  const script = options.page ?? PAGE_SCRIPT;
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Porthole check</title><style>body{margin:0;padding:8px}section{margin-bottom:16px}</style></head><body><script>${escapeScript(script)}</script></body></html>`;
   // Its inline scripts named, so an error says the line in the content as written (P074).
   const { content, scriptLines } = namedScripts(options.content);

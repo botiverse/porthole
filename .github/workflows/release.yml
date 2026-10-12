@@ -39,5 +39,8 @@ jobs:
           '
       - run: pnpm run check
       - run: pnpm --filter @botiverse/porthole run build
+      # Never publish a package a bundler can't take in whole (P075).
+      - run: pnpm --filter @botiverse/porthole exec playwright install --with-deps chromium
+      - run: pnpm --filter @botiverse/porthole run test:bundle
       # pnpm publish so publishConfig.exports (dist) replaces the source exports.
       - run: pnpm --filter @botiverse/porthole publish --access public --no-git-checks

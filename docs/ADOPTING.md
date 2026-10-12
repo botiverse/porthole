@@ -338,12 +338,18 @@ opaque frame, so the agent reads only "Script error.", and names no line in a se
   ```js
   import puppeteer from "@cloudflare/puppeteer";
   import { cdpDriver, checkPage } from "@botiverse/porthole/check";
-  import page from "@botiverse/porthole/check/page";   // the check page's script, bundled
   const browser = await puppeteer.launch(env.BROWSER);
   const tab = await browser.newPage();
-  const report = await checkPage({ config, content, page, driver: cdpDriver(() => tab.createCDPSession()) });  // no cast
+  const report = await checkPage({ config, content, driver: cdpDriver(() => tab.createCDPSession()) });  // no cast
   await browser.close();
   ```
+
+**Bundling:** every entry point bundles whole (a Worker, a single executable): `/check` imports
+its check page's script as a module, and `/conformance` its harness, so nothing is looked up
+beside a module at run time. Each release is bundled with rolldown and esbuild and checked for
+that before it is published (`test:bundle`). `/conformance`, which runs under Playwright, still
+looks for the optional MCP Apps App SDK where it runs; without it, the App SDK probes say so and
+don't run.
 
 ## 7. Conformance: prove your integration
 
@@ -432,7 +438,7 @@ prints each reason at the end; so does `--reporter=json`.
 | `@botiverse/porthole/react` | `PortholeProvider`, `PortholeFrame`, `PortholeView`, `usePortholeLink`, `cssVariableTheme`, `useRunAgain` |
 | `@botiverse/porthole/server` | `createContentHost` (`routes`, `forget`), `contentHostFor`, `prefixedName`, `memoryTicketStore`, `d1TicketStore`, `upstreamHeaders`, `statusPage`, `conformancePage`, the callbacks' types |
 | `@botiverse/porthole/node` | `nodeServer`, `nodeHost`, `nodeProbe`, `toRequest`, `sendResponse` |
-| `@botiverse/porthole/check` | `checkPage`, `playwrightDriver`, `cdpDriver` (`CHECK_ORIGIN`, `CHECK_CONTENT_DOMAIN`: the names a driver of your own answers); `/check/page`, the check page's script |
+| `@botiverse/porthole/check` | `checkPage`, `playwrightDriver`, `cdpDriver` (`CHECK_ORIGIN`, `CHECK_CONTENT_DOMAIN`: the names a driver of your own answers); `/check/page`, the check page's script (`checkPage` has it already) |
 | `@botiverse/porthole/mcp` | the MCP Apps adapter (views, the sandbox proxy) |
 | `@botiverse/porthole/conformance` | `defineHostConformance`, `conformanceProjects`, `onDemand`, `conformancePage`; `/conformance/reporter`, skip reasons |
 

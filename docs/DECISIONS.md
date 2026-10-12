@@ -2089,3 +2089,36 @@ scheme and themeKey keep each frame element, its window and its page, opaque, se
 (failing before item 18); the examples' unit tests and their conformance run on three engines.
 **Revisit when** a driver that can't intercept requests needs served checks (it would need a
 real content domain).
+
+## P075 · 2026-10-12 · Every entry point bundles whole: no file looked up beside a module · Accepted
+
+**Decision.** `/check` loaded its check page's script at run time from a path computed beside its
+module (`new URL("./page-source.js", import.meta.url)`, then `import()` of it), and `/conformance`
+read its harness the same way (`readFile(new URL("./harness.js", import.meta.url))`, falling back
+to `import("esbuild")`). A bundle has no files beside its modules: Ferry's CLI, one executable
+built by rolldown for Node SEA, refuses such loads at build time, and its 0.1.85 release failed
+on `/check`; a Worker's bundle would fail where the path runs. 0.3.2:
+1. **Both scripts are modules imported statically**: `check/page-source` and
+   `conformance/harness-source`, which from the sources build the script with esbuild (Porthole's
+   own development dependency), and which the build replaces with a module exporting the built
+   script as a string and nothing else. `checkPage`'s `page` option stays, and is no longer
+   needed anywhere.
+2. **`test:bundle`** bundles every published entry point from the build, with rolldown (for Node,
+   one file, dynamic imports inlined) and with esbuild for Workers, lists every load left for run
+   time as Ferry's build does (an `import()` of anything but a literal builtin, `require`,
+   `createRequire`, the module's own location), and fails on any not reviewed in the script; then
+   it imports each bundle from a directory with nothing else in it, and checks a page in Chromium
+   from the `/check` bundle with no `page` given. CI and the release workflow run it after the
+   build: a package that fails it is never published. Run on 0.3.1's build it fails, naming
+   `/check`'s and `/conformance`'s loads.
+3. **The one reviewed load:** `/conformance`'s MCP probes look for the optional official App SDK
+   where the suite runs (`createRequire(import.meta.url).resolve(...)`), inside a `try`: without it
+   they say so and don't run. The runner runs under Playwright, from `node_modules`.
+4. The build empties `dist/` first, so no file of an earlier build ships.
+
+**Cost.** Importing `/check` loads the check page's script (about 145 KB) with it; importing
+`/conformance` its harness (about 140 KB). Both were loaded on first use before.
+**Why.** An entry point that works only beside its own files isn't a library a bundler can take,
+and the failure shows only where the path runs.
+**Revisit when** a bundler needs code split into chunks of its own (none does yet).
+

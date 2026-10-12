@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { runInThisContext } from "node:vm";
 import { expect, type Frame, type Page, type TestInfo, type TestType } from "@playwright/test";
@@ -6,6 +5,7 @@ import type { PortholeConfig } from "../config/schema.ts";
 import type { Displays } from "../displays/displays.ts";
 import type { FrameLocation, InstanceRef } from "../isolation/types.ts";
 import { entryTests, type EntryConformanceHost } from "./entry.ts";
+import HARNESS from "./harness-source.ts";
 export { conformancePage } from "./page.ts";
 import type { ConformanceHarness } from "./harness/page.ts";
 import type { FrameOutcome } from "../host/types.ts";
@@ -103,35 +103,12 @@ const FOREIGN = "http://porthole-foreign.example";
 /** Where the harness loads from, on the app's own origin (routed by the test, never the app's). */
 const HARNESS_PATH = "/__porthole/conformance/harness.js";
 
-let built: Promise<string> | null = null;
-
 /**
- * The harness as one script: from the package (`dist/conformance/harness.js`), or, run from the
- * sources, bundled now (esbuild, a development dependency of Porthole's).
+ * The harness as one script, imported with this module (`harness-source`), so a bundle has it too
+ * (P075).
  */
 export function harnessScript(): Promise<string> {
-  built ??= (async () => {
-    try {
-      return await readFile(new URL("./harness.js", import.meta.url), "utf8");
-    } catch {
-      const { build } = await import("esbuild");
-      const result = await build({
-        entryPoints: [fileURLToPath(new URL("./harness/page.ts", import.meta.url))],
-        bundle: true,
-        format: "iife",
-        platform: "browser",
-        target: "es2022",
-        write: false,
-        logLevel: "silent",
-      });
-      const text = result.outputFiles[0]?.text;
-      if (text === undefined) {
-        throw new Error("the conformance harness didn't build");
-      }
-      return text;
-    }
-  })();
-  return built;
+  return Promise.resolve(HARNESS);
 }
 
 type Harness = Record<string, ((...args: unknown[]) => unknown) | undefined>;

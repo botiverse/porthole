@@ -55,6 +55,7 @@ PORTHOLE_LEAK_WEAKEN=sync-guard pnpm test:leak  # a negative control: its probes
 ops/prod-shape/run.sh # the prod-shape profile in docker compose (TLS edge, DNS, siblings; three engines)
 PORTHOLE_PROD_ENGINES=chromium ops/prod-shape/run.sh   # a subset
 pnpm --filter @botiverse/porthole build         # dist/ (JS + .d.ts, the conformance harness) for packing
+pnpm --filter @botiverse/porthole test:bundle   # the build, bundled as adopters bundle it: no run-time loads (needs a build)
 PORTHOLE_ENGINES=chromium pnpm --filter @botiverse/porthole exec playwright test -c examples/conformance/playwright.config.mjs   # the examples (needs a build)
 pnpm exec oxfmt <file>                          # format (never prettier)
 ```
