@@ -3,6 +3,32 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## 0.3.1
+
+From Ferry's and Raft Artifacts' adoptions of 0.3.0 and a second cold adoption (P074). Additive.
+
+- `checkPage` runs a served config served: its own origin, the served CSP, shell, storage and
+  cookies, under an in-process server both drivers answer; errors name the content's own lines,
+  as the lint does. Configs that declare host functions can be checked (#8): each is answered as
+  a host that declines, and each call is reported (one hosts refuse is a problem, one a person
+  may decline a note). The manual's examples are checked under presets with every host function.
+- React: flipping the provider's scheme, or a new themeKey, re-themes running frames in place;
+  it no longer makes every display again, losing widgets' state and reloading previews (#9).
+- Sign-in comes back to `authorizeUrl` with the entry's state, never the request's own URL, so a
+  TLS edge or a dev proxy in front of the app no longer strands the person on the sign-in.
+- `entryTarget(next, authorizeUrl, { app: true })` also takes the app's own pages.
+  `renderConfirm` gets `redirect()` ("redirected", not counted toward muting). `nodeServer` takes a
+  function for a host made after it listens. `entry.pathOf` may be async. A missing secret is
+  named. `portholeClient`'s functions pass bare (`this: void`). `PortholeView` renders its
+  placeholder or fallback on the server from the client's meta. `domain: null` is the documented
+  no-content-domain setup.
+- Conformance: `@botiverse/porthole/conformance/reporter` prints why each case was skipped;
+  `contentSource` may be a function; `conformanceProjects` takes `use` and per-engine
+  `launchOptions` (a system Chromium).
+- The examples run on `nodeServer` and `contentHostFor`, as ADOPTING recommends; ADOPTING says
+  when the other paths are right, how a page without a bundler loads Porthole's modules, and the
+  default authorize URL.
+
 ## 0.3.0
 
 Developer experience, for the people adopting Porthole and the agents writing for it.
