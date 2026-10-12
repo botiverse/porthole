@@ -1809,3 +1809,112 @@ artifact-only app lacks, two snippet bugs, no word on the page's CSP, two ways t
 which left the manual wrong), Workers specifics, and local development.
 **Revisit when** a second cold adoption (after 0.3) finds friction these don't cover.
 
+
+## P072 · 2026-10-12 · Host kit 0.3: the client, the bootstrap and the relay, so adopters stop writing glue · Proposed
+
+**Decision (proposed, for review).** After 0.2.2 the server's content file is policy and little
+else; the glue moved to the client, the bootstrap and url mode. Ferry still writes about 1,650
+lines of glue and workarounds, Raft about 450 (notes/porthole-0.3-audit.md). 0.3 adds, all
+additive:
+
+1. **`defineDisplays(kinds)`** (core): one registry for every kind an app shows.
+
+   ```ts
+   const displays = defineDisplays({
+     widget: { preset: "inlineWidget", options: { capabilities: { sendPrompt: {} } } },
+     page:   { preset: "artifact", options: { layout: { kind: "fill" } } },
+     preview:{ preset: "url", options: {} },               // url mode: served only
+   });
+   displays.opaque("widget");                              // PortholeConfig
+   displays.served(contentSource);                         // Record<kind, PortholeConfig> | null, memoized
+   displays.configFor(instance, contentSource | null);     // by the document's kind and preset
+   displays.frameSources(contentSource, { authorizeUrl }); // for a CSP built without a ContentHost (Vite, Electron)
+   displays.guideConfig("widget", "served" | "opaque");    // the agent's manual, without real origins
+   ```
+
+   `createContentHost({ displays })` and `defineHostConformance({ displays })` take it in place of
+   `configs` and `config(instance)` (both stay).
+2. **Conventional routes and bootstrap** (/server, /node):
+   - `content.routes(viewerOf, { prefix = "/porthole" })`: `POST frames` (issue), `GET authorize`,
+     `GET meta`, `POST handoff` (item 6), one mount. `entry.authorizeUrl` defaults to
+     `${appOrigins[0]}${prefix}/authorize`.
+   - `GET meta` answers `ContentClientMeta`: `{ served, contentSource, frameSources, health }`.
+   - `issue` answers 201 `{ url, origin, link? }`: `link` is the clean address, where
+     `entry.pathOf(instance)` names the instance's path.
+   - `contentHostFor((env) => options)` on Workers: one host per `env`, a fail-closed 503 naming
+     the problem (logged once), `fetch(request, env)` answering the content domain first.
+   - `nodeServer({ content, app, upgrade?, appSocket? })`: the `http.Server`, the gate started on
+     listen and stopped on close.
+3. **The client served kit** (core, React):
+   - `portholeClient({ base = "/porthole", headers?, credentials?, displays })`: `meta()`,
+     `subscribe()`, `config(kind)` (served or opaque, null until meta is known), the locator,
+     `link(instance)`, `openInTab(instance)` (a blank tab inside the click, then the link).
+   - React: `<PortholeProvider client>` and `<PortholeView display="page" instance={…}
+     content={…} fallback={({ kind, message, link, retry }) => …} />`, where `kind` is
+     `needs-tab | denied | expired | failed | timeout`, worded as Porthole's pages word them.
+     `usePortholeLink(instance)` gives `{ link, open, copy }`.
+4. **React ergonomics:** provider `scheme`, `theme` with `themeKey`, `cssVariableTheme(tokens)`,
+   `nonce: "auto"`, `openLink`, `notify` (skin the copy notice), `renderConfirm(request, answer)`
+   (the app draws the dialog; Porthole keeps the gates, the one-at-a-time queue and decline
+   counting); content errors deduplicated per run; `usePortholeFrame()` with `runAgain()`.
+5. **The url-mode relay kit** (/server, /node): `upstreamHeaders.request/response` (the header
+   rewrite `proxyTo` uses, on `Headers` or raw pairs, WebSockets too); `statusPage(…)` (P070's
+   fallback included); `nodeHost`'s `appSocket` gets the request with Porthole's cookies removed;
+   `content.forget({ scope?, subject? })` drops cached `authorize` answers.
+6. **Viewer handoff for token-authenticated apps:** `POST handoff`, called by the signed-in app
+   with its own token (`client.handoff()`), sets an `HttpOnly` cookie scoped to the authorize
+   path holding a short-lived viewer key Porthole signs (never the app's token);
+   `entry.viewer(key)` turns it back into the app's viewer. `entry.spa: { route }` gives the
+   default `signIn` for a single-page app, with `entryTarget(next)` as the open-redirect guard.
+7. **If cheap:** `health.onServedChange(served)`, deduplicated; `log` also takes a
+   `{ info, warn, error }` logger; `prefixedNames({ w: …, f: … })` for several prefixes; a
+   `location` on a mount, used once before the locator (pre-located frames).
+
+**Why.** Each item deletes code both apps (or every adopter with that need) wrote the same way,
+and three of them already drift: Ferry's desktop CSP lacks the authorize route, its copied status
+page lacks P070's fallback, and clean addresses are computed two ways.
+**Rejected.** A framework-specific server adapter (Hono, Express): `routes` is a fetch handler
+any of them mounts in one line.
+**To decide in review:** the default prefix (`/porthole`) and whether `issue` moves under it;
+the handoff cookie's lifetime (proposed 10 minutes).
+
+## P073 · 2026-10-12 · The agent's side: check a page before people see it; tools with names and schemas · Proposed
+
+**Decision (proposed, for review).** Today an agent learns its page broke only after a person
+looked (Ferry, at its next turn, at most 5 errors) or never (Raft). Porthole already has the
+parts: the shell's error capture, the conformance harness's `launch` at a width and a scheme, and
+a browser check behind every line of the manual. 0.3 exposes them:
+
+1. **`lintContent(config, content): Finding[]`** (core, pure, any runtime): what can be told
+   without running it, worded as the manual words it, each rule tied to the manual's limit id:
+   over `maxBytes`; a document where a fragment is shown (or the reverse); `document.write`;
+   nested frames and plugins; `navigator.clipboard` and `execCommand("copy")` (use `copyText`);
+   `alert`/`confirm`/`prompt`; a `<form>` that submits; hosts outside egress in `src`, `href`,
+   `fetch` and imports; an unpinned library (`@latest`, a range); `position: fixed` in a flow
+   layout; `target=_blank` without `openLink`. `{ rule, severity, message, line? }`.
+2. **`checkPage(options): Promise<CheckReport>`** (`@botiverse/porthole/check`): runs the content
+   in the real sandbox (the harness, the production CSP) at each width and scheme (defaults from
+   the config: the manual's phone and desktop widths, light and dark unless the config is
+   unthemed), and reports per run: errors (thrown, rejected, "Blocked by the sandbox"), CSP
+   blocks, failed loads, `console.error`/`warn`, the height and whether the limit clips it,
+   horizontal overflow, optional screenshots; plus `lint`, `ok` and one agent-readable `text`.
+   Drivers: `playwrightDriver(browser)` (Node), and `cdpDriver(session)` over any CDP session
+   (Puppeteer's, or `@cloudflare/puppeteer`'s on Cloudflare Browser Rendering), so a Worker can
+   check too. The harness ships as a string module, so no file system is needed.
+3. **Tool definitions** (core): `showTool(config)`, `guideTool(config)`, `checkTool(config)`, each
+   `{ name, description, inputSchema }` (JSON Schema; names from `guide.toolName` and
+   `guideToolName`, the topics an enum of the built-in and the config's own); `answerGuide(config,
+   args)` validates and answers; `guideChanges(from, to)`, the notice for the agent when a display
+   kind flips between served and opaque (null when the manual doesn't change). An MCP server
+   example in `examples/mcp/` wires show, guide and check.
+4. **The manual's own examples pass the check:** a test runs `checkPage` on every
+   `GUIDE_EXAMPLES` entry under every preset, at the manual's widths, in light and dark
+   (OBJECTIVES criterion 5).
+
+**Why.** It is the one change that improves what agents make rather than what hosts write, and
+both apps asked for errors to reach the agent before a person does.
+**Rejected.** Running content on the host's server without a browser (jsdom and the like): it
+doesn't apply CSP, layout or the sandbox, so it would pass pages that break.
+**To decide in review:** whether the show tool runs `lintContent` and refuses on errors by default
+(proposed: it returns findings; refusing is the host's choice); contrast measurement now or later
+(proposed: later).
