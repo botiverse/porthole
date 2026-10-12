@@ -22,3 +22,26 @@ describe("the package a host installs", () => {
     expect(manifest.peerDependenciesMeta?.react?.optional).toBe(true);
   });
 });
+
+describe("the package's README", () => {
+  test("links only to what the package ships", () => {
+    const root = path.resolve(import.meta.dirname, "..");
+    const readme = readFileSync(path.join(root, "README.md"), "utf8");
+    const files = (
+      JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as { files: string[] }
+    ).files;
+    const links = [...readme.matchAll(/\]\((?!https?:)([^)#]+)\)/gu)].map((each) => each[1] ?? "");
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) {
+      expect(
+        files.some((each) => link === each || link.startsWith(`${each}/`)),
+        link,
+      ).toBe(true);
+      // docs/ is copied from the repository's docs/ at build time (scripts/copy-docs.ts).
+      const source = link.startsWith("docs/")
+        ? path.resolve(root, "../..", link)
+        : path.resolve(root, link);
+      expect(() => readFileSync(source), link).not.toThrow();
+    }
+  });
+});
