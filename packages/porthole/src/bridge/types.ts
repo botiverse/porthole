@@ -30,8 +30,9 @@ export type CapabilityHandler<N extends CapabilityName> = (
 export type CapabilityHandlers = { readonly [N in HandledCapability]?: CapabilityHandler<N> };
 
 /**
- * The display a confirmation is for, as the host named it: its id and title, and the instance it
- * shows where it is served (P076), so a host can word its dialog from its own records.
+ * The display a confirmation is for, as the host named it: its id and title, and the instance the
+ * host gave it, served or opaque (P076, P077), so a host can word its dialog from its own records.
+ * Host-side only: none of it is the content's word, and an opaque frame never gets the instance.
  */
 export interface ConfirmDisplay {
   readonly id: string;

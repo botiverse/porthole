@@ -2142,3 +2142,21 @@ and the failure shows only where the path runs.
 for an opaque one); `test/kit03.test.ts` (a host made in the `listen` callback is checked without a
 request, once, however often it is started).
 
+## P077 · 2026-10-12 · A confirmation names the host's instance in opaque frames too · Accepted
+
+**Decision.** P076 gave `ConfirmRequest.display` the instance only where the frame is served,
+because `PortholeView` handed the instance to its frame only then. The instance is the host's own
+value in both modes: Ferry passes `instance={widgetInstance(sessionId)}` to `PortholeView`
+whether its frame ends up served or opaque (the content domain down, absent on a self-hosted
+server, the first seconds before the probe). 0.3.4: `PortholeView` gives its frame the instance
+in both modes, and an opaque mount's `instance` (`MountOptions`, `PortholeFrame`) is documented
+as the host's own name for what it shows, given back in its confirmations only.
+
+**Never sent to the frame.** An opaque frame's document is the shell built from the config, with
+no instance in it; the instance is used to locate only a served frame, and the bridge's display
+(where confirmations get it) stays on the host's side. A served frame already knows its scope:
+its origin is named from it.
+**Measured.** `leak/react.spec.ts`: `renderConfirm` names the instance the host gave, served and
+opaque (failing on 0.3.3 for opaque); for an opaque frame, the instance is in none of the frame's
+attributes, its document, its address or name, nor any message its page heard.
+

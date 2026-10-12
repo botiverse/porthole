@@ -51,7 +51,11 @@ export interface MountOptions {
   readonly scheme: ColorScheme;
   /** Handlers for this display only, over the host's. */
   readonly handlers?: CapabilityHandlers;
-  /** Domain and external isolation: the instance to locate. */
+  /**
+   * Domain and external isolation: the instance to locate. Opaque: the host's own name for what
+   * the display shows, given back to the host in its confirmations (`ConfirmRequest.display`) and
+   * never sent to the frame (P077).
+   */
   readonly instance?: InstanceRef;
   /** A whole document the frame starts with (an MCP Apps view), hardened by the shell. */
   readonly document?: string;

@@ -541,7 +541,8 @@ What both adopters still wrote after 0.2 moves into Porthole (ADOPTING.md is the
   opaque, with its fallback), `usePortholeLink`, and the provider's shared `scheme`, `theme`
   (`cssVariableTheme`), `nonce: "auto"`, `handlers`, `openLink`, `notify` and `renderConfirm`
   (`accept`, `decline`, and `redirect`: `"redirected"`, which doesn't count toward muting, P074;
-  the request's `display` carries the served frame's `instance`, P076).
+  the request's `display` carries the instance the host gave the frame, served or opaque, and an
+  opaque frame never gets it, P076, P077).
   A flip of the provider's scheme or a new themeKey re-themes running frames in place: no effect
   that makes a display depends on the context value those renew (#9, P074).
 - **The viewer handoff** for a page that holds a token: `POST /porthole/handoff` with the app's

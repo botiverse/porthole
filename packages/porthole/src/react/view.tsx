@@ -37,7 +37,10 @@ export interface PortholeViewProps extends Omit<
 > {
   /** The display kind (`defineDisplays`). */
   readonly display: string;
-  /** The instance to show while frames are served. */
+  /**
+   * The instance: what a served frame shows; for an opaque one, the host's own name for it, given
+   * back in its confirmations only, never sent to the frame (P077).
+   */
   readonly instance?: InstanceRef;
   /**
    * The content: a served shell's to draw, and what an opaque frame shows while frames aren't
@@ -144,7 +147,7 @@ export function PortholeView(props: PortholeViewProps): ReactElement | null {
       {...frame}
       config={config}
       generation={(frame.generation ?? 0) + generation}
-      {...(served && instance !== undefined ? { instance } : {})}
+      {...(instance === undefined ? {} : { instance })}
       {...(content === undefined ? {} : { content })}
       onOutcome={(outcome: FrameOutcome) => {
         onOutcome?.(outcome);

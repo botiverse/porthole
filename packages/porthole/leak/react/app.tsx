@@ -281,14 +281,14 @@ function renderViews(spec: ViewsSpec): void {
                     document: { kind: "external" as const, url: "http://app.test/" },
                   },
                 }
-              : spec.served
-                ? {
-                    instance: {
-                      scope: view.id,
-                      document: { kind: "shell" as const, preset: "inlineWidget" },
-                    },
-                  }
-                : {}),
+              : {
+                  // The host's own instance, served or opaque, as a host passes it either way
+                  // (P077); `k9q2` marks it, so a test can tell whether it reached the frame.
+                  instance: {
+                    scope: `${view.id}-k9q2`,
+                    document: { kind: "shell" as const, preset: "inlineWidget" },
+                  },
+                }),
             onOutcome: (outcome) => record(view.id, "outcome", outcome),
             onInitialized: () => record(view.id, "initialized"),
           }),

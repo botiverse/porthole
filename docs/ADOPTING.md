@@ -66,8 +66,8 @@ a copy button copied), and `renderConfirm` (your own dialog, given `accept`, `de
 `redirect`: Porthole keeps the queue, runs `accept` inside its click, and counts declines toward
 muting the display; `redirect`, for "edit it first", answers the call `"redirected"` and neither
 counts nor resets the count). The request names the display (`request.display`: its `id`,
-`title`, and the `instance` a served frame shows), so the dialog can say what it is from your own
-records. `useRunAgain()` gives a "run again" button.
+`title`, and the `instance` you gave the frame, served or opaque), so the dialog can say what it
+is from your own records. It stays on your side: an opaque frame never gets the instance. `useRunAgain()` gives a "run again" button.
 
 ## 4. Served pages: the host kit
 

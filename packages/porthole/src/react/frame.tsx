@@ -359,7 +359,10 @@ export interface PortholeFrameProps {
   readonly partial?: boolean;
   /** A whole document to start with (an MCP Apps view). */
   readonly document?: string;
-  /** Domain and external isolation: the instance to show. */
+  /**
+   * Domain and external isolation: the instance to show. Opaque: the host's own name for what it
+   * shows, for its confirmations only, never sent to the frame (P077).
+   */
   readonly instance?: InstanceRef;
   /** The color scheme it shows in. Default: the provider's `scheme`, else light. */
   readonly scheme?: ColorScheme;

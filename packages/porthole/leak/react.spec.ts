@@ -915,7 +915,15 @@ test("renderConfirm: the app's own dialog asks; its yes runs the call from its c
   expect(await events(page, "provider", "sendPrompt")).toHaveLength(1);
 });
 
-test("renderConfirm names the instance a served frame shows, and none for an opaque one (P076)", async ({
+/** PROMPT, and a record of everything the frame's page could read of the host's naming. */
+const RECORDING = `${PROMPT}<script>
+  window.seen = [];
+  addEventListener("message", (event) => {
+    try { window.seen.push(JSON.stringify(event.data)); } catch (_) { window.seen.push("?"); }
+  });
+</script>`;
+
+test("renderConfirm names the instance the host gave, served or opaque; an opaque frame never gets it (P076, P077)", async ({
   page,
 }) => {
   for (const served of [true, false]) {
@@ -923,14 +931,31 @@ test("renderConfirm names the instance a served frame shows, and none for an opa
       served,
       frames: "ok",
       renderConfirm: true,
-      views: [{ id: "w", display: "widget", content: PROMPT }],
+      views: [{ id: "w", display: "widget", content: RECORDING }],
     });
-    const inside = page.locator('[data-view="w"] iframe').contentFrame();
+    const element = page.locator('[data-view="w"] iframe');
+    const inside = element.contentFrame();
     await inside.locator("#ask").click();
     await expect(page.locator("#app-dialog")).toContainText("sendPrompt from w");
-    await expect(page.locator("#app-instance")).toHaveText(served ? "shell on w" : "no instance");
+    await expect(page.locator("#app-instance")).toHaveText("shell on w-k9q2");
     await page.click("#app-no");
     await expect(inside.locator("#status")).toHaveText("false");
+    if (!served) {
+      // Host-side only: not in the frame's attributes, its document, its address or name, nor in
+      // any message the frame's page heard.
+      const attributes = await element.evaluate((iframe) =>
+        [...iframe.attributes].map((each) => `${each.name}=${each.value}`).join(" "),
+      );
+      expect(attributes).not.toContain("k9q2");
+      const read = await inside
+        .locator("html")
+        .evaluate(
+          () =>
+            `${document.documentElement.outerHTML} ${location.href} ${window.name} ${JSON.stringify((window as unknown as { seen: string[] }).seen)}`,
+        );
+      expect(read).toContain("sendPrompt");
+      expect(read).not.toContain("k9q2");
+    }
   }
 });
 
