@@ -38,6 +38,9 @@ const reference = {
     const box = document.createElement("section");
     box.id = `display-${id}`;
     box.style.width = `${spec.widthPx ?? 600}px`;
+    if (spec.heightPx !== undefined) {
+      box.style.height = `${spec.heightPx}px`;
+    }
     document.getElementById("displays")?.append(box);
 
     const calls: RecordedCall[] = [];

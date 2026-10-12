@@ -40,6 +40,8 @@ export interface LaunchSpec {
   readonly scheme?: ColorScheme;
   /** The frame's width, px. */
   readonly widthPx?: number;
+  /** The height of the box the frame sits in, px: for a layout that fills it (`layout.kind`). */
+  readonly heightPx?: number;
   /** The host's live values for theme variables, per scheme (as `HostOptions.theme` answers). */
   readonly hostTheme?: {
     readonly light?: Readonly<Record<string, string>>;

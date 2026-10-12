@@ -305,7 +305,60 @@ describe("0.1.1: what a host may change", () => {
     expect(compile(own).guide(["interactive"])).toContain("localStorage is kept for this widget");
     expect(refusal({ ...base, storage: { shared: "conversation" } })).toMatch(/only domain/u);
     expect(refusal({ ...own, storage: { shared: "A Conversation!" } })).toMatch(/noun/u);
-    expect(refusal({ ...own, storage: { scope: "x" } })).toMatch(/not a known field/u);
+    expect(refusal({ ...own, storage: { kind: "x" } })).toMatch(/not a known field/u);
+    expect(
+      refusal({ ...own, storage: { shared: "conversation", scope: "this artifact" } }),
+    ).toMatch(/not both/u);
+    expect(refusal({ ...own, storage: { scope: "This Artifact!" } })).toMatch(/lowercase words/u);
+  });
+
+  test("0.1.7: a page's own shape: fill, no host theme, its size, its storage, where errors go (P065)", () => {
+    const page = presets.artifact({
+      isolation: "domain",
+      contentOrigins: ["https://*.example-usercontent.com"],
+      layout: { kind: "fill" },
+      theme: { documents: "never" },
+      limits: { maxBytes: 10 * 1_048_576 },
+      storage: { scope: "this artifact, across its versions" },
+      errors: "host",
+    });
+    const guide = compile(page).guide();
+    expect(guide).toContain(
+      "It is as tall as the window: the page scrolls itself, and position: fixed and sticky work.",
+    );
+    expect(guide).toContain("as wide as the window on a desktop");
+    expect(guide).not.toContain("No position: fixed");
+    expect(guide).not.toContain("Its height follows its content");
+    expect(guide).toContain("It always shows in light: the app doesn't theme it");
+    expect(guide).not.toContain("person's light or dark theme");
+    expect(guide).not.toContain("A theme change");
+    expect(guide).toContain("Keep it under 10 MB.");
+    expect(guide).toContain(
+      "localStorage is kept for this artifact, across its versions, in this browser",
+    );
+    expect(guide).not.toContain("prefix your keys");
+    expect(guide).toContain("goes to the app (at most 5 a run), not to you");
+    const description = compile(page).toolDescription();
+    expect(description).toContain("It fills the viewer");
+    expect(description).toContain("always in light");
+
+    const silent = presets.artifact({ errors: "none" });
+    expect(silent.capabilities.reportError).toBeUndefined();
+    expect(compile(silent).guide(["interactive"])).toContain(
+      "nothing reports what your code throws",
+    );
+    const heard = compile(presets.inlineWidget({ errors: "agent" })).guide(["interactive"]);
+    expect(heard).toContain("comes back to you (at most 5 a run), so you can fix it");
+
+    expect(refusal({ ...base, layout: { ...base.layout, kind: "grid" } })).toMatch(
+      /flow" or "fill/u,
+    );
+    expect(refusal({ ...base, theme: { ...base.theme, documents: "never" } })).toMatch(
+      /whole pages/u,
+    );
+    expect(refusal({ ...base, errors: "none" })).toMatch(/drop the capability/u);
+    expect(refusal({ ...silent, errors: "agent" })).toMatch(/needs the reportError/u);
+    expect(refusal({ ...base, errors: "everyone" })).toMatch(/agent", "host" or "none/u);
   });
 
   test("only passive kinds may load from any https site, by the host's explicit choice (P059)", () => {

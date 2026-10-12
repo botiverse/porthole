@@ -86,9 +86,11 @@ export interface ThemeConfig {
    * Whether a whole document (an artifact page) takes the person's light or dark scheme:
    * `declared` (default): only a page that declares it supports both
    * (`<meta name="color-scheme" content="light dark">`); any other page shows as its author
-   * styled it, in light. `always`: every page. The variables are there either way.
+   * styled it, in light. `always`: every page. `never` (pages only, P065): the host has no
+   * theme for it: it always gets the light values, its frame says light, and no theme change
+   * reaches it. The variables are there in every case.
    */
-  readonly documents?: "declared" | "always";
+  readonly documents?: "declared" | "always" | "never";
 }
 
 export interface Limits {
@@ -143,6 +145,13 @@ export interface LayoutConfig {
   readonly narrowWidthPx: number;
   /** The widest the frame is (a desktop column). */
   readonly wideWidthPx: number;
+  /**
+   * How the frame sits in the host (P065). `flow` (default): a card in a column, as tall as its
+   * content (up to `maxHeightPx`). `fill`: it fills the viewer (the page itself): as tall as its
+   * container, the content scrolling itself, `position: fixed` and `sticky` working. Every mount
+   * then fills (`MountOptions.fill`), and the manual says so.
+   */
+  readonly kind?: "flow" | "fill";
 }
 
 export interface GuideConfig {
@@ -193,9 +202,23 @@ export interface PortholeConfig {
    * "conversation" }`), so the manual says storage is shared across it and keys need a prefix.
    */
   readonly storage?: StorageConfig;
+  /**
+   * Where the content's own errors go, for the manual (P065): `agent`, back to the agent that
+   * wrote it; `host`, to the app only (the agent never sees them); `none`, nowhere (the config
+   * declares no `reportError`). Absent: the manual says they are reported to the app.
+   */
+  readonly errors?: "agent" | "host" | "none";
 }
 
 export interface StorageConfig {
-  /** What the displays sharing one origin have in common, as a noun ("conversation"). */
+  /**
+   * What the displays sharing one origin at once have in common, as a noun ("conversation"):
+   * the manual tells authors to prefix their keys.
+   */
   readonly shared?: string;
+  /**
+   * What one display's storage is kept for, when only one display uses its origin at a time, in
+   * words ("this artifact, across its versions", P065): the manual says so, with no prefix advice.
+   */
+  readonly scope?: string;
 }

@@ -11,12 +11,12 @@ import {
   declaredCapabilities,
   effectiveGates,
   egressOrigins,
-  sandboxTokens,
   type EgressKind,
 } from "../compile/policy.ts";
 import { shellPlan } from "../shell/plan.ts";
 import { themeDefault } from "../theme/variables.ts";
 import { GUIDE_EXAMPLES } from "./examples.ts";
+import { manualLimits, sizeWords } from "./limits.ts";
 
 /**
  * The agent manual and the tool description, generated from the config (PRINCIPLE 3, 10): the
@@ -129,30 +129,6 @@ const optsIn = (config: PortholeConfig): boolean =>
 const loadsScripts = (config: PortholeConfig): boolean =>
   egressOrigins(config, "script").length > 0;
 
-/** What the sandbox withholds, from the sandbox tokens and the shell's own walls. */
-function forbidden(config: PortholeConfig, c: Context): string {
-  const tokens = sandboxTokens(config);
-  const items = ["position: fixed", "full screen"];
-  if (!tokens.includes("allow-modals")) {
-    items.push("alert/confirm/prompt");
-  }
-  if (!tokens.includes("allow-forms")) {
-    items.push("forms that submit");
-  }
-  if (!tokens.includes("allow-popups")) {
-    items.push("popups and new windows");
-  }
-  if (!tokens.includes("allow-downloads")) {
-    items.push("downloads");
-  }
-  items.push(
-    c.global("copyText") ? "the clipboard (copy buttons call copyText)" : "the clipboard",
-    "frames (iframe, object, embed)",
-    "WebRTC",
-  );
-  return `Not allowed: ${items.join(", ")}.`;
-}
-
 function widget(c: Context): string {
   const { config, noun } = c;
   const { layout, limits } = config;
@@ -164,9 +140,10 @@ function widget(c: Context): string {
       : config.mode === "mcp-app"
         ? "What you pass: an MCP Apps view, a whole HTML document that talks to its host through the official App SDK (@modelcontextprotocol/ext-apps) or the protocol's own messages."
         : "What you pass: SVG that starts with <svg, or an HTML fragment: no <!doctype>, <html>, <head> or <body>. Order it styles, then markup, then scripts: people see the styled markup as you write it, and scripts run once all of it is written, in order, each external one loaded before the next runs.";
-  const height = c.declared("resize")
-    ? `Its height follows its content, at most ${limits.maxHeightPx.toLocaleString("en-US")} px (then it scrolls inside).`
-    : "Its height is fixed by the app: keep it short, or let it scroll inside.";
+  const stated = manualLimits(config, network(config));
+  const said = (id: string) => stated.find((limit) => limit.id === id)?.text ?? "";
+  const fills = layout.kind === "fill";
+  const themeless = config.theme.documents === "never";
   const viewBox = layout.narrowWidthPx + 20;
   const smallest = Math.round(((13 * layout.minWidthPx) / viewBox) * 10) / 10;
   const largest = Math.round(((13 * 400) / viewBox) * 10) / 10;
@@ -180,7 +157,7 @@ function widget(c: Context): string {
     "",
     what,
     "",
-    `Where it runs: in a sandboxed frame as wide as the column it sits in, about ${layout.narrowWidthPx} px on a phone (${layout.minWidthPx} on a small one) and ${layout.wideWidthPx} on a desktop; the same ${noun} is read on both, so never write for one of them. Design for ${layout.narrowWidthPx} first; where the layout depends on the width, read it as it runs (the box's clientWidth, again from a ResizeObserver). ${height} ${optsIn(config) ? `It shows in light, as you style it; to follow the person's light or dark theme, declare it in its head (<meta name="color-scheme" content="light dark">) and draw with the variables below.` : "It runs in the person's light or dark theme."} It runs again each time it is shown${loadsScripts(config) ? ": pin library versions" : ""}.`,
+    `Where it runs: ${fills ? `in a sandboxed frame that fills the viewer, about ${layout.narrowWidthPx} px wide on a phone (${layout.minWidthPx} on a small one) and as wide as the window on a desktop` : `in a sandboxed frame as wide as the column it sits in, about ${layout.narrowWidthPx} px on a phone (${layout.minWidthPx} on a small one) and ${layout.wideWidthPx} on a desktop`}; the same ${noun} is read on both, so never write for one of them. Design for ${layout.narrowWidthPx} first; where the layout depends on the width, read it as it runs (the ${fills ? "window's innerWidth, again on resize" : "box's clientWidth, again from a ResizeObserver"}). ${said("layout")} ${said("theme")} It runs again each time it is shown${loadsScripts(config) ? ": pin library versions" : ""}.`,
     "",
     "Sizes that read on a phone:",
     c.when(
@@ -190,15 +167,22 @@ function widget(c: Context): string {
     `- The frame never scrolls sideways: nothing fixed wider than ${layout.minWidthPx} px; images max-width: 100%; a grid or flex child with long text min-width: 0; a wide table or code block in its own box with overflow-x: auto.`,
     "- Cards in a row wrap (flex-wrap: wrap; flex: 1 1 100px), or a grid of repeat(auto-fit, minmax(160px, 1fr)): at most 2 columns under 500 px, never a fixed repeat(3, …).",
     "- Touch: anything clickable is at least 44 px tall. Phones don't hover: what a hover shows, a tap (click) shows too.",
+    fills
+      ? null
+      : "- No position: fixed: the frame grows with its content, so a fixed element covers it.",
     "",
-    `${forbidden(config, c)} ${network(config)} Keep it under ${Math.floor(limits.maxBytes / 1000)} KB.`,
+    "The sandbox:",
+    ...stated.filter((limit) => limit.topic === "sandbox").map((limit) => `- ${limit.text}`),
+    `Keep it under ${sizeWords(limits.maxBytes)}.`,
     loadsScripts(config)
       ? "\nLibraries: pin an exact version at least two weeks old (chart.js@4.4.1 in its URL), never @latest or a range, so the code can't be swapped under you and draws the same every time."
       : null,
     "",
-    optsIn(config)
-      ? `Colors, for a ${noun} that declares light and dark: every color from these variables, never hard-coded, so both work; its own background then stays transparent (it sits on the app's surface).`
-      : `Colors: every color from these variables, never hard-coded, so light and dark both work. The ${noun}'s own background is transparent (it sits on the app's surface).`,
+    themeless
+      ? `Colors: these variables hold the app's light palette; use them, or colors of your own. Give the ${noun} its own background.`
+      : optsIn(config)
+        ? `Colors, for a ${noun} that declares light and dark: every color from these variables, never hard-coded, so both work; its own background then stays transparent (it sits on the app's surface).`
+        : `Colors: every color from these variables, never hard-coded, so light and dark both work. The ${noun}'s own background is transparent (it sits on the app's surface).`,
     c.names("--color-background-") === "" ? null : `- Surfaces: ${c.names("--color-background-")}`,
     c.names("--color-text-") === "" ? null : `- Text: ${c.names("--color-text-")}`,
     c.names("--color-border-") === ""
@@ -225,7 +209,9 @@ function widget(c: Context): string {
     c.when(
       `Don't use --color-background-primary as a card's fill: it is the app's own surface, so a card on it vanishes.`,
     ),
-    `A theme change updates the variables in place and fires window "${config.theme.event}": CSS that uses var(...) follows by itself; a canvas or a library you gave colors to must redraw.`,
+    themeless
+      ? null
+      : `A theme change updates the variables in place and fires window "${config.theme.event}": CSS that uses var(...) follows by itself; a canvas or a library you gave colors to must redraw.`,
     config.mode === "inline"
       ? "Buttons and inputs already match the app (its borders, radius, colors and focus ring, 44 px tall): use them as they are, or restyle them with your own CSS."
       : null,
@@ -272,7 +258,7 @@ function chart(c: Context): string {
     /^--color-chart-seq-\d+$/u.test(name),
   );
   const libraries = loadsScripts(config)
-    ? `Libraries (Chart.js, ECharts, d3) draw in px too, in a box with a set height (Chart.js responsive: true, maintainAspectRatio: false). They don't read CSS variables: pass in getComputedStyle(document.documentElement).getPropertyValue("${categorical[0] ?? "--color-text-primary"}").trim(), redraw on window "${config.theme.event}", and override their palette and white background.`
+    ? `Libraries (Chart.js, ECharts, d3) draw in px too, in a box with a set height (Chart.js responsive: true, maintainAspectRatio: false). They don't read CSS variables: pass in getComputedStyle(document.documentElement).getPropertyValue("${categorical[0] ?? "--color-text-primary"}").trim()${config.theme.documents === "never" ? "" : `, redraw on window "${config.theme.event}"`}, and override their palette and white background.`
     : "No chart library loads here: draw the SVG yourself, from a script, as below.";
   return lines(
     `# Charts (a chart is a ${c.noun})`,
@@ -362,8 +348,8 @@ const ENTRIES: { readonly [N in CapabilityName]: (c: Context, gates: readonly Ga
         : `- Copying: the request porthole/copy-text with { text } (at most ${MAX_COPY_CHARS.toLocaleString("en-US")} characters) copies text to the person's clipboard, and the app shows them what was copied; nothing else in the ${c.noun} can write the clipboard. ${gateWords(gates, "the text")}`,
     annotate: (c) =>
       `- Comments: the person may point at parts of the ${c.noun} to comment on them. Give headings and the parts that matter stable ids (id="revenue"), so comments stay on them when the ${c.noun} is written again.`,
-    reportError: (c, gates) =>
-      `- Errors: what your code throws, and anything the sandbox blocks, is reported to the app (at most ${c.config.limits.maxErrorReports} a run). ${gateWords(gates, "it")}`.trim(),
+    reportError: (c) =>
+      `- ${manualLimits(c.config, "").find((limit) => limit.id === "errors")?.text ?? ""}`,
     resize: () => "",
   };
 
@@ -375,17 +361,18 @@ function interactive(c: Context): string {
       return own === undefined ? ENTRIES[name](c, effectiveGates(config, name)) : `- ${own}`;
     })
     .filter((entry) => entry !== "");
-  const state =
-    config.isolation === "opaque"
-      ? `- State isn't saved: localStorage works but lasts only while the ${noun} is on screen, and a reload or another device starts fresh. Keep what matters in the ${noun}'s code.`
-      : config.storage?.shared === undefined
-        ? `- localStorage is kept for this ${noun} in this browser; another device starts fresh.`
-        : `- localStorage is shared by every ${noun} in this ${config.storage.shared}, in this browser (another device starts fresh): prefix your keys with a name of this ${noun}'s own ("budget:filters", not "filters"), or ${noun}s overwrite each other.`;
+  const stated = manualLimits(config, "");
+  const stored = stated.find((limit) => limit.id === "storage");
+  const state = stored === undefined ? null : `- ${stored.text}`;
+  // Without reportError the capability list has no errors entry: say that nothing reports them.
+  const errors = c.declared("reportError")
+    ? null
+    : `- ${stated.find((limit) => limit.id === "errors")?.text ?? ""}`;
   const none =
     entries.length === 0
       ? `- It can only draw: it has no way to send anything to you or the app.`
       : null;
-  return lines(`# Interactive ${noun}s`, "", ...entries, none, state);
+  return lines(`# Interactive ${noun}s`, "", ...entries, errors, none, state);
 }
 
 const TOPICS: Readonly<Record<BuiltInTopic, (c: Context) => string>> = {
@@ -459,7 +446,15 @@ export function generateToolDescription(config: PortholeConfig): string {
     config.guide.guideToolName === undefined
       ? ""
       : ` Read ${config.guide.guideToolName} once before your first ${c.noun}${config.mode === "inline" ? " (topic chart before your first chart)" : ""}.`;
-  return `${what} It runs in a sandbox about ${layout.narrowWidthPx} px wide on a phone and ${layout.wideWidthPx} on a desktop, from the same code${c.declared("resize") ? " (its height follows the content)" : ""}, in the person's light or dark theme through CSS variables, ${net}. ${globals.join(" ")}${read} Each time it is shown it runs again from this code.`.replace(
+  const where =
+    layout.kind === "fill"
+      ? `It fills the viewer in a sandbox about ${layout.narrowWidthPx} px wide on a phone, from the same code on every screen`
+      : `It runs in a sandbox about ${layout.narrowWidthPx} px wide on a phone and ${layout.wideWidthPx} on a desktop, from the same code${c.declared("resize") ? " (its height follows the content)" : ""}`;
+  const theme =
+    config.theme.documents === "never"
+      ? "always in light (the app doesn't theme it)"
+      : "in the person's light or dark theme through CSS variables";
+  return `${what} ${where}, ${theme}, ${net}. ${globals.join(" ")}${read} Each time it is shown it runs again from this code.`.replace(
     / {2,}/gu,
     " ",
   );

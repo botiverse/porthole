@@ -34,7 +34,8 @@ export interface Probe {
   readonly id: string;
   /**
    * The DESIGN.md egress-table item it proves; 0 for the shell's own wiring and interop, 11 for
-   * behavior (streaming, sizing, theming), 12 for host-function gates, 13 for the clipboard.
+   * behavior (streaming, sizing, theming), 12 for host-function gates, 13 for the clipboard, 14
+   * for the manual's claims about the sandbox (`LIMIT_CHECKS`).
    */
   readonly item: number;
   readonly title: string;

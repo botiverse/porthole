@@ -26,7 +26,7 @@ export interface ShellPlan {
   /** The window event fired after a theme change. */
   readonly themeEvent: string;
   /** Whether a whole document takes the person's scheme: when it declares it, or always. */
-  readonly themeDocuments: "declared" | "always";
+  readonly themeDocuments: "declared" | "always" | "never";
   /** `memory`: an opaque origin has no storage, so a map stands in for the frame's life. */
   readonly storage: "memory" | "native";
   readonly maxErrorReports: number;

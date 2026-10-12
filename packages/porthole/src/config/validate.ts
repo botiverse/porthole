@@ -292,6 +292,7 @@ export function validateConfig(input: unknown): PortholeConfig {
       "sandbox",
       "permissions",
       "storage",
+      "errors",
     ],
     "config",
   );
@@ -360,9 +361,16 @@ export function validateConfig(input: unknown): PortholeConfig {
   if (
     theme.documents !== undefined &&
     theme.documents !== "declared" &&
-    theme.documents !== "always"
+    theme.documents !== "always" &&
+    theme.documents !== "never"
   ) {
-    fail("config.theme.documents", 'must be "declared" or "always"');
+    fail("config.theme.documents", 'must be "declared", "always" or "never"');
+  }
+  if (theme.documents === "never" && config.mode !== "artifact") {
+    fail(
+      "config.theme.documents",
+      '"never" is for whole pages: a fragment takes the theme it is drawn in',
+    );
   }
   const variables = object(theme.variables, "config.theme.variables");
   for (const [name, value] of Object.entries(variables)) {
@@ -414,7 +422,10 @@ export function validateConfig(input: unknown): PortholeConfig {
   }
 
   const layout = object(config.layout, "config.layout");
-  only(layout, ["minWidthPx", "narrowWidthPx", "wideWidthPx"], "config.layout");
+  only(layout, ["minWidthPx", "narrowWidthPx", "wideWidthPx", "kind"], "config.layout");
+  if (layout.kind !== undefined && layout.kind !== "flow" && layout.kind !== "fill") {
+    fail("config.layout.kind", 'must be "flow" or "fill"');
+  }
   for (const name of ["minWidthPx", "narrowWidthPx", "wideWidthPx"]) {
     positive(layout[name], `config.layout.${name}`, 10_000);
   }
@@ -494,7 +505,22 @@ export function validateConfig(input: unknown): PortholeConfig {
 
   if (config.storage !== undefined) {
     const storage = object(config.storage, "config.storage");
-    only(storage, ["shared"], "config.storage");
+    only(storage, ["shared", "scope"], "config.storage");
+    if (storage.shared !== undefined && storage.scope !== undefined) {
+      fail(
+        "config.storage",
+        "shared (several displays at once) or scope (one at a time), not both",
+      );
+    }
+    if (
+      storage.scope !== undefined &&
+      (typeof storage.scope !== "string" || !/^[a-z][a-z ,'-]{0,59}$/u.test(storage.scope))
+    ) {
+      fail(
+        "config.storage.scope",
+        'must be short lowercase words ("this artifact, across its versions")',
+      );
+    }
     if (config.isolation !== "domain") {
       fail("config.storage", "only domain isolation keeps storage across displays");
     }
@@ -503,6 +529,20 @@ export function validateConfig(input: unknown): PortholeConfig {
       (typeof storage.shared !== "string" || !/^[a-z][a-z -]{0,39}$/u.test(storage.shared))
     ) {
       fail("config.storage.shared", 'must be a short lowercase noun ("conversation")');
+    }
+  }
+
+  if (config.errors !== undefined) {
+    if (config.errors !== "agent" && config.errors !== "host" && config.errors !== "none") {
+      fail("config.errors", 'must be "agent", "host" or "none"');
+    }
+    if ((config.errors === "none") !== (capabilities.reportError === undefined)) {
+      fail(
+        "config.errors",
+        config.errors === "none"
+          ? '"none" means no reportError: drop the capability'
+          : `${JSON.stringify(config.errors)} needs the reportError capability, which carries them`,
+      );
     }
   }
 

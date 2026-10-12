@@ -250,7 +250,11 @@ describe("the shell", () => {
     const copy = compile(presets.inlineWidget({ capabilities: { copyText: {} } }));
     expect(copy.shell?.globals).toContain("copyText");
     expect(compile(presets.inlineWidget()).shell?.globals).not.toContain("copyText");
-    expect(copy.guide(["widget"])).toContain("the clipboard (copy buttons call copyText)");
-    expect(compile(presets.inlineWidget()).guide(["widget"])).toContain("Not allowed:");
+    expect(copy.guide(["widget"])).toContain(
+      "the clipboard are closed (copy buttons call copyText)",
+    );
+    expect(compile(presets.inlineWidget()).guide(["widget"])).toContain(
+      "full screen and the clipboard are closed.",
+    );
   });
 });

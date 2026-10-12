@@ -108,7 +108,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         emit("error", { message, source: "host" });
       };
 
-      let scheme: ColorScheme = mount.scheme;
+      // A page the host doesn't theme (`documents: "never"`, P065) is always given light.
+      const themeless = config.theme.documents === "never";
+      let scheme: ColorScheme = themeless ? "light" : mount.scheme;
       let height = mount.initialHeightPx ?? 0;
       let surface: Surface | null = null;
       let connection: C | null = null;
@@ -323,8 +325,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           referrerPolicy: compiled.referrerPolicy,
           colorScheme: scheme,
           // An app reports no size: its frame fills the host's container, at least the minimum;
-          // so does any display the host mounts to fill (its content scrolls inside).
-          ...(speaks && mount.fill !== true
+          // so does any display the host mounts to fill, or whose layout fills (P065): its
+          // content scrolls itself.
+          ...(speaks && mount.fill !== true && config.layout.kind !== "fill"
             ? { initialHeightPx: height }
             : { fill: true, initialHeightPx: config.limits.minHeightPx }),
         });
@@ -443,6 +446,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         displayId: mount.displayId,
         annotations,
         setTheme(next: ColorScheme) {
+          if (themeless) {
+            return;
+          }
           scheme = next;
           surface?.setColorScheme(next);
           // Read the host's values two frames later: a host that restyles its page for the new

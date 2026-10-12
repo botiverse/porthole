@@ -14,6 +14,7 @@ import {
   type PortholeConfig,
 } from "../src/index.ts";
 import { SHELL_RUNTIME } from "../src/shell/runtime.ts";
+import { sizeWords } from "../src/guide/limits.ts";
 
 /**
  * The agreement test (P003, OBJECTIVE 2): for every preset, the CSP, the shell's wiring and the
@@ -62,6 +63,15 @@ const CASES: Record<string, PortholeConfig> = {
   }),
   "artifact page": presets.artifact(),
   "artifact page with comments": presets.artifact({ capabilities: { annotate: {} } }),
+  "a whole-page viewer (P065)": presets.artifact({
+    isolation: "domain",
+    contentOrigins: ["https://*.example-usercontent.com"],
+    layout: { kind: "fill" },
+    theme: { documents: "never" },
+    limits: { maxBytes: 10 * 1_048_576 },
+    storage: { scope: "this artifact, across its versions" },
+    errors: "host",
+  }),
   "artifact page, hotlinked images and media from any https site": presets.artifact({
     egress: { anyHttps: ["img", "media"] },
   }),
@@ -245,13 +255,18 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
   });
 
   test("the manual states the config's limits and theme event", () => {
-    expect(text).toContain(`under ${Math.floor(config.limits.maxBytes / 1000)} KB`);
-    if (config.capabilities.resize !== undefined) {
+    expect(text).toContain(`under ${sizeWords(config.limits.maxBytes)}`);
+    if (config.capabilities.resize !== undefined && config.layout.kind !== "fill") {
       expect(text).toContain(`at most ${config.limits.maxHeightPx.toLocaleString("en-US")} px`);
     }
-    expect(text).toContain(`window "${config.theme.event}"`);
+    // A page the host doesn't theme hears no theme change, and the manual says none.
+    expect(text.includes(`window "${config.theme.event}"`)).toBe(
+      config.theme.documents !== "never",
+    );
     expect(plan?.themeEvent).toBe(config.theme.event);
-    expect(text).toContain(`about ${config.layout.narrowWidthPx} px on a phone`);
+    expect(text).toMatch(
+      new RegExp(`about ${config.layout.narrowWidthPx} px (wide )?on a phone`, "u"),
+    );
   });
 });
 

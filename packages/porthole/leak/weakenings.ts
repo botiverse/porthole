@@ -147,8 +147,8 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "document-theme": [
     {
       file: RUNTIME,
-      find: '    themed = plan.themeDocuments === "always" ||',
-      replace: "    themed = true ||",
+      find: '    themed = plan.themeDocuments !== "never" && (plan.themeDocuments === "always" ||',
+      replace: "    themed = true || (",
     },
   ],
   "embedder-csp": "embedder-csp",

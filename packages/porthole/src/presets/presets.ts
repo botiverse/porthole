@@ -37,7 +37,7 @@ export interface PresetOptions {
   readonly theme?: {
     readonly variables?: Readonly<Record<string, ThemeValue | null>>;
     readonly event?: string;
-    readonly documents?: "declared" | "always";
+    readonly documents?: "declared" | "always" | "never";
   };
   readonly limits?: Partial<Limits>;
   readonly layout?: Partial<LayoutConfig>;
@@ -48,6 +48,8 @@ export interface PresetOptions {
   readonly embedder?: EmbedderConfig;
   /** Domain isolation: what displays sharing an origin share (`StorageConfig`), for the manual. */
   readonly storage?: StorageConfig;
+  /** Where the content's errors go (`PortholeConfig.errors`); `none` drops `reportError`. */
+  readonly errors?: "agent" | "host" | "none";
 }
 
 /** The url preset's options: where the app is served, and the embedding page's extra frames. */
@@ -156,6 +158,9 @@ function build(
   const capabilities: { -readonly [N in CapabilityName]?: CapabilityConfig } = {
     ...BASE_CAPABILITIES,
   };
+  if (options.errors === "none") {
+    delete capabilities.reportError;
+  }
   for (const [name, value] of Object.entries(options.capabilities ?? {}) as [
     CapabilityName,
     CapabilityConfig | false,
@@ -182,6 +187,7 @@ function build(
     contentOrigins: options.contentOrigins ?? [],
     embedder: options.embedder ?? {},
     ...(options.storage === undefined ? {} : { storage: options.storage }),
+    ...(options.errors === undefined ? {} : { errors: options.errors }),
   });
 }
 

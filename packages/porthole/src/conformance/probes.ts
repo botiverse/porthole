@@ -14,6 +14,7 @@ import type { ConformanceHost, LaunchedDisplay, LeakSuiteOptions } from "./index
 import { attack, inline, js, type Probe, type ProbeContext } from "./kit.ts";
 import { BEHAVIOR_PROBES } from "./behavior.ts";
 import { CLIPBOARD_PROBES } from "./clipboard.ts";
+import { LIMIT_PROBES } from "./limits.ts";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import {
@@ -1042,6 +1043,7 @@ export const PROBES: readonly Probe[] = [
   },
   ...BEHAVIOR_PROBES,
   ...CLIPBOARD_PROBES,
+  ...LIMIT_PROBES,
 ];
 
 type AnyTest = TestType<

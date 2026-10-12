@@ -1457,3 +1457,104 @@ Follow-up to 0.1.5 (the second host's adoption).
 - It passes against a host whose shells open images and media (`leak/served/any-https.spec.ts`,
   with its canaries on a routed https site). The image and the audio reached the site; the fetch,
   script, stylesheet and frame didn't.
+
+## P064 · 2026-10-11 · The manual states every sandbox limit content can trip over, and each claim has a browser check · Accepted
+
+**Decision.** The `widget` topic's "The sandbox:" list replaces the old "Not allowed" line. Each
+line comes from `manualLimits(config)`, which derives every limit from the config: the sandbox
+tokens, declared capabilities and globals, egress, and isolation. Every limit has an id, and
+`LIMIT_CHECKS` names the browser checks that prove it. These are new item-14 probes (`14.<id>`)
+and served cases (`served.domain.address`, `served.domain.storage-scope`).
+
+`test/limits.test.ts` fails in three cases:
+- a limit names no check;
+- a limit names a check no suite defines;
+- the list holds a line that isn't a limit.
+
+So a new line can't go untested.
+
+The limits:
+- **Failure:** what's blocked fails silently.
+- **Loading:** the network; assets inline.
+- **Shell-less behavior:** dialogs (confirm false, prompt null); print; downloads; forms;
+  mailto:/tel:/sms: links; windows.
+- **Platform:** devices denied without asking (file inputs work); blob: workers (no service
+  workers, no WebRTC); sound only from a click.
+- **Context:** the frame's address; the shell's own removals.
+- **Storage** (in the interactive topic): it can throw in domain mode.
+
+Item 1 of 0.1.7 (the owner's benchmark against another artifact host's page contract).
+
+**Why.** The manual named only some limits ("Not allowed: …"), and several silently change
+behavior. The advice to handle forms on submit would have failed: Chromium and Firefox fire no
+submit event in a sandbox without `allow-forms`.
+
+**Measured** on Chromium, WebKit and Firefox, in opaque frames and on the served origin. Each
+difference is stated as the behavior safe on all three:
+- submit events fire on WebKit only;
+- `window.open` returns null on two engines and throws on Firefox;
+- an opaque frame's `navigator.serviceWorker` throws on reading on Chromium and WebKit, and
+  `register` rejects on Firefox;
+- `play()` without a click is refused on Chromium and WebKit and allowed by Playwright's Firefox;
+- getUserMedia rejects with `NotFoundError` on headless Chromium and `NotAllowedError` elsewhere;
+- Web Share is absent on all three.
+
+**Limits.** "Reads and writes can throw" (domain storage) and "sound only from a click" are
+browser policy that the suite can't force everywhere. Their checks prove the half that is
+observable (storage persists per scope; `play()` in a click plays). On a page whose own policy
+closes blob: workers, `14.workers` reports itself inapplicable (P058).
+**Rejected.** A hand-written list of limits (it drifts from the config); stating per-engine
+behavior (the manual is read once, for every engine).
+**Revisit when** a sandbox token or capability changes what content can do: add its limit and a
+check, or the unit test fails.
+
+## P065 · 2026-10-11 · A config says a whole-page viewer's shape, and the manual and behavior follow · Accepted
+
+**Decision.** The first artifact-page host's served config made the manual say false things. New
+config fields express its shape, and each drives the manual and the behavior it implies:
+- **`layout.kind: "fill"`** (default `"flow"`):
+  - Behavior: every mount fills its container (`MountOptions.fill`, React `fill`), and the
+    content scrolls itself.
+  - Manual: "about N px wide on a phone and as wide as the window on a desktop"; "as tall as the
+    window: the page scrolls itself, and position: fixed and sticky work"; read the window's
+    width. The card's height cap and the "No position: fixed" line go. The tool description
+    says it fills the viewer.
+- **`theme.documents: "never"`** (pages only; refused for fragments, which take the theme they
+  are drawn in):
+  - Behavior: the frame always gets the light values and a light `color-scheme`, and the shell
+    never themes the page even if it declares light and dark. `setTheme` doesn't reach it, so it
+    hears no theme event.
+  - Manual: it always shows in light; style it yourself; `prefers-color-scheme` may report the
+    reader's system setting, so don't rely on it. The theme-change and redraw sentences go.
+- **`limits.maxBytes`** is stated in KB, or MB from a megabyte up ("Keep it under 10 MB.").
+- **`storage.scope`** (domain only, exclusive with `storage.shared`) names what one display's
+  storage is kept for ("this artifact, across its versions"). It adds no prefix advice, since
+  only one display uses the origin at a time.
+- **`errors: "agent" | "host" | "none"`** says where the content's errors go:
+  - `agent`: "comes back to you, so you can fix it";
+  - `host`: "goes to the app, not to you: test what you write";
+  - `none`: no `reportError` (the preset drops it; validation keeps the two consistent), and
+    "nothing reports what your code throws".
+
+  Absent, the old "reported to the app" stays.
+
+Item 2 of 0.1.7.
+
+**Measured** with the person on dark: inside a page's frame whose element says light,
+`prefers-color-scheme` reports light on WebKit and Firefox and dark on Chromium. Hence the
+manual's "may report the reader's system setting".
+
+**Tested.**
+- Browser checks (all three engines, in `LIMIT_CHECKS` under `layout`, `theme` and `errors`):
+  - `14.fill`: the frame keeps its box's 400 px, the page scrolls, a fixed bar stays at the top;
+  - `14.theme-never`: light values, no `data-theme`, a light frame element, no theme event after
+    a flip to dark;
+  - `14.errors`: a throw reaches the host with `reportError`, and nothing reaches it with
+    `errors: "none"`.
+- Unit tests: the manual and tool description for the viewer's config, every field's
+  validation, and an agreement case.
+
+**Rejected.**
+- Host-side patches to the manual's text: the config is the source.
+- Making `"never"` the default for pages: hosts that theme pages would lose it.
+**Revisit when** a host needs a theme of its own that isn't light (then a fixed scheme value).

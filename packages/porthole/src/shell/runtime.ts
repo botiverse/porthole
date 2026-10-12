@@ -567,7 +567,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
     document.body.replaceWith(document.importNode(parsed.body, true));
     root = null;
     const declaredScheme = parsed.querySelector('meta[name="color-scheme" i]');
-    themed = plan.themeDocuments === "always" || (declaredScheme !== null && /\bdark\b/i.test(declaredScheme.getAttribute("content") || ""));
+    themed = plan.themeDocuments !== "never" && (plan.themeDocuments === "always" || (declaredScheme !== null && /\bdark\b/i.test(declaredScheme.getAttribute("content") || "")));
     schemeFollows();
     await runScripts(scripts);
     announceLoaded();

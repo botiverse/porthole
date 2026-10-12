@@ -712,6 +712,65 @@ network; the leak suite renders each through the real sandbox at phone and deskt
 widths in light and dark and asserts it reads (no overflow, text above a floor
 size) — the guide's examples are themselves conformance cases.
 
+The `widget` topic's "The sandbox:" list states every limit that silently changes
+how content behaves, each one line derived from the config (`manualLimits`, P064):
+
+| Limit | Says | Stated when | Checks (all three engines) |
+|-------|------|-------------|----------------------------|
+| `silent` | what's blocked fails silently: nothing loads, a fetch rejects, no error shows | always | `14.silent` |
+| `network` | what loads from where, from the CSP's sources | always | `1.connect`, `2.resources` |
+| `inline-assets` | images, fonts and sound inline as data: URLs or SVG; CSS in a `<style>` | something is open (else Network: none says it) | `14.inline-assets` |
+| `dialogs` | alert/confirm/prompt show nothing: confirm false, prompt null | no `allow-modals` | `14.dialogs` |
+| `print` | `window.print()` does nothing | no `allow-modals` | `14.print` |
+| `downloads` | no `<a download>`, data:/blob: links or script saves; `downloadFile` if declared | no `allow-downloads` | `14.downloads`, `6.download` |
+| `forms` | forms never submit and some browsers fire no submit event: `type="button"` and a click handler | no `allow-forms` | `14.forms` |
+| `link-schemes` | mailto:, tel:, sms: open nothing: show the text | always | `14.link-schemes` |
+| `windows` | window.open and target=_blank open no window (null or a throw); through `openLink` if declared | no `allow-popups` | `14.windows`, `6.open` |
+| `devices` | camera, microphone, location, sharing denied without asking; file inputs and FileReader work | always | `14.devices` |
+| `workers` | blob: Web Workers work; no service workers; no WebRTC | always | `14.workers`, `3.webrtc` |
+| `sound` | sound plays only from a click | always | `14.sound` |
+| `address` | about:srcdoc (opaque) or its own address with Porthole's ticket (domain) | always | `14.address`, `served.domain.address` |
+| `shell` | document.write/open throw; nested frames removed; full screen and clipboard closed | always | `14.shell`, `4.document-write`, `4.light-dom` |
+| `storage` (interactive topic) | per isolation; in domain mode reads and writes can throw: try/catch | always | `14.storage`, `served.domain.storage-scope` |
+
+Three more limits sit outside the list:
+- `layout` (where it runs): a card whose height follows its content, or `layout.kind:
+  "fill"`, a frame as tall as its box with the page scrolling itself. Checks: `11.size`, `14.fill`.
+- `theme` (where it runs): the person's theme, a page that declares it, or
+  `theme.documents: "never"`, always light. Checks: `11.theme-flip`, `11.document-theme`,
+  `14.theme-never`.
+- `errors` (interactive): `errors: "agent" | "host" | "none"`. Check: `14.errors`.
+
+They are config facts a whole-page viewer needed (P065):
+- `layout.kind: "fill"` makes every mount fill its container (`MountOptions.fill`, React
+  `fill`). The manual says the page is as tall as the window, that `position: fixed` and
+  `sticky` work, and to read the window's width; it drops the card's height cap and the "no
+  `position: fixed`" line.
+- `theme.documents: "never"` (pages only) gives the frame light values and a light
+  `color-scheme`. A host flip doesn't reach it, so it hears no theme event. The manual says
+  style it yourself, and not to rely on `prefers-color-scheme`. Measured with the person on
+  dark: inside, that query says light on WebKit and Firefox (they follow the frame element's
+  `color-scheme`) and dark on Chromium.
+- `limits.maxBytes` is stated in KB or MB (`Keep it under 10 MB.`).
+- `storage.scope` names what one display's storage is kept for ("this artifact, across its
+  versions"), without `storage.shared`'s prefix advice.
+- `errors` says where the content's errors go: back to the agent, to the app only, or nowhere
+  (no `reportError`). Absent, the manual keeps its old "reported to the app".
+
+`test/limits.test.ts` fails if a limit names no check, names one no suite defines,
+or the list holds a line that isn't a limit. Measured differences, each stated as
+the behavior safe everywhere:
+- submit events fire on WebKit only;
+- `window.open` returns null on Chromium and WebKit and throws on Firefox;
+- reading `navigator.serviceWorker` in an opaque frame throws on Chromium and
+  WebKit, and `register` rejects on Firefox;
+- `play()` without a click is refused on Chromium and WebKit, and allowed by
+  Playwright's Firefox;
+- Web Share is absent on all three desktop engines.
+
+On a page whose own policy closes blob: workers, `14.workers` reports itself
+inapplicable (P058).
+
 ## MCP Apps adapter vs AppBridge
 
 The official SDK ships `AppBridge` (host side), which extends the MCP SDK's

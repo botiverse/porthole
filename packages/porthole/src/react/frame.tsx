@@ -392,7 +392,11 @@ export function PortholeFrame(props: PortholeFrameProps): ReactElement {
         position: "relative",
         width: "100%",
         // A display that fills takes its parent's height (the host sizes the parent, or this box).
-        ...(props.fill === true || props.config.mode === "url" ? { height: "100%" } : {}),
+        ...(props.fill === true ||
+        props.config.mode === "url" ||
+        props.config.layout.kind === "fill"
+          ? { height: "100%" }
+          : {}),
         ...(state === "running" ? {} : { minHeight: Math.max(height, PLACEHOLDER_HEIGHT_PX) }),
         ...props.style,
       }}
@@ -434,7 +438,7 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
   // By value: a config or instance made inline (each render) is the same display.
   const config = useByValue(frame.config);
   const instance = useByValue(frame.instance);
-  const fills = config.mode === "url" || frame.fill === true;
+  const fills = config.mode === "url" || frame.fill === true || config.layout.kind === "fill";
 
   // The latest props, read when the display calls back (never during render).
   const latest = useEffectEvent(() => frame);

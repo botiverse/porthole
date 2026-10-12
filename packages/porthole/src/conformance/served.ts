@@ -295,6 +295,24 @@ export function servedTests(
     }
 
     define(
+      "served.domain.address",
+      "a served frame's address is its own, carrying at most Porthole's ticket: never the app's",
+      async ({ page }) => {
+        const display = await host.show(page, host.shell("address"), { content: SHELL_CONTENT });
+        const frame = await display.frame();
+        const seen = await frame.evaluate(() => ({
+          origin: location.origin,
+          search: location.search,
+          hash: location.hash,
+        }));
+        expect(seen.origin).toBe(display.origin);
+        expect(seen.search).toMatch(/^(\?ticket=[^&]+)?$/u);
+        expect(seen.hash).toBe("");
+        expect(seen.origin).not.toBe(new URL(page.url()).origin);
+      },
+    );
+
+    define(
       "served.domain.storage-scope",
       "storage persists within a scope and is never shared across scopes",
       async ({ page }) => {
