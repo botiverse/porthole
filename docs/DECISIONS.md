@@ -1558,3 +1558,33 @@ manual's "may report the reader's system setting".
 - Host-side patches to the manual's text: the config is the source.
 - Making `"never"` the default for pages: hosts that theme pages would lose it.
 **Revisit when** a host needs a theme of its own that isn't light (then a fixed scheme value).
+
+## P066 · 2026-10-12 · The host kit: an app writes its policy, Porthole the machinery around `/server` · Proposed
+
+**Decision (proposed, awaiting the coordinator's OK).** Porthole 0.2.0 takes in the host-side
+machinery both hosts wrote around `/server`:
+- Host-routing middleware: fetch/Workers, plus a Node adapter with WebSocket upgrade, handing
+  reserved labels back to the app.
+- Content-domain parsing and its misconfiguration guards.
+- An issue-endpoint factory, with a client `httpLocator`.
+- An optional health gate with an opaque fallback.
+- A conformance runner an app points at its real page.
+- A prod-shaped docker profile and CI on push.
+
+The app keeps four callbacks (`instance`, `access`, `authorize`, `source`) and its config.
+DESIGN § "The host kit" sketches the API.
+
+**Why.**
+- The first host wrote 1,738 lines (domain, displays, health, the content router, the client's
+  served frames, its conformance host).
+- The second host wrote 2,305 lines (content service, content mapping, the frame API, the
+  client frame, its conformance tools).
+- Most of it is the same code.
+- Their copies already disagree in small ways. The first host derives the scheme from its public
+  URL, the second from `*.localhost`. The first logs a domain clash and disables the domain, the
+  second fails closed. Neither tests over TLS.
+
+**To be decided before coding:**
+- Clash handling: throw (fail closed), or report and disable.
+- The issue body's shape: `{ instance }`, or the app's own fields.
+- Whether the conformance harness bundles its own React.
