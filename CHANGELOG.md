@@ -3,6 +3,29 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## 0.2.0
+
+- The host kit (P066): an app writes its policy (`instance`, `access`, `authorize`, `source`) and
+  its settings; Porthole does the rest. `createContentHost` (`/server`) gives the routing
+  middleware (reserved labels handed back), the issue endpoint (`{ instance }`, a proposal the
+  app maps; the client never chooses an origin), `meta`, `frameSources`, the content-domain
+  helpers (`contentDomain`, `ContentDomainError`: a clash throws at startup, or with the health
+  gate is a lasting "misconfigured", logged once) and the optional health gate with its opaque
+  fallback. New `/node` subpath: `nodeHost` (requests and WebSocket upgrades) and `nodeProbe`.
+  Client: `httpLocator`, `LocateError`, `servedOrOpaque`.
+- Redirect entry (P068): `entry` gives every instance a clean address (`urlOf`) that opens
+  directly, through the app's authorize route (`authorize`) and its own sign-in, with a one-time
+  code bound to the address and the browser. Never the sign-in inside a frame (`FrameBlock`
+  `sign-in`); tickets stay the way frames load. `prefixedName` says a label's scope (`Naming`).
+- The conformance runner: `defineHostConformance` / `hostConformance` run the leak suite, the
+  served cases and the redirect entry cases (`entryTests`) against an app's real page, with a
+  framework-free harness on `createHost` loaded under the page's nonce
+  (`dist/conformance/harness.js`). `served.url.ticket` uses a fresh browser.
+- The prod-shape profile (`ops/prod-shape/run.sh`): Caddy's TLS, wildcard DNS, same-site
+  sibling origins, the kit reference app, a clash; CI on every push (checks, loopback on three
+  engines, prod shape).
+- Compatible: every 0.1.x import works unchanged.
+
 ## 0.1.8
 
 - The manual's silent line says where a block is reported, following `errors`: back to the agent
