@@ -886,9 +886,10 @@ Three more limits sit outside the list:
 
 They are config facts a whole-page viewer needed (P065):
 - `layout.kind: "fill"` makes every mount fill its container (`MountOptions.fill`, React
-  `fill`). The manual says the page is as tall as the window, that `position: fixed` and
-  `sticky` work, and to read the window's width; it drops the card's height cap and the "no
-  `position: fixed`" line.
+  `fill`). The manual says the page fills the app's viewer (as tall as that, often smaller than
+  the window), that `position: fixed` and `sticky` work, and to read the frame's own width,
+  designing for the phone's width first; it drops the card's height cap and the "no
+  `position: fixed`" line (0.2.1: the viewer, not the window).
 - `theme.documents: "never"` (pages only) gives the frame light values and a light
   `color-scheme`. A host flip doesn't reach it, so it hears no theme event. The manual says
   style it yourself, and not to rely on `prefers-color-scheme`. Measured with the person on

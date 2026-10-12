@@ -323,15 +323,21 @@ describe("0.1.1: what a host may change", () => {
       errors: "host",
     });
     const guide = compile(page).guide();
+    // 0.2.1: it fills the app's viewer, which may be smaller than the window.
     expect(guide).toContain(
-      "It is as tall as the window: the page scrolls itself, and position: fixed and sticky work.",
+      "It is as tall as the viewer, not the window: the page scrolls itself, and position: fixed and sticky work.",
     );
-    expect(guide).toContain("as wide as the window on a desktop");
+    expect(guide).toContain("fills the app's viewer (often smaller than the window");
+    expect(guide).not.toContain("as wide as the window");
+    expect(guide).toContain("Design for 300 first");
     expect(guide).not.toContain("No position: fixed");
     expect(guide).not.toContain("Its height follows its content");
     expect(guide).toContain("It always shows in light: the app doesn't theme it");
     expect(guide).not.toContain("person's light or dark theme");
     expect(guide).not.toContain("A theme change");
+    // 0.2.1: no theme lines but "always light" (and the prefers-color-scheme caveat).
+    expect(guide).not.toContain("both themes");
+    expect(guide).not.toMatch(/light and dark|light or dark|dark theme/u);
     expect(guide).toContain("Keep it under 10 MB.");
     expect(guide).toContain(
       "localStorage is kept for this artifact, across its versions, in this browser",
@@ -340,6 +346,10 @@ describe("0.1.1: what a host may change", () => {
     expect(guide).toContain("goes to the app (at most 5 a run), not to you");
     const description = compile(page).toolDescription();
     expect(description).toContain("It fills the viewer");
+    const guided = presets.artifact({ guide: { guideToolName: "read_page_guide" } });
+    expect(compile(guided).toolDescription()).toContain(
+      "Call read_page_guide once before your first page.",
+    );
     expect(description).toContain("always in light");
 
     const silent = presets.artifact({ errors: "none" });

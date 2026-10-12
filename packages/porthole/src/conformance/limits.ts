@@ -468,6 +468,8 @@ export const LIMIT_PROBES: readonly Probe[] = [
       const display = await context.launch({
         config: inline(),
         content: `<button id="go">Play</button>${RECORDER}<script>
+  r.mediaBlocked = false;
+  document.addEventListener("securitypolicyviolation", (event) => { if (event.effectiveDirective === "media-src") r.mediaBlocked = true; });
   new Audio(${js(SILENCE)}).play().then(() => (r.unasked = "played"), (e) => (r.unasked = "refused " + e.name));
   document.getElementById("go").addEventListener("click", () => {
     new Audio(${js(SILENCE)}).play().then(() => { r.clicked = "played"; r.done = true; }, (e) => { r.clicked = "refused " + e.name; r.done = true; });
@@ -477,6 +479,12 @@ export const LIMIT_PROBES: readonly Probe[] = [
       await settle(500);
       await click(display, "#go");
       const verdict = await recorded(display);
+      // The frame's own policy allows data: media: a violation for it is the page's (P058).
+      if (verdict.clicked !== "played" && verdict.mediaBlocked === true) {
+        context.inapplicable(
+          "the page's own CSP, which an opaque frame inherits, blocks data: media (media-src): opaque content here plays no inline sound, whatever its config",
+        );
+      }
       expect(verdict.clicked, "play() in a click's handler").toBe("played");
       context.measured(`play() without a click: ${String(verdict.unasked)}`);
     },

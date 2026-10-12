@@ -1702,3 +1702,25 @@ tickets.
 or a browser starts sending `Lax` cookies on framed redirects everywhere (then frames could use
 clean addresses too).
 
+## P069 · 2026-10-12 · The manual says what the page host means: call the guide tool, fill the viewer, no theme lines when unthemed; 14.sound reports an inherited block · Accepted
+
+**Decision.** From the first artifact-page host reading its generated manual (0.2.1):
+- With `guide.guideToolName`, the tool description says to *call* the guide tool ("Call
+  read_page_guide once before your first page"): it is a tool, not a document.
+- With `layout.kind: "fill"`, the frame fills the app's viewer, which is often smaller than the
+  window (toolbars, side panels): the manual says "fills the app's viewer", "as tall as the
+  viewer, not the window", and to read the frame's own width; it keeps "design for the phone's
+  width first". This supersedes P065's "as tall as the window" wording.
+- With `theme.documents: "never"`, the manual has no theme line but "always light: style it
+  yourself" and the `prefers-color-scheme` caveat: the example's "cards that read in both
+  themes" and "the app's light palette" go.
+- `14.sound` detects that the page's own CSP (which an opaque frame inherits) blocks its `data:`
+  media (`media-src`) and reports itself inapplicable, as `1.connect`, `2.resources`,
+  `12.no-confirm` and `14.workers` do (P058); `leak/inherited-policy.spec.ts` proves it on a
+  closed page on all three engines.
+
+**Why.** Each line was false or misleading for that host (a document to read, the window's size,
+both themes), and the host skipped `14.sound` by hand on a page whose `media-src 'self'` the
+frame inherits.
+**Revisit when** a host's viewer is the whole window (the wording is still true there).
+

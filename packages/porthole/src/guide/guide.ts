@@ -157,7 +157,7 @@ function widget(c: Context): string {
     "",
     what,
     "",
-    `Where it runs: ${fills ? `in a sandboxed frame that fills the viewer, about ${layout.narrowWidthPx} px wide on a phone (${layout.minWidthPx} on a small one) and as wide as the window on a desktop` : `in a sandboxed frame as wide as the column it sits in, about ${layout.narrowWidthPx} px on a phone (${layout.minWidthPx} on a small one) and ${layout.wideWidthPx} on a desktop`}; the same ${noun} is read on both, so never write for one of them. Design for ${layout.narrowWidthPx} first; where the layout depends on the width, read it as it runs (the ${fills ? "window's innerWidth, again on resize" : "box's clientWidth, again from a ResizeObserver"}). ${said("layout")} ${said("theme")} It runs again each time it is shown${loadsScripts(config) ? ": pin library versions" : ""}.`,
+    `Where it runs: ${fills ? `in a sandboxed frame that fills the app's viewer (often smaller than the window: toolbars and side panels take room), about ${layout.narrowWidthPx} px wide on a phone (${layout.minWidthPx} on a small one) and wider on a desktop` : `in a sandboxed frame as wide as the column it sits in, about ${layout.narrowWidthPx} px on a phone (${layout.minWidthPx} on a small one) and ${layout.wideWidthPx} on a desktop`}; the same ${noun} is read on both, so never write for one of them. Design for ${layout.narrowWidthPx} first; where the layout depends on the width, read it as it runs (the ${fills ? "frame's own innerWidth, again on resize" : "box's clientWidth, again from a ResizeObserver"}). ${said("layout")} ${said("theme")} It runs again each time it is shown${loadsScripts(config) ? ": pin library versions" : ""}.`,
     "",
     "Sizes that read on a phone:",
     c.when(
@@ -179,7 +179,7 @@ function widget(c: Context): string {
       : null,
     "",
     themeless
-      ? `Colors: these variables hold the app's light palette; use them, or colors of your own. Give the ${noun} its own background.`
+      ? `Colors: these variables hold the app's palette; use them, or colors of your own. Give the ${noun} its own background.`
       : optsIn(config)
         ? `Colors, for a ${noun} that declares light and dark: every color from these variables, never hard-coded, so both work; its own background then stays transparent (it sits on the app's surface).`
         : `Colors: every color from these variables, never hard-coded, so light and dark both work. The ${noun}'s own background is transparent (it sits on the app's surface).`,
@@ -204,7 +204,7 @@ function widget(c: Context): string {
     otherVariables(c) === "" ? null : `- Also: ${otherVariables(c)}`,
     "",
     exampleFits(c, GUIDE_EXAMPLES.stats)
-      ? `Cards that read in both themes, and wrap on a phone:\n${GUIDE_EXAMPLES.stats}\n`
+      ? `Cards that ${themeless ? "" : "read in both themes, and "}wrap on a phone:\n${GUIDE_EXAMPLES.stats}\n`
       : null,
     c.when(
       `Don't use --color-background-primary as a card's fill: it is the app's own surface, so a card on it vanishes.`,
@@ -445,7 +445,7 @@ export function generateToolDescription(config: PortholeConfig): string {
   const read =
     config.guide.guideToolName === undefined
       ? ""
-      : ` Read ${config.guide.guideToolName} once before your first ${c.noun}${config.mode === "inline" ? " (topic chart before your first chart)" : ""}.`;
+      : ` Call ${config.guide.guideToolName} once before your first ${c.noun}${config.mode === "inline" ? " (topic chart before your first chart)" : ""}.`;
   const where =
     layout.kind === "fill"
       ? `It fills the viewer in a sandbox about ${layout.narrowWidthPx} px wide on a phone, from the same code on every screen`

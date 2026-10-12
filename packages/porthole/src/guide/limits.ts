@@ -95,7 +95,7 @@ export function manualLimits(config: PortholeConfig, network: string): ManualLim
   add(
     "layout",
     config.layout.kind === "fill"
-      ? "It is as tall as the window: the page scrolls itself, and position: fixed and sticky work."
+      ? "It is as tall as the viewer, not the window: the page scrolls itself, and position: fixed and sticky work."
       : declared.has("resize")
         ? `Its height follows its content, at most ${config.limits.maxHeightPx.toLocaleString("en-US")} px (then it scrolls inside).`
         : "Its height is fixed by the app: keep it short, or let it scroll inside.",

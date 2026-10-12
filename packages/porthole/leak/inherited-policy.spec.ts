@@ -62,3 +62,13 @@ test("[12.no-confirm] on a host that always confirms: inapplicable, not failed",
     /^inapplicable on this host: this host always has a confirm function/u,
   );
 });
+
+test("[14.sound] on a page whose own policy closes media: inapplicable, not failed", async ({
+  page,
+  browserName,
+}) => {
+  const entry = leakTests(closed).find((each) => each.id === "14.sound");
+  expect(await skipReason(entry, page, browserName)).toMatch(
+    /^inapplicable on this host: the page's own CSP, which an opaque frame inherits, blocks data: media \(media-src\)/u,
+  );
+});
