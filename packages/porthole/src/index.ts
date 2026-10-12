@@ -124,6 +124,7 @@ export type {
   CapabilityHandlers,
   Confirm,
   ConfirmAnswer,
+  ConfirmDisplay,
   ConfirmRequest,
   Proceed,
   HostFunctionBridge,

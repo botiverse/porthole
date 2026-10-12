@@ -249,6 +249,14 @@ function renderViews(spec: ViewsSpec): void {
                   "div",
                   { id: "app-dialog", role: "dialog" },
                   h("p", null, `${request.capability} from ${request.display.title}`),
+                  // The instance the frame shows, where it is served (P076): the host's own words.
+                  h(
+                    "p",
+                    { id: "app-instance" },
+                    request.display.instance === undefined
+                      ? "no instance"
+                      : `${request.display.instance.document.kind} on ${request.display.instance.scope}`,
+                  ),
                   h("button", { id: "app-yes", onClick: answer.accept }, "Yes"),
                   h("button", { id: "app-no", onClick: answer.decline }, "No"),
                   h("button", { id: "app-edit", onClick: answer.redirect }, "Edit first"),

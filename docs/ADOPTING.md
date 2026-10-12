@@ -65,7 +65,9 @@ reads the page's), `handlers`, `openLink` (default: a new tab), `notify` (your o
 a copy button copied), and `renderConfirm` (your own dialog, given `accept`, `decline` and
 `redirect`: Porthole keeps the queue, runs `accept` inside its click, and counts declines toward
 muting the display; `redirect`, for "edit it first", answers the call `"redirected"` and neither
-counts nor resets the count). `useRunAgain()` gives a "run again" button.
+counts nor resets the count). The request names the display (`request.display`: its `id`,
+`title`, and the `instance` a served frame shows), so the dialog can say what it is from your own
+records. `useRunAgain()` gives a "run again" button.
 
 ## 4. Served pages: the host kit
 
@@ -132,7 +134,10 @@ nodeServer({ content, app: async (request) => (await routes(request)) ?? app(req
   every other request to `app` (fetch-style: Hono's `app.fetch`) or `request` (a Node listener:
   Express), the health gate started on listen and stopped on close. Behind a TLS edge, add
   `scheme: "https"`. A host that needs the port first (`listen(0)`) can come later: `content:
-  () => host` (null until made); requests go to the app until it gives one.
+  () => host` (null until made); requests go to the app until it gives one. `nodeServer` starts
+  the host it is given: a host made in a `listen` callback starts right after it, and one made
+  later at the next request. `start()` runs once (a started host ignores it), so starting it
+  yourself as soon as you make it is fine too.
 - **`nodeHost(content, { request })`** is for an app that keeps its own `node:http` server (or a
   framework that owns one): put its `request` and `upgrade` listeners on your server, call
   `content.start()` once it listens and `content.close()` when it stops.

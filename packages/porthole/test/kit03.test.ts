@@ -656,6 +656,33 @@ describe("nodeServer", () => {
     }
   });
 
+  it("starts a host made in its listen callback without waiting for a request, once (P076)", async () => {
+    const probe = vi.fn(() => Promise.resolve({ status: 503, body: "" }));
+    let made: ReturnType<typeof kit>["content"] | null = null;
+    const server = nodeServer({ content: () => made, app: () => new Response("the app") });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", () => {
+        const { port } = server.address() as { port: number };
+        made = kit({
+          domain: `usercontent.localhost:${port}`,
+          appOrigins: ["http://localhost:1"],
+          health: { probe },
+        }).content;
+        resolve();
+      }),
+    );
+    try {
+      // No request yet: started all the same.
+      await vi.waitFor(() => expect(probe).toHaveBeenCalled());
+      // The app starting it too does nothing more.
+      (made as ReturnType<typeof kit>["content"] | null)?.start();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(probe, "one check, not one per start").toHaveBeenCalledTimes(1);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
   it("serves content and the app on one server, the gate started on listen", async () => {
     const { content } = kit({
       domain: "usercontent.localhost",

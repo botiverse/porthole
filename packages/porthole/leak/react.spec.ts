@@ -915,6 +915,25 @@ test("renderConfirm: the app's own dialog asks; its yes runs the call from its c
   expect(await events(page, "provider", "sendPrompt")).toHaveLength(1);
 });
 
+test("renderConfirm names the instance a served frame shows, and none for an opaque one (P076)", async ({
+  page,
+}) => {
+  for (const served of [true, false]) {
+    await views(page, {
+      served,
+      frames: "ok",
+      renderConfirm: true,
+      views: [{ id: "w", display: "widget", content: PROMPT }],
+    });
+    const inside = page.locator('[data-view="w"] iframe').contentFrame();
+    await inside.locator("#ask").click();
+    await expect(page.locator("#app-dialog")).toContainText("sendPrompt from w");
+    await expect(page.locator("#app-instance")).toHaveText(served ? "shell on w" : "no instance");
+    await page.click("#app-no");
+    await expect(inside.locator("#status")).toHaveText("false");
+  }
+});
+
 test("renderConfirm's redirect: the call doesn't go, and it never mutes the display (P074)", async ({
   page,
 }) => {

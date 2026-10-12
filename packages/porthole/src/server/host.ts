@@ -311,7 +311,10 @@ export interface ContentHost<V> {
   ): (request: Request) => Promise<Response>;
   /** A url-mode app's access for a WebSocket upgrade (`server.access`), or null. */
   access(request: Request): Promise<Access | null>;
-  /** Starts the health gate (after the app listens). */
+  /**
+   * Starts the health gate (after the app listens). Once: starting a started host does nothing,
+   * so the app and `nodeServer` may both start it (P076). After `close`, it starts again.
+   */
   start(): void;
   /** Runs one health check now. */
   check(): Promise<ContentHealthView>;
@@ -533,6 +536,7 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
   let timer: ReturnType<typeof setTimeout> | null = null;
   let running: Promise<ContentHealthView> | null = null;
   let closed = false;
+  let started = false;
   const schedule = () => {
     if (closed || gate === undefined || view.misconfigured === true || domain === null) {
       return;
@@ -1114,12 +1118,17 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
     access: async (request) => (server === null ? null : server.access(request)),
 
     start() {
+      if (started) {
+        return;
+      }
+      started = true;
       closed = false;
       void check();
     },
     check,
     close() {
       closed = true;
+      started = false;
       if (timer !== null) {
         clearTimeout(timer);
         timer = null;

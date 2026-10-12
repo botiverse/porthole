@@ -2122,3 +2122,23 @@ on `/check`; a Worker's bundle would fail where the path runs. 0.3.2:
 and the failure shows only where the path runs.
 **Revisit when** a bundler needs code split into chunks of its own (none does yet).
 
+## P076 · 2026-10-12 · A confirmation names the instance; a content host starts once · Accepted
+
+**Decision.** From Ferry, #10. 0.3.3, additive:
+1. **`ConfirmRequest.display` carries the frame's `instance`** where the display is served
+   (`ConfirmDisplay`: `id`, `title`, `instance?`), in the core's `confirm` and React's
+   `renderConfirm`. A host words its dialog from its own records (Ferry: the transcript the
+   instance belongs to) without keeping an index from display ids to them (28 lines in Ferry). The
+   instance is the host's own, as it gave it to `mount`: nothing the content chose.
+2. **`ContentHost.start()` runs once**: a started host ignores it until `close`, so the app and
+   `nodeServer` may both start it (before, each start ran a check, and the second came at the first
+   request). **`nodeServer` asks a lazily given host right after the server's `listen` callbacks**
+   (a host made in one, with the port it got, starts then), and again at each request until it
+   gives one. ADOPTING says who starts it.
+
+**Why.** Each was a workaround in Ferry: the side index, and starting the host itself while
+`nodeServer` started it again.
+**Measured.** `leak/react.spec.ts` (`renderConfirm` names the served frame's instance, and none
+for an opaque one); `test/kit03.test.ts` (a host made in the `listen` callback is checked without a
+request, once, however often it is started).
+

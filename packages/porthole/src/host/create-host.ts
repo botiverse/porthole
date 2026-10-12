@@ -353,7 +353,11 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         }
         const bridge = createBridge({
           config,
-          display: { id: mount.displayId, title: mount.title },
+          display: {
+            id: mount.displayId,
+            title: mount.title,
+            ...(mount.instance === undefined ? {} : { instance: mount.instance }),
+          },
           handlers,
           ...(options.confirm === undefined ? {} : { confirm: options.confirm }),
           userActivation: () => created.userActivation(),

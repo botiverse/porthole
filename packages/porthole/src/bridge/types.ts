@@ -4,6 +4,7 @@ import type {
   CapabilityResults,
   HandledCapability,
 } from "../config/capabilities.ts";
+import type { InstanceRef } from "../isolation/types.ts";
 
 /**
  * The host-function bridge (ARCHITECTURE § Framework layer): carries a capability call from the
@@ -28,12 +29,22 @@ export type CapabilityHandler<N extends CapabilityName> = (
 /** The host's handlers: one for each declared capability served by a handler. */
 export type CapabilityHandlers = { readonly [N in HandledCapability]?: CapabilityHandler<N> };
 
+/**
+ * The display a confirmation is for, as the host named it: its id and title, and the instance it
+ * shows where it is served (P076), so a host can word its dialog from its own records.
+ */
+export interface ConfirmDisplay {
+  readonly id: string;
+  readonly title: string;
+  readonly instance?: InstanceRef;
+}
+
 /** What a person is asked to confirm: the call's whole effect, not a summary the content chose. */
 export type ConfirmRequest = {
   [N in CapabilityName]: {
     readonly capability: N;
     readonly args: CapabilityArgs[N];
-    readonly display: { readonly id: string; readonly title: string };
+    readonly display: ConfirmDisplay;
   };
 }[CapabilityName];
 

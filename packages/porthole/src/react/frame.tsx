@@ -715,7 +715,14 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
           ? {
               confirm: (request: ConfirmRequest, proceed: Proceed) =>
                 (latest().confirm ?? pageConfirm ?? (() => Promise.resolve(false)))(
-                  { ...request, display: { id: latest().displayId, title: latest().title } },
+                  {
+                    ...request,
+                    display: {
+                      ...request.display,
+                      id: latest().displayId,
+                      title: latest().title,
+                    },
+                  },
                   proceed,
                 ),
             }

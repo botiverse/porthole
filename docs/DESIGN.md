@@ -530,7 +530,8 @@ What both adopters still wrote after 0.2 moves into Porthole (ADOPTING.md is the
   served, content source, frame sources, health) and `POST`/`DELETE handoff`.
   `contentHostFor(build)` gives one host per Workers `env`, failing closed with a plain 503;
   `nodeServer({ content, app })` is the whole Node server (`content` may be a function giving the
-  host once made, P074). A missing or short secret throws, naming `PORTHOLE_SECRET`.
+  host once made, P074; asked right after the `listen` callbacks and at each request until it
+  gives one, and `start` is idempotent, P076). A missing or short secret throws, naming `PORTHOLE_SECRET`.
 - **The client:** `portholeClient({ displays, base, headers, credentials, handoff })` is the
   locator and knows each kind's config from the meta (null until known), links, `openInTab`
   (a tab opened in the click, then sent to the address), the handoff, and `entryTarget` (the
@@ -539,7 +540,8 @@ What both adopters still wrote after 0.2 moves into Porthole (ADOPTING.md is the
   `denied`, `expired`, `failed`, `timeout`). React: `PortholeView` (a display by kind, served or
   opaque, with its fallback), `usePortholeLink`, and the provider's shared `scheme`, `theme`
   (`cssVariableTheme`), `nonce: "auto"`, `handlers`, `openLink`, `notify` and `renderConfirm`
-  (`accept`, `decline`, and `redirect`: `"redirected"`, which doesn't count toward muting, P074).
+  (`accept`, `decline`, and `redirect`: `"redirected"`, which doesn't count toward muting, P074;
+  the request's `display` carries the served frame's `instance`, P076).
   A flip of the provider's scheme or a new themeKey re-themes running frames in place: no effect
   that makes a display depends on the context value those renew (#9, P074).
 - **The viewer handoff** for a page that holds a token: `POST /porthole/handoff` with the app's

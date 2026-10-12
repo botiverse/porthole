@@ -15,6 +15,7 @@ import type {
   CapabilityHandlers,
   Confirm,
   ConfirmAnswer,
+  ConfirmDisplay,
   ConfirmRequest,
   HostFunctionBridge,
   Refusal,
@@ -35,7 +36,7 @@ export type BridgeEvent =
 
 export interface BridgeOptions {
   readonly config: PortholeConfig;
-  readonly display: { readonly id: string; readonly title: string };
+  readonly display: ConfirmDisplay;
   readonly handlers: CapabilityHandlers;
   readonly confirm?: Confirm;
   /** Whether the embedding page has user activation now; undefined where it can't tell. */

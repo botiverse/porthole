@@ -295,7 +295,10 @@ export interface NodeServerOptions {
   /**
    * The content host, or a function giving it when it exists: a host made after the server listens
    * (its content domain names the port `listen(0)` chose, P074). Until it gives one, every request
-   * is the app's; the health gate starts when it first does.
+   * is the app's. `nodeServer` starts the host's health gate when it listens, asking the function
+   * once the server's `listen` callbacks have run (a host made in one starts then), and again at
+   * each request until it gives one; `start` is idempotent, so an app may start the host itself
+   * as soon as it makes it (P076).
    */
   readonly content: ContentHost<unknown> | (() => ContentHost<unknown> | null);
   /**
@@ -384,9 +387,11 @@ export function nodeServer(options: NodeServerOptions): Server {
   });
   server.on("listening", () => {
     listening = true;
-    current();
+    // After the listen callbacks: a host made in one (with the port it got) starts now.
+    setImmediate(current);
   });
   server.on("close", () => {
+    listening = false;
     const host = typeof given === "function" ? given() : given;
     host?.close();
   });
