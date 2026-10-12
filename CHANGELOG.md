@@ -3,6 +3,12 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## 0.1.8
+
+- The manual's silent line says where a block is reported, following `errors`: back to the agent
+  (`agent`), to the app only (`host`), to the app (unset), or nowhere (no `reportError`), so it no
+  longer contradicts the Errors line (#4, P067). `14.silent` checks the host's side too.
+
 ## 0.1.7
 
 - The manual's "The sandbox:" list states every limit that silently changes behavior, derived
