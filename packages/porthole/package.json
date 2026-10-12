@@ -23,7 +23,8 @@
     "./server": "./src/server/index.ts",
     "./node": "./src/node/index.ts",
     "./check": "./src/check/index.ts",
-    "./check/page": "./src/check/page-source.ts"
+    "./check/page": "./src/check/page-source.ts",
+    "./conformance/reporter": "./src/conformance/reporter.ts"
   },
   "publishConfig": {
     "bin": {
@@ -61,6 +62,10 @@
       "./check/page": {
         "types": "./dist/check/page-source.d.ts",
         "default": "./dist/check/page-source.js"
+      },
+      "./conformance/reporter": {
+        "types": "./dist/conformance/reporter.d.ts",
+        "default": "./dist/conformance/reporter.js"
       }
     }
   },

@@ -59,11 +59,16 @@ function useClient(): PortholeClient {
 }
 
 /** The client's meta, as a React value (re-renders when frames start or stop being served). */
+/**
+ * The client's meta. On the server too (P074): a client made with the meta it will start with
+ * (`portholeClient({ meta })`) renders the frame's placeholder or the fallback there, and the
+ * page hydrates from the same.
+ */
 function useMeta(client: PortholeClient) {
   return useSyncExternalStore(
     (listener) => client.subscribe(listener),
     () => client.meta(),
-    () => null,
+    () => client.meta(),
   );
 }
 

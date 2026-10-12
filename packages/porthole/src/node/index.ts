@@ -292,8 +292,12 @@ export function nodeProbe(): HealthProbe {
 }
 
 export interface NodeServerOptions {
-  /** The content host. */
-  readonly content: ContentHost<unknown>;
+  /**
+   * The content host, or a function giving it when it exists: a host made after the server listens
+   * (its content domain names the port `listen(0)` chose, P074). Until it gives one, every request
+   * is the app's; the health gate starts when it first does.
+   */
+  readonly content: ContentHost<unknown> | (() => ContentHost<unknown> | null);
   /**
    * The app, fetch-style (Hono's `app.fetch`, or the app's own handler): every request that
    * isn't the content domain's. Or `request`, a Node listener (Express).
@@ -335,14 +339,56 @@ export function nodeServer(options: NodeServerOptions): Server {
   if (request === undefined) {
     throw new TypeError("nodeServer needs the app: app (fetch-style) or request (a Node listener)");
   }
-  const porthole = nodeHost(options.content, {
-    request,
-    ...(options.upgrade === undefined ? {} : { upgrade: options.upgrade }),
-    ...(options.appSocket === undefined ? {} : { appSocket: options.appSocket }),
+  const adapters = new WeakMap<ContentHost<unknown>, NodeHost>();
+  const started = new WeakSet<ContentHost<unknown>>();
+  let listening = false;
+  const given = options.content;
+  /** The host now (made once, adapted once), started once the server listens. */
+  const current = (): NodeHost | null => {
+    const host = typeof given === "function" ? given() : given;
+    if (host === null) {
+      return null;
+    }
+    let adapter = adapters.get(host);
+    if (adapter === undefined) {
+      adapter = nodeHost(host, {
+        request,
+        ...(options.upgrade === undefined ? {} : { upgrade: options.upgrade }),
+        ...(options.appSocket === undefined ? {} : { appSocket: options.appSocket }),
+      });
+      adapters.set(host, adapter);
+    }
+    if (listening && !started.has(host)) {
+      started.add(host);
+      host.start();
+    }
+    return adapter;
+  };
+  const server = createHttpServer((incoming, response) => {
+    const adapter = current();
+    if (adapter === null) {
+      request(incoming, response);
+    } else {
+      adapter.request(incoming, response);
+    }
   });
-  const server = createHttpServer(porthole.request);
-  server.on("upgrade", porthole.upgrade);
-  server.on("listening", () => options.content.start());
-  server.on("close", () => options.content.close());
+  server.on("upgrade", (incoming: IncomingMessage, socket: Duplex, head: Buffer) => {
+    const adapter = current();
+    if (adapter !== null) {
+      adapter.upgrade(incoming, socket, head);
+    } else if (options.upgrade !== undefined) {
+      options.upgrade(incoming, socket, head);
+    } else {
+      refuseSocket(socket);
+    }
+  });
+  server.on("listening", () => {
+    listening = true;
+    current();
+  });
+  server.on("close", () => {
+    const host = typeof given === "function" ? given() : given;
+    host?.close();
+  });
   return server;
 }

@@ -1,11 +1,13 @@
 // A whole Porthole app, runtime-agnostic (a web `Request` in, a `Response` out): agents' HTML
 // pages, each version on an origin of its own, framed in the app's viewer and openable at a
-// clean address. examples/node/server.mjs and examples/workers/worker.mjs only adapt it.
+// clean address. examples/node/server.mjs (`nodeServer`) and examples/workers/worker.mjs
+// (`contentHostFor`) only run it.
 //
 // What is the app's own here (the policy): who is signed in (a cookie), which pages exist, who
 // may see each, and what a clean address names. Everything else is Porthole's: one mount
 // (`content.routes`, under /porthole) answers frames, the authorize route and the page's meta.
-import { conformancePage, createContentHost, prefixedName } from "@botiverse/porthole/server";
+import { entryTarget } from "@botiverse/porthole";
+import { conformancePage, prefixedName } from "@botiverse/porthole/server";
 import { displays, kinds } from "./displays.mjs";
 
 /** The stored pages: id → versions. An app keeps them in its database. */
@@ -30,18 +32,21 @@ const html = (body, headers = {}) =>
 
 const escape = (text) => text.replace(/[&<>"']/gu, (char) => `&#${char.charCodeAt(0)};`);
 
-/** Only a path of the app's own comes back from sign-in: never another site's address. */
-const ownPath = (next, appOrigin) => {
-  if (next?.startsWith(`${appOrigin}/`)) next = next.slice(appOrigin.length);
-  return next?.startsWith("/") && !next.startsWith("//") && !next.includes("\\") ? next : "/";
-};
-
 /**
+ * The app: `options`, its content host's (its policy), and `handle(request, content)`, its own
+ * requests, given that host. A runtime makes the host from the options and sends the content
+ * domain's requests to it.
+ *
  * @param {{ appOrigin: string, contentDomain: string, secret: string, tickets?: import("@botiverse/porthole/server").TicketStore,
  *           health?: import("@botiverse/porthole/server").HealthOptions, conformance?: boolean, client: (path: string) => Promise<Response | null> }} settings
  */
 export function makeApp(settings) {
   const { appOrigin } = settings;
+  // Where redirect entry comes back after sign-in: `<first app origin>/porthole/authorize`, the
+  // default (`entry.authorizeUrl` names another).
+  const authorizeUrl = `${appOrigin}/porthole/authorize`;
+  /** Where sign-in goes on to: the authorize route or a page of the app's own, never another site. */
+  const backTo = (next) => entryTarget(next, authorizeUrl, { app: true }) ?? `${appOrigin}/`;
   const pages = { ...PAGES };
   // TEST MODE, for Porthole's conformance runner only (examples/conformance): pages the suite
   // names itself, and one page no one may see. NEVER enable it in production: anyone signed in
@@ -68,7 +73,8 @@ export function makeApp(settings) {
       : null;
   };
 
-  const content = createContentHost({
+  /** @type {import("@botiverse/porthole/server").ContentHostOptions<string>} */
+  const options = {
     domain: settings.contentDomain,
     appOrigins: [appOrigin],
     secret: settings.secret,
@@ -125,14 +131,14 @@ export function makeApp(settings) {
     },
     ...(settings.health === undefined ? {} : { health: settings.health }),
     log: (event) => console.log(JSON.stringify(event)),
-  });
-  // Frames, the authorize route and the page's meta, under /porthole.
-  const routes = content.routes(viewerOf);
+  };
 
-  async function handle(request) {
+  /** @param {Request} request @param {import("@botiverse/porthole/server").ContentHost<string>} content */
+  async function handle(request, content) {
     const url = new URL(request.url);
     const viewer = viewerOf(request);
-    const porthole = await routes(request);
+    // Frames, the authorize route and the page's meta, under /porthole.
+    const porthole = await content.routes(viewerOf)(request);
     if (porthole !== null) return porthole;
     if (url.pathname === "/porthole-client/displays.mjs") {
       // The page's display kinds: the same as the server's, as a module.
@@ -160,7 +166,7 @@ export function makeApp(settings) {
           });
     }
     if (url.pathname === "/login" && request.method === "GET") {
-      const next = escape(ownPath(url.searchParams.get("next"), appOrigin));
+      const next = escape(backTo(url.searchParams.get("next")));
       return html(
         `<!doctype html><title>Sign in</title><main id="sign-in-page"><form method="post"><input type="hidden" name="next" value="${next}"><button id="sign-in">Sign in as ada</button></form></main>`,
         {
@@ -171,7 +177,7 @@ export function makeApp(settings) {
       );
     }
     if (url.pathname === "/login" && request.method === "POST") {
-      const next = ownPath(new URLSearchParams(await request.text()).get("next"), appOrigin);
+      const next = backTo(new URLSearchParams(await request.text()).get("next"));
       return new Response(null, {
         status: 303,
         headers: {
@@ -228,5 +234,5 @@ Promise.all([import("@botiverse/porthole"), import("/porthole-client/displays.mj
 }, (error) => problem("Porthole's client didn't load: " + error.message));
 </script></body></html>`;
 
-  return { content, handle };
+  return { options, handle };
 }

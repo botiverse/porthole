@@ -51,8 +51,12 @@ export interface HostConformanceOptions {
   readonly config?: (instance: InstanceRef) => PortholeConfig;
   /** The app's display kinds (`defineDisplays`), in place of `config`. */
   readonly displays?: Displays;
-  /** The content source `displays` serve from (`http://*.content.localhost:8790`). */
-  readonly contentSource?: string;
+  /**
+   * The content source `displays` serve from (`http://*.content.localhost:8790`). A function is
+   * asked when a case needs it (P074): a test server's port that isn't known when the spec file
+   * loads.
+   */
+  readonly contentSource?: string | (() => string);
   /**
    * The instances the served cases ask for, each for the scope a case names (may be async: a
    * page published on demand, `onDemand`). Give what the app serves; the cases for the rest are
@@ -182,7 +186,11 @@ export function hostConformance(options: HostConformanceOptions): HostConformanc
   const configOf =
     options.config ??
     (displays !== undefined && contentSource !== undefined
-      ? (instance: InstanceRef) => displays.configFor(instance, contentSource)
+      ? (instance: InstanceRef) =>
+          displays.configFor(
+            instance,
+            typeof contentSource === "function" ? contentSource() : contentSource,
+          )
       : () => {
           throw new TypeError("hostConformance needs config, or displays with contentSource");
         });
@@ -501,28 +509,66 @@ export interface ConformanceProject {
  * preferences its WebRTC probe needs (loopback ICE). Pass `devices` from `@playwright/test`
  * (P071).
  */
+export interface ConformanceProjectsOptions {
+  readonly engines?: readonly ConformanceProject["name"][];
+  /** Added to every project's `use` (a trace setting, `ignoreHTTPSErrors`, a `baseURL`). */
+  readonly use?: Readonly<Record<string, unknown>>;
+  /**
+   * Each engine's launch options, merged with Porthole's own (P074): a system browser's
+   * `executablePath` and `args` (`{ chromium: { executablePath: "/usr/bin/chromium" } }`, on a box
+   * Playwright has no Chromium build for). Firefox's preferences add to the ones its probes need.
+   */
+  readonly launchOptions?: Partial<
+    Readonly<Record<ConformanceProject["name"], Readonly<Record<string, unknown>>>>
+  >;
+}
+
+const recordOf = (value: unknown): Record<string, unknown> =>
+  value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
+
 export function conformanceProjects(
   devices: Readonly<Record<string, Record<string, unknown>>>,
-  options: { readonly engines?: readonly ("chromium" | "webkit" | "firefox")[] } = {},
+  options: ConformanceProjectsOptions = {},
 ): ConformanceProject[] {
-  const all: ConformanceProject[] = [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
-    { name: "webkit", use: { ...devices["Desktop Safari"] } },
-    {
-      name: "firefox",
-      use: {
-        ...devices["Desktop Firefox"],
-        launchOptions: {
-          firefoxUserPrefs: {
-            "media.peerconnection.ice.loopback": true,
-            "media.peerconnection.ice.obfuscate_host_addresses": false,
-          },
-        },
+  const DEVICE = {
+    chromium: "Desktop Chrome",
+    webkit: "Desktop Safari",
+    firefox: "Desktop Firefox",
+  } as const;
+  /** Porthole's own launch options: Firefox's WebRTC probe needs loopback ICE. */
+  const OWN: Readonly<Record<ConformanceProject["name"], Record<string, unknown>>> = {
+    chromium: {},
+    webkit: {},
+    firefox: {
+      firefoxUserPrefs: {
+        "media.peerconnection.ice.loopback": true,
+        "media.peerconnection.ice.obfuscate_host_addresses": false,
       },
     },
-  ];
+  };
   const engines = options.engines ?? ["chromium", "webkit", "firefox"];
-  return all.filter((project) => engines.includes(project.name));
+  return (["chromium", "webkit", "firefox"] as const)
+    .filter((name) => engines.includes(name))
+    .map((name) => {
+      const given = { ...recordOf(options.use?.launchOptions), ...options.launchOptions?.[name] };
+      const prefs = {
+        ...recordOf(OWN[name].firefoxUserPrefs),
+        ...recordOf(given.firefoxUserPrefs),
+      };
+      const launchOptions = {
+        ...OWN[name],
+        ...given,
+        ...(Object.keys(prefs).length === 0 ? {} : { firefoxUserPrefs: prefs }),
+      };
+      return {
+        name,
+        use: {
+          ...devices[DEVICE[name]],
+          ...options.use,
+          ...(Object.keys(launchOptions).length === 0 ? {} : { launchOptions }),
+        },
+      };
+    });
 }
 
 /**

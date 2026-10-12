@@ -9,7 +9,7 @@ npm install @botiverse/porthole
 ```
 
 Node 24 or later, or Cloudflare Workers. The browser part is plain ES modules with no
-dependencies (bundle it, or serve `dist/`).
+dependencies (bundle it, or serve `dist/` with an import map: docs/ADOPTING.md § 4).
 
 ## Two ways to show content
 
@@ -30,7 +30,8 @@ PORTHOLE_SECRET=$(npx porthole secret) node node_modules/@botiverse/porthole/exa
 ```
 
 - `examples/app.mjs`: the app (policy, routes, page), runtime-agnostic.
-- `examples/node/server.mjs`, `examples/workers/` (with its D1 migration and `wrangler.jsonc`).
+- `examples/node/server.mjs` (`nodeServer`), `examples/workers/` (`contentHostFor`, with its D1
+  migration and `wrangler.jsonc`).
 - `examples/conformance/`: Porthole's conformance suite run against it, on three engines.
 - `examples/mcp/server.mjs`: the agent's tools (show, guide, check) as an MCP server.
 

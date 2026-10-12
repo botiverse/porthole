@@ -14,6 +14,7 @@ export {
   PortholeProvider,
   type PlaceholderProps,
   type PortholeFrameProps,
+  type ConfirmActions,
   type PortholeProviderProps,
 } from "./frame.tsx";
 export { ARM_DELAY_MS, ConfirmDialog, type ConfirmDialogProps } from "./dialog.tsx";

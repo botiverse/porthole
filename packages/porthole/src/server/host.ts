@@ -201,7 +201,8 @@ export interface EntryOptions<V> {
     request: Request,
   ) => Awaitable<InstanceRef | null | undefined>;
   /**
-   * The app's own sign-in, which comes back to `returnTo` (the authorize URL) once signed in.
+   * The app's own sign-in, which comes back to `returnTo` (the authorize URL, as `authorizeUrl`
+   * names the app, with the entry's state) once signed in.
    * Only ever on a tab: in a frame, the person is asked to open a new tab instead. `entry` is the
    * address being opened, decoded (P070).
    */
@@ -218,9 +219,10 @@ export interface EntryOptions<V> {
   readonly spa?: { readonly route: string };
   /**
    * The clean path of an instance (the reverse of `at`), or null: `issue` then answers its clean
-   * address as `link` (P072), for "open in a new tab" and "copy link".
+   * address as `link` (P072), for "open in a new tab" and "copy link". It may look it up (a
+   * promise, P074); where it fails, the frame comes without a link.
    */
-  readonly pathOf?: (instance: InstanceRef) => string | null;
+  readonly pathOf?: (instance: InstanceRef, request: Request) => Awaitable<string | null>;
   /**
    * A viewer handoff, for an app whose page authenticates with a token rather than a cookie
    * (P072): `POST <prefix>/handoff`, made with the app's own credential, leaves a short-lived key
@@ -406,10 +408,19 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
   if (options.configs === undefined && options.displays === undefined) {
     throw new TypeError("createContentHost needs configs or displays");
   }
-  const secret = typeof options.secret === "string" ? utf8(options.secret.trim()) : options.secret;
+  // The secret as given (an unset environment variable: none), checked with the domain below.
+  const secret: Uint8Array | null =
+    typeof options.secret === "string"
+      ? utf8(options.secret.trim())
+      : options.secret instanceof Uint8Array
+        ? options.secret
+        : null;
   const healthLabel = gate?.label ?? DEFAULT_HEALTH_LABEL;
   // The id Porthole's health check answers with: keyed, so another deployment's answer fails.
-  const healthId = base64url(hmacSha256(secret, utf8("porthole/health"))).slice(0, 22);
+  const healthId =
+    secret === null || secret.byteLength < 32
+      ? ""
+      : base64url(hmacSha256(secret, utf8("porthole/health"))).slice(0, 22);
   const appReserved = reservedLabels(options.reserved);
 
   let domain: ContentDomainInfo | null = null;
@@ -423,6 +434,17 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
         ? options.domain
         : contentDomain(options.domain, { appOrigins: options.appOrigins });
     if (domain !== null) {
+      // Said plainly where it's missing, as where it's short (P074).
+      if (secret === null) {
+        throw new TypeError(
+          "createContentHost needs a secret: at least 32 random bytes (set PORTHOLE_SECRET; npx porthole secret makes one)",
+        );
+      }
+      if (secret.byteLength < 32) {
+        throw new TypeError(
+          "The secret must be at least 32 random bytes (set PORTHOLE_SECRET; npx porthole secret makes one)",
+        );
+      }
       if (options.entry !== undefined && options.name?.scopeOf === undefined) {
         throw new TypeError(
           "Redirect entry needs a naming that says which scope a label names (prefixedName)",
@@ -632,7 +654,9 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
 
   // The viewer handoff (P072): a key Porthole signs, naming the app's viewer until a time, in a
   // cookie only the prefix's routes get. Never the app's own credential.
-  const handoffKey = hmacSha256(secret, utf8("porthole/handoff"));
+  // None where the secret can't sign (then nothing is served, and no handoff made or taken).
+  const handoffKey =
+    secret === null || secret.byteLength < 32 ? null : hmacSha256(secret, utf8("porthole/handoff"));
   const secureApp = (options.appOrigins[0] ?? "").startsWith("https:");
   const handoffName = secureApp ? "__Secure-porthole-handoff" : "porthole-handoff";
   const handoffCookie = (value: string, maxAge: number): string =>
@@ -644,14 +668,14 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
       `Max-Age=${maxAge}`,
       ...(secureApp ? ["Secure"] : []),
     ].join("; ");
-  const signHandoff = (id: string, until: number): string => {
+  const signHandoff = (key: Uint8Array, id: string, until: number): string => {
     const payload = base64url(utf8(JSON.stringify({ h: 1, v: id, x: until })));
-    return `${payload}.${base64url(hmacSha256(handoffKey, utf8(payload)))}`;
+    return `${payload}.${base64url(hmacSha256(key, utf8(payload)))}`;
   };
   /** The viewer a request's handoff cookie names, if it is good. */
   const handedOver = async (request: Request): Promise<V | null> => {
     const handoff = options.entry?.handoff;
-    if (handoff === undefined) {
+    if (handoff === undefined || handoffKey === null) {
       return null;
     }
     for (const part of (request.headers.get("cookie") ?? "").split(";")) {
@@ -690,18 +714,29 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
     }
     return null;
   };
+  /**
+   * Where the person comes back after signing in: the authorize route as the app is reached
+   * (`authorizeUrl`'s origin and path), with this request's query (its state). Never the request's
+   * own URL, whose origin behind a TLS edge or a dev proxy isn't the app's (P074).
+   */
+  const returnOf = (request: Request): string => {
+    const back = new URL(authorizeUrl);
+    back.search = new URL(request.url).search;
+    return back.href;
+  };
   /** The app's sign-in: its own `signIn`, or its single-page route with `next`. */
   const signInWith = async (
     entry: EntryOptions<V>,
     request: Request,
     context: EntryContext,
   ): Promise<Response> => {
+    const returnTo = returnOf(request);
     if (entry.signIn !== undefined) {
-      return entry.signIn(request.url, request, context);
+      return entry.signIn(returnTo, request, context);
     }
     const route = entry.spa?.route ?? "/";
-    const to = new URL(route, options.appOrigins[0]);
-    to.searchParams.set("next", request.url);
+    const to = new URL(route, new URL(authorizeUrl).origin);
+    to.searchParams.set("next", returnTo);
     return new Response(null, {
       status: 303,
       headers: { location: to.href, "cache-control": "no-store", "referrer-policy": "no-referrer" },
@@ -807,10 +842,10 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
           } catch (error) {
             return refusal(409, "refused", error instanceof Error ? error.message : String(error));
           }
-          // The clean address, where the app says the instance's path (P072).
-          const path = options.entry?.pathOf?.(instance) ?? null;
+          // The clean address, where the app says the instance's path (P072, P074).
           let link: string | null = null;
           try {
+            const path = (await options.entry?.pathOf?.(instance, request)) ?? null;
             link = path === null ? null : server.urlOf(instance.scope, path);
           } catch {
             link = null;
@@ -910,7 +945,10 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
         if (typeof id !== "string" || id.length === 0 || id.length > 512) {
           return refusal(500, "failed", "entry.handoff.id gave no id (1 to 512 characters)");
         }
-        const key = signHandoff(id, Date.now() + HANDOFF_SECONDS * 1_000);
+        if (handoffKey === null) {
+          return refusal(503, "unavailable", "The content domain isn't served");
+        }
+        const key = signHandoff(handoffKey, id, Date.now() + HANDOFF_SECONDS * 1_000);
         return new Response(null, {
           status: 204,
           headers: {

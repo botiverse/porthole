@@ -44,36 +44,45 @@ export interface PortholeClientOptions<N extends string> {
   readonly fetch?: typeof fetch;
 }
 
+/**
+ * Every function is declared `this: void` (P074): each may be passed bare
+ * (`useSyncExternalStore(porthole.subscribe, porthole.meta)`), and none reads `this`.
+ */
 export interface PortholeClient<N extends string = string> extends InstanceLocator {
   readonly displays: Displays<N>;
+  /** Locates an instance's frame through `POST <base>/frames` (`InstanceLocator`). */
+  locate(this: void, instance: InstanceRef, signal?: AbortSignal): Promise<FrameLocation>;
   /** The meta as last fetched, or null before it is known. */
-  meta(): ContentClientMeta | null;
+  meta(this: void): ContentClientMeta | null;
   /** Called when the meta changes (frames served or not). */
-  subscribe(listener: () => void): () => void;
+  subscribe(this: void, listener: () => void): () => void;
   /** Fetches the meta again. */
-  refresh(): Promise<ContentClientMeta | null>;
+  refresh(this: void): Promise<ContentClientMeta | null>;
   /**
    * The config a kind shows under now: served while frames are served, else opaque (a url kind:
    * null). Null until the meta is known, so a frame never starts opaque and then restarts served.
    */
-  config(kind: N): PortholeConfig | null;
+  config(this: void, kind: N): PortholeConfig | null;
   /** The same, for an instance's kind. */
-  configFor(instance: InstanceRef): PortholeConfig | null;
+  configFor(this: void, instance: InstanceRef): PortholeConfig | null;
   /** An instance's clean address (`entry.pathOf` on the server), or null. */
-  link(instance: InstanceRef): Promise<string | null>;
+  link(this: void, instance: InstanceRef): Promise<string | null>;
   /** The clean address if already known (from locating the instance), for rendering. */
-  knownLink(instance: InstanceRef): string | null;
+  knownLink(this: void, instance: InstanceRef): string | null;
   /**
    * Opens an instance's clean address in a new tab: call it in the click (the tab opens at once,
    * then goes to the address).
    */
-  openInTab(instance: InstanceRef): void;
+  openInTab(this: void, instance: InstanceRef): void;
   /** Hands the signed-in viewer to the authorize route (`entry.handoff`); true if it took. */
-  handoff(): Promise<boolean>;
-  /** `next` if it is this server's authorize route (after a sign-in), else null (`entryTarget`). */
-  entryTarget(next: unknown): string | null;
+  handoff(this: void): Promise<boolean>;
+  /**
+   * `next` if it is this server's authorize route (after a sign-in), or with `{ app: true }` any
+   * address on the app's own origin; else null (`entryTarget`).
+   */
+  entryTarget(this: void, next: unknown, options?: { readonly app?: boolean }): string | null;
   /** Stops refreshing the handoff. */
-  close(): void;
+  close(this: void): void;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -81,9 +90,18 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 /**
  * Whether a sign-in's `next` is the app's authorize route (P072): the open-redirect guard a
- * single-page app runs before going on to it. Null for anything else.
+ * single-page app runs before going on to it. Null for anything else; with `{ app: true }`, also
+ * any path or address on the app's own origin (P074), so one check serves a sign-in that comes
+ * back to redirect entry or to the app's own pages. Never another origin.
+ *
+ * The authorize route is `<first app origin><prefix>/authorize` unless the server names another
+ * (`entry.authorizeUrl`): `https://app.example.com/porthole/authorize` by default.
  */
-export function entryTarget(next: unknown, authorizeUrl: string): string | null {
+export function entryTarget(
+  next: unknown,
+  authorizeUrl: string,
+  options: { readonly app?: boolean } = {},
+): string | null {
   if (typeof next !== "string" || next.length > 8_192) {
     return null;
   }
@@ -95,10 +113,19 @@ export function entryTarget(next: unknown, authorizeUrl: string): string | null 
   } catch {
     return null;
   }
-  return target.origin === route.origin &&
+  if (
+    target.origin === route.origin &&
     target.pathname === route.pathname &&
     target.hash === "" &&
     target.searchParams.has("state")
+  ) {
+    return target.href;
+  }
+  // An app path: one leading slash, no backslash (`//evil.example` and `/\evil.example` are
+  // other sites to a browser), and still the app's origin once resolved.
+  const path = /^\/(?![/\\])/u.test(next) && !next.includes("\\");
+  const absolute = /^https?:\/\//iu.test(next);
+  return options.app === true && (path || absolute) && target.origin === route.origin
     ? target.href
     : null;
 }
@@ -245,30 +272,34 @@ export function portholeClient<N extends string>(
     document.addEventListener("visibilitychange", fresh);
   }
 
+  const link = async (instance: InstanceRef): Promise<string | null> => {
+    const key = keyOf(instance);
+    if (!links.has(key)) {
+      try {
+        await issue(instance);
+      } catch {
+        return null;
+      }
+    }
+    return links.get(key) ?? null;
+  };
+
   return {
     displays: options.displays,
     meta: () => meta,
-    subscribe(listener) {
+    subscribe: (listener) => {
       listeners.add(listener);
-      return () => listeners.delete(listener);
+      return () => {
+        listeners.delete(listener);
+      };
     },
     refresh,
     config: (kind) => configOf(kind),
     configFor: (instance) => configOf(options.displays.kindOf(instance)),
     locate: issue,
-    async link(instance) {
-      const key = keyOf(instance);
-      if (!links.has(key)) {
-        try {
-          await issue(instance);
-        } catch {
-          return null;
-        }
-      }
-      return links.get(key) ?? null;
-    },
+    link,
     knownLink: (instance) => links.get(keyOf(instance)) ?? null,
-    openInTab(instance) {
+    openInTab: (instance) => {
       // Opened inside the click (a popup blocker lets it), then sent to the address.
       const tab = typeof window === "undefined" ? null : window.open("about:blank", "_blank");
       if (tab === null) {
@@ -276,17 +307,17 @@ export function portholeClient<N extends string>(
       }
       tab.opener = null;
       void (async () => {
-        const link = await this.link(instance);
-        if (link === null) {
+        const found = await link(instance);
+        if (found === null) {
           tab.close();
         } else {
-          tab.location.href = link;
+          tab.location.href = found;
         }
       })();
     },
     handoff,
-    entryTarget: (next) => entryTarget(next, url("/authorize")),
-    close() {
+    entryTarget: (next, given) => entryTarget(next, url("/authorize"), given),
+    close: () => {
       if (watching) {
         window.removeEventListener("focus", fresh);
         document.removeEventListener("visibilitychange", fresh);

@@ -110,12 +110,11 @@ export interface PortholeProviderProps {
   /**
    * Draws the confirmation in the app's own dialog, for the request at the head of the queue:
    * Porthole keeps the queue (one question at a time), runs `accept` inside the click, and counts
-   * declines. Omitted: Porthole's `ConfirmDialog`. (`confirm` replaces the whole mechanism.)
+   * declines. `redirect`: the person took it elsewhere (edited a prompt first, P074): the call
+   * doesn't go, and it neither counts toward muting the display nor resets the count. Omitted:
+   * Porthole's `ConfirmDialog`. (`confirm` replaces the whole mechanism.)
    */
-  readonly renderConfirm?: (
-    request: ConfirmRequest,
-    answer: { readonly accept: () => void; readonly decline: () => void },
-  ) => ReactNode;
+  readonly renderConfirm?: (request: ConfirmRequest, answer: ConfirmActions) => ReactNode;
   /**
    * Who confirms gated calls for every frame below. Omitted: the default dialog (`ConfirmDialog`).
    * Pass your own function to replace it.
@@ -136,6 +135,16 @@ export interface PortholeProviderProps {
    */
   readonly nonce?: string;
   readonly children?: ReactNode;
+}
+
+/** What an app's own confirmation dialog answers with (`renderConfirm`). */
+export interface ConfirmActions {
+  /** Yes: the call goes, run inside this click. */
+  readonly accept: () => void;
+  /** No: the call doesn't go, and it counts toward muting the display. */
+  readonly decline: () => void;
+  /** Elsewhere (the person edits the prompt first): the call doesn't go, and doesn't count. */
+  readonly redirect: () => void;
 }
 
 /** The page's own nonce: `<meta name="csp-nonce" content>`, else the first `script[nonce]`'s. */
@@ -290,6 +299,10 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
             },
             decline: () => {
               current.resolve("declined");
+              setQueue((waiting) => waiting.slice(1));
+            },
+            redirect: () => {
+              current.resolve("redirected");
               setQueue((waiting) => waiting.slice(1));
             },
           })
@@ -477,12 +490,15 @@ function rememberedHeight(
 
 export function PortholeFrame(props: PortholeFrameProps): ReactElement {
   const page = useContext(Page);
+  // The provider's registry and heights: stable, unlike the context value, which a scheme flip
+  // or a new themeKey renews (an effect keyed on it would let the frame go and make it again, #9).
+  const { live, heights } = page;
   const key = useId();
   const box = useRef<HTMLDivElement>(null);
   const max = props.config.limits.maxLiveFrames;
   const state = useSyncExternalStore(
-    (listener) => page.live.subscribe(listener),
-    () => page.live.state(key),
+    (listener) => live.subscribe(listener),
+    () => live.state(key),
     (): FrameState => "waiting",
   );
   const { eager } = props;
@@ -493,9 +509,9 @@ export function PortholeFrame(props: PortholeFrameProps): ReactElement {
       return;
     }
     if (eager === true || typeof IntersectionObserver !== "function") {
-      page.live.near(key, true);
-      page.live.admit(key, max);
-      return () => page.live.release(key);
+      live.near(key, true);
+      live.admit(key, max);
+      return () => live.release(key);
     }
     const observer = new IntersectionObserver(
       (entries) => {
@@ -503,9 +519,9 @@ export function PortholeFrame(props: PortholeFrameProps): ReactElement {
         if (entry === undefined) {
           return;
         }
-        page.live.near(key, entry.isIntersecting);
+        live.near(key, entry.isIntersecting);
         if (entry.isIntersecting) {
-          page.live.admit(key, max);
+          live.admit(key, max);
         }
       },
       { rootMargin: NEAR_SCREEN },
@@ -513,22 +529,22 @@ export function PortholeFrame(props: PortholeFrameProps): ReactElement {
     observer.observe(element);
     return () => {
       observer.disconnect();
-      page.live.release(key);
+      live.release(key);
     };
-  }, [page, key, max, eager]);
+  }, [live, key, max, eager]);
 
-  const height = rememberedHeight(page.heights, props.displayId, props.aliases);
+  const height = rememberedHeight(heights, props.displayId, props.aliases);
   // A display renamed while it runs (its id settled) keeps its height under its new id.
   const previousId = useRef(props.displayId);
   useLayoutEffect(() => {
     const before = previousId.current;
     previousId.current = props.displayId;
-    const kept = page.heights.get(before);
-    if (before !== props.displayId && kept !== undefined && !page.heights.has(props.displayId)) {
-      page.heights.set(props.displayId, kept);
+    const kept = heights.get(before);
+    if (before !== props.displayId && kept !== undefined && !heights.has(props.displayId)) {
+      heights.set(props.displayId, kept);
     }
-  }, [page, props.displayId]);
-  const run = () => page.live.admit(key, max);
+  }, [heights, props.displayId]);
+  const run = () => live.admit(key, max);
   const placeholder = props.renderPlaceholder ?? DefaultPlaceholder;
   return (
     <div
@@ -593,6 +609,18 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
 
   // The latest props, read when the display calls back (never during render).
   const latest = useEffectEvent(() => frame);
+  // The provider's scheme and theme, read when used: a flip or a new themeKey (a new context
+  // value) re-themes the running display, never makes it again (#9, P074). What a display is
+  // made with comes from the provider's stable parts below.
+  const latestPage = useEffectEvent(() => page);
+  const {
+    handlers: pageHandlers,
+    copyText: pageCopyText,
+    confirm: pageConfirm,
+    hostInfo,
+    locate,
+    nonce,
+  } = page;
   const notify = useEffectEvent(
     <E extends keyof DisplayEvents>(event: E, detail: DisplayEvents[E]): void => {
       switch (event) {
@@ -662,23 +690,23 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
     const declared = new Set(Object.keys(config.capabilities));
     for (const name of new Set([
       ...Object.keys(first.handlers ?? {}),
-      ...Object.keys(page.handlers?.() ?? {}).filter((each) => declared.has(each)),
+      ...Object.keys(pageHandlers?.() ?? {}).filter((each) => declared.has(each)),
     ])) {
       handlers[name] = (args, context) =>
         (
           (latest().handlers as Record<string, AnyHandler | undefined> | undefined)?.[name] ??
-          (page.handlers?.() as Record<string, AnyHandler | undefined> | undefined)?.[name]
+          (pageHandlers?.() as Record<string, AnyHandler | undefined> | undefined)?.[name]
         )?.(args, named(context));
     }
     // Copy buttons without a handler of the host's: the provider's, which shows a toast.
     if (config.capabilities.copyText !== undefined && handlers.copyText === undefined) {
-      const fallback = page.copyText;
+      const fallback = pageCopyText;
       if (fallback !== undefined) {
         handlers.copyText = (args, context) =>
           fallback(args as { readonly text: string }, named(context));
       }
     }
-    const asks = first.confirm !== undefined || page.confirm !== undefined;
+    const asks = first.confirm !== undefined || pageConfirm !== undefined;
     let display: DisplayHandle;
     try {
       display = createHost(config, {
@@ -686,20 +714,20 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
         ...(asks
           ? {
               confirm: (request: ConfirmRequest, proceed: Proceed) =>
-                (latest().confirm ?? page.confirm ?? (() => Promise.resolve(false)))(
+                (latest().confirm ?? pageConfirm ?? (() => Promise.resolve(false)))(
                   { ...request, display: { id: latest().displayId, title: latest().title } },
                   proceed,
                 ),
             }
           : {}),
-        theme: (each) => (latest().theme ?? page.theme)?.(each) ?? {},
-        ...(page.hostInfo === undefined ? {} : { hostInfo: page.hostInfo }),
-        ...(page.locate === undefined ? {} : { locator: { locate: page.locate } }),
-        ...(page.nonce === undefined ? {} : { nonce: page.nonce }),
+        theme: (each) => (latest().theme ?? latestPage().theme)?.(each) ?? {},
+        ...(hostInfo === undefined ? {} : { hostInfo }),
+        ...(locate === undefined ? {} : { locator: { locate } }),
+        ...(nonce === undefined ? {} : { nonce }),
       }).mount(container, {
         displayId: first.displayId,
         title: first.title,
-        scheme: first.scheme ?? page.scheme ?? "light",
+        scheme: first.scheme ?? latestPage().scheme ?? "light",
         initialHeightPx: startHeight,
         ...(view === undefined ? {} : { document: view }),
         ...(instance === undefined ? {} : { instance }),
@@ -735,9 +763,22 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
       display.destroy();
       handle.current = null;
     };
-    // A new display only for a new config, document, instance or page (or generation, by key);
-    // content, theme, handlers, id and title are fed to the running one.
-  }, [config, view, instance, page, startHeight, fills]);
+    // A new display only for a new config, document or instance, or what the provider makes
+    // displays with (its nonce, hostInfo by value, whether it locates or confirms; generation, by
+    // key). Content, scheme, theme, handlers, id and title are fed to the running one.
+  }, [
+    config,
+    view,
+    instance,
+    startHeight,
+    fills,
+    pageHandlers,
+    pageCopyText,
+    pageConfirm,
+    hostInfo,
+    locate,
+    nonce,
+  ]);
 
   useEffect(() => {
     if (content !== undefined) {
@@ -803,6 +844,21 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
       handle.current?.refreshTheme();
     }
   }, [themeKey, mountThemeKey]);
+  // A new theme function (tokens a host passes inline): its values reach the running display
+  // where they changed for the scheme it shows (a flip re-reads them itself), P074.
+  const themeOf = frame.theme ?? page.theme;
+  const themed = useRef<string | null>(null);
+  useEffect(() => {
+    if (themeOf === undefined) {
+      return;
+    }
+    const now = `${scheme}\n${JSON.stringify(themeOf(scheme))}`;
+    const before = themed.current;
+    themed.current = now;
+    if (before !== null && before !== now && before.startsWith(`${scheme}\n`)) {
+      handle.current?.refreshTheme();
+    }
+  }, [themeOf, scheme]);
 
   return (
     <div

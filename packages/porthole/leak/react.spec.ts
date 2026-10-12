@@ -239,6 +239,11 @@ test("a theme flip reaches the running frame in place", async ({ page }) => {
   });
   const inside = frameOf(page, "t");
   await expect(inside.locator("p")).toHaveText("t");
+  // The frame element and its window, kept: a frame made again would have the right colors too.
+  await page.evaluate(() => {
+    const element = document.querySelector<HTMLIFrameElement>("[data-porthole-display='t'] iframe");
+    (window as unknown as { first: unknown }).first = [element, element?.contentWindow];
+  });
   await open(page, {
     provider: "default",
     frames: [frame({ displayId: "t", content, scheme: "dark" })],
@@ -247,6 +252,12 @@ test("a theme flip reaches the running frame in place", async ({ page }) => {
   expect(
     await inside.locator("html").evaluate(() => (window as unknown as { kept?: string }).kept),
   ).toBe("yes");
+  expect(
+    await page.evaluate(() => {
+      const [element, view] = (window as unknown as { first: [HTMLIFrameElement, Window] }).first;
+      return element.isConnected && element.contentWindow === view;
+    }),
+  ).toBe(true);
 });
 
 test("the default dialog: the whole text and the display's title, Cancel focused, no early yes", async ({
@@ -803,6 +814,89 @@ test("a view served: located through the client; its fallback, worded, when the 
   );
 });
 
+test("the provider's scheme flip and new themeKey re-theme every frame in place, opaque, served and url (#9)", async ({
+  page,
+}) => {
+  const rerender = (next: ViewsSpec) =>
+    page.evaluate((each) => (window as unknown as { app: App }).app.renderViews(each), next);
+  /** Each frame element and its window, kept to compare; and a mark inside each frame's page. */
+  const mark = async () => {
+    await page.evaluate(() => {
+      const frames = [...document.querySelectorAll("iframe")];
+      (window as unknown as { marked: unknown }).marked = frames.map((each) => [
+        each,
+        each.contentWindow,
+      ]);
+    });
+    for (const inner of page.frames().filter((each) => each !== page.mainFrame())) {
+      await inner.evaluate(() => {
+        (window as unknown as { kept?: string }).kept = "yes";
+      });
+    }
+  };
+  const same = async () => {
+    const kept = await page.evaluate(() => {
+      const marked = (window as unknown as { marked: [HTMLIFrameElement, Window | null][] }).marked;
+      return (
+        marked.length > 0 &&
+        marked.every(([each, view]) => each.isConnected && each.contentWindow === view) &&
+        document.querySelectorAll("iframe").length === marked.length
+      );
+    });
+    const inside = await Promise.all(
+      page
+        .frames()
+        .filter((each) => each !== page.mainFrame())
+        .map((each) => each.evaluate(() => (window as unknown as { kept?: string }).kept)),
+    );
+    return kept && inside.length > 0 && inside.every((each) => each === "yes");
+  };
+  for (const served of [false, true]) {
+    const spec = (scheme: "light" | "dark", themeKey: number): ViewsSpec => ({
+      served,
+      frames: "ok",
+      scheme,
+      themeKey,
+      views: served
+        ? [
+            { id: "s", display: "widget" },
+            { id: "p", display: "preview" },
+          ]
+        : [{ id: "o", display: "widget", content: '<p id="x">opaque</p>' }],
+    });
+    await views(page, spec("light", 0));
+    if (served) {
+      await expect(
+        page.locator('[data-view="p"] iframe').contentFrame().locator("html"),
+      ).toHaveAttribute("data-app", "ready");
+      await expect(page.locator('[data-view="s"] [data-porthole-ready="true"]')).toBeAttached();
+    } else {
+      await expect(page.locator('[data-view="o"] iframe').contentFrame().locator("#x")).toHaveText(
+        "opaque",
+      );
+    }
+    await mark();
+    expect(await same()).toBe(true);
+    await rerender(spec("dark", 0));
+    // Re-themed: the shell's own document says dark, opaque or served.
+    await expect(
+      page
+        .locator(`[data-view="${served ? "s" : "o"}"] iframe`)
+        .contentFrame()
+        .locator("html"),
+    ).toHaveAttribute("data-theme", "dark");
+    await page.waitForTimeout(300);
+    expect(await same(), `${served ? "served" : "opaque"}: the same frames after a flip`).toBe(
+      true,
+    );
+    await rerender(spec("dark", 1));
+    await page.waitForTimeout(300);
+    expect(await same(), `${served ? "served" : "opaque"}: the same frames after a themeKey`).toBe(
+      true,
+    );
+  }
+});
+
 test("renderConfirm: the app's own dialog asks; its yes runs the call from its click", async ({
   page,
 }) => {
@@ -819,4 +913,26 @@ test("renderConfirm: the app's own dialog asks; its yes runs the call from its c
     "true",
   );
   expect(await events(page, "provider", "sendPrompt")).toHaveLength(1);
+});
+
+test("renderConfirm's redirect: the call doesn't go, and it never mutes the display (P074)", async ({
+  page,
+}) => {
+  await views(page, {
+    served: false,
+    frames: "ok",
+    renderConfirm: true,
+    views: [{ id: "w", display: "widget", content: PROMPT }],
+  });
+  const inside = page.locator('[data-view="w"] iframe').contentFrame();
+  // More times than the mute's limit: each is asked, none mutes.
+  for (let round = 0; round < 4; round += 1) {
+    await inside.locator("#ask").click();
+    await expect(page.locator("#app-dialog")).toBeVisible();
+    await page.click("#app-edit");
+    // The call didn't go: sendPrompt answers false, as for a no.
+    await expect(inside.locator("#status")).toHaveText("false");
+    await inside.locator("#status").evaluate((element) => (element.textContent = ""));
+  }
+  expect(await events(page, "provider", "sendPrompt")).toHaveLength(0);
 });

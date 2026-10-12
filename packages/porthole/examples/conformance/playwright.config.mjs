@@ -11,7 +11,8 @@ export default defineConfig({
   testMatch: "*.spec.mjs",
   outputDir: process.env.PORTHOLE_EXAMPLE_RESULTS ?? "test-results",
   fullyParallel: true,
-  reporter: [["list"]],
+  // The list, and why each skipped case was skipped (an inapplicable probe says which directive).
+  reporter: [["list"], ["@botiverse/porthole/conformance/reporter"]],
   projects: conformanceProjects(devices, {
     engines: (process.env.PORTHOLE_ENGINES ?? "chromium,webkit,firefox").split(","),
   }),

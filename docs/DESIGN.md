@@ -437,7 +437,10 @@ a link sent to someone with access.
    frame, never the sign-in**: a plain page asking for a new tab (`blocked: sign-in`). No
    access: the app's refusal on a tab (`refusal(status, request, entry)`; nothing returned:
    Porthole's page), a plain page in a frame; never content. Both hooks get the address decoded
-   (`EntryContext`: label, scope, path, clean URL, the instance, framed).
+   (`EntryContext`: label, scope, path, clean URL, the instance, framed). `returnTo` (and
+   `entry.spa`'s `next`) is `authorizeUrl` with the request's query: the app as it is reached,
+   never the request's own URL, whose scheme and host behind a TLS edge or a dev proxy are
+   another's (P074).
 3. Granted, a 302 back to `/__porthole/entry?code=…`: a one-time code (60 s), bound to the
    label, the path and the nonce. The content origin redeems it only on that label and only with
    the nonce's cookie, sets the session (bound to the path) and 303s to the clean address. The
@@ -489,7 +492,11 @@ The tests are located in the app's own spec file, at the `defineHostConformance`
 addresses may be async (an app publishes a test page on demand and returns its real instance,
 which the issue endpoint then gets); `entry.unknown` lists addresses that name nothing, each of
 which must be a 404 on the content domain. `hostConformance(options)` gives the hosts for an app
-that registers the cases itself.
+that registers the cases itself. Playwright's list and line reporters show a skipped case without
+its reason; `@botiverse/porthole/conformance/reporter` prints each reason after the run (P074).
+`contentSource` may be a function, asked per case (a port known only once the server runs), and
+`conformanceProjects` merges an app's own `use` and per-engine `launchOptions` (a system
+browser) with Porthole's (P074).
 
 **Prod shape** (`ops/prod-shape/`, `ops/prod-shape/run.sh`). Docker compose: Caddy's internal
 CA serving `app.test`, `*.content.test` (same-site siblings, as in production without a Public
@@ -517,18 +524,24 @@ What both adopters still wrote after 0.2 moves into Porthole (ADOPTING.md is the
   `frame-src` directive without a server, and a served kind's config for the manual without a real
   origin. `createContentHost({ displays })` and the conformance runner take it.
 - **`content.routes(viewerOf)`** (/server): one mount under `/porthole` (`prefix`): `POST frames`
-  (`issue`, answering `link`, the clean address, where `entry.pathOf` names the path), `GET
+  (`issue`, answering `link`, the clean address, where `entry.pathOf` names the path, which it
+  may look up: a promise, P074), `GET
   authorize` (its URL now the default `entry.authorizeUrl`), `GET meta` (`ContentClientMeta`:
   served, content source, frame sources, health) and `POST`/`DELETE handoff`.
   `contentHostFor(build)` gives one host per Workers `env`, failing closed with a plain 503;
-  `nodeServer({ content, app })` is the whole Node server.
+  `nodeServer({ content, app })` is the whole Node server (`content` may be a function giving the
+  host once made, P074). A missing or short secret throws, naming `PORTHOLE_SECRET`.
 - **The client:** `portholeClient({ displays, base, headers, credentials, handoff })` is the
   locator and knows each kind's config from the meta (null until known), links, `openInTab`
-  (a tab opened in the click, then sent to the address), the handoff, and `entryTarget`.
+  (a tab opened in the click, then sent to the address), the handoff, and `entryTarget` (the
+  authorize route only; with `{ app: true }` also a path or address on the app's origin, P074).
   `frameFallback(outcome)` words what to offer when a frame shows nothing (`needs-tab`,
   `denied`, `expired`, `failed`, `timeout`). React: `PortholeView` (a display by kind, served or
   opaque, with its fallback), `usePortholeLink`, and the provider's shared `scheme`, `theme`
-  (`cssVariableTheme`), `nonce: "auto"`, `handlers`, `openLink`, `notify` and `renderConfirm`.
+  (`cssVariableTheme`), `nonce: "auto"`, `handlers`, `openLink`, `notify` and `renderConfirm`
+  (`accept`, `decline`, and `redirect`: `"redirected"`, which doesn't count toward muting, P074).
+  A flip of the provider's scheme or a new themeKey re-themes running frames in place: no effect
+  that makes a display depends on the context value those renew (#9, P074).
 - **The viewer handoff** for a page that holds a token: `POST /porthole/handoff` with the app's
   own credential, from the app's own page, sets a 10-minute `HttpOnly` cookie scoped to the
   prefix holding a Porthole-signed key (the viewer's id and expiry), which the authorize route
@@ -554,12 +567,23 @@ What both adopters still wrote after 0.2 moves into Porthole (ADOPTING.md is the
 - **`checkPage({ config, content, driver })`** (`/check`): the content in the real sandbox at each
   width and scheme (defaults: the manual's phone and desktop widths, light and dark unless
   unthemed). The check page (`src/check/page.ts`, bundled and shipped as `/check/page`) is served
-  by the driver at a fixed origin, mounts the content opaque under its own CSP with a small
-  instrument first in it, and hears errors, rejections, CSP blocks, failed loads, the console and
-  the document's width by `postMessage`; heights come from the display's resize events. The
-  report's `text` names each problem once, with where it happened, at most 8. Drivers:
-  `playwrightDriver(browser)`, and `cdpDriver(open)` over any CDP session (Cloudflare Browser
-  Rendering from a Worker).
+  by the driver at a fixed origin (`https://porthole-check.invalid`), mounts the content with a
+  small instrument first in it, and hears errors, rejections, CSP blocks, failed loads, the
+  console and the document's width by `postMessage`; heights come from the display's resize
+  events. A served config runs served (P074): the driver also answers a reserved content domain
+  (`*.porthole-check-content.invalid`) with an in-process `createServer` (a random secret, the
+  check page as its only host origin), so the content gets its own origin, the served CSP in
+  headers, the shell, storage and cookies, each run on a new origin; an opaque config, an MCP
+  Apps view (as a page with the view's egress) and a driver without `serve` run opaque. Each
+  inline script is named (`//# sourceURL=porthole-script-<n>`) and its first line recorded, so an
+  error's line is the content's own line, as lint numbers it. Every host function the config
+  declares is answered as a host that declines (`confirm` says no; each handler answers no), and
+  each call the host sees is reported (`run.calls`): refused by a gate whatever the person says (no
+  click, bad arguments, too often) a problem, declined or answered a note. A global the shell
+  refuses itself without a click (`sendPrompt`) rejects in the content, so it shows as an error. The report's `text` names each
+  problem once, with where it happened, at most 8. Drivers: `playwrightDriver(browser)` (requests
+  answered by `page.route`), and `cdpDriver(open)` over any CDP session (`Fetch` interception;
+  Cloudflare Browser Rendering from a Worker).
 - **Tools:** `showTool`, `guideTool`, `checkTool` give `{ name, description, inputSchema }` from
   the config; `answerGuide` answers the guide tool; `guideChanges(from, to)` is the notice when a
   kind flips between served and opaque. `examples/mcp/server.mjs` wires them over MCP.

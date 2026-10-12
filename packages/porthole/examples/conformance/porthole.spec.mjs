@@ -19,7 +19,8 @@ defineHostConformance(test, {
   // The app's frame endpoint (content.routes), and its display kinds.
   issue: { url: "/porthole/frames" },
   displays,
-  contentSource: `http://*.content.localhost:${port}`,
+  // Asked when a case needs it: a function, so a port known only once the server runs works too.
+  contentSource: () => `http://*.content.localhost:${port}`,
   // A stored-pages app: its test page's two versions (the domain cases run on version 1).
   instances: {
     artifact: (scope, version) => ({

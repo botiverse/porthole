@@ -187,6 +187,9 @@ export interface ViewsSpec {
   }[];
   /** The app's own confirmation dialog (`renderConfirm`). */
   readonly renderConfirm?: boolean;
+  /** The provider's scheme (default light) and themeKey, for every view. */
+  readonly scheme?: "light" | "dark";
+  readonly themeKey?: number;
 }
 
 const DISPLAYS = defineDisplays({
@@ -203,9 +206,15 @@ function renderViews(spec: ViewsSpec): void {
       frameSources: [],
       health: null,
     },
-    fetch: async () =>
+    fetch: async (_input: RequestInfo | URL, init?: RequestInit) =>
       spec.frames === "ok"
-        ? Response.json({ url: `${APP_ORIGIN}/leak/host/app.html`, origin: APP_ORIGIN })
+        ? Response.json({
+            // A shell instance gets a served shell; an app, the running app.
+            url: (typeof init?.body === "string" ? init.body : "").includes('"shell"')
+              ? `${APP_ORIGIN}/leak/host/served-shell.html`
+              : `${APP_ORIGIN}/leak/host/app.html`,
+            origin: APP_ORIGIN,
+          })
         : Response.json(
             { error: { code: "forbidden", message: "You can't see this" } },
             { status: 403 },
@@ -216,7 +225,10 @@ function renderViews(spec: ViewsSpec): void {
       PortholeProvider,
       {
         client,
-        scheme: "light",
+        scheme: spec.scheme ?? "light",
+        // A new function on every render, as a host writes `cssVariableTheme(tokens)` inline.
+        theme: () => theme(),
+        ...(spec.themeKey === undefined ? {} : { themeKey: spec.themeKey }),
         handlers: {
           sendPrompt: ({ text }) => {
             record("provider", "sendPrompt", text);
@@ -227,7 +239,11 @@ function renderViews(spec: ViewsSpec): void {
           ? {
               renderConfirm: (
                 request: ConfirmRequest,
-                answer: { readonly accept: () => void; readonly decline: () => void },
+                answer: {
+                  readonly accept: () => void;
+                  readonly decline: () => void;
+                  readonly redirect: () => void;
+                },
               ) =>
                 h(
                   "div",
@@ -235,6 +251,7 @@ function renderViews(spec: ViewsSpec): void {
                   h("p", null, `${request.capability} from ${request.display.title}`),
                   h("button", { id: "app-yes", onClick: answer.accept }, "Yes"),
                   h("button", { id: "app-no", onClick: answer.decline }, "No"),
+                  h("button", { id: "app-edit", onClick: answer.redirect }, "Edit first"),
                 ),
             }
           : {}),
@@ -256,7 +273,14 @@ function renderViews(spec: ViewsSpec): void {
                     document: { kind: "external" as const, url: "http://app.test/" },
                   },
                 }
-              : {}),
+              : spec.served
+                ? {
+                    instance: {
+                      scope: view.id,
+                      document: { kind: "shell" as const, preset: "inlineWidget" },
+                    },
+                  }
+                : {}),
             onOutcome: (outcome) => record(view.id, "outcome", outcome),
             onInitialized: () => record(view.id, "initialized"),
           }),

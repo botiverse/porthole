@@ -1,3 +1,4 @@
+import { get as httpGet } from "node:http";
 import { describe, expect, it, vi } from "vitest";
 import {
   defineDisplays,
@@ -125,6 +126,57 @@ describe("content.routes", () => {
     expect(await routes(new Request(`${APP}/porthole/nothing`))).toBeNull();
   });
 
+  it("takes a clean path the app looks up (a promise), and issues without a link where it fails (P074)", async () => {
+    const issue = async (pathOf: NonNullable<ContentHostOptions<Viewer>["entry"]>["pathOf"]) => {
+      const { routes } = kit({
+        entry: { at: (scope) => page(scope), ...(pathOf === undefined ? {} : { pathOf }) },
+      });
+      const frames = await routes(
+        new Request(`${APP}/porthole/frames`, {
+          method: "POST",
+          headers: { authorization: "Bearer ada", "content-type": "application/json" },
+          body: JSON.stringify({ instance: page("abc", "3") }),
+        }),
+      );
+      expect(frames?.status).toBe(201);
+      return (await frames?.json()) as { url: string; link?: string };
+    };
+    const looked = await issue(async (instance, request) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(request.method).toBe("POST");
+      return `/v/${instance.document.kind === "artifact" ? instance.document.version : ""}`;
+    });
+    expect(looked.link).toBe(`${origin("abc")}/v/1`);
+    const failed = await issue(() => Promise.reject(new Error("the database is down")));
+    expect(failed.url).toContain(origin("abc"));
+    expect(failed.link).toBeUndefined();
+  });
+
+  it("answers meta with served false when there is no content domain, so pages fall back (P074)", async () => {
+    // Self-hosted with no domain for content: a host all the same, with no secret needed.
+    const content = createContentHost<Viewer>({
+      domain: null,
+      appOrigins: [APP],
+      secret: undefined as unknown as string,
+      displays,
+      instance: () => null,
+      access: () => null,
+    });
+    const routes = content.routes(() => ({ id: "ada" }));
+    const meta = await routes(new Request(`${APP}/porthole/meta`));
+    expect(meta?.status).toBe(200);
+    expect(await meta?.json()).toMatchObject({ served: false, contentSource: null });
+    const client = portholeClient({
+      displays,
+      base: `${APP}/porthole`,
+      fetch: async (input: RequestInfo | URL, init?: RequestInit) =>
+        (await routes(new Request(input, init))) ?? new Response(null, { status: 404 }),
+    });
+    await client.refresh();
+    expect(client.config("artifact")?.isolation, "opaque, never pending").toBe("opaque");
+    expect(await content.fetch(new Request(`${origin("abc")}/`))).toBeNull();
+  });
+
   it("defaults the authorize route under the prefix; the prefix moves", async () => {
     const { content } = kit({ prefix: "/content" });
     const begin = await content.fetch(
@@ -152,6 +204,76 @@ describe("content.routes", () => {
       entryTarget("https://evil.example/porthole/authorize?state=x", `${APP}/porthole/authorize`),
     ).toBeNull();
     expect(entryTarget(`${APP}/porthole/frames?state=x`, `${APP}/porthole/authorize`)).toBeNull();
+  });
+
+  it("entryTarget with { app: true } also takes the app's own pages, never another site (P074)", () => {
+    const route = `${APP}/porthole/authorize`;
+    const app = (next: unknown) => entryTarget(next, route, { app: true });
+    expect(entryTarget("/settings", route), "only the authorize route by default").toBeNull();
+    expect(app("/")).toBe(`${APP}/`);
+    expect(app("/pages/1?tab=a#top")).toBe(`${APP}/pages/1?tab=a#top`);
+    expect(app(`${APP}/pages/1`)).toBe(`${APP}/pages/1`);
+    expect(app(`${route}?state=s`)).toBe(`${route}?state=s`);
+    for (const elsewhere of [
+      "//evil.example/x",
+      "/\\evil.example/x",
+      "/\t/evil.example/x",
+      "\\\\evil.example",
+      "https://evil.example/x",
+      "https://app.example.com.evil.example/x",
+      "http://app.example.com/x",
+      "javascript:alert(1)",
+      "data:text/html,x",
+      "pages/1",
+      "",
+      null,
+      42,
+    ]) {
+      expect(app(elsewhere), String(elsewhere)).toBeNull();
+    }
+  });
+});
+
+describe("behind a proxy (P074)", () => {
+  it("sends the person back to the app's own authorize URL, not the URL the request arrived at", async () => {
+    const signIns: string[] = [];
+    const { content, routes } = kit({
+      entry: {
+        at: (scope, path) => (path === "/" ? page(scope) : null),
+        signIn: (returnTo) => {
+          signIns.push(returnTo);
+          return new Response(null, { status: 303, headers: { location: `${APP}/login` } });
+        },
+      },
+    });
+    const begin = await content.fetch(
+      new Request(`${origin("abc")}/`, { headers: { "sec-fetch-dest": "document" } }),
+    );
+    const state = new URL(begin?.headers.get("location") ?? "").search;
+    // A TLS edge (the app sees http) and a dev proxy that rewrote Host.
+    await routes(
+      new Request(`http://localhost:5173/porthole/authorize${state}`, {
+        headers: { host: "localhost:5173", "sec-fetch-dest": "document" },
+      }),
+    );
+    expect(signIns).toEqual([`${APP}/porthole/authorize${state}`]);
+    expect(entryTarget(signIns[0], `${APP}/porthole/authorize`)).toBe(signIns[0]);
+  });
+
+  it("builds a single-page app's next the same way", async () => {
+    const { content, routes } = kit();
+    const begin = await content.fetch(
+      new Request(`${origin("abc")}/`, { headers: { "sec-fetch-dest": "document" } }),
+    );
+    const state = new URL(begin?.headers.get("location") ?? "").search;
+    const signIn = await routes(
+      new Request(`http://10.0.0.7:8080/porthole/authorize${state}`, {
+        headers: { "sec-fetch-dest": "document" },
+      }),
+    );
+    const to = new URL(signIn?.headers.get("location") ?? "");
+    expect(`${to.origin}${to.pathname}`).toBe(`${APP}/sign-in`);
+    expect(to.searchParams.get("next")).toBe(`${APP}/porthole/authorize${state}`);
   });
 });
 
@@ -318,6 +440,49 @@ describe("server niceties", () => {
     expect(await refused?.text()).toMatch(
       /content domain can't be served: .*holds the app's own origin/u,
     );
+    // A Worker without its secret (no .dev.vars, no `wrangler secret put`): named, not a crash.
+    const unset = contentHostFor((env: { readonly PORTHOLE_SECRET?: string }) => ({
+      domain: "usercontent.example.net",
+      appOrigins: [APP],
+      secret: env.PORTHOLE_SECRET as string,
+      displays,
+      instance: () => null,
+      access: () => null,
+    }));
+    const missing = await unset.fetch(new Request(`${APP}/`), {});
+    expect(missing?.status).toBe(503);
+    expect(await missing?.text()).toMatch(/needs a secret.*PORTHOLE_SECRET/u);
+  });
+
+  it("names a missing secret, and a short one, with where to get one (P074)", () => {
+    const options = (secret: unknown, extra: Partial<ContentHostOptions<Viewer>> = {}) =>
+      ({
+        domain: "usercontent.example.net",
+        appOrigins: [APP],
+        secret,
+        displays,
+        instance: () => null,
+        access: () => null,
+        ...extra,
+      }) as ContentHostOptions<Viewer>;
+    for (const secret of [undefined, null, 42]) {
+      expect(() => createContentHost(options(secret)), String(secret)).toThrow(
+        /createContentHost needs a secret: at least 32 random bytes \(set PORTHOLE_SECRET; npx porthole secret makes one\)/u,
+      );
+    }
+    for (const secret of ["", "short", "   "]) {
+      expect(() => createContentHost(options(secret)), secret).toThrow(
+        /The secret must be at least 32 random bytes \(set PORTHOLE_SECRET/u,
+      );
+    }
+    // Under the health gate's fallback, a lasting "misconfigured" saying the same (P066).
+    const gated = createContentHost(
+      options(undefined, { health: { probe: () => Promise.reject(new Error("unused")) } }),
+    );
+    expect(gated.meta().health).toMatchObject({ state: "unhealthy", misconfigured: true });
+    expect(gated.meta().health?.reason).toMatch(/needs a secret.*PORTHOLE_SECRET/u);
+    // Content off ("") needs no secret.
+    expect(createContentHost(options(undefined, { domain: "" })).meta().served).toBe(false);
   });
 });
 
@@ -344,6 +509,46 @@ describe("the client", () => {
     );
     // Outside a browser there is no Origin to judge: the app's credential is what counts.
     expect(await client.handoff()).toBe(true);
+  });
+
+  it("hands out its functions bare, as React's useSyncExternalStore takes them (P074)", async () => {
+    const { routes } = kit();
+    // Each taken off the client, as `useSyncExternalStore(porthole.subscribe, porthole.meta)`
+    // takes them: typed `this: void`, so type-aware lint's unbound-method has nothing to say.
+    const {
+      subscribe,
+      meta,
+      refresh,
+      config,
+      configFor,
+      locate,
+      link,
+      knownLink,
+      entryTarget: target,
+      close,
+    } = portholeClient({
+      displays,
+      base: `${APP}/porthole`,
+      headers: { authorization: "Bearer ada" },
+      fetch: async (input: RequestInfo | URL, init?: RequestInit) =>
+        (await routes(new Request(input, init))) ?? new Response(null, { status: 404 }),
+    });
+    let told = 0;
+    const stop = subscribe(() => {
+      told += 1;
+    });
+    expect(meta()).toBeNull();
+    await refresh();
+    expect(told).toBe(1);
+    expect(meta()?.served).toBe(true);
+    expect(config("artifact")?.isolation).toBe("domain");
+    expect(configFor(page("abc"))?.isolation).toBe("domain");
+    expect((await locate(page("abc"))).origin).toBe(origin("abc"));
+    expect(knownLink(page("abc"))).toBe(`${origin("abc")}/`);
+    expect(await link(page("xyz"))).toBe(`${origin("xyz")}/`);
+    expect(target("/pages", { app: true })).toBe(`${APP}/pages`);
+    stop();
+    close();
   });
 
   it("falls back to opaque configs (and none for a url kind) while frames aren't served", () => {
@@ -425,6 +630,32 @@ describe("the url-mode relay kit", () => {
 });
 
 describe("nodeServer", () => {
+  it("takes a host made after it listens: the app's until then, then the content domain's", async () => {
+    let made: ReturnType<typeof kit>["content"] | null = null;
+    const server = nodeServer({ content: () => made, app: () => new Response("the app") });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
+    const ask = (host: string) =>
+      new Promise<number>((resolve, reject) => {
+        httpGet({ host: "127.0.0.1", port, path: "/", headers: { host } }, (response) => {
+          response.resume();
+          resolve(response.statusCode ?? 0);
+        }).on("error", reject);
+      });
+    try {
+      expect(await ask(`www.usercontent.localhost:${port}`)).toBe(200);
+      // The content domain names the port it got.
+      made = kit({
+        domain: `usercontent.localhost:${port}`,
+        appOrigins: ["http://localhost:1"],
+      }).content;
+      expect(await ask(`www.usercontent.localhost:${port}`)).toBe(404);
+      expect(await ask(`localhost:${port}`)).toBe(200);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
   it("serves content and the app on one server, the gate started on listen", async () => {
     const { content } = kit({
       domain: "usercontent.localhost",

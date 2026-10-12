@@ -129,6 +129,7 @@ export {
   hostConformance,
   onDemand,
   type ConformanceProject,
+  type ConformanceProjectsOptions,
   type HostConformance,
   type HostConformanceOptions,
 } from "./host-kit.ts";

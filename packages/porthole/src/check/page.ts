@@ -1,6 +1,54 @@
-import type { ColorScheme, PortholeConfig } from "../config/schema.ts";
+import type { CapabilityHandlers } from "../bridge/types.ts";
+import {
+  capabilitySpec,
+  isCapabilityName,
+  type HandledCapability,
+} from "../config/capabilities.ts";
 import { createHost } from "../host/create-host.ts";
 import type { DisplayHandle } from "../host/types.ts";
+import type { FrameLocation } from "../isolation/types.ts";
+import {
+  contentLine,
+  instrumented,
+  type CheckCall,
+  type CheckRunData,
+  type CheckRunSpec,
+} from "./instrument.ts";
+
+export type { CheckCall, CheckRunData, CheckRunSpec } from "./instrument.ts";
+
+/**
+ * What a host that declines answers each host function with (P074): no prompt sent, no link
+ * opened, nothing downloaded or copied; a tool call or a read refused.
+ */
+const DECLINED: { readonly [N in HandledCapability]: () => unknown } = {
+  sendPrompt: () => false,
+  openLink: () => false,
+  downloadFile: () => false,
+  copyText: () => false,
+  setModelContext: () => undefined,
+  callTool: () => {
+    throw new Error("The host declined the tool call");
+  },
+  readData: () => {
+    throw new Error("The host declined the read");
+  },
+};
+
+/** A handler for each host function the config declares: it notes the call and answers no. */
+function declining(capabilities: readonly string[], calls: CheckCall[]): CapabilityHandlers {
+  const handlers: Record<string, () => unknown> = {};
+  for (const name of capabilities) {
+    if (isCapabilityName(name) && capabilitySpec(name).served === "handler") {
+      const answer = DECLINED[name as HandledCapability];
+      handlers[name] = () => {
+        calls.push({ capability: name, outcome: "answered" });
+        return answer();
+      };
+    }
+  }
+  return handlers;
+}
 
 /**
  * The check page (P073): runs content in the real sandbox (the core's `createHost`, the config's
@@ -10,75 +58,13 @@ import type { DisplayHandle } from "../host/types.ts";
  * that `checkPage` loads into a blank page through its driver.
  */
 
-export interface CheckRunSpec {
-  readonly config: PortholeConfig;
-  readonly content: string;
-  readonly widthPx: number;
-  readonly heightPx?: number;
-  readonly scheme: ColorScheme;
-  readonly hostTheme?: Readonly<Record<string, string>>;
-}
-
-export interface CheckRunData {
-  readonly errors: string[];
-  readonly blocked: { readonly url: string; readonly directive: string }[];
-  readonly failedLoads: { readonly url: string; readonly tag: string }[];
-  readonly console: { readonly level: "error" | "warning"; readonly text: string }[];
-  readonly height: number | null;
-  readonly scrollWidth: number | null;
-  readonly clientWidth: number | null;
-  readonly outcome: string | null;
-}
-
-/** Put first in the content: it reports to the page that frames it. */
-export const INSTRUMENT = `<script>(() => {
-  const send = (kind, data) => { try { parent.postMessage({ portholeCheck: kind, data }, "*"); } catch (_) {} };
-  const text = (value) => { try { return String(value && value.stack ? value.message || value : value); } catch (_) { return "?"; } };
-  for (const [method, level] of [["error", "error"], ["warn", "warning"]]) {
-    const original = console[method];
-    console[method] = (...args) => { send("console", { level, text: args.map(text).join(" ").slice(0, 400) }); return original.apply(console, args); };
-  }
-  addEventListener("error", (event) => {
-    const target = event.target;
-    if (target && target !== window && (target.src || target.href)) {
-      send("load", { url: String(target.src || target.href).slice(0, 400), tag: String(target.tagName || "").toLowerCase() });
-    } else if (event.message || event.error) {
-      const where = event.lineno ? " (line " + event.lineno + ")" : "";
-      send("error", (event.error && event.error.message ? (event.error.name || "Error") + ": " + event.error.message : String(event.message)).slice(0, 400) + where);
-    }
-  }, true);
-  addEventListener("unhandledrejection", (event) => send("error", ("Unhandled rejection: " + text(event.reason)).slice(0, 400)));
-  addEventListener("securitypolicyviolation", (event) => send("blocked", { url: String(event.blockedURI || "inline").slice(0, 400), directive: String(event.effectiveDirective) }));
-  addEventListener("message", (event) => {
-    if (event.source === parent && event.data && event.data.portholeCheck === "measure") {
-      const root = document.documentElement;
-      send("measure", { scrollWidth: Math.max(root.scrollWidth, document.body ? document.body.scrollWidth : 0), clientWidth: root.clientWidth });
-    }
-  });
-})();</script>`;
-
-/** The content with the instrument first: after a document's <head>, or before a fragment. */
-export function instrumented(content: string): string {
-  const head = /<head[^>]*>/iu.exec(content);
-  if (head !== null) {
-    const at = head.index + head[0].length;
-    return `${content.slice(0, at)}${INSTRUMENT}${content.slice(at)}`;
-  }
-  const html = /<html[^>]*>/iu.exec(content);
-  if (html !== null) {
-    const at = html.index + html[0].length;
-    return `${content.slice(0, at)}<head>${INSTRUMENT}</head>${content.slice(at)}`;
-  }
-  return /^\s*<!doctype/iu.test(content)
-    ? content.replace(/^(\s*<!doctype[^>]*>)/iu, `$1${INSTRUMENT}`)
-    : `${INSTRUMENT}${content}`;
-}
-
 interface Run {
   readonly display: DisplayHandle;
   readonly box: HTMLElement;
+  readonly scriptLines: readonly number[];
   readonly data: {
     errors: string[];
+    calls: CheckCall[];
     blocked: { url: string; directive: string }[];
     failedLoads: { url: string; tag: string }[];
     console: { level: "error" | "warning"; text: string }[];
@@ -105,9 +91,25 @@ addEventListener("message", (event: MessageEvent) => {
     }
     const said = data.data as Record<string, unknown>;
     switch (data.portholeCheck) {
-      case "error":
-        run.data.errors.push(String(data.data));
+      case "error": {
+        const error = data.data as {
+          message?: unknown;
+          file?: unknown;
+          line?: unknown;
+          stack?: unknown;
+        };
+        const line = contentLine(
+          {
+            file: typeof error.file === "string" ? error.file : "",
+            line: typeof error.line === "number" ? error.line : 0,
+            stack: typeof error.stack === "string" ? error.stack : "",
+          },
+          run.scriptLines,
+        );
+        const message = typeof error.message === "string" ? error.message : "Error";
+        run.data.errors.push(`${message}${line === null ? "" : ` (line ${line})`}`);
         break;
+      }
       case "blocked":
         run.data.blocked.push({ url: String(said.url), directive: String(said.directive) });
         break;
@@ -140,19 +142,34 @@ const check = {
     box.style.cssText = `width:${spec.widthPx}px;${spec.heightPx === undefined ? "" : `height:${spec.heightPx}px;`}`;
     document.body.append(box);
     const theme = spec.hostTheme ?? {};
+    const calls: CheckCall[] = [];
     const display = createHost(spec.config, {
       theme: () => theme,
       hostInfo: { name: "porthole-check", version: "1" },
+      // Every host function the config declares, answered as a host that declines (P074): a
+      // person asked to confirm says no, a handler says no, and each call is noted.
+      handlers: declining(Object.keys(spec.config.capabilities), calls),
+      confirm: () => Promise.resolve("declined"),
+      // A served config's instance, issued by the check's own server on this page's origin.
+      locator: {
+        locate: async (instance) =>
+          (await (
+            await fetch("/issue", { method: "POST", body: JSON.stringify({ instance }) })
+          ).json()) as FrameLocation,
+      },
     }).mount(box, {
       displayId: `check-${id}`,
       title: "Check",
       scheme: spec.scheme,
+      ...(spec.instance === undefined ? {} : { instance: spec.instance }),
     });
     const run: Run = {
       display,
       box,
+      scriptLines: spec.scriptLines,
       data: {
         errors: [],
+        calls,
         blocked: [],
         failedLoads: [],
         console: [],
@@ -165,11 +182,20 @@ const check = {
     display.on("resize", ({ height }) => {
       run.data.height = height;
     });
+    display.on("refused", ({ capability, refusal }) => {
+      // "failed": the declining handler's own no, already noted.
+      if (refusal !== "failed") {
+        calls.push({ capability, outcome: refusal });
+      }
+    });
     display.on("outcome", (outcome) => {
       run.data.outcome = outcome.state === "blocked" ? `blocked: ${outcome.reason}` : outcome.state;
     });
     runs.set(id, run);
-    display.on("initialized", () => display.setContent(instrumented(spec.content)));
+    // A stored page comes from the check's server; a shell (served or opaque) gets the content.
+    if (spec.instance?.document.kind !== "artifact") {
+      display.on("initialized", () => display.setContent(instrumented(spec.content)));
+    }
     return id;
   },
   /** Asks the frame for its width; resolves when it answers (or after a second). */

@@ -2,7 +2,8 @@
 
 How to put Porthole in an app, from the npm package alone. The package's `examples/` is a whole
 app that does everything below: `examples/app.mjs` is the app, runtime-agnostic;
-`examples/node/server.mjs` and `examples/workers/` run it; `examples/mcp/server.mjs` gives the
+`examples/node/server.mjs` (`nodeServer`) and `examples/workers/` (`contentHostFor`) run it, as
+§4 and §5 recommend; `examples/mcp/server.mjs` gives the
 agent its tools. DESIGN.md says how it works and DECISIONS.md why (the P-numbers the code cites).
 
 ## 1. Choose how content is shown
@@ -61,8 +62,10 @@ React: `<PortholeProvider>` near the root; `<PortholeFrame config displayId titl
 per display. The provider takes what every frame shares: `scheme`, `theme` (and `themeKey`;
 `cssVariableTheme(tokens)` reads the values from your page's CSS variables), `nonce` (`"auto"`
 reads the page's), `handlers`, `openLink` (default: a new tab), `notify` (your own toast for what
-a copy button copied), and `renderConfirm` (your own dialog: Porthole keeps the queue, runs your
-yes inside its click, and counts declines). `useRunAgain()` gives a "run again" button.
+a copy button copied), and `renderConfirm` (your own dialog, given `accept`, `decline` and
+`redirect`: Porthole keeps the queue, runs `accept` inside its click, and counts declines toward
+muting the display; `redirect`, for "edit it first", answers the call `"redirected"` and neither
+counts nor resets the count). `useRunAgain()` gives a "run again" button.
 
 ## 4. Served pages: the host kit
 
@@ -82,6 +85,7 @@ Put it on the Public Suffix List when you can, so its labels are sites of their 
 
 ```js
 import { createContentHost, prefixedName, memoryTicketStore } from "@botiverse/porthole/server";
+import { nodeServer } from "@botiverse/porthole/node";
 import { displays } from "./displays.mjs";
 
 const APP = "http://localhost:8790";
@@ -97,15 +101,15 @@ const content = createContentHost({
   source: (id, version) => myStore.page(id, version), // { html } | null
   entry: {                                          // clean addresses: a-abc.<domain>/ in a new tab
     at: (scope, path) => instanceAt(scope, path),   // null: nothing there (a 404 on the content domain)
-    pathOf: (instance) => pathOf(instance),         // the reverse: frames come with their link
+    pathOf: async (instance) => pathOf(instance),   // the reverse (may look it up): frames come with their link
     signIn: (returnTo) => Response.redirect(`${APP}/login?next=${encodeURIComponent(returnTo)}`, 303),
   },
 });
 
 // One mount, under /porthole: POST frames, GET authorize, GET meta, POST/DELETE handoff.
 const routes = content.routes(viewerOf);
-// Every request: the content domain first, then Porthole's routes, then your app.
-const answer = (await content.fetch(request)) ?? (await routes(request)) ?? (await app(request));
+// The whole server: the content domain to Porthole, then Porthole's routes, then your app.
+nodeServer({ content, app: async (request) => (await routes(request)) ?? app(request) }).listen(8790);
 ```
 
 - **`instance`** gets the client's proposal (`{ scope, document }`) and returns the instance as
@@ -117,10 +121,21 @@ const answer = (await content.fetch(request)) ?? (await routes(request)) ?? (awa
 - **`Response.redirect` needs an absolute URL** outside a browser (Node throws on `/login`).
 - **`reserved`** is only for labels your app itself serves on the content domain (previews of a
   dev server, `p-*`). Labels nothing serves need nothing: they are a 404 there.
-- **Node:** `nodeServer({ content, app: (request) => answer(request) }).listen(8790)` is the whole
-  server, WebSockets included, the health gate started on listen. **Workers:**
-  `contentHostFor((env) => options)` makes one host per `env`, and answers a plain 503 naming the
-  problem when the settings can't be served.
+- **No content domain** (self-hosted without one): still make the host, with `domain: null` (or
+  `""`). That is the supported setup: no secret is needed, `GET /porthole/meta` answers
+  `{ served: false }`, and pages show every kind opaque (a url kind, its fallback) instead of
+  waiting for a meta that never comes. Without a host, `portholeClient` stays pending.
+- **`secret`** is at least 32 random bytes (`npx porthole secret`), from the environment
+  (`PORTHOLE_SECRET`). A missing or short one throws at `createContentHost`, saying so (with
+  `health`, frames stay opaque and the meta says why).
+- **`nodeServer`** is the whole Node server: the content domain to Porthole, WebSockets included,
+  every other request to `app` (fetch-style: Hono's `app.fetch`) or `request` (a Node listener:
+  Express), the health gate started on listen and stopped on close. Behind a TLS edge, add
+  `scheme: "https"`. A host that needs the port first (`listen(0)`) can come later: `content:
+  () => host` (null until made); requests go to the app until it gives one.
+- **`nodeHost(content, { request })`** is for an app that keeps its own `node:http` server (or a
+  framework that owns one): put its `request` and `upgrade` listeners on your server, call
+  `content.start()` once it listens and `content.close()` when it stops.
 - **Health:** `health: { probe: nodeProbe(), onServedChange: (served) => … }` checks the content
   domain over the real network and falls back to opaque frames while it doesn't answer.
 
@@ -144,10 +159,26 @@ openButton.onclick = () => porthole.openInTab(instance);           // the clean 
 
 `porthole.config(kind)` is the served config while frames are served, the opaque one while they
 aren't, and null until the meta is known, so a frame never starts opaque and then restarts
-served. A client module that fails to load shows nothing at all: catch its import and say so
+served. The client's functions take no `this`: pass them bare
+(`useSyncExternalStore(porthole.subscribe, porthole.meta)`). A client module that fails to load shows nothing at all: catch its import and say so
 (`examples/app.mjs` does).
 
-React: give the provider the client, and show a kind:
+**Without a bundler**, the page gets Porthole's browser modules from your server, in three parts
+(`examples/app.mjs` has all three):
+
+1. Serve the package's `dist/` at a path of your app's (`/porthole-client/`, `.js` files only).
+   On Workers it is the static assets directory (`assets.directory`, with `run_worker_first`).
+2. Map the bare name in an import map that carries the page's nonce:
+   `<script type="importmap" nonce="…">{"imports":{"@botiverse/porthole":"/porthole-client/index.js"}}</script>`.
+3. Serve the page its display kinds as a module, made from the same plain object the server's
+   `defineDisplays` gets, so they never disagree:
+   `` `import { defineDisplays } from "@botiverse/porthole";\nexport const displays = defineDisplays(${JSON.stringify(kinds)});` ``
+   at `/porthole-client/displays.mjs`, imported from there.
+
+With a bundler, import `@botiverse/porthole` and your `displays.mjs` as usual.
+
+React: give the provider the client, and show a kind. Flipping the provider's `scheme`, or a new
+`themeKey`, re-themes running frames in place: they keep their state.
 
 ```jsx
 <PortholeProvider client={porthole} scheme={mode} theme={cssVariableTheme(TOKENS)} nonce="auto">
@@ -156,6 +187,10 @@ React: give the provider the client, and show a kind:
 </PortholeProvider>
 // const { link, open, copy } = usePortholeLink(instance);   "Open in a new tab", "Copy link"
 ```
+
+Rendered on a server, `PortholeView` draws what the client's meta says: give `portholeClient` the
+meta it starts with (`meta`, from your page's data), and the server's HTML has the frame's
+placeholder or the fallback, which the page then hydrates. Without it, `pending`.
 
 ### The page's CSP
 
@@ -169,9 +204,15 @@ React: give the provider the client, and show a kind:
 
 ### Sign-in
 
-- Your sign-in page gets the authorize URL as `next`, and goes back to it when signed in. Check
-  it with `entryTarget(next, authorizeUrl)` (or `porthole.entryTarget(next)`): only your own
-  authorize route, never another site.
+- Your sign-in page gets the authorize URL as `next` (`signIn`'s `returnTo`), and goes back to it
+  when signed in. The authorize URL is `<first app origin>/porthole/authorize` unless
+  `entry.authorizeUrl` names another, and `next` is built from it with the entry's state: never
+  from the address the request arrived at, which behind a TLS edge or a dev proxy isn't your app's.
+- Check `next` with `entryTarget(next, authorizeUrl, { app: true })` (in the page,
+  `porthole.entryTarget(next, { app: true })`): the authorize route or any page on your app's
+  origin, as an absolute URL, and null for anything else (another site, `//host`, `/\host`,
+  `javascript:`), so one check serves sign-ins that go back to a page and those that go back to
+  a frame's content. Without `{ app: true }` it takes only the authorize route.
 - **Warning: no `form-action 'self'` on a sign-in page that posts a form.** `form-action` holds
   every redirect of a submission, and redirect entry continues from your sign-in through the
   content origin, so the browser blocks the last hop and the person stays on your sign-in. Leave
@@ -211,6 +252,13 @@ export default {
 };
 ```
 
+- **`contentHostFor`** makes one content host per `env`, the first time a request needs it. While
+  the settings can't be served (no `PORTHOLE_SECRET`, a content domain that shares a site with the
+  app), every request gets a plain 503 naming the problem, logged once (`{ log }`), instead of a
+  stack trace. `porthole.host(env)` is the host itself (`frameSources` for your CSP) once `fetch`
+  has answered null. Settings fixed at build time (no `env`) can make one `createContentHost` at
+  module scope instead; a bad setting then fails the Worker as it starts.
+
 - **Tickets in D1** (never KV, which is eventually consistent):
   `npx porthole d1-schema > migrations/0001_porthole_tickets.sql`, then
   `wrangler d1 migrations apply <db>`.
@@ -236,8 +284,10 @@ const tools = [showTool(config), guideTool(config), checkTool(config)]; // { nam
 // guide: answerGuide(config, args)                           // { text } or { error }
 ```
 
-Names come from the config (`guide.toolName`, `guide.guideToolName`); the descriptions are the
-manual's own words. `examples/mcp/server.mjs` wires all three as an MCP server.
+Names come from the config (`guide.toolName`, `guide.guideToolName`), else `show_<noun>`,
+`<noun>_guide` and `check_<noun>` (`show_page`, `page_guide`, `check_page` for a page; naming them
+in the config also has the manual name them). The descriptions are the manual's own words.
+`examples/mcp/server.mjs` wires all three as an MCP server.
 
 - **`admitContent`** runs `lintContent` and refuses (by default, `refuseOn: "error"`) only what
   would certainly fail or be cut: over the size limit, a document with no body where a fragment
@@ -254,7 +304,20 @@ manual's own words. `examples/mcp/server.mjs` wires all three as an MCP server.
 `checkPage` (`@botiverse/porthole/check`) runs the content in the real sandbox at the manual's
 phone and desktop widths, in light and dark, and answers a report whose `text` is a few lines for
 the agent: what it threw, what the sandbox blocked, what failed to load, `console.error`, overflow
-and a cut height, each problem once with where it happened (at most 8; the rest counted).
+and a cut height, each problem once with where it happened (at most 8; the rest counted). Lines
+are the content's own, as the agent wrote it (a script's error and a lint finding name the same
+line).
+
+A served config is checked served: its content runs on an origin of its own under Porthole's
+server, with the served CSP, shell, storage and cookies, as people's browsers run it (both drivers
+answer a reserved content domain themselves; nothing goes to your server). An opaque config, or
+an MCP Apps view, runs opaque.
+
+The host functions the config declares are answered as a host that declines would: a person
+asked to confirm says no, and a handler answers no (no prompt sent, a tool call refused). Each
+call is in the report (`run.calls`): one hosts refuse whatever the person says (no click, bad
+arguments) is a problem; one a person may decline is a note, so the agent makes sure the page
+still works then.
 
 ```js
 import { checkPage, playwrightDriver } from "@botiverse/porthole/check";
@@ -263,7 +326,7 @@ report.ok; report.text;
 ```
 
 It needs a browser somewhere: Chromium is best (WebKit mutes a thrown error's message in an
-opaque frame, so the agent reads only "Script error."). Where:
+opaque frame, so the agent reads only "Script error.", and names no line in a served one). Where:
 
 - **A server with Chromium** (Node): `playwrightDriver(await chromium.launch())`.
 - **An agent on a person's machine, maybe without Chromium** (Ferry's daemon): run
@@ -278,7 +341,7 @@ opaque frame, so the agent reads only "Script error."). Where:
   import page from "@botiverse/porthole/check/page";   // the check page's script, bundled
   const browser = await puppeteer.launch(env.BROWSER);
   const tab = await browser.newPage();
-  const report = await checkPage({ config, content, page, driver: cdpDriver(() => tab.createCDPSession()) });
+  const report = await checkPage({ config, content, page, driver: cdpDriver(() => tab.createCDPSession()) });  // no cast
   await browser.close();
   ```
 
@@ -291,7 +354,16 @@ cases, redirect entry) against your app's real page, its CSP and session, in Pla
 // playwright.config.mjs
 import { defineConfig, devices } from "@playwright/test";
 import { conformanceProjects } from "@botiverse/porthole/conformance";
-export default defineConfig({ projects: conformanceProjects(devices), webServer: { … } });
+export default defineConfig({
+  fullyParallel: true,                       // else one spec file is one worker: minutes longer
+  // The list, then why each skipped case was skipped (the list alone shows a bare "-").
+  reporter: [["list"], ["@botiverse/porthole/conformance/reporter"]],
+  projects: conformanceProjects(devices, {
+    engines: ["chromium", "webkit", "firefox"],              // the default
+    // launchOptions: { chromium: { executablePath: "/usr/bin/chromium" } },   a system browser
+  }),
+  webServer: { … },
+});
 
 // porthole.spec.mjs
 import { test } from "@playwright/test";
@@ -300,7 +372,7 @@ defineHostConformance(test, {
   name: "my-app",
   open: async (page) => { /* sign in, open the page that shows content */ },
   issue: { url: "/porthole/frames" },
-  displays, contentSource: "http://*.content.localhost:8790",
+  displays, contentSource: () => `http://*.content.localhost:${port}`,   // asked per case: a port known later
   instances: { artifact: (scope, version) => ({ scope, document: { kind: "artifact", id: "conformance", version } }) },
   entry: { url: (scope) => `http://a-t-${scope}.content.localhost:8790/v/1`, unknown: "derive" },
 });
@@ -324,9 +396,16 @@ choosing. `onDemand(make)` memoizes fixtures made the first time a case asks (a 
 on demand); `instances` and `entry.url` may be async. The tests are located at your
 `defineHostConformance` call, so `playwright test porthole.spec.mjs` selects them.
 
+Each engine needs its browser (`npx playwright install chromium webkit firefox`); a subset is
+`engines: ["chromium"]`. Where Playwright has no build of one (arm64 Linux's Chromium), point at
+the system's: `launchOptions: { chromium: { executablePath, args } }`, merged with Porthole's own
+(`use` adds to every project's).
+
 The leak probes run opaque displays on your page: where its own CSP closes what a probe needs,
 the probe reports itself inapplicable, saying which directive. Those are facts about your page's
-opaque fallback, not failures.
+opaque fallback, not failures: a page with a `default-src` sees `[1.connect]` and
+`[2.resources]` skipped, its `connect-src` already closing what they probe. The reporter above
+prints each reason at the end; so does `--reporter=json`.
 
 ## 8. Expected, and how to tell
 
@@ -337,6 +416,10 @@ opaque fallback, not failures.
   (Vue's in-browser build, Alpine.js, Vega's expressions, WebAssembly). Egress, the sandbox and the
   origin are what isolate it (P071).
 - On `http` loopback the session cookies are `porthole-<key>`; on `https`, `__Host-porthole-<key>`.
+  A frame's are `Secure; SameSite=None; Partitioned` on loopback too: browsers keep `Secure`
+  cookies on `localhost`.
+- A served frame is one iframe on the content's own origin (no frame inside it), first loaded at
+  `/__porthole/d/<key>?ticket=…`: in a test, `page.frameLocator('iframe[src*="/__porthole/d/"]')`.
 - A clean address that names nothing (a label the naming never makes, the bare domain, a path
   `entry.at` says has nothing) is a 404 on the content domain: it never reaches your sign-in.
 - Host errors name the content origin and leave out ticket URLs.
@@ -349,8 +432,8 @@ opaque fallback, not failures.
 | `@botiverse/porthole/react` | `PortholeProvider`, `PortholeFrame`, `PortholeView`, `usePortholeLink`, `cssVariableTheme`, `useRunAgain` |
 | `@botiverse/porthole/server` | `createContentHost` (`routes`, `forget`), `contentHostFor`, `prefixedName`, `memoryTicketStore`, `d1TicketStore`, `upstreamHeaders`, `statusPage`, `conformancePage`, the callbacks' types |
 | `@botiverse/porthole/node` | `nodeServer`, `nodeHost`, `nodeProbe`, `toRequest`, `sendResponse` |
-| `@botiverse/porthole/check` | `checkPage`, `playwrightDriver`, `cdpDriver`; `/check/page`, the check page's script |
+| `@botiverse/porthole/check` | `checkPage`, `playwrightDriver`, `cdpDriver` (`CHECK_ORIGIN`, `CHECK_CONTENT_DOMAIN`: the names a driver of your own answers); `/check/page`, the check page's script |
 | `@botiverse/porthole/mcp` | the MCP Apps adapter (views, the sandbox proxy) |
-| `@botiverse/porthole/conformance` | `defineHostConformance`, `conformanceProjects`, `onDemand`, `conformancePage` |
+| `@botiverse/porthole/conformance` | `defineHostConformance`, `conformanceProjects`, `onDemand`, `conformancePage`; `/conformance/reporter`, skip reasons |
 
 The types' doc comments are the precise reference; DESIGN.md § "The host kit" is the long form.

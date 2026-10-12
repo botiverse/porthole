@@ -1955,3 +1955,137 @@ document's width to the page by `postMessage`. Height comes from the display's o
 and MCP Apps presets at the manual's widths in light and dark, on three engines
 (`leak/check.spec.ts`); a broken widget is told each problem once; the CDP driver runs on
 Chromium.
+
+## P074 · 2026-10-12 · 0.3.1: sign-in behind a proxy, pages checked as they run, and what 0.3.0's adopters had to guess · Accepted
+
+**Decision.** 0.3.1 fixes what Ferry's and Raft Artifacts' adoptions of 0.3.0 and a second cold
+adoption (from the package alone) hit. Additions only.
+1. **Sign-in comes back to the app as it is reached.** `signIn`'s `returnTo` and `entry.spa`'s
+   `next` are `authorizeUrl` (by default `<first app origin>/porthole/authorize`) with the
+   request's query, its state. Before, they were the request's own URL, which behind a TLS edge
+   (`http://`) or a dev proxy (`localhost:5173`, a rewritten Host) names an origin that isn't the
+   app's, so `entryTarget` refused it and the person stayed on the sign-in.
+2. **`renderConfirm` gets `redirect()`** beside `accept` and `decline`: the call answers
+   `"redirected"` (the core's existing answer for "the person took it elsewhere": edited the
+   prompt first). It doesn't go, and neither counts toward muting the display nor resets the
+   count. `ConfirmActions` is exported.
+3. **`nodeServer`'s `content` may be a function** giving the host once it exists (null until
+   then): a host whose content domain names the port `listen(0)` chose. Until it gives one, every
+   request and upgrade is the app's; the host is started once, when first given while listening,
+   and closed with the server.
+4. **A served config is checked served.** `checkPage` ran every config opaque, so for a served
+   page it reported what people never see (`document.cookie` throwing in an opaque frame) and
+   missed what they do (the CSP block the throw stopped short of). Now, where the driver can serve
+   (`CheckSession.serve`, both shipped drivers), the check runs Porthole's own `createServer`
+   in process (a random secret; the check page, `https://porthole-check.invalid`, its only host
+   origin), and the driver answers a reserved content domain (`*.porthole-check-content.invalid`)
+   from it, so the content gets an origin of its own, the served CSP in headers, the shell,
+   storage and cookies; each run a new origin. Nothing reaches the app's server or the network
+   for those names. Opaque configs, MCP Apps views and drivers without `serve` run opaque as
+   before. **One numbering:** each inline script is named (`//# sourceURL=porthole-script-<n>`)
+   and its first line recorded, so a runtime error's line is the content's own line, as lint
+   numbers it (it was the line within the script).
+5. **Conformance says why it skipped:** `@botiverse/porthole/conformance/reporter`, beside the
+   list reporter, prints each skipped case's reason after the run (an inapplicable probe names the
+   page's directive). The example config uses it; ADOPTING's snippet has it and `fullyParallel`.
+6. **A missing secret is named:** `createContentHost` without one throws "needs a secret: at
+   least 32 random bytes (set PORTHOLE_SECRET; npx porthole secret makes one)" (it threw a
+   `TypeError` from inside the HMAC); a short one says the same. Like any setting it refuses, it
+   is a lasting "misconfigured" instead under the health gate's fallback (P066), and
+   `contentHostFor` answers its 503 with the text. Content off (`domain: ""`) needs no secret.
+7. **The examples follow the recommended path:** Node on `nodeServer`, Workers on
+   `contentHostFor`; `examples/app.mjs` gives the host's options and a handler that takes the
+   host. ADOPTING says when the other path is right: `nodeHost` for an app that keeps its own
+   server, `createContentHost` at module scope for settings fixed at build time.
+8. **ADOPTING says how a page without a bundler loads Porthole:** the package's `dist/` served at
+   a path, an import map with the page's nonce, and the display kinds served as a module made
+   from the same object the server's `defineDisplays` gets.
+9. **`entryTarget(next, authorizeUrl, { app: true })`** also takes a path or address on the app's
+   own origin (one leading slash, no backslash, `http(s)` only, the origin checked once resolved),
+   returned absolute: one open-redirect guard for a sign-in that goes back to a page or to a
+   frame's content. Without the option it is the authorize route only, as before. ADOPTING and
+   the doc comment state the default authorize URL.
+
+10. **Configs that declare host functions can be checked (#8).** The check page mounted with no
+    handlers, so `mount` threw "No handler for the declared capabilities" before content ran,
+    and `checkTool` on a widget config with `sendPrompt` couldn't run at all. Now the check page
+    answers every declared host function as a host that declines (its `confirm` says no; each
+    handler answers no: `false`, nothing, or a refused tool call or read) and reports each call
+    the host sees (`run.calls`): one a host's gates refuse whatever the person says (no click, bad
+    arguments, not offered, too often) is a problem; one a person or host may decline is a note.
+    A global the shell refuses itself (`sendPrompt` with no click) rejects in the content, which
+    the check reports as the error it is. The manual's examples are now checked under presets
+    that declare every host function too, opaque, served and MCP Apps.
+
+From Raft Artifacts' adoption of 0.3.0 (its workarounds grew from 14 lines to 34 for these):
+
+11. **`entry.pathOf` may be async** (`Awaitable`, given the request too): a clean path that needs a
+    lookup (`/` for a page's current version) comes from the database. Where it fails, the frame
+    is issued without a link rather than refused. `link`, `usePortholeLink` and `openInTab` were
+    async already.
+12. **The runner's `contentSource` may be a function**, asked when a case needs a config: the
+    test server's port isn't known when the spec file loads.
+13. **`conformanceProjects(devices, { use, launchOptions })`**: `use` adds to every project's;
+    `launchOptions` per engine (a system Chromium's `executablePath` and `args`, where Playwright
+    has no build: arm64 Linux) merges with Porthole's own, Firefox's preferences with the ones its
+    probes need.
+14. **`PortholeView` renders on the server** what the client's meta says: the frame's placeholder
+    or the fallback, from `portholeClient({ meta })`. Its server snapshot was null, so an SSR'd
+    page (and its tests) had nothing until hydration.
+15. **`CdpSession` is documented as the least the driver uses**, and a type test holds that
+    Playwright's `CDPSession` and Puppeteer's (as it declares itself, generic over the protocol)
+    are taken with no cast. Checked against Raft's own `@cloudflare/puppeteer` and TypeScript
+    5.9 settings, 0.3.0's type took both already: its cast can simply go.
+
+From Ferry, after 0.3.0:
+
+16. **`portholeClient`'s functions are declared `this: void`**, so they pass bare
+    (`useSyncExternalStore(porthole.subscribe, porthole.meta)`) under type-aware lint's
+    `unbound-method`, and none reads `this` (`openInTab` called `this.link`). Method syntax with
+    `this: void` rather than function properties keeps `PortholeClient<"a" | "b">` assignable to
+    `PortholeClient` (the provider's), as methods' parameters are.
+17. **No content domain is a host with `domain: null`**, the supported setup for a self-hosted app
+    without one: no secret needed, and `/porthole/meta` answers `{ served: false }`, so pages show
+    opaque rather than pending. ADOPTING says so.
+18. **A provider's scheme flip or new `themeKey` re-themes its frames in place (#9).** The
+    provider's context value is renewed with its scheme, theme and themeKey, and two effects were
+    keyed on it: `PortholeFrame`'s registry effect (whose cleanup let the frame go, so it was made
+    again) and the mount effect. Every display was destroyed and made again: widgets lost their
+    state, url-mode previews reloaded. Both now depend only on the provider's stable parts (the
+    registry, heights, handlers, confirm, locator, nonce, hostInfo by value), and read the scheme
+    and theme when used; flips go through `setTheme`, a new themeKey through `refreshTheme`, and a
+    new theme function (tokens passed inline) through `refreshTheme` where its values changed.
+
+**Risks.**
+- Item 9 widens what a guard accepts, on request. Bounded by `test/kit03.test.ts`: `//host`,
+  `/\host`, a tab inside the slashes, `\\host`, another scheme, a look-alike host, `javascript:`
+  and `data:` are all null.
+- Item 3 sends every request to the app until the host exists, the content domain's included.
+  Nothing names that domain before the host does (its port is the one just chosen); an app whose
+  DNS already points the content domain at it makes the host before it listens.
+- Item 1 trusts `authorizeUrl`, which the app sets (or its first app origin); the request can no
+  longer choose where sign-in comes back to, which is narrower than before.
+
+**Why.** Each item was a workaround or a wrong guess: Ferry's sign-in stayed put behind its dev
+proxy and a TLS edge; an app's own dialog couldn't answer "edit first" without a decline that
+counts; an app that makes its host after its server starts had to drop to `nodeHost`; an agent told
+to fix line 6 of a served page's runtime error edited the wrong line, for an error people never see;
+`[1.connect]` showed as a bare "-"; a forgotten secret crashed inside the HMAC; Ferry's widget
+config couldn't be checked at all (#8); the cold adopter had to choose between the guide's path and
+the examples', read `examples/app.mjs` to load the browser modules, and read `client.js` to learn
+`entryTarget` refused `/`; Raft Artifacts' workarounds for items 11 to 15 had grown to 34 lines;
+Ferry's type-aware lint refused the client's functions passed bare, it made no host at all without a
+content domain, leaving displays pending, and every theme flip made its displays again (#9).
+**Measured.** `test/kit03.test.ts` (a proxied authorize request, the SPA `next`, the lazy
+`nodeServer`, the secret, `entryTarget`, an async `pathOf`, the client's functions taken bare and
+linted, no content domain); the prod-shape profile signs in through its TLS edge with the kit app
+reached as `http` behind it (failing before item 1); `leak/react.spec.ts` (four redirects, never
+muted, no prompt sent); `leak/check.spec.ts` (a served page: no cookie error, the connect block
+reported, errors on their file lines, on both drivers; every host function declared: the manual's
+examples pass, and a widget's calls on load are answered and reported, opaque and served);
+`test/check.test.ts` (the calls' words, the CDP session types); `test/conformance-options.test.ts`;
+`test/react-ssr.test.ts` (failing before item 14); `leak/react.spec.ts`'s flips of the provider's
+scheme and themeKey keep each frame element, its window and its page, opaque, served and url
+(failing before item 18); the examples' unit tests and their conformance run on three engines.
+**Revisit when** a driver that can't intercept requests needs served checks (it would need a
+real content domain).

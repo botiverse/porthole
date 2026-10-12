@@ -58,6 +58,20 @@ async function serve(pathname: string): Promise<{ body: string; type: string } |
       type: "text/html; charset=utf-8",
     };
   }
+  if (pathname === "/leak/host/served-shell.html") {
+    // A served shell, as a content origin serves it, for the React binding's served views (#9):
+    // on `localhost` (another site), its host the React page on 127.0.0.1.
+    const { compile, presets } = await import("../src/index.ts");
+    const config = presets.inlineWidget({
+      isolation: "domain",
+      contentOrigins: [`http://localhost:${port}`],
+      capabilities: { sendPrompt: {} },
+    });
+    return {
+      body: compile(config).shellDocument({ origins: [`http://127.0.0.1:${port}`] }),
+      type: "text/html; charset=utf-8",
+    };
+  }
   const relative = pathname === "/" ? "leak/host/index.html" : pathname.replace(/^\/+/u, "");
   if (!/^(src|leak\/host)\//u.test(relative) || relative.includes("..")) {
     return null;

@@ -11,6 +11,8 @@ export const kinds = {
     options: {
       // A whole-page viewer: the frame fills its box, and the agent's manual says so.
       layout: { kind: "fill" },
+      // Optional: the tools default to these names (show_page, page_guide, check_page); naming
+      // them here also has the manual name them.
       guide: { toolName: "show_page", guideToolName: "page_guide" },
     },
   },

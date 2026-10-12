@@ -5,11 +5,18 @@
  */
 export {
   checkPage,
+  type CheckCall,
   type CheckDriver,
   type CheckOptions,
   type CheckReport,
   type CheckRun,
   type CheckSession,
 } from "./check.ts";
-export { cdpDriver, playwrightDriver, type CdpSession } from "./drivers.ts";
+export {
+  CHECK_CONTENT_DOMAIN,
+  CHECK_ORIGIN,
+  cdpDriver,
+  playwrightDriver,
+  type CdpSession,
+} from "./drivers.ts";
 export { lintContent, type Finding, type LintRule } from "./lint.ts";

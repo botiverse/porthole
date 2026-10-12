@@ -13,6 +13,9 @@ import {
   showTool,
   GUIDE_EXAMPLES,
 } from "../src/index.ts";
+import type { CDPSession as PlaywrightSession } from "@playwright/test";
+import { cdpDriver, checkPage, type CdpSession, type CheckDriver } from "../src/check/index.ts";
+import type { CheckRunData } from "../src/check/instrument.ts";
 
 /** The agent's side without a browser (P073): the lint, the show tool's gate, the tools. */
 
@@ -160,5 +163,94 @@ describe("the tools", () => {
     const told = guideChanges(opaque, served);
     expect(told).toMatch(/^The manual for show_widget changed\. It now says:\n- /u);
     expect(told?.split("\n").length).toBeLessThan(6);
+  });
+});
+
+describe("checkPage's report", () => {
+  /** A driver whose page saw `data` in every run. */
+  const saw = (data: Partial<CheckRunData>): CheckDriver => ({
+    open: () =>
+      Promise.resolve({
+        setViewport: () => Promise.resolve(),
+        load: () => Promise.resolve(),
+        evaluate: <T>(expression: string) =>
+          Promise.resolve(
+            (expression.includes(".result(")
+              ? {
+                  errors: [],
+                  calls: [],
+                  blocked: [],
+                  failedLoads: [],
+                  console: [],
+                  height: 100,
+                  scrollWidth: 300,
+                  clientWidth: 300,
+                  outcome: "loaded",
+                  ...data,
+                }
+              : 0) as T,
+          ),
+        close: () => Promise.resolve(),
+      }),
+  });
+
+  it("words host-function calls: what hosts refuse is a problem, what a person may decline a note (P074)", async () => {
+    const config = presets.inlineWidget({ capabilities: { sendPrompt: {}, readData: {} } });
+    const refused = await checkPage({
+      config,
+      content: "<p>x</p>",
+      page: "",
+      settleMs: 0,
+      driver: saw({
+        calls: [
+          { capability: "sendPrompt", outcome: "no-user-activation" },
+          { capability: "readData", outcome: "answered" },
+        ],
+      }),
+    });
+    expect(refused.ok).toBe(false);
+    expect(refused.text.split("\n")).toEqual([
+      expect.stringMatching(/^The widget has 1 problem/u),
+      "- It called sendPrompt at load, with no click: hosts refuse that. Call sendPrompt from a click (at every width and scheme).",
+      "Note: it called readData at load; the check answered no, as a host or a person may. Make sure the widget still works then.",
+    ]);
+    const declined = await checkPage({
+      config,
+      content: "<p>x</p>",
+      page: "",
+      settleMs: 0,
+      driver: saw({ calls: [{ capability: "sendPrompt", outcome: "declined" }] }),
+    });
+    expect(declined.ok).toBe(true);
+    expect(declined.text).toMatch(/^OK: .*\nNote: it called sendPrompt at load/u);
+  });
+});
+
+describe("cdpDriver's session type", () => {
+  it("takes Playwright's and Puppeteer's sessions as they are, with no cast (P074)", () => {
+    /** Puppeteer's `CDPSession`, as it declares itself: generic over the protocol's maps. */
+    interface Commands {
+      "Page.enable": { paramsType: []; returnType: Record<string, never> };
+      "Runtime.evaluate": {
+        paramsType: [{ expression: string; awaitPromise?: boolean; returnByValue?: boolean }];
+        returnType: { result: { value?: unknown } };
+      };
+    }
+    interface Events {
+      "Fetch.requestPaused": [{ requestId: string; request: { url: string; method: string } }];
+      "Page.loadEventFired": [{ timestamp: number }];
+    }
+    abstract class PuppeteerSession {
+      abstract send<T extends keyof Commands>(
+        method: T,
+        params?: Commands[T]["paramsType"][0],
+        options?: { timeout: number },
+      ): Promise<Commands[T]["returnType"]>;
+      abstract on<K extends keyof Events>(type: K, handler: (event: Events[K][0]) => void): this;
+      abstract detach(): Promise<void>;
+    }
+    const fits = (open: () => Promise<CdpSession>) => cdpDriver(open);
+    expect(typeof fits(() => Promise.resolve({} as PlaywrightSession))).toBe("object");
+    expect(typeof fits(() => Promise.resolve({} as PuppeteerSession))).toBe("object");
   });
 });

@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { createServer as createHttpServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { presets, type PortholeConfig } from "../../src/index.ts";
+import { entryTarget, presets, type PortholeConfig } from "../../src/index.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
 import { nodeHost, nodeProbe, sendResponse, toRequest } from "../../src/node/index.ts";
 import {
@@ -206,15 +206,13 @@ export async function startKit(settings: KitSettings): Promise<Kit> {
           ? null
           : { scope, document: { kind: "artifact", id: "page", version } };
       },
-      signIn: (returnTo) => {
-        const back = new URL(returnTo);
-        return new Response(null, {
+      // The whole return address: the app checks it on the way back (entryTarget). Behind a TLS
+      // edge this app sees its requests as http, so the kit must build it from the app's own URL.
+      signIn: (returnTo) =>
+        new Response(null, {
           status: 303,
-          headers: {
-            location: `/signin?next=${encodeURIComponent(`${back.pathname}${back.search}`)}`,
-          },
-        });
-      },
+          headers: { location: `/signin?next=${encodeURIComponent(returnTo)}` },
+        }),
       refusal: (status) =>
         new Response(
           `<!doctype html><title>No access</title><main id="refusal">${status === 403 ? "You don't have access to this page." : "There is no such page."}</main>`,
@@ -228,6 +226,9 @@ export async function startKit(settings: KitSettings): Promise<Kit> {
     },
   });
   const issue = content.issue(viewerOf);
+  /** Where sign-in goes back to: this app's authorize route (checked), or a path of its own. */
+  const backTo = (next: string | null): string =>
+    entryTarget(next, `${settings.appOrigin}/porthole/authorize`) ?? ownPath(next);
   const authorize = content.authorize(viewerOf);
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), {
@@ -250,7 +251,7 @@ export async function startKit(settings: KitSettings): Promise<Kit> {
       return authorize(request);
     }
     if (url.pathname === "/signin") {
-      return new Response(SIGN_IN(ownPath(url.searchParams.get("next"))), {
+      return new Response(SIGN_IN(backTo(url.searchParams.get("next"))), {
         headers: {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store",
@@ -266,7 +267,7 @@ export async function startKit(settings: KitSettings): Promise<Kit> {
       return new Response(null, {
         status: 303,
         headers: {
-          location: ownPath(url.searchParams.get("next")),
+          location: backTo(url.searchParams.get("next")),
           "set-cookie": `kit-viewer=${as}; Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`,
         },
       });
@@ -304,7 +305,8 @@ export async function startKit(settings: KitSettings): Promise<Kit> {
 
   const porthole = nodeHost(content, {
     request: (request, response) => {
-      appRoutes(toRequest(request, secure ? "https" : "http")).then(
+      // As an app behind a TLS edge sees itself: http, whatever the browser used (P074).
+      appRoutes(toRequest(request, "http")).then(
         (answer) => sendResponse(response, answer),
         () => response.writeHead(500).end(),
       );
