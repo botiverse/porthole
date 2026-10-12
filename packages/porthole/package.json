@@ -21,7 +21,9 @@
     "./mcp": "./src/mcp/index.ts",
     "./conformance": "./src/conformance/index.ts",
     "./server": "./src/server/index.ts",
-    "./node": "./src/node/index.ts"
+    "./node": "./src/node/index.ts",
+    "./check": "./src/check/index.ts",
+    "./check/page": "./src/check/page-source.ts"
   },
   "publishConfig": {
     "bin": {
@@ -51,6 +53,14 @@
       "./node": {
         "types": "./dist/node/index.d.ts",
         "default": "./dist/node/index.js"
+      },
+      "./check": {
+        "types": "./dist/check/index.d.ts",
+        "default": "./dist/check/index.js"
+      },
+      "./check/page": {
+        "types": "./dist/check/page-source.d.ts",
+        "default": "./dist/check/page-source.js"
       }
     }
   },

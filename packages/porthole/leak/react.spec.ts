@@ -1,6 +1,6 @@
 import { expect, test, type FrameLocator, type Page } from "@playwright/test";
 import { embedderCsp, presets, type AnnotationMark } from "../src/index.ts";
-import type { AppState, FrameSpec } from "./react/app.tsx";
+import type { AppState, FrameSpec, ViewsSpec } from "./react/app.tsx";
 
 /**
  * The React binding in a real browser (M4): what the first host's widget frame does today, each
@@ -10,6 +10,7 @@ import type { AppState, FrameSpec } from "./react/app.tsx";
  */
 
 interface App {
+  renderViews(spec: ViewsSpec): void;
   render(state: AppState): void;
   log(): { display: string; event: string; detail?: unknown }[];
   answerCustom(accepted: boolean): void;
@@ -761,4 +762,61 @@ test("a mounting frame hears no theme event; a flip, exactly one (#3)", async ({
   expect(await flips(), "no event for a render that changes nothing").toEqual([]);
   await open(page, state("dark", 1));
   await expect.poll(flips).toEqual(["dark"]);
+});
+
+// ─── The host kit's client side (P072) ───────────────────────────────────
+
+async function views(page: Page, spec: ViewsSpec): Promise<void> {
+  await open(page, { frames: [], provider: "none" });
+  await page.evaluate((next) => (window as unknown as { app: App }).app.renderViews(next), spec);
+}
+
+test("a view by kind: opaque with its content while frames aren't served; a url kind waits for them", async ({
+  page,
+}) => {
+  await views(page, {
+    served: false,
+    frames: "ok",
+    views: [
+      { id: "w", display: "widget", content: '<p id="x">opaque</p>' },
+      { id: "p", display: "preview" },
+    ],
+  });
+  await expect(page.locator('[data-view="w"] iframe').contentFrame().locator("#x")).toHaveText(
+    "opaque",
+  );
+  await expect(page.locator('[data-view="p"] [data-porthole-fallback]')).toContainText(
+    "This can't be shown now",
+  );
+});
+
+test("a view served: located through the client; its fallback, worded, when the server refuses", async ({
+  page,
+}) => {
+  await views(page, { served: true, frames: "ok", views: [{ id: "p", display: "preview" }] });
+  await expect(
+    page.locator('[data-view="p"] iframe').contentFrame().locator("html"),
+  ).toHaveAttribute("data-app", "ready");
+  await views(page, { served: true, frames: "fail", views: [{ id: "q", display: "preview" }] });
+  await expect(page.locator('[data-view="q"] [data-porthole-fallback]')).toContainText(
+    "This couldn't be shown",
+  );
+});
+
+test("renderConfirm: the app's own dialog asks; its yes runs the call from its click", async ({
+  page,
+}) => {
+  await views(page, {
+    served: false,
+    frames: "ok",
+    renderConfirm: true,
+    views: [{ id: "w", display: "widget", content: PROMPT }],
+  });
+  await page.locator('[data-view="w"] iframe').contentFrame().locator("#ask").click();
+  await expect(page.locator("#app-dialog")).toContainText("sendPrompt from w");
+  await page.click("#app-yes");
+  await expect(page.locator('[data-view="w"] iframe').contentFrame().locator("#status")).toHaveText(
+    "true",
+  );
+  expect(await events(page, "provider", "sendPrompt")).toHaveLength(1);
 });

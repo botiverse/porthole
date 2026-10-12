@@ -2,12 +2,14 @@ import { createElement as h, Fragment } from "react";
 import { createRoot } from "react-dom/client";
 import type { ConfirmRequest, Proceed } from "../../src/bridge/types.ts";
 import {
+  defineDisplays,
+  portholeClient,
   presets,
   type AnnotateMode,
   type AnnotationMark,
   type PortholeConfig,
 } from "../../src/index.ts";
-import { PortholeFrame, PortholeProvider } from "../../src/react/index.ts";
+import { PortholeFrame, PortholeProvider, PortholeView } from "../../src/react/index.ts";
 
 /**
  * A host app on the React binding, driven by the test through `window.app`: which frames it shows
@@ -173,8 +175,100 @@ function render(state: AppState): void {
   );
 }
 
+/** The host kit's client side (P072): views by kind, through a client whose server the test plays. */
+export interface ViewsSpec {
+  readonly served: boolean;
+  /** How the frame endpoint answers: a location, or a refusal. */
+  readonly frames: "ok" | "fail";
+  readonly views: readonly {
+    readonly id: string;
+    readonly display: "widget" | "preview";
+    readonly content?: string;
+  }[];
+  /** The app's own confirmation dialog (`renderConfirm`). */
+  readonly renderConfirm?: boolean;
+}
+
+const DISPLAYS = defineDisplays({
+  widget: { preset: "inlineWidget", options: { capabilities: { sendPrompt: {} } } },
+  preview: { preset: "url" },
+});
+
+function renderViews(spec: ViewsSpec): void {
+  const client = portholeClient({
+    displays: DISPLAYS,
+    meta: {
+      served: spec.served,
+      contentSource: spec.served ? APP_ORIGIN : null,
+      frameSources: [],
+      health: null,
+    },
+    fetch: async () =>
+      spec.frames === "ok"
+        ? Response.json({ url: `${APP_ORIGIN}/leak/host/app.html`, origin: APP_ORIGIN })
+        : Response.json(
+            { error: { code: "forbidden", message: "You can't see this" } },
+            { status: 403 },
+          ),
+  });
+  root.render(
+    h(
+      PortholeProvider,
+      {
+        client,
+        scheme: "light",
+        handlers: {
+          sendPrompt: ({ text }) => {
+            record("provider", "sendPrompt", text);
+            return true;
+          },
+        },
+        ...(spec.renderConfirm === true
+          ? {
+              renderConfirm: (
+                request: ConfirmRequest,
+                answer: { readonly accept: () => void; readonly decline: () => void },
+              ) =>
+                h(
+                  "div",
+                  { id: "app-dialog", role: "dialog" },
+                  h("p", null, `${request.capability} from ${request.display.title}`),
+                  h("button", { id: "app-yes", onClick: answer.accept }, "Yes"),
+                  h("button", { id: "app-no", onClick: answer.decline }, "No"),
+                ),
+            }
+          : {}),
+      },
+      spec.views.map((view) =>
+        h(
+          "div",
+          { key: view.id, "data-view": view.id, style: { height: 300 } },
+          h(PortholeView, {
+            display: view.display,
+            displayId: view.id,
+            title: view.id,
+            eager: true,
+            ...(view.content === undefined ? {} : { content: view.content }),
+            ...(view.display === "preview"
+              ? {
+                  instance: {
+                    scope: view.id,
+                    document: { kind: "external" as const, url: "http://app.test/" },
+                  },
+                }
+              : {}),
+            onOutcome: (outcome) => record(view.id, "outcome", outcome),
+            onInitialized: () => record(view.id, "initialized"),
+          }),
+        ),
+      ),
+    ),
+  );
+}
+
 const app = {
   render,
+  renderViews,
   log: () => log,
   answerCustom(accepted: boolean) {
     pendingCustom?.(accepted);

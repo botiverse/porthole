@@ -3,7 +3,7 @@
 // (PORTHOLE_CONFORMANCE=1, examples/app.mjs): pages the suite names itself. Never ship it.
 import { test } from "@playwright/test";
 import { defineHostConformance } from "@botiverse/porthole/conformance";
-import { pageConfig } from "../app.mjs";
+import { displays } from "../displays.mjs";
 
 const port = Number(process.env.PORTHOLE_EXAMPLE_PORT ?? 8796);
 const app = `http://localhost:${port}`;
@@ -16,8 +16,10 @@ defineHostConformance(test, {
     await page.goto(`${app}/login?next=/`);
     await Promise.all([page.waitForURL(`${app}/`), page.click("#sign-in")]);
   },
-  issue: { url: "/api/frames" },
-  config: () => pageConfig(`http://*.content.localhost:${port}`),
+  // The app's frame endpoint (content.routes), and its display kinds.
+  issue: { url: "/porthole/frames" },
+  displays,
+  contentSource: `http://*.content.localhost:${port}`,
   // A stored-pages app: its test page's two versions (the domain cases run on version 1).
   instances: {
     artifact: (scope, version) => ({

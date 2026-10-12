@@ -1810,9 +1810,9 @@ which left the manual wrong), Workers specifics, and local development.
 **Revisit when** a second cold adoption (after 0.3) finds friction these don't cover.
 
 
-## P072 · 2026-10-12 · Host kit 0.3: the client, the bootstrap and the relay, so adopters stop writing glue · Proposed
+## P072 · 2026-10-12 · Host kit 0.3: the client, the bootstrap and the relay, so adopters stop writing glue · Accepted
 
-**Decision (proposed, for review).** After 0.2.2 the server's content file is policy and little
+**Decision.** After 0.2.2 the server's content file is policy and little
 else; the glue moved to the client, the bootstrap and url mode. Ferry still writes about 1,650
 lines of glue and workarounds, Raft about 450 (notes/porthole-0.3-audit.md). 0.3 adds, all
 additive:
@@ -1856,7 +1856,7 @@ additive:
 4. **React ergonomics:** provider `scheme`, `theme` with `themeKey`, `cssVariableTheme(tokens)`,
    `nonce: "auto"`, `openLink`, `notify` (skin the copy notice), `renderConfirm(request, answer)`
    (the app draws the dialog; Porthole keeps the gates, the one-at-a-time queue and decline
-   counting); content errors deduplicated per run; `usePortholeFrame()` with `runAgain()`.
+   counting); content errors deduplicated per run; `useRunAgain()` for a "run again" button.
 5. **The url-mode relay kit** (/server, /node): `upstreamHeaders.request/response` (the header
    rewrite `proxyTo` uses, on `Headers` or raw pairs, WebSockets too); `statusPage(…)` (P070's
    fallback included); `nodeHost`'s `appSocket` gets the request with Porthole's cookies removed;
@@ -1864,7 +1864,7 @@ additive:
 6. **Viewer handoff for token-authenticated apps:** `POST handoff`, called by the signed-in app
    with its own token (`client.handoff()`), sets an `HttpOnly` cookie scoped to the authorize
    path holding a short-lived viewer key Porthole signs (never the app's token);
-   `entry.viewer(key)` turns it back into the app's viewer. `entry.spa: { route }` gives the
+   `entry.handoff: { id(viewer), viewer(id) }` says who a viewer is and turns it back. `entry.spa: { route }` gives the
    default `signIn` for a single-page app, with `entryTarget(next)` as the open-redirect guard.
 7. **If cheap:** `health.onServedChange(served)`, deduplicated; `log` also takes a
    `{ info, warn, error }` logger; `prefixedNames({ w: …, f: … })` for several prefixes; a
@@ -1875,12 +1875,28 @@ and three of them already drift: Ferry's desktop CSP lacks the authorize route, 
 page lacks P070's fallback, and clean addresses are computed two ways.
 **Rejected.** A framework-specific server adapter (Hono, Express): `routes` is a fetch handler
 any of them mounts in one line.
-**To decide in review:** the default prefix (`/porthole`) and whether `issue` moves under it;
-the handoff cookie's lifetime (proposed 10 minutes).
+**Decided in review:**
+- The default prefix is `/porthole`, overridable (`createContentHost({ prefix })`), and `issue`
+  moves under it (`POST /porthole/frames`), so one mount serves frames, authorize, meta and
+  handoff, and an embedding CSP, a dev proxy or a desktop CSP each need one path. Apps move their
+  old routes themselves (`issue(viewerOf)` and `authorize(viewerOf)` still exist for that).
+- The handoff cookie lasts 10 minutes, refreshed whenever the app's page loads or regains focus
+  (`portholeClient({ handoff: true })`, at most every 30 s); an expired one costs only a quiet
+  trip through the app's sign-in route. The POST needs the app's own credential (`viewerOf` must
+  name a viewer) and is refused from another origin (`Origin`, or `Sec-Fetch-Site` where there is
+  no `Origin`), so no other site can set or clear it. The key is Porthole-signed (HMAC under the
+  secret, apart from session keys), names the viewer's id and its expiry, and the cookie is
+  `HttpOnly`, `SameSite=Lax`, scoped to the prefix path (`__Secure-` on https). It is no
+  credential for the app's API, unlike the app's token stored in a cookie (which Ferry did), which
+  would ride on every request to the app origin, for as long as the token lives.
+- Item 7: `health.onServedChange` and logger adapters only.
 
-## P073 · 2026-10-12 · The agent's side: check a page before people see it; tools with names and schemas · Proposed
+**Measured.** The example app on the new routes and client passes the whole suite on three
+engines; `PortholeView`, its fallback and `renderConfirm` run in the React spec.
 
-**Decision (proposed, for review).** Today an agent learns its page broke only after a person
+## P073 · 2026-10-12 · The agent's side: check a page before people see it; tools with names and schemas · Accepted
+
+**Decision.** Today an agent learns its page broke only after a person
 looked (Ferry, at its next turn, at most 5 errors) or never (Raft). Porthole already has the
 parts: the shell's error capture, the conformance harness's `launch` at a width and a scheme, and
 a browser check behind every line of the manual. 0.3 exposes them:
@@ -1915,6 +1931,27 @@ a browser check behind every line of the manual. 0.3 exposes them:
 both apps asked for errors to reach the agent before a person does.
 **Rejected.** Running content on the host's server without a browser (jsdom and the like): it
 doesn't apply CSP, layout or the sandbox, so it would pass pages that break.
-**To decide in review:** whether the show tool runs `lintContent` and refuses on errors by default
-(proposed: it returns findings; refusing is the host's choice); contrast measurement now or later
-(proposed: later).
+**Decided in review:**
+- The show tool refuses by default (`admitContent`, `refuseOn: "error"`), but only on a narrow
+  set of deterministic errors that would certainly fail or be cut: over the size limit, a whole
+  document where a fragment goes when it can't be taken as its body, nested frames and plugins,
+  `document.write`. Everything heuristic is a warning returned with the result. A host sets the
+  policy (`refuseOn: "never"`). A refusal says exactly what to change, and to call the tool again.
+- Contrast: later.
+- `checkPage` must work where the host has no browser: an agent on a person's machine lints
+  locally and sends the check to its server (or uses Playwright where installed); a Worker uses
+  Browser Rendering through `cdpDriver`, with the check page's script imported
+  (`@botiverse/porthole/check/page`). The report's text is short enough for an agent's context:
+  each problem once, with where it happened, at most 8 (`maxProblems`), the rest counted.
+
+**How it runs.** The check page (bundled from `src/check/page.ts`) is served at a fixed origin
+the driver answers itself (`https://porthole-check.invalid`: the shell needs a real host origin),
+mounts the content with `createHost` under its own CSP, opaque (a served config's content with the
+same CSP; an MCP Apps view as a page with its egress), and puts a small script first in the
+content that reports errors, rejections, CSP blocks, failed loads, `console.error`/`warn` and the
+document's width to the page by `postMessage`. Height comes from the display's own resize events.
+
+**Measured.** Every `GUIDE_EXAMPLES` entry passes under the inline, artifact, whole-page viewer
+and MCP Apps presets at the manual's widths in light and dark, on three engines
+(`leak/check.spec.ts`); a broken widget is told each problem once; the CDP driver runs on
+Chromium.

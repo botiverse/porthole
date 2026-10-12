@@ -40,6 +40,8 @@ export {
   type ContentHost,
   type ContentHostEvent,
   type ContentHostOptions,
+  type ContentClientMeta,
+  type ContentLogger,
   type EntryContext,
   type EntryOptions,
   type ContentMeta,
@@ -68,7 +70,15 @@ export { conformancePage } from "../conformance/page.ts";
 // The types an app's callbacks take and give (P070).
 export type { PortholeConfig } from "../config/schema.ts";
 export type { FrameLocation, InstanceRef, ServedDocument } from "../isolation/types.ts";
-export { proxyTo, type ProxyOptions } from "./proxy.ts";
+export {
+  isPortholeCookie,
+  proxyTo,
+  upstreamHeaders,
+  withoutPortholeCookies,
+  type ProxyOptions,
+} from "./proxy.ts";
+export { statusPageOf as statusPage } from "./pages.ts";
+export { contentHostFor, type ContentHostFor } from "./bootstrap.ts";
 export type {
   Access,
   ArtifactStore,

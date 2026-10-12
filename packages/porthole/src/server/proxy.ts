@@ -131,3 +131,89 @@ export function proxyTo(options: ProxyOptions = {}): Upstream {
     });
   };
 }
+
+type HeaderInput =
+  | Headers
+  | Iterable<readonly [string, string]>
+  | Readonly<Record<string, string | readonly string[] | undefined>>;
+
+/** Headers from any of the shapes a relay has: fetch's, raw pairs, Node's. */
+function headersOf(input: HeaderInput): Headers {
+  if (input instanceof Headers) {
+    return new Headers(input);
+  }
+  const out = new Headers();
+  const entries =
+    Symbol.iterator in input
+      ? (input as Iterable<readonly [string, string]>)
+      : Object.entries(input as Record<string, string | readonly string[] | undefined>).flatMap(
+          ([name, value]): [string, string][] =>
+            value === undefined
+              ? []
+              : typeof value === "string"
+                ? [[name, value]]
+                : value.map((each): [string, string] => [name, each]),
+        );
+  for (const [name, value] of entries) {
+    out.append(name, value);
+  }
+  return out;
+}
+
+/** Whether a cookie is Porthole's own (sessions, entry nonces, the handoff). */
+export const isPortholeCookie = (name: string): boolean =>
+  /^(?:__Host-|__Secure-)?porthole-/u.test(name);
+
+/** The cookie header without Porthole's own cookies, or null when nothing else is left. */
+export function withoutPortholeCookies(cookie: string | null | undefined): string | null {
+  const kept = (cookie ?? "")
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part !== "" && !isPortholeCookie(part.split("=")[0]?.trim() ?? ""));
+  return kept.length === 0 ? null : kept.join("; ");
+}
+
+/**
+ * The header rewrite `proxyTo` makes, for a relay of its own (P072): a browser's request as the
+ * app at `target` gets it (Host, Origin, Referer naming the app; no forwarding headers, no
+ * Porthole cookies), and the app's answer as the browser on `origin` gets it (redirects and
+ * cookies kept on the content origin, Porthole's cookies never set). `websocket` keeps the
+ * upgrade's own headers. Pairs out, so a raw socket relay writes them as they are.
+ */
+export const upstreamHeaders = {
+  request(
+    input: HeaderInput,
+    options: { readonly origin: string; readonly target: string; readonly websocket?: boolean },
+  ): [string, string][] {
+    const given = headersOf(input);
+    const out = upstreamRequestHeaders(given, options.origin, options.target);
+    const cookie = withoutPortholeCookies(given.get("cookie"));
+    if (cookie === null) {
+      out.delete("cookie");
+    } else {
+      out.set("cookie", cookie);
+    }
+    if (options.websocket === true) {
+      out.delete("accept-encoding");
+      for (const name of ["connection", "upgrade"]) {
+        const value = given.get(name);
+        if (value !== null) {
+          out.set(name, value);
+        }
+      }
+      out.set("host", new URL(options.target).host);
+    }
+    return [...out];
+  },
+  response(
+    input: HeaderInput,
+    options: { readonly origin: string; readonly target: string },
+  ): [string, string][] {
+    const answer = upstreamResponseHeaders(headersOf(input), options.origin, options.target);
+    const cookies = answer
+      .getSetCookie()
+      .filter((each) => !isPortholeCookie(each.split("=")[0]?.trim() ?? ""));
+    answer.delete("set-cookie");
+    return [...answer, ...cookies.map((each): [string, string] => ["set-cookie", each])];
+  },
+};

@@ -130,6 +130,31 @@ export type {
   Refusal,
 } from "./bridge/types.ts";
 export { createHost } from "./host/create-host.ts";
+// The client half of the host kit, and the display registry (P072).
+export {
+  entryTarget,
+  frameFallback,
+  portholeClient,
+  type ContentClientMeta,
+  type FrameFallback,
+  type PortholeClient,
+  type PortholeClientOptions,
+} from "./host/client.ts";
+export { defineDisplays, type DisplayKind, type Displays } from "./displays/displays.ts";
+// The agent's side: what content can be told without running it, and its tools (P073).
+export { fragmentOf, lintContent, type Finding, type LintRule } from "./check/lint.ts";
+export {
+  admitContent,
+  answerGuide,
+  checkTool,
+  guideChanges,
+  guideTool,
+  guideTopics,
+  showTool,
+  type AdmitResult,
+  type JsonSchema,
+  type ToolDefinition,
+} from "./check/tools.ts";
 export { writeClipboard } from "./host/clipboard.ts";
 export {
   httpLocator,

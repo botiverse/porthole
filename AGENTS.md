@@ -32,13 +32,16 @@ The host kit (0.2.0, P066, P068): `createContentHost` is the whole host side aro
 served content (routing, issue endpoint, health gate, clean addresses through redirect
 entry), with a Node adapter (`/node`), a conformance runner an app points at its real page
 (`defineHostConformance`), a reference app (`leak/kit/`), and a prod-shape profile.
+0.3 (P072, P073): `defineDisplays`, `content.routes` under `/porthole`, the client
+(`portholeClient`, `PortholeView`), the viewer handoff, the url-mode relay kit, and the
+agent's side: `lintContent`, `admitContent`, `checkPage` (`/check`), tool definitions.
 
 ## Setup
 
 - Node ≥ 24 (TypeScript runs directly via type stripping — erasable syntax only:
   no enums, no parameter properties, no namespaces; relative imports carry `.ts`).
 - pnpm 11 workspace; one package, `packages/porthole` (`@botiverse/porthole`,
-  with `/react`, `/mcp`, `/conformance`, `/server`, `/node` as subpath exports, P013).
+  with `/react`, `/mcp`, `/conformance`, `/server`, `/node`, `/check` as subpath exports, P013).
 - The core is framework-agnostic TypeScript; the React binding is a thin subpath.
 
 ## Commands
@@ -65,7 +68,8 @@ firefox`). Scratch files go under `.dev/scratch/` (gitignored).
 ```
 packages/porthole/src/   config/ compile/ shell/ guide/ theme/ presets/   the compiler side
                          protocol/ bridge/ transport/ platform/ isolation/ host/   the seams
-                         react/ mcp/ conformance/ server/ node/           the subpath entries
+                         react/ mcp/ conformance/ server/ node/ check/    the subpath entries
+                         displays/   the display registry (defineDisplays)
 packages/porthole/test/  unit tests; agreement.test.ts is the config ↔ CSP ↔ shell ↔ manual check
 packages/porthole/leak/  the leak suite run against Porthole's reference host; react.spec.ts the
                          React binding in real browsers (leak/react/app.tsx, bundled by esbuild);

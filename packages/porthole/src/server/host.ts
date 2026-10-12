@@ -1,7 +1,9 @@
 import type { PortholeConfig } from "../config/schema.ts";
 import { embedderFrameSourcesOf } from "../compile/policy.ts";
 import type { FrameLocation, InstanceRef } from "../isolation/types.ts";
-import { base64url, hmacSha256, utf8 } from "./crypto.ts";
+import type { Displays } from "../displays/displays.ts";
+import type { ContentClientMeta } from "../host/client.ts";
+import { base64url, fromBase64url, fromUtf8, hmacSha256, timingSafeEqual, utf8 } from "./crypto.ts";
 import {
   ContentDomainError,
   contentDomain,
@@ -53,6 +55,11 @@ export interface HealthOptions {
    * its clients whether frames are served pushes it from here.
    */
   readonly onChange?: (view: ContentHealthView) => void;
+  /**
+   * Told when frames start or stop being served (P072): `meta().served` flipped. Deduplicated:
+   * once per flip, not per check.
+   */
+  readonly onServedChange?: (served: boolean) => void;
 }
 
 /** Where content stands, for the app's own meta and logs. */
@@ -82,6 +89,15 @@ export interface ContentMeta {
   readonly health: ContentHealthView | null;
 }
 
+export type { ContentClientMeta } from "../host/client.ts";
+
+/** A logger (pino, console, winston): the kit's events at their level (P072). */
+export interface ContentLogger {
+  readonly info?: (message: string, event: ContentHostEvent) => void;
+  readonly warn?: (message: string, event: ContentHostEvent) => void;
+  readonly error?: (message: string, event: ContentHostEvent) => void;
+}
+
 type Awaitable<T> = T | Promise<T>;
 
 export interface ContentHostOptions<V> {
@@ -92,10 +108,20 @@ export interface ContentHostOptions<V> {
   /** At least 32 random bytes (or a string of at least 32 bytes). */
   readonly secret: Uint8Array | string;
   readonly tickets?: TicketStore;
-  /** The configs content is served under, given the content source (`https://*.<domain>`). */
-  readonly configs:
+  /**
+   * The configs content is served under, given the content source (`https://*.<domain>`). Or
+   * `displays` (P072), which says it for every kind once.
+   */
+  readonly configs?:
     | Readonly<Record<string, PortholeConfig>>
     | ((source: string) => Readonly<Record<string, PortholeConfig>>);
+  /** The app's display kinds (`defineDisplays`): their served configs, in place of `configs`. */
+  readonly displays?: Displays;
+  /**
+   * Where `routes` answers on the app's origin (P072): `<prefix>/frames`, `/authorize`, `/meta`,
+   * `/handoff`. Default `/porthole`.
+   */
+  readonly prefix?: string;
   /**
    * How a scope is named (`prefixedName("a-")`); default: keyed labels. Redirect entry needs one
    * that says which scope a label names (`prefixedName` does).
@@ -143,7 +169,8 @@ export interface ContentHostOptions<V> {
     readonly perMinute: number;
     readonly key?: (request: Request, viewer: V | null) => string;
   };
-  readonly log?: (event: ContentHostEvent) => void;
+  /** The kit's events: a function, or a logger (`{ info, warn, error }`). */
+  readonly log?: ((event: ContentHostEvent) => void) | ContentLogger;
   /**
    * Redirect entry (P068): clean addresses (`urlOf`) that open directly, in a new tab, on a
    * reload, from a bookmark or a link someone with access was sent. Without a cookie, the content
@@ -154,8 +181,11 @@ export interface ContentHostOptions<V> {
 }
 
 export interface EntryOptions<V> {
-  /** The app's authorize route (`ContentHost.authorize`), an absolute URL on an app origin. */
-  readonly authorizeUrl: string;
+  /**
+   * The app's authorize route (`ContentHost.authorize`), an absolute URL on an app origin.
+   * Default: `<first app origin><prefix>/authorize`, where `routes` answers it.
+   */
+  readonly authorizeUrl?: string;
   /**
    * Policy 1 for a clean address: the instance a scope's path means, or null/undefined: nothing
    * (404). The path is the address's pathname; its query rides along but never chooses the
@@ -175,7 +205,32 @@ export interface EntryOptions<V> {
    * Only ever on a tab: in a frame, the person is asked to open a new tab instead. `entry` is the
    * address being opened, decoded (P070).
    */
-  readonly signIn: (returnTo: string, request: Request, entry: EntryContext) => Awaitable<Response>;
+  readonly signIn?: (
+    returnTo: string,
+    request: Request,
+    entry: EntryContext,
+  ) => Awaitable<Response>;
+  /**
+   * A single-page app's sign-in route (P072): the default `signIn` sends the person there with
+   * `?next=<authorize URL>`, and the app goes on to `next` once signed in (check it with
+   * `entryTarget`).
+   */
+  readonly spa?: { readonly route: string };
+  /**
+   * The clean path of an instance (the reverse of `at`), or null: `issue` then answers its clean
+   * address as `link` (P072), for "open in a new tab" and "copy link".
+   */
+  readonly pathOf?: (instance: InstanceRef) => string | null;
+  /**
+   * A viewer handoff, for an app whose page authenticates with a token rather than a cookie
+   * (P072): `POST <prefix>/handoff`, made with the app's own credential, leaves a short-lived key
+   * for its viewer in a cookie only the authorize route gets. `id` says who the viewer is (at
+   * most 512 characters); `viewer` turns it back into the app's viewer, or null.
+   */
+  readonly handoff?: {
+    readonly id: (viewer: V) => string;
+    readonly viewer: (id: string, request: Request) => Awaitable<V | null>;
+  };
   /**
    * The app's refusal page on a tab (a frame gets Porthole's plain one), for the address in
    * `entry`. Nothing (null, undefined): Porthole's own (P070).
@@ -230,6 +285,24 @@ export interface ContentHost<V> {
    * nothing is served. Opens through redirect entry (`entry`); frames take tickets (`issue`).
    */
   urlOf(scope: string, path?: string): string | null;
+  /** Where `routes` answers (`/porthole`). */
+  readonly prefix: string;
+  /**
+   * The app's Porthole routes in one handler (P072): `POST <prefix>/frames` (`issue`), `GET
+   * <prefix>/authorize`, `GET <prefix>/meta` (`clientMeta`), `POST`/`DELETE <prefix>/handoff`.
+   * Null for any other request: the app's own routes.
+   */
+  routes(
+    viewerOf: (request: Request) => Awaitable<V | null>,
+  ): (request: Request) => Promise<Response | null>;
+  /** What `GET <prefix>/meta` answers the page. */
+  clientMeta(): ContentClientMeta;
+  /** The viewer handoff (`entry.handoff`), as a fetch handler: POST sets it, DELETE clears it. */
+  handoff(
+    viewerOf: (request: Request) => Awaitable<V | null>,
+  ): (request: Request) => Promise<Response>;
+  /** Drops cached `authorize` answers (`authorizeTtlSeconds`): all, or a scope's, or a subject's. */
+  forget(filter?: { readonly scope?: string; readonly subject?: string }): void;
   /** The app's authorize route for redirect entry (`entry.authorizeUrl`), as a fetch handler. */
   authorize(
     viewerOf: (request: Request) => Awaitable<V | null>,
@@ -276,6 +349,34 @@ const plain = (status: number, text: string): Response =>
 
 type FrameBlockReason = Parameters<typeof appStatusPage>[4];
 
+/** How long a viewer handoff holds (P072): the app's page refreshes it on load and focus. */
+const HANDOFF_SECONDS = 600;
+
+/** The kit's events to the app's `log`: its function, or its logger at each event's level. */
+function logOf(given: ContentHostOptions<unknown>["log"]): (event: ContentHostEvent) => void {
+  if (given === undefined) {
+    return () => {};
+  }
+  if (typeof given === "function") {
+    return given;
+  }
+  return (event) => {
+    const message =
+      event.evt === "porthole.content.healthy"
+        ? "Porthole: the content domain answers; frames are served"
+        : event.evt === "porthole.content.unhealthy"
+          ? `Porthole: frames aren't served: ${event.reason}`
+          : `Porthole: the content domain can't be served (${event.code}): ${event.reason}`;
+    if (event.evt === "porthole.content.healthy") {
+      given.info?.(message, event);
+    } else if (event.evt === "porthole.content.unhealthy") {
+      given.warn?.(message, event);
+    } else {
+      given.error?.(message, event);
+    }
+  };
+}
+
 /** The CSP source for an authorize route: its origin and path, so nothing else there frames. */
 const authorizeSource = (url: string): string => {
   const parsed = new URL(url);
@@ -295,7 +396,16 @@ const fetchProbe: HealthProbe = async (url, timeoutMs) => {
 
 export function createContentHost<V>(options: ContentHostOptions<V>): ContentHost<V> {
   const gate = options.health;
-  const log = options.log ?? (() => {});
+  const log = logOf(options.log);
+  const prefix = (options.prefix ?? "/porthole").replace(/\/+$/u, "");
+  if (!/^\/[\w./-]*$/u.test(prefix)) {
+    throw new TypeError("A route prefix is a path: /porthole");
+  }
+  const authorizeUrl =
+    options.entry?.authorizeUrl ?? `${options.appOrigins[0] ?? ""}${prefix}/authorize`;
+  if (options.configs === undefined && options.displays === undefined) {
+    throw new TypeError("createContentHost needs configs or displays");
+  }
   const secret = typeof options.secret === "string" ? utf8(options.secret.trim()) : options.secret;
   const healthLabel = gate?.label ?? DEFAULT_HEALTH_LABEL;
   // The id Porthole's health check answers with: keyed, so another deployment's answer fails.
@@ -318,8 +428,16 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
           "Redirect entry needs a naming that says which scope a label names (prefixedName)",
         );
       }
+      const displays = options.displays;
       configs =
-        typeof options.configs === "function" ? options.configs(domain.source) : options.configs;
+        options.configs === undefined
+          ? (displays?.served(domain.source) ??
+            (() => {
+              throw new TypeError(displays?.problem(domain.source) ?? "No configs");
+            })())
+          : typeof options.configs === "function"
+            ? options.configs(domain.source)
+            : options.configs;
       server = createServer({
         content: serverDomain(domain, {
           ...(options.name === undefined ? {} : { name: options.name }),
@@ -335,7 +453,7 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
           ? {}
           : {
               entry: {
-                authorizeUrl: options.entry.authorizeUrl,
+                authorizeUrl,
                 // Whether a clean address names anything, before a browser is sent away (P070).
                 named: async (label: string, path: string, request: Request) => {
                   const scope = options.name?.scopeOf?.(label) ?? null;
@@ -375,6 +493,19 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
   }
 
   const served = (): boolean => server !== null && view.state === "healthy";
+  // onServedChange: once per flip of served(), the first decision included.
+  let toldServed: boolean | null = null;
+  const tellServed = () => {
+    const now = served();
+    if (now !== toldServed && view.state !== "checking") {
+      toldServed = now;
+      try {
+        gate?.onServedChange?.(now);
+      } catch {
+        // The app's listener failing changes nothing here.
+      }
+    }
+  };
 
   // The health gate: one check at a time, again after a minute while unhealthy, ten while healthy.
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -446,6 +577,7 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
           // The app's listener failing changes nothing here.
         }
       }
+      tellServed();
       running = null;
       schedule();
       return view;
@@ -498,7 +630,85 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
     return top !== "" && appReserved(top) ? null : { url, label };
   };
 
-  return {
+  // The viewer handoff (P072): a key Porthole signs, naming the app's viewer until a time, in a
+  // cookie only the prefix's routes get. Never the app's own credential.
+  const handoffKey = hmacSha256(secret, utf8("porthole/handoff"));
+  const secureApp = (options.appOrigins[0] ?? "").startsWith("https:");
+  const handoffName = secureApp ? "__Secure-porthole-handoff" : "porthole-handoff";
+  const handoffCookie = (value: string, maxAge: number): string =>
+    [
+      `${handoffName}=${value}`,
+      `Path=${prefix}`,
+      "HttpOnly",
+      "SameSite=Lax",
+      `Max-Age=${maxAge}`,
+      ...(secureApp ? ["Secure"] : []),
+    ].join("; ");
+  const signHandoff = (id: string, until: number): string => {
+    const payload = base64url(utf8(JSON.stringify({ h: 1, v: id, x: until })));
+    return `${payload}.${base64url(hmacSha256(handoffKey, utf8(payload)))}`;
+  };
+  /** The viewer a request's handoff cookie names, if it is good. */
+  const handedOver = async (request: Request): Promise<V | null> => {
+    const handoff = options.entry?.handoff;
+    if (handoff === undefined) {
+      return null;
+    }
+    for (const part of (request.headers.get("cookie") ?? "").split(";")) {
+      const at = part.indexOf("=");
+      if (at < 0 || part.slice(0, at).trim() !== handoffName) {
+        continue;
+      }
+      const [payload = "", mac = "", ...rest] = part
+        .slice(at + 1)
+        .trim()
+        .split(".");
+      const given = fromBase64url(mac);
+      if (
+        rest.length > 0 ||
+        given === null ||
+        !timingSafeEqual(given, hmacSha256(handoffKey, utf8(payload)))
+      ) {
+        continue;
+      }
+      const bytes = fromBase64url(payload);
+      let said: unknown = null;
+      try {
+        said = bytes === null ? null : JSON.parse(fromUtf8(bytes));
+      } catch {
+        said = null;
+      }
+      if (
+        isRecord(said) &&
+        said.h === 1 &&
+        typeof said.v === "string" &&
+        typeof said.x === "number" &&
+        said.x > Date.now()
+      ) {
+        return handoff.viewer(said.v, request);
+      }
+    }
+    return null;
+  };
+  /** The app's sign-in: its own `signIn`, or its single-page route with `next`. */
+  const signInWith = async (
+    entry: EntryOptions<V>,
+    request: Request,
+    context: EntryContext,
+  ): Promise<Response> => {
+    if (entry.signIn !== undefined) {
+      return entry.signIn(request.url, request, context);
+    }
+    const route = entry.spa?.route ?? "/";
+    const to = new URL(route, options.appOrigins[0]);
+    to.searchParams.set("next", request.url);
+    return new Response(null, {
+      status: 303,
+      headers: { location: to.href, "cache-control": "no-store", "referrer-policy": "no-referrer" },
+    });
+  };
+
+  const host: ContentHost<V> = {
     get domain() {
       return domain;
     },
@@ -511,7 +721,7 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
         : [
             ...embedderFrameSourcesOf(Object.values(configs)),
             // A frame on a clean address goes by the authorize route (only that path).
-            ...(options.entry === undefined ? [] : [authorizeSource(options.entry.authorizeUrl)]),
+            ...(options.entry === undefined ? [] : [authorizeSource(authorizeUrl)]),
           ],
 
     owns: (request) => routeOf(request) !== null,
@@ -597,7 +807,15 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
           } catch (error) {
             return refusal(409, "refused", error instanceof Error ? error.message : String(error));
           }
-          return json(201, location);
+          // The clean address, where the app says the instance's path (P072).
+          const path = options.entry?.pathOf?.(instance) ?? null;
+          let link: string | null = null;
+          try {
+            link = path === null ? null : server.urlOf(instance.scope, path);
+          } catch {
+            link = null;
+          }
+          return json(201, link === null ? location : { ...location, link });
         } catch {
           return refusal(500, "failed", "The app's policy failed");
         }
@@ -609,6 +827,103 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
       contentSource: domain?.source ?? null,
       health: gate === undefined ? null : view,
     }),
+
+    prefix,
+
+    clientMeta: () => ({
+      served: served(),
+      contentSource: domain?.source ?? null,
+      frameSources: host.frameSources,
+      health:
+        gate === undefined
+          ? null
+          : { state: view.state, ...(view.reason === undefined ? {} : { reason: view.reason }) },
+    }),
+
+    routes(viewerOf) {
+      const issue = host.issue(viewerOf);
+      const authorize = host.authorize(viewerOf);
+      const handoff = host.handoff(viewerOf);
+      return async (request) => {
+        let pathname: string;
+        try {
+          pathname = new URL(request.url).pathname;
+        } catch {
+          return null;
+        }
+        if (!pathname.startsWith(`${prefix}/`)) {
+          return null;
+        }
+        const method = request.method.toUpperCase();
+        switch (pathname.slice(prefix.length)) {
+          case "/frames":
+            return issue(request);
+          case "/authorize":
+            return authorize(request);
+          case "/meta":
+            return method === "GET" || method === "HEAD"
+              ? json(200, host.clientMeta())
+              : refusal(405, "method", "GET here");
+          case "/handoff":
+            return handoff(request);
+          default:
+            return null;
+        }
+      };
+    },
+
+    handoff(viewerOf) {
+      return async (request) => {
+        const method = request.method.toUpperCase();
+        if (method !== "POST" && method !== "DELETE") {
+          return refusal(405, "method", "POST (or DELETE) here");
+        }
+        const handoff = options.entry?.handoff;
+        if (handoff === undefined) {
+          return refusal(404, "not-found", "This app has no viewer handoff (entry.handoff)");
+        }
+        // The app's own page only: a request from another site never sets or clears it.
+        const origin = request.headers.get("origin");
+        const site = request.headers.get("sec-fetch-site");
+        if (
+          (origin !== null && !options.appOrigins.includes(origin)) ||
+          (origin === null && site !== null && site !== "same-origin")
+        ) {
+          return refusal(403, "cross-site", "Only the app's own page hands its viewer over");
+        }
+        if (method === "DELETE") {
+          return new Response(null, {
+            status: 204,
+            headers: { "set-cookie": handoffCookie("", 0), "cache-control": "no-store" },
+          });
+        }
+        let viewer: V | null;
+        try {
+          viewer = await viewerOf(request);
+        } catch {
+          return refusal(500, "failed", "The app couldn't tell who is asking");
+        }
+        if (viewer === null) {
+          return refusal(401, "unauthenticated", "Sign in first: the handoff names a viewer");
+        }
+        const id = handoff.id(viewer);
+        if (typeof id !== "string" || id.length === 0 || id.length > 512) {
+          return refusal(500, "failed", "entry.handoff.id gave no id (1 to 512 characters)");
+        }
+        const key = signHandoff(id, Date.now() + HANDOFF_SECONDS * 1_000);
+        return new Response(null, {
+          status: 204,
+          headers: {
+            "set-cookie": handoffCookie(key, HANDOFF_SECONDS),
+            "cache-control": "no-store",
+          },
+        });
+      };
+    },
+
+    forget(filter = {}) {
+      server?.forget(filter);
+    },
 
     urlOf(scope, path = "/") {
       return server === null || !served() ? null : server.urlOf(scope, path);
@@ -668,7 +983,7 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
         const scope = options.name?.scopeOf?.(state.label) ?? null;
         let viewer: V | null;
         try {
-          viewer = await viewerOf(request);
+          viewer = (await viewerOf(request)) ?? (await handedOver(request));
         } catch {
           return appPage(
             500,
@@ -709,7 +1024,7 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
                     "sign-in",
                     method,
                   )
-                : await entry.signIn(request.url, request, context);
+                : await signInWith(entry, request, context);
             }
             const status = instance === null ? 404 : 403;
             const own = framed ? null : await entry.refusal?.(status, request, context);
@@ -773,4 +1088,5 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
       }
     },
   };
+  return host;
 }

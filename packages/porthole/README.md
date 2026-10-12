@@ -32,6 +32,7 @@ PORTHOLE_SECRET=$(npx porthole secret) node node_modules/@botiverse/porthole/exa
 - `examples/app.mjs`: the app (policy, routes, page), runtime-agnostic.
 - `examples/node/server.mjs`, `examples/workers/` (with its D1 migration and `wrangler.jsonc`).
 - `examples/conformance/`: Porthole's conformance suite run against it, on three engines.
+- `examples/mcp/server.mjs`: the agent's tools (show, guide, check) as an MCP server.
 
 ## The smallest opaque display
 
@@ -50,15 +51,18 @@ display.setContent("<p>Hello from an agent</p>");
 In React: `<PortholeProvider>` around `<PortholeFrame config displayId title scheme content />` from
 `@botiverse/porthole/react`.
 
-## What the agent reads
+## What the agent gets
 
 ```js
-import { compile } from "@botiverse/porthole";
+import { admitContent, checkTool, guideTool, showTool } from "@botiverse/porthole";
 
-const compiled = compile(config);
-compiled.toolDescription(); // the show tool's description: what it may write, and where it runs
-compiled.guide();           // the manual: the sandbox's limits, sizes, colors, examples
+const tools = [showTool(config), guideTool(config), checkTool(config)]; // name, description, JSON Schema
+const admitted = admitContent(config, html); // refuses only what certainly fails, saying what to change
 ```
+
+`checkPage` (`@botiverse/porthole/check`) runs a page in the real sandbox at phone and desktop
+width, light and dark, before anyone sees it, and tells the agent what broke in a few lines.
+`examples/mcp/server.mjs` wires the tools as an MCP server.
 
 ## Read next
 
@@ -71,11 +75,12 @@ compiled.guide();           // the manual: the sandbox's limits, sizes, colors, 
 
 | Import | What |
 | --- | --- |
-| `@botiverse/porthole` | `createHost`, `presets`, `compile`, `httpLocator`, `servedOrOpaque` (browser and server) |
-| `@botiverse/porthole/react` | `PortholeProvider`, `PortholeFrame` |
-| `@botiverse/porthole/server` | `createContentHost`, `prefixedName`, `d1TicketStore` (any runtime) |
-| `@botiverse/porthole/node` | `nodeHost`, `nodeProbe` (Node's http server) |
+| `@botiverse/porthole` | `createHost`, `presets`, `defineDisplays`, `portholeClient`, `lintContent`, the tools (browser and server) |
+| `@botiverse/porthole/react` | `PortholeProvider`, `PortholeFrame`, `PortholeView` |
+| `@botiverse/porthole/server` | `createContentHost` (`routes`), `contentHostFor`, `prefixedName`, `d1TicketStore` (any runtime) |
+| `@botiverse/porthole/node` | `nodeServer`, `nodeHost`, `nodeProbe` (Node's http server) |
 | `@botiverse/porthole/mcp` | the MCP Apps adapter |
+| `@botiverse/porthole/check` | `checkPage`, `playwrightDriver`, `cdpDriver`: the agent's pre-show check |
 | `@botiverse/porthole/conformance` | `defineHostConformance`: the suite, against your app (Playwright) |
 
 `npx porthole secret` makes a secret; `npx porthole d1-schema` prints the D1 migration.

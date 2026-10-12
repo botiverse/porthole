@@ -66,9 +66,9 @@ describe("the Workers example", () => {
     const cookie = { cookie: "example-viewer=ada" };
     expect((await at(`${APP}/`)).status).toBe(303);
     const page = await (await at(`${APP}/`, { headers: cookie })).text();
-    expect(page).toContain('href="http://a-hello.content.localhost:8793/"');
+    expect(page).toContain('id="open-tab"');
     expect((await at(`${APP}/porthole-client/index.js`)).status).toBe(200);
-    const issued = await at(`${APP}/api/frames`, {
+    const issued = await at(`${APP}/porthole/frames`, {
       method: "POST",
       headers: { ...cookie, "content-type": "application/json" },
       body: JSON.stringify({

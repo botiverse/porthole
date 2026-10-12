@@ -18,6 +18,14 @@ export {
 } from "./frame.tsx";
 export { ARM_DELAY_MS, ConfirmDialog, type ConfirmDialogProps } from "./dialog.tsx";
 export {
+  cssVariableTheme,
+  PortholeView,
+  usePortholeLink,
+  useRunAgain,
+  type PortholeFallbackProps,
+  type PortholeViewProps,
+} from "./view.tsx";
+export {
   CopyToast,
   TOAST_CHARS,
   TOAST_MS,

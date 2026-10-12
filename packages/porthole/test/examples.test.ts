@@ -31,16 +31,15 @@ describe("the examples", () => {
       expect((await get(`${app.appOrigin}/`)).status).toBe(303);
       const cookie = { cookie: "example-viewer=ada" };
       const page = await (await get(`${app.appOrigin}/`, cookie)).text();
-      expect(page).toContain('href="http://a-hello.content.localhost:8892/"');
+      expect(page).toContain('id="open-tab"');
       // Served once the health gate has seen the content domain (opaque until then).
       await vi.waitFor(async () => {
-        const meta = (await (await get(`${app.appOrigin}/api/meta`, cookie)).json()) as {
+        const meta = (await (await get(`${app.appOrigin}/porthole/meta`, cookie)).json()) as {
           served: boolean;
-          config: { isolation: string };
         };
-        expect(meta).toMatchObject({ served: true, config: { isolation: "domain" } });
+        expect(meta).toMatchObject({ served: true });
       });
-      const issued = await fetch(`${app.appOrigin}/api/frames`, {
+      const issued = await fetch(`${app.appOrigin}/porthole/frames`, {
         method: "POST",
         headers: { ...cookie, "content-type": "application/json" },
         body: JSON.stringify({
@@ -48,9 +47,10 @@ describe("the examples", () => {
         }),
       });
       expect(issued.status).toBe(201);
-      expect(((await issued.json()) as { origin: string }).origin).toBe(
-        "http://a-hello.content.localhost:8892",
-      );
+      expect(await issued.json()).toMatchObject({
+        origin: "http://a-hello.content.localhost:8892",
+        link: "http://a-hello.content.localhost:8892/",
+      });
       // A label the naming never makes: nothing there (asked of loopback, by Host).
       const status = await new Promise<number>((resolve, reject) => {
         get_(

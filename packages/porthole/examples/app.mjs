@@ -3,17 +3,10 @@
 // clean address. examples/node/server.mjs and examples/workers/worker.mjs only adapt it.
 //
 // What is the app's own here (the policy): who is signed in (a cookie), which pages exist, who
-// may see each. Everything else is Porthole's. Copy this file and replace the policy.
-import { presets } from "@botiverse/porthole";
+// may see each, and what a clean address names. Everything else is Porthole's: one mount
+// (`content.routes`, under /porthole) answers frames, the authorize route and the page's meta.
 import { conformancePage, createContentHost, prefixedName } from "@botiverse/porthole/server";
-
-/** The config a page is shown under: served on its own origin, or opaque while that's down. */
-export const pageConfig = (contentSource) =>
-  presets.artifact({
-    // A whole-page viewer: the frame fills its box, and the agent's manual says so.
-    layout: { kind: "fill" },
-    ...(contentSource === null ? {} : { isolation: "domain", contentOrigins: [contentSource] }),
-  });
+import { displays, kinds } from "./displays.mjs";
 
 /** The stored pages: id → versions. An app keeps them in its database. */
 const PAGES = {
@@ -60,6 +53,13 @@ export function makeApp(settings) {
     };
     pages.private = { owner: "nobody", versions: { 1: "<!doctype html><p>private</p>" } };
   }
+  const page = (scope) =>
+    pages[scope]
+      ? scope
+      : settings.conformance === true && /^t-[a-z0-9-]{1,40}$/u.test(scope)
+        ? "conformance"
+        : null;
+  const latest = (id) => Object.keys(pages[id].versions).at(-1);
   /** Who may see an instance: anyone signed in, but a page with an owner only its owner. */
   const accessOf = (instance, viewer) => {
     const owner = pages[page(instance.scope) ?? ""]?.owner ?? null;
@@ -67,20 +67,13 @@ export function makeApp(settings) {
       ? { viewer, subject: viewer }
       : null;
   };
-  const page = (scope) =>
-    pages[scope]
-      ? scope
-      : settings.conformance === true && /^t-[a-z0-9-]{1,40}$/u.test(scope)
-        ? "conformance"
-        : null;
 
   const content = createContentHost({
     domain: settings.contentDomain,
     appOrigins: [appOrigin],
     secret: settings.secret,
     ...(settings.tickets === undefined ? {} : { tickets: settings.tickets }),
-    // The key is the preset a stored page names: an artifact's defaults to "artifact".
-    configs: (source) => ({ artifact: pageConfig(source) }),
+    displays,
     name: prefixedName("a-"),
     // Policy 1: the instance a frame request proposes. The server picks the scope, never the client.
     instance: (proposal) => {
@@ -110,18 +103,21 @@ export function makeApp(settings) {
       const stored = pages[id]?.versions[version];
       return stored === undefined ? null : { html: stored };
     },
-    // Policy 4: what a clean address names: `/` the latest version, `/v/<n>` version n.
+    // Policy 4: what a clean address names: `/` the latest version, `/v/<n>` version n. And the
+    // reverse (pathOf), so frames come with their clean address for "open in a new tab".
     entry: {
-      authorizeUrl: `${appOrigin}/porthole/authorize`,
       at: (scope, path) => {
         const id = page(scope);
         if (id === null) return null;
-        const version =
-          path === "/" ? Object.keys(pages[id].versions).at(-1) : /^\/v\/(\d+)$/u.exec(path)?.[1];
+        const version = path === "/" ? latest(id) : /^\/v\/(\d+)$/u.exec(path)?.[1];
         return pages[id].versions[version] === undefined
           ? null
           : { scope, document: { kind: "artifact", id, version } };
       },
+      pathOf: (instance) =>
+        instance.document.version === latest(page(instance.scope) ?? "hello")
+          ? "/"
+          : `/v/${instance.document.version}`,
       // The app's own sign-in, coming back to the authorize route. Absolute: Node's
       // Response.redirect needs one.
       signIn: (returnTo) =>
@@ -130,38 +126,47 @@ export function makeApp(settings) {
     ...(settings.health === undefined ? {} : { health: settings.health }),
     log: (event) => console.log(JSON.stringify(event)),
   });
-  const issue = content.issue(viewerOf);
-  const authorize = content.authorize(viewerOf);
+  // Frames, the authorize route and the page's meta, under /porthole.
+  const routes = content.routes(viewerOf);
 
   async function handle(request) {
     const url = new URL(request.url);
     const viewer = viewerOf(request);
-    if (url.pathname === "/porthole/authorize") return authorize(request);
-    if (url.pathname === "/api/frames") return issue(request);
+    const porthole = await routes(request);
+    if (porthole !== null) return porthole;
+    if (url.pathname === "/porthole-client/displays.mjs") {
+      // The page's display kinds: the same as the server's, as a module.
+      return new Response(
+        `import { defineDisplays } from "@botiverse/porthole";\nexport const displays = defineDisplays(${JSON.stringify(kinds)});\n`,
+        { headers: { "content-type": "text/javascript; charset=utf-8" } },
+      );
+    }
     if (url.pathname.startsWith("/porthole-client/")) {
       return (
         (await settings.client(url.pathname.slice("/porthole-client".length))) ??
         new Response("not found", { status: 404 })
       );
     }
-    if (url.pathname === "/api/meta") {
-      // What the page needs: whether frames are served, and the config to show them under.
-      const meta = content.meta();
-      return Response.json({
-        ...meta,
-        config: pageConfig(meta.served ? meta.contentSource : null),
-        viewer,
-      });
+    if (url.pathname === "/api/page") {
+      // The opaque fallback's content: the latest version, for a viewer who may see it.
+      const id = url.searchParams.get("id") ?? "";
+      const version = pages[id] === undefined ? undefined : latest(id);
+      const instance =
+        version === undefined ? null : { scope: id, document: { kind: "artifact", id, version } };
+      return instance === null || accessOf(instance, viewer) === null
+        ? new Response("not found", { status: 404 })
+        : new Response(pages[id].versions[version], {
+            headers: { "content-type": "text/html; charset=utf-8" },
+          });
     }
     if (url.pathname === "/login" && request.method === "GET") {
       const next = escape(ownPath(url.searchParams.get("next"), appOrigin));
       return html(
         `<!doctype html><title>Sign in</title><main id="sign-in-page"><form method="post"><input type="hidden" name="next" value="${next}"><button id="sign-in">Sign in as ada</button></form></main>`,
         {
-          "content-security-policy":
-            // No form-action: after the sign-in POST, redirect entry goes on through the
-            // content origin, and form-action holds every redirect of a submission.
-            "default-src 'none'; frame-ancestors 'none'",
+          // No form-action: after the sign-in POST, redirect entry goes on through the content
+          // origin, and form-action holds every redirect of a submission (docs/ADOPTING.md).
+          "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
         },
       );
     }
@@ -175,30 +180,16 @@ export function makeApp(settings) {
         },
       });
     }
-    if (url.pathname === "/api/page") {
-      // The opaque fallback's content: the latest version, for a viewer who may see it.
-      const id = url.searchParams.get("id") ?? "";
-      const latest = pages[id] === undefined ? undefined : Object.keys(pages[id].versions).at(-1);
-      const instance =
-        latest === undefined
-          ? null
-          : { scope: id, document: { kind: "artifact", id, version: latest } };
-      const grant = instance === null ? null : accessOf(instance, viewer);
-      return grant === null
-        ? new Response("not found", { status: 404 })
-        : new Response(pages[id].versions[latest], {
-            headers: { "content-type": "text/html; charset=utf-8" },
-          });
-    }
     if (url.pathname === "/") {
       if (viewer === null) return Response.redirect(`${appOrigin}/login?next=/`, 303);
       const id = url.searchParams.get("page") ?? "hello";
       if (pages[id] === undefined) return new Response("not found", { status: 404 });
+      const frames = content.frameSources;
       return html(viewerPage(id), {
         // The embedding page's CSP: its scripts by nonce, and frames only from content origins
-        // (content.frameSources). An opaque display inherits this policy too, so it leaves
-        // img/media/font/style/worker open to what inline content uses (docs/ADOPTING.md).
-        "content-security-policy": `default-src 'self'; script-src 'self' 'nonce-${NONCE}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src data: blob:; font-src data:; worker-src blob:; frame-src ${content.frameSources.length === 0 ? "'none'" : content.frameSources.join(" ")}; base-uri 'none'; frame-ancestors 'none'`,
+        // and the authorize route (content.frameSources). An opaque display inherits this policy
+        // too, so it leaves img/media/font/style/worker open to what inline content uses.
+        "content-security-policy": `default-src 'self'; script-src 'self' 'nonce-${NONCE}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src data: blob:; font-src data:; worker-src blob:; frame-src ${frames.length === 0 ? "'none'" : frames.join(" ")}; base-uri 'none'; frame-ancestors 'none'`,
       });
     }
     return new Response("not found", { status: 404 });
@@ -210,22 +201,29 @@ export function makeApp(settings) {
     id,
   ) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Pages</title>
 <style>body{font-family:system-ui;margin:24px} #frame{height:480px;border:1px solid #8884} #problem{color:#b00}</style></head>
-<body><main id="app"><p>Signed in. <a id="open-tab" href="${escape(content.urlOf(id) ?? "#")}" target="_blank" rel="noopener">Open in a new tab</a></p>
+<body><main id="app"><p>Signed in. <button id="open-tab" type="button">Open in a new tab</button></p>
 <div id="frame"></div><p id="problem" role="alert"></p></main>
 <script type="importmap" nonce="${NONCE}">{"imports":{"@botiverse/porthole":"/porthole-client/index.js"}}</script>
 <script type="module" nonce="${NONCE}">
 const problem = (text) => { document.getElementById("problem").textContent = text; };
 // The client module failing to load would otherwise show nothing at all.
-import("@botiverse/porthole").then(async ({ createHost, httpLocator }) => {
-  const meta = await (await fetch("/api/meta")).json();
-  const host = createHost(meta.config, { locator: httpLocator("/api/frames"), nonce: ${JSON.stringify(NONCE)} });
+Promise.all([import("@botiverse/porthole"), import("/porthole-client/displays.mjs")]).then(async ([{ createHost, frameFallback, portholeClient }, { displays }]) => {
+  const porthole = portholeClient({ displays });            // the server's /porthole routes
+  const meta = await porthole.refresh();
+  const instance = { scope: ${JSON.stringify(id)}, document: { kind: "artifact", id: ${JSON.stringify(id)}, version: ${JSON.stringify(latest(id))} } };
+  // "Open in a new tab": the clean address, opened inside the click.
+  document.getElementById("open-tab").addEventListener("click", () => porthole.openInTab(instance));
+  // Served while frames are served (located through /porthole/frames); opaque, inline, while not.
+  const host = createHost(porthole.config("artifact"), { locator: porthole, nonce: ${JSON.stringify(NONCE)} });
   const display = host.mount(document.getElementById("frame"), {
     displayId: ${JSON.stringify(id)}, title: ${JSON.stringify(id)}, scheme: "light",
-    // Served: located by the issue endpoint. Opaque (frames not served now): the same page, inline.
-    ...(meta.served ? { instance: { scope: ${JSON.stringify(id)}, document: { kind: "artifact", id: ${JSON.stringify(id)}, version: "1" } } } : {}),
+    ...(meta?.served ? { instance } : {}),
   });
-  if (!meta.served) display.setContent(await (await fetch("/api/page?id=${encodeURIComponent(id)}")).text());
-  display.on("outcome", (outcome) => { if (outcome.state !== "loaded") problem("The page couldn't be shown here (" + (outcome.reason ?? outcome.state) + "): open it in a new tab."); });
+  if (!meta?.served) display.setContent(await (await fetch("/api/page?id=${encodeURIComponent(id)}")).text());
+  display.on("outcome", (outcome) => {
+    const fallback = frameFallback(outcome);
+    if (fallback !== null) problem(fallback.title + ": " + fallback.message);
+  });
   display.on("hostError", (error) => problem(error.message));
 }, (error) => problem("Porthole's client didn't load: " + error.message));
 </script></body></html>`;

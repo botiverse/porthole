@@ -251,7 +251,15 @@ export function createServer(options: ServerOptions): PortholeServer {
   if (!Number.isInteger(authorizeTtl) || authorizeTtl < 0 || authorizeTtl > 300) {
     throw new TypeError("authorize.ttlSeconds must be an integer from 0 to 300");
   }
-  const answers = new Map<string, { readonly answer: AuthorizeAnswer; readonly until: number }>();
+  const answers = new Map<
+    string,
+    {
+      readonly answer: AuthorizeAnswer;
+      readonly until: number;
+      readonly scope: string;
+      readonly subject: string | null;
+    }
+  >();
 
   if (options.hostOrigins.length === 0) {
     throw new TypeError("hostOrigins must name the origins that embed content");
@@ -338,7 +346,12 @@ export function createServer(options: ServerOptions): PortholeServer {
       } catch {
         given = { allow: false };
       }
-      answer = { answer: given, until: at + authorizeTtl * 1_000 };
+      answer = {
+        answer: given,
+        until: at + authorizeTtl * 1_000,
+        scope: access.instance.scope,
+        subject: access.subject ?? null,
+      };
       if (authorizeTtl > 0) {
         if (answers.size > 10_000) {
           answers.clear();
@@ -1045,6 +1058,17 @@ export function createServer(options: ServerOptions): PortholeServer {
           ? `${ENTER_PATH}?ticket=${ticket}`
           : `${PREFIX}d/${key}?ticket=${ticket}`;
       return { url: `${origin}${path}`, origin, reports: true };
+    },
+
+    forget(filter = {}) {
+      for (const [key, each] of answers) {
+        if (
+          (filter.scope === undefined || each.scope === filter.scope) &&
+          (filter.subject === undefined || each.subject === filter.subject)
+        ) {
+          answers.delete(key);
+        }
+      }
     },
 
     urlOf(scope, path = "/") {

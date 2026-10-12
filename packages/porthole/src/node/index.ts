@@ -9,13 +9,14 @@
  *   server.on("upgrade", porthole.upgrade);
  *   server.listen(8080, () => content.start());
  */
-import type { IncomingMessage, ServerResponse } from "node:http";
-import { request as httpRequest } from "node:http";
+import type { IncomingMessage, Server, ServerResponse } from "node:http";
+import { createServer as createHttpServer, request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { LookupFunction } from "node:net";
 import type { Duplex } from "node:stream";
 import { Readable } from "node:stream";
 import type { ContentHost, HealthProbe } from "../server/host.ts";
+import { withoutPortholeCookies } from "../server/proxy.ts";
 import type { Access } from "../server/types.ts";
 
 type RequestListener = (request: IncomingMessage, response: ServerResponse) => void;
@@ -219,6 +220,13 @@ export function nodeHost<V>(content: ContentHost<V>, app: NodeHostOptions): Node
           if (access === null) {
             refuseSocket(socket);
           } else {
+            // The app's socket never sees Porthole's own cookies, as its HTTP requests don't (P072).
+            const cookie = withoutPortholeCookies(request.headers.cookie);
+            if (cookie === null) {
+              delete request.headers.cookie;
+            } else {
+              request.headers.cookie = cookie;
+            }
             appSocket(access, request, socket, head);
           }
         },
@@ -281,4 +289,60 @@ export function nodeProbe(): HealthProbe {
       );
       asked.end();
     });
+}
+
+export interface NodeServerOptions {
+  /** The content host. */
+  readonly content: ContentHost<unknown>;
+  /**
+   * The app, fetch-style (Hono's `app.fetch`, or the app's own handler): every request that
+   * isn't the content domain's. Or `request`, a Node listener (Express).
+   */
+  readonly app?: (request: Request) => Response | Promise<Response>;
+  readonly request?: RequestListener;
+  readonly upgrade?: UpgradeListener;
+  readonly appSocket?: NodeHostOptions["appSocket"];
+  /** Whether the app's own requests came over https (behind a TLS edge): their URL's scheme. */
+  readonly scheme?: "https" | "http";
+}
+
+/**
+ * The whole Node server (P072): the content domain to Porthole, everything else to the app, its
+ * WebSockets included; the health gate started when it listens and stopped when it closes.
+ *
+ *   nodeServer({ content, app: (request) => app.fetch(request) }).listen(8790);
+ */
+export function nodeServer(options: NodeServerOptions): Server {
+  const scheme = options.scheme ?? "http";
+  const fromFetch = options.app;
+  const request: RequestListener | undefined =
+    options.request ??
+    (fromFetch === undefined
+      ? undefined
+      : (incoming, response) => {
+          Promise.resolve(fromFetch(toRequest(incoming, scheme))).then(
+            (answer) => sendResponse(response, answer),
+            () => {
+              if (response.headersSent) {
+                response.destroy();
+                return;
+              }
+              response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+              response.end("Something went wrong.");
+            },
+          );
+        });
+  if (request === undefined) {
+    throw new TypeError("nodeServer needs the app: app (fetch-style) or request (a Node listener)");
+  }
+  const porthole = nodeHost(options.content, {
+    request,
+    ...(options.upgrade === undefined ? {} : { upgrade: options.upgrade }),
+    ...(options.appSocket === undefined ? {} : { appSocket: options.appSocket }),
+  });
+  const server = createHttpServer(porthole.request);
+  server.on("upgrade", porthole.upgrade);
+  server.on("listening", () => options.content.start());
+  server.on("close", () => options.content.close());
+  return server;
 }

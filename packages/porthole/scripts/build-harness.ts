@@ -16,3 +16,26 @@ await build({
   legalComments: "none",
   logLevel: "warning",
 });
+
+// The check page (P073), as a module exporting its script: a Worker imports it and passes it to
+// checkPage. It replaces the source-only page-source the build compiled.
+const page = await build({
+  entryPoints: [new URL("../src/check/page.ts", import.meta.url).pathname],
+  bundle: true,
+  format: "iife",
+  platform: "browser",
+  target: "es2022",
+  minify: true,
+  legalComments: "none",
+  write: false,
+  logLevel: "warning",
+});
+const { writeFile } = await import("node:fs/promises");
+await writeFile(
+  new URL("../dist/check/page-source.js", import.meta.url),
+  `const source = ${JSON.stringify(page.outputFiles[0]?.text ?? "")};\nexport default source;\n`,
+);
+await writeFile(
+  new URL("../dist/check/page-source.d.ts", import.meta.url),
+  "declare const source: string;\nexport default source;\n",
+);

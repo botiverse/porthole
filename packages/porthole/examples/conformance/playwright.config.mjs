@@ -18,7 +18,7 @@ export default defineConfig({
   webServer: {
     command: "node ../node/server.mjs",
     cwd: import.meta.dirname,
-    url: `http://localhost:${port}/api/meta`,
+    url: `http://localhost:${port}/porthole/meta`,
     env: {
       PORT: String(port),
       PORTHOLE_SECRET: "example-secret-for-tests-only-0123456789",

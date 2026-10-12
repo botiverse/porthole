@@ -1,0 +1,238 @@
+import {
+  anyHttps,
+  declaredCapabilities,
+  egressOrigins,
+  type EgressKind,
+} from "../compile/policy.ts";
+import type { PortholeConfig } from "../config/schema.ts";
+import { sizeWords } from "../guide/limits.ts";
+import { originMatchesSource } from "../isolation/served.ts";
+
+/**
+ * What can be told about content without running it (P073), worded as the manual words it, so
+ * the agent fixes it before anyone sees it. Pure: any runtime. Errors are only what certainly
+ * fails or is cut (`refuseOn: "error"` refuses those); the rest are warnings.
+ */
+
+export type LintRule =
+  | "size"
+  | "document"
+  | "nested-frame"
+  | "document-write"
+  | "clipboard"
+  | "dialog"
+  | "form"
+  | "egress"
+  | "unpinned"
+  | "position-fixed"
+  | "new-window";
+
+export interface Finding {
+  readonly rule: LintRule;
+  readonly severity: "error" | "warning";
+  /** What to change, for the agent. */
+  readonly message: string;
+  /** Where (1-based), where a line says it. */
+  readonly line?: number;
+}
+
+const lineOf = (text: string, index: number): number => text.slice(0, index).split("\n").length;
+
+const noun = (config: PortholeConfig) =>
+  config.mode === "artifact" ? "page" : config.mode === "mcp-app" ? "view" : "widget";
+
+/** A whole document's markers: what a fragment must not have. */
+const DOCUMENT = /<!doctype\b|<html[\s>]|<head[\s>]|<body[\s>]/iu;
+
+/**
+ * A whole document sent where a fragment is shown (an inline widget), as the fragment it means:
+ * its head's styles and scripts, then its body. Null where it has no body to take.
+ */
+export function fragmentOf(content: string): string | null {
+  const head = /<head[^>]*>([\s\S]*?)<\/head>/iu.exec(content)?.[1] ?? "";
+  const kept = [...head.matchAll(/<(style|script)\b[\s\S]*?<\/\1>|<link\b[^>]*>/giu)]
+    .map((each) => each[0])
+    .join("\n");
+  const body =
+    /<body[^>]*>([\s\S]*?)(?:<\/body>|$)/iu.exec(content)?.[1] ??
+    content
+      .replace(/<!doctype[^>]*>/iu, "")
+      .replace(/<\/?html[^>]*>/giu, "")
+      .replace(/<head[^>]*>[\s\S]*?<\/head>/iu, "");
+  return body.trim() === "" ? null : `${kept}${kept === "" ? "" : "\n"}${body.trim()}`;
+}
+
+/** Where content reaches out, by the kind of egress each would need. */
+const REACHES: readonly { readonly kind: EgressKind; readonly pattern: RegExp }[] = [
+  { kind: "script", pattern: /<script\b[^>]*\bsrc\s*=\s*["']?(https?:\/\/[^"'\s>]+)/giu },
+  { kind: "script", pattern: /\bimport\s*(?:[\w{}\s*,]+from\s*)?\(?\s*["'](https?:\/\/[^"']+)/gu },
+  { kind: "style", pattern: /<link\b[^>]*\bhref\s*=\s*["']?(https?:\/\/[^"'\s>]+)/giu },
+  { kind: "style", pattern: /@import\s+(?:url\()?["']?(https?:\/\/[^"')\s]+)/giu },
+  { kind: "img", pattern: /<img\b[^>]*\bsrc\s*=\s*["']?(https?:\/\/[^"'\s>]+)/giu },
+  { kind: "img", pattern: /url\(\s*["']?(https?:\/\/[^"')\s]+)/giu },
+  {
+    kind: "media",
+    pattern: /<(?:video|audio|source)\b[^>]*\bsrc\s*=\s*["']?(https?:\/\/[^"'\s>]+)/giu,
+  },
+  { kind: "connect", pattern: /\bfetch\s*\(\s*["'`](https?:\/\/[^"'`]+)/gu },
+  {
+    kind: "connect",
+    pattern: /\bnew\s+(?:WebSocket|EventSource)\s*\(\s*["'`]((?:https?|wss?):\/\/[^"'`]+)/gu,
+  },
+];
+
+const CDN_PACKAGE =
+  /^https:\/\/(?:cdn\.jsdelivr\.net\/npm|unpkg\.com|esm\.sh)\/((?:@[^/]+\/)?[^/@]+)(@[^/]*)?/u;
+
+export function lintContent(config: PortholeConfig, content: string): Finding[] {
+  if (config.mode === "url") {
+    return [];
+  }
+  const findings: Finding[] = [];
+  const add = (rule: LintRule, severity: Finding["severity"], message: string, index?: number) =>
+    findings.push({
+      rule,
+      severity,
+      message,
+      ...(index === undefined ? {} : { line: lineOf(content, index) }),
+    });
+  const it = noun(config);
+  const declared = new Set(declaredCapabilities(config));
+
+  const bytes = new TextEncoder().encode(content).byteLength;
+  if (bytes > config.limits.maxBytes) {
+    add(
+      "size",
+      "error",
+      `It is ${sizeWords(bytes)}; a ${it} may be at most ${sizeWords(config.limits.maxBytes)}: make it smaller (less data inline, no embedded fonts or images it doesn't need).`,
+    );
+  }
+  if (config.mode === "inline") {
+    const at = content.search(DOCUMENT);
+    if (at >= 0) {
+      if (fragmentOf(content) === null) {
+        add(
+          "document",
+          "error",
+          "Send an HTML fragment (styles, markup, scripts), not a whole document: this one has no body to show.",
+          at,
+        );
+      } else {
+        add(
+          "document",
+          "warning",
+          "Send an HTML fragment, not a whole document (no <!doctype>, <html>, <head> or <body>): it was taken as its body, with its head's styles and scripts.",
+          at,
+        );
+      }
+    }
+  }
+  const frame = /<(iframe|frame|object|embed)\b/iu.exec(content);
+  if (frame !== null) {
+    add(
+      "nested-frame",
+      "error",
+      `Remove the <${frame[1]?.toLowerCase()}>: nested frames and plugins are taken out of a ${it} and never run. Draw it inline instead.`,
+      frame.index,
+    );
+  }
+  const write = /\bdocument\s*\.\s*write(?:ln)?\s*\(/u.exec(content);
+  if (write !== null) {
+    add(
+      "document-write",
+      "error",
+      "Remove document.write: it throws here. Build elements with document.createElement, or set innerHTML.",
+      write.index,
+    );
+  }
+  const clipboard =
+    /\bnavigator\s*\.\s*clipboard\b|\bexecCommand\s*\(\s*["'](?:copy|cut)["']/u.exec(content);
+  if (clipboard !== null) {
+    add(
+      "clipboard",
+      "warning",
+      declared.has("copyText")
+        ? "The clipboard is closed to content: a copy button calls copyText(text) from its click."
+        : "The clipboard is closed to content: copying from a button doesn't work here.",
+      clipboard.index,
+    );
+  }
+  const dialog = /(?:^|[^.\w$])(?:window\s*\.\s*)?(alert|confirm|prompt)\s*\(/u.exec(content);
+  if (dialog !== null) {
+    add(
+      "dialog",
+      "warning",
+      `${dialog[1]}() shows nothing here (confirm returns false, prompt null): show it in the ${it}'s own markup.`,
+      dialog.index,
+    );
+  }
+  const form = /<form\b/iu.exec(content);
+  if (form !== null) {
+    add(
+      "form",
+      "warning",
+      'Forms never submit here, and some browsers fire no submit event: use <button type="button"> and a click handler.',
+      form.index,
+    );
+  }
+  const reported = new Set<string>();
+  for (const { kind, pattern } of REACHES) {
+    for (const match of content.matchAll(pattern)) {
+      const address = match[1] ?? "";
+      let origin: string;
+      try {
+        origin = new URL(address.replace(/^ws/u, "http")).origin;
+      } catch {
+        continue;
+      }
+      const open =
+        (kind !== "script" &&
+          kind !== "style" &&
+          kind !== "connect" &&
+          address.startsWith("https:") &&
+          anyHttps(config, kind)) ||
+        egressOrigins(config, kind).some(
+          (source) => source === origin || originMatchesSource(origin, source),
+        );
+      if (!open && !reported.has(`${kind} ${origin}`)) {
+        reported.add(`${kind} ${origin}`);
+        add(
+          "egress",
+          "warning",
+          `Nothing loads from ${origin} here (${kind}): ${kind === "script" || kind === "style" ? "write it inline, or use a library from an allowed CDN" : kind === "connect" ? "the content can't call it; work from data in the content" : "put it inline as a data: URL"}.`,
+          match.index,
+        );
+      }
+      const pinned = CDN_PACKAGE.exec(address);
+      if (pinned !== null && (pinned[2] === undefined || !/^@\d+\.\d+\.\d+/u.test(pinned[2]))) {
+        add(
+          "unpinned",
+          "warning",
+          `Pin an exact version of ${pinned[1]} (${pinned[1]}@1.2.3 in its URL), never @latest or a range: the code then can't change under the ${it}.`,
+          match.index,
+        );
+      }
+    }
+  }
+  if (config.layout.kind !== "fill") {
+    const fixed = /position\s*:\s*fixed/iu.exec(content);
+    if (fixed !== null) {
+      add(
+        "position-fixed",
+        "warning",
+        `No position: fixed: the frame grows with the ${it}'s content, so a fixed element covers it. Use position: sticky or normal flow.`,
+        fixed.index,
+      );
+    }
+  }
+  const opens = /target\s*=\s*["']?_blank|\bwindow\s*\.\s*open\s*\(/u.exec(content);
+  if (opens !== null && !declared.has("openLink")) {
+    add(
+      "new-window",
+      "warning",
+      "Nothing opens a new window here (window.open returns null, target=_blank does nothing): show it inline.",
+      opens.index,
+    );
+  }
+  return findings;
+}

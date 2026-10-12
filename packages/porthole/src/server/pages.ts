@@ -184,3 +184,31 @@ export function appStatusPage(
     },
   });
 }
+
+/**
+ * A page saying why a frame shows nothing, for a relay of the app's own (P072): told to the page
+ * that frames it, at each web host origin and (a desktop scheme among them) to its parent (P070),
+ * its one script inline under its hash, so it works on any origin.
+ */
+export function statusPageOf(options: {
+  readonly status: number;
+  readonly title: string;
+  readonly detail: string;
+  readonly reason?: FrameBlock;
+  readonly hostOrigins: readonly string[];
+  /** Who may frame it (`frame-ancestors`): default, the host origins. */
+  readonly frameAncestors?: string;
+  readonly link?: { readonly href: string; readonly text: string };
+  readonly method?: string;
+}): Response {
+  return appStatusPage(
+    options.status,
+    options.title,
+    options.detail,
+    options.frameAncestors ?? options.hostOrigins.join(" "),
+    options.reason ?? "error",
+    options.hostOrigins,
+    options.link,
+    options.method,
+  );
+}

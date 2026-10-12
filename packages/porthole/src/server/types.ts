@@ -216,6 +216,11 @@ export interface PortholeServer {
   access(request: Request): Promise<Access | null>;
   /** The frame source every content origin matches (`https://*.example-usercontent.com`). */
   readonly contentSource: string;
+  /**
+   * Drops cached `authorize.check` answers (`ttlSeconds`): all, or a scope's, or a subject's, so a
+   * revocation holds at once (P072).
+   */
+  forget(filter?: { readonly scope?: string; readonly subject?: string }): void;
   /** A clean address on a scope's origin (P068): what a tab, a link, a bookmark opens. */
   urlOf(scope: string, path?: string): string;
   /** A redirect entry's state, signature checked; null for one this server didn't make. */

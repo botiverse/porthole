@@ -34,6 +34,7 @@ import type { InstanceLocator, InstanceRef } from "../isolation/types.ts";
 import { ConfirmDialog } from "./dialog.tsx";
 import { createLiveFrames, type FrameState, type LiveFrames } from "./live.ts";
 import { CopyToast, type CopyNotice } from "./toast.tsx";
+import type { PortholeClient } from "../host/client.ts";
 
 /**
  * The React binding: a `<PortholeProvider>` near the root owns what is per page (which frames
@@ -49,6 +50,14 @@ export const PLACEHOLDER_HEIGHT_PX = 96;
 
 interface PageState {
   readonly live: LiveFrames;
+  /** The host kit's client (P072): the locator, configs by kind, links. */
+  readonly client?: PortholeClient;
+  /** Defaults every frame below takes unless it says its own (P072). */
+  readonly scheme?: ColorScheme;
+  readonly theme?: (scheme: ColorScheme) => Readonly<Record<string, string | null | undefined>>;
+  readonly themeKey?: string | number;
+  /** The provider's handlers as of now (its own over the default `openLink`). */
+  readonly handlers?: () => CapabilityHandlers;
   /** Heights displays reported, by display id: a frame mounting again starts at its last. */
   readonly heights: Map<string, number>;
   readonly confirm?: Confirm;
@@ -65,7 +74,48 @@ const PAGE: PageState = { live: createLiveFrames(), heights: new Map() };
 
 const Page = createContext<PageState>(PAGE);
 
+/** The provider's page state, for the binding's other components (`PortholeView`). */
+export const PortholeContext = Page;
+
 export interface PortholeProviderProps {
+  /**
+   * The host kit's client (`portholeClient`, P072): it locates served frames (unless `locator` is
+   * given), and `PortholeView` takes each kind's config and link from it.
+   */
+  readonly client?: PortholeClient;
+  /** The color scheme every frame below shows in, unless it says its own. */
+  readonly scheme?: ColorScheme;
+  /**
+   * The host's live values for the theme variables, for every frame below (`cssVariableTheme`
+   * reads them from the page's own CSS variables). Change `themeKey` when they change.
+   */
+  readonly theme?: (scheme: ColorScheme) => Readonly<Record<string, string | null | undefined>>;
+  readonly themeKey?: string | number;
+  /** Handlers every frame below has, under its own (a frame's own win). */
+  readonly handlers?: CapabilityHandlers;
+  /**
+   * How `openLink` opens a link where a frame has no handler of its own: a desktop app's
+   * external browser. Default: a new tab, `noopener`.
+   */
+  readonly openLink?: (url: string) => void;
+  /**
+   * Shows what a copy button put on the clipboard, in the app's own toast (the words stay
+   * Porthole's: `notice`); `copy` copies it again in a click where the first write failed.
+   * Omitted: Porthole's `CopyToast`.
+   */
+  readonly notify?: (
+    notice: CopyNotice,
+    actions: { readonly copy: () => Promise<boolean> },
+  ) => void;
+  /**
+   * Draws the confirmation in the app's own dialog, for the request at the head of the queue:
+   * Porthole keeps the queue (one question at a time), runs `accept` inside the click, and counts
+   * declines. Omitted: Porthole's `ConfirmDialog`. (`confirm` replaces the whole mechanism.)
+   */
+  readonly renderConfirm?: (
+    request: ConfirmRequest,
+    answer: { readonly accept: () => void; readonly decline: () => void },
+  ) => ReactNode;
   /**
    * Who confirms gated calls for every frame below. Omitted: the default dialog (`ConfirmDialog`).
    * Pass your own function to replace it.
@@ -81,10 +131,25 @@ export interface PortholeProviderProps {
   readonly toastClassName?: string;
   /**
    * The page's CSP nonce, where its `script-src` is nonce-based: opaque frames inherit the page's
-   * policy, so their shell carries it (P054).
+   * policy, so their shell carries it (P054). `"auto"`: read from the page (a `<meta
+   * name="csp-nonce">`, else its first script's nonce).
    */
   readonly nonce?: string;
   readonly children?: ReactNode;
+}
+
+/** The page's own nonce: `<meta name="csp-nonce" content>`, else the first `script[nonce]`'s. */
+function pageNonce(): string | undefined {
+  if (typeof document === "undefined") {
+    return undefined;
+  }
+  const meta = document.querySelector<HTMLMetaElement>('meta[name="csp-nonce"]')?.content;
+  const script = document.querySelector<HTMLScriptElement>("script[nonce]")?.nonce;
+  return meta !== undefined && meta !== ""
+    ? meta
+    : script !== undefined && script !== ""
+      ? script
+      : undefined;
 }
 
 interface Pending {
@@ -114,9 +179,18 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
   // The default copyText: the host's page writes the clipboard (in the frame's click, which
   // activated this page too) and shows the person what went on it, or offers to copy it.
   const [notice, setNotice] = useState<CopyNotice | null>(null);
+  const ownNotify = useRef(props.notify);
+  useLayoutEffect(() => {
+    ownNotify.current = props.notify;
+  });
   const copyText = useCallback<CapabilityHandler<"copyText">>(async ({ text }, context) => {
     const copied = await writeClipboard(text, globalThis.document);
-    setNotice({ text, copied, title: context.title });
+    const said = { text, copied, title: context.title };
+    if (ownNotify.current === undefined) {
+      setNotice(said);
+    } else {
+      ownNotify.current(said, { copy: () => writeClipboard(text, globalThis.document) });
+    }
     return copied;
   }, []);
   const closeNotice = useCallback(() => setNotice(null), []);
@@ -127,15 +201,50 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
   useLayoutEffect(() => {
     ownLocator.current = props.locator;
   });
+  const ownClient = useRef(props.client);
+  useLayoutEffect(() => {
+    ownClient.current = props.client;
+  });
   const locate = useCallback<InstanceLocator["locate"]>(
     (instance, signal) =>
-      ownLocator.current === undefined
-        ? Promise.reject(new Error("No locator (PortholeProvider.locator)"))
-        : ownLocator.current.locate(instance, signal),
+      ownLocator.current !== undefined
+        ? ownLocator.current.locate(instance, signal)
+        : ownClient.current !== undefined
+          ? ownClient.current.locate(instance, signal)
+          : Promise.reject(new Error("No locator (PortholeProvider.locator or client)")),
     [],
   );
-  const locates = props.locator !== undefined;
-  const { nonce } = props;
+  const locates = props.locator !== undefined || props.client !== undefined;
+  // `"auto"`: the page's own nonce, read once.
+  const [autoNonce] = useState(() => (props.nonce === "auto" ? pageNonce() : undefined));
+  const nonce = props.nonce === "auto" ? autoNonce : props.nonce;
+  const { client, scheme, theme, themeKey } = props;
+  // openLink without a frame handler: the provider's, or a new tab.
+  const ownOpen = useRef(props.openLink);
+  useLayoutEffect(() => {
+    ownOpen.current = props.openLink;
+  });
+  const handlers = useMemo<CapabilityHandlers>(
+    () => ({
+      openLink: ({ url }) => {
+        if (ownOpen.current === undefined) {
+          globalThis.open?.(url, "_blank", "noopener");
+        } else {
+          ownOpen.current(url);
+        }
+        return true;
+      },
+    }),
+    [],
+  );
+  const ownHandlers = useRef(props.handlers);
+  useLayoutEffect(() => {
+    ownHandlers.current = props.handlers;
+  });
+  const merged = useCallback<() => CapabilityHandlers>(
+    () => ({ ...handlers, ...ownHandlers.current }),
+    [handlers],
+  );
   const value = useMemo<PageState>(
     () => ({
       live,
@@ -145,14 +254,47 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
       ...(hostInfo === undefined ? {} : { hostInfo }),
       ...(locates ? { locate } : {}),
       ...(nonce === undefined ? {} : { nonce }),
+      ...(client === undefined ? {} : { client }),
+      ...(scheme === undefined ? {} : { scheme }),
+      ...(theme === undefined ? {} : { theme }),
+      ...(themeKey === undefined ? {} : { themeKey }),
+      handlers: merged,
     }),
-    [live, heights, confirm, copyText, hostInfo, locates, locate, nonce],
+    [
+      live,
+      heights,
+      confirm,
+      copyText,
+      hostInfo,
+      locates,
+      locate,
+      nonce,
+      client,
+      scheme,
+      theme,
+      themeKey,
+      merged,
+    ],
   );
   const current = queue[0] ?? null;
   return (
     <Page.Provider value={value}>
       {props.children}
-      {props.confirm === undefined ? (
+      {props.confirm === undefined && props.renderConfirm !== undefined && current !== null
+        ? props.renderConfirm(current.request, {
+            accept: () => {
+              // Inside the app's own click: the effect is the person's (a window it opens).
+              current.proceed();
+              current.resolve("accepted");
+              setQueue((waiting) => waiting.slice(1));
+            },
+            decline: () => {
+              current.resolve("declined");
+              setQueue((waiting) => waiting.slice(1));
+            },
+          })
+        : null}
+      {props.confirm === undefined && props.renderConfirm === undefined ? (
         <ConfirmDialog
           request={current?.request ?? null}
           {...(props.dialogClassName === undefined ? {} : { className: props.dialogClassName })}
@@ -166,17 +308,19 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
           }}
         />
       ) : null}
-      <CopyToast
-        notice={notice}
-        {...(props.toastClassName === undefined ? {} : { className: props.toastClassName })}
-        onClose={closeNotice}
-        onCopy={(failed) => {
-          // A click on the host's own page: the write has the gesture it needs now.
-          void writeClipboard(failed.text, globalThis.document).then((copied) =>
-            setNotice({ ...failed, copied }),
-          );
-        }}
-      />
+      {props.notify !== undefined ? null : (
+        <CopyToast
+          notice={notice}
+          {...(props.toastClassName === undefined ? {} : { className: props.toastClassName })}
+          onClose={closeNotice}
+          onCopy={(failed) => {
+            // A click on the host's own page: the write has the gesture it needs now.
+            void writeClipboard(failed.text, globalThis.document).then((copied) =>
+              setNotice({ ...failed, copied }),
+            );
+          }}
+        />
+      )}
     </Page.Provider>
   );
 }
@@ -204,7 +348,8 @@ export interface PortholeFrameProps {
   readonly document?: string;
   /** Domain and external isolation: the instance to show. */
   readonly instance?: InstanceRef;
-  readonly scheme: ColorScheme;
+  /** The color scheme it shows in. Default: the provider's `scheme`, else light. */
+  readonly scheme?: ColorScheme;
   /** The host's live values for the config's theme variables (from its design tokens). */
   readonly theme?: (scheme: ColorScheme) => Readonly<Record<string, string | null | undefined>>;
   /** Handlers for the declared capabilities (the latest ones are called). */
@@ -437,7 +582,10 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
   const [ready, setReady] = useState(false);
   // The height this display started at: later reports don't make it start again.
   const [startHeight] = useState(initialHeightPx);
-  const { document: view, content, partial, scheme } = frame;
+  const { document: view, content, partial } = frame;
+  const scheme = frame.scheme ?? page.scheme ?? "light";
+  // A run's content errors, told once each (a loop throwing the same error says it once).
+  const told = useRef(new Set<string>());
   // By value: a config or instance made inline (each render) is the same display.
   const config = useByValue(frame.config);
   const instance = useByValue(frame.instance);
@@ -458,9 +606,14 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
           frame.onResize?.(size);
           return;
         }
-        case "contentError":
-          frame.onContentError?.((detail as DisplayEvents["contentError"]).message);
+        case "contentError": {
+          const { message } = detail as DisplayEvents["contentError"];
+          if (!told.current.has(message)) {
+            told.current.add(message);
+            frame.onContentError?.(message);
+          }
           return;
+        }
         case "hostError":
           frame.onHostError?.(detail as DisplayEvents["hostError"]);
           return;
@@ -503,14 +656,19 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
       displayId: latest().displayId,
       title: latest().title,
     });
-    // The handlers present now (a declared one must be), each calling the latest prop's.
+    // The handlers present now (a declared one must be), each calling the latest prop's, else
+    // the provider's (P072).
     const handlers: Record<string, AnyHandler> = {};
-    for (const name of Object.keys(first.handlers ?? {})) {
+    const declared = new Set(Object.keys(config.capabilities));
+    for (const name of new Set([
+      ...Object.keys(first.handlers ?? {}),
+      ...Object.keys(page.handlers?.() ?? {}).filter((each) => declared.has(each)),
+    ])) {
       handlers[name] = (args, context) =>
-        (latest().handlers as Record<string, AnyHandler | undefined> | undefined)?.[name]?.(
-          args,
-          named(context),
-        );
+        (
+          (latest().handlers as Record<string, AnyHandler | undefined> | undefined)?.[name] ??
+          (page.handlers?.() as Record<string, AnyHandler | undefined> | undefined)?.[name]
+        )?.(args, named(context));
     }
     // Copy buttons without a handler of the host's: the provider's, which shows a toast.
     if (config.capabilities.copyText !== undefined && handlers.copyText === undefined) {
@@ -534,14 +692,14 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
                 ),
             }
           : {}),
-        theme: (each) => latest().theme?.(each) ?? {},
+        theme: (each) => (latest().theme ?? page.theme)?.(each) ?? {},
         ...(page.hostInfo === undefined ? {} : { hostInfo: page.hostInfo }),
         ...(page.locate === undefined ? {} : { locator: { locate: page.locate } }),
         ...(page.nonce === undefined ? {} : { nonce: page.nonce }),
       }).mount(container, {
         displayId: first.displayId,
         title: first.title,
-        scheme: first.scheme,
+        scheme: first.scheme ?? page.scheme ?? "light",
         initialHeightPx: startHeight,
         ...(view === undefined ? {} : { document: view }),
         ...(instance === undefined ? {} : { instance }),
@@ -638,7 +796,7 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
       handle.current?.setTheme(scheme);
     }
   }, [scheme, mountScheme]);
-  const { themeKey } = frame;
+  const themeKey = frame.themeKey ?? page.themeKey;
   const [mountThemeKey] = useState(themeKey);
   useEffect(() => {
     if (themeKey !== undefined && themeKey !== mountThemeKey) {

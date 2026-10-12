@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { runInThisContext } from "node:vm";
 import { expect, type Frame, type Page, type TestInfo, type TestType } from "@playwright/test";
 import type { PortholeConfig } from "../config/schema.ts";
+import type { Displays } from "../displays/displays.ts";
 import type { FrameLocation, InstanceRef } from "../isolation/types.ts";
 import { entryTests, type EntryConformanceHost } from "./entry.ts";
 export { conformancePage } from "./page.ts";
@@ -43,8 +44,15 @@ export interface HostConformanceOptions {
   readonly issue?: { readonly url: string; readonly headers?: Readonly<Record<string, string>> };
   /** Or the location for an instance, got the test's own way. */
   readonly locate?: (instance: InstanceRef, page: Page) => Promise<FrameLocation>;
-  /** The config a served instance is framed under (the app's served config for its preset). */
-  readonly config: (instance: InstanceRef) => PortholeConfig;
+  /**
+   * The config a served instance is framed under (the app's served config for its preset). Or
+   * `displays` with `contentSource` (P072), which say it for every kind.
+   */
+  readonly config?: (instance: InstanceRef) => PortholeConfig;
+  /** The app's display kinds (`defineDisplays`), in place of `config`. */
+  readonly displays?: Displays;
+  /** The content source `displays` serve from (`http://*.content.localhost:8790`). */
+  readonly contentSource?: string;
   /**
    * The instances the served cases ask for, each for the scope a case names (may be async: a
    * page published on demand, `onDemand`). Give what the app serves; the cases for the rest are
@@ -170,6 +178,14 @@ export interface HostConformance {
 
 /** The leak and served hosts on an app's real page, for an app that registers the cases itself. */
 export function hostConformance(options: HostConformanceOptions): HostConformance {
+  const { displays, contentSource } = options;
+  const configOf =
+    options.config ??
+    (displays !== undefined && contentSource !== undefined
+      ? (instance: InstanceRef) => displays.configFor(instance, contentSource)
+      : () => {
+          throw new TypeError("hostConformance needs config, or displays with contentSource");
+        });
   let current: Page | null = null;
   const opened = new WeakSet<Page>();
   const hits = new Map<string, number>();
@@ -288,14 +304,7 @@ export function hostConformance(options: HostConformanceOptions): HostConformanc
               ...(options.issue.headers === undefined ? {} : { headers: options.issue.headers }),
             }
           : { location: await locate(instance) };
-      const id = await invoke(
-        page,
-        "show",
-        options.config(instance),
-        instance,
-        where,
-        given.content,
-      );
+      const id = await invoke(page, "show", configOf(instance), instance, where, given.content);
       let origin: string | null = null;
       await expect
         .poll(
@@ -371,7 +380,7 @@ export function hostConformance(options: HostConformanceOptions): HostConformanc
           async frame(page, url) {
             await ready(page);
             const instance = await served.artifact("entry", "1");
-            const id = await invoke(page, "show", options.config(instance), instance, {
+            const id = await invoke(page, "show", configOf(instance), instance, {
               location: { url, origin: new URL(url).origin },
             });
             return {

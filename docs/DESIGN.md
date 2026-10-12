@@ -509,6 +509,64 @@ package carries these docs (`docs/`), and `/server` exports the types an app's c
 renamed, so there is no compat module. `FrameBlock` gains `sign-in`; `ContentDomain.name` takes
 a `Naming` (any function still fits).
 
+### The host kit 0.3: the client, the bootstrap, the relay (P072)
+
+What both adopters still wrote after 0.2 moves into Porthole (ADOPTING.md is the walk-through):
+- **`defineDisplays(kinds)`** (core): each kind's preset and options once; opaque and served
+  configs (memoized per content source), the kind an instance names, frame sources and the
+  `frame-src` directive without a server, and a served kind's config for the manual without a real
+  origin. `createContentHost({ displays })` and the conformance runner take it.
+- **`content.routes(viewerOf)`** (/server): one mount under `/porthole` (`prefix`): `POST frames`
+  (`issue`, answering `link`, the clean address, where `entry.pathOf` names the path), `GET
+  authorize` (its URL now the default `entry.authorizeUrl`), `GET meta` (`ContentClientMeta`:
+  served, content source, frame sources, health) and `POST`/`DELETE handoff`.
+  `contentHostFor(build)` gives one host per Workers `env`, failing closed with a plain 503;
+  `nodeServer({ content, app })` is the whole Node server.
+- **The client:** `portholeClient({ displays, base, headers, credentials, handoff })` is the
+  locator and knows each kind's config from the meta (null until known), links, `openInTab`
+  (a tab opened in the click, then sent to the address), the handoff, and `entryTarget`.
+  `frameFallback(outcome)` words what to offer when a frame shows nothing (`needs-tab`,
+  `denied`, `expired`, `failed`, `timeout`). React: `PortholeView` (a display by kind, served or
+  opaque, with its fallback), `usePortholeLink`, and the provider's shared `scheme`, `theme`
+  (`cssVariableTheme`), `nonce: "auto"`, `handlers`, `openLink`, `notify` and `renderConfirm`.
+- **The viewer handoff** for a page that holds a token: `POST /porthole/handoff` with the app's
+  own credential, from the app's own page, sets a 10-minute `HttpOnly` cookie scoped to the
+  prefix holding a Porthole-signed key (the viewer's id and expiry), which the authorize route
+  reads when `viewerOf` knows no one. `entry.spa` signs a person in through the app's own route.
+- **The url-mode relay kit:** `upstreamHeaders` (the header rewrite `proxyTo` makes, for any
+  transport, WebSockets too), `statusPage` (the frame-status page with its script under its hash),
+  `nodeHost`'s `appSocket` without Porthole's cookies, `content.forget()` for cached `authorize`
+  answers.
+- **Server:** `health.onServedChange(served)`, once per flip; `log` takes a `{ info, warn, error }`
+  logger.
+
+### The agent's side: lint, check, tools (P073)
+
+- **`lintContent(config, content)`** (core, pure): what can be told without running it, each
+  finding worded for the agent with its line. Errors only for what certainly fails or is cut:
+  over the size, a document where a fragment goes that has no body, nested frames and plugins,
+  `document.write`. Warnings for the rest: a document sent as a widget (taken as its body,
+  `fragmentOf`), the clipboard, dialogs, forms, hosts outside egress, unpinned CDN libraries,
+  `position: fixed` in a flow layout, new windows without `openLink`.
+- **`admitContent(config, content, { refuseOn })`**: the show tool's gate. It refuses errors by
+  default with a text that says what to change; otherwise it shows the content (a widget's
+  document taken as its body) and returns the warnings as a note.
+- **`checkPage({ config, content, driver })`** (`/check`): the content in the real sandbox at each
+  width and scheme (defaults: the manual's phone and desktop widths, light and dark unless
+  unthemed). The check page (`src/check/page.ts`, bundled and shipped as `/check/page`) is served
+  by the driver at a fixed origin, mounts the content opaque under its own CSP with a small
+  instrument first in it, and hears errors, rejections, CSP blocks, failed loads, the console and
+  the document's width by `postMessage`; heights come from the display's resize events. The
+  report's `text` names each problem once, with where it happened, at most 8. Drivers:
+  `playwrightDriver(browser)`, and `cdpDriver(open)` over any CDP session (Cloudflare Browser
+  Rendering from a Worker).
+- **Tools:** `showTool`, `guideTool`, `checkTool` give `{ name, description, inputSchema }` from
+  the config; `answerGuide` answers the guide tool; `guideChanges(from, to)` is the notice when a
+  kind flips between served and opaque. `examples/mcp/server.mjs` wires them over MCP.
+- **The manual's examples pass the check:** `leak/check.spec.ts` runs every `GUIDE_EXAMPLES`
+  entry under each preset at the manual's widths in light and dark, on three engines (OBJECTIVES
+  criterion 5).
+
 ### Protocol adapters
 
 The core ships the adapter for the MCP Apps subset its own shell speaks
