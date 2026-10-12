@@ -3,6 +3,17 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## 0.2.3
+
+- Adopting from the package alone (P071): a README with a quickstart, `docs/ADOPTING.md`, and
+  runnable examples (`examples/`: one app on Node and Workers, and the conformance suite against
+  it). `npx porthole secret` and `npx porthole d1-schema`. `MountOptions.fill` and
+  `<PortholeFrame fill>` are deprecated in favor of `layout.kind: "fill"`. The runner asks less of
+  an app that serves only stored pages (`instances.shell`, `entry.denied`, `atSignIn`,
+  `completeSignIn` optional; `entry.unknown: "derive"`; `conformancePage`, `conformanceProjects`,
+  `onDemand`). `14.inline-assets` reports an inherited block as inapplicable. Host errors no
+  longer quote ticket URLs. DESIGN's snippet fixed; `'unsafe-eval'` documented.
+
 ## 0.2.2
 
 - From the host kit's first two adopters (P070, #5, #6): an address that names nothing (a label
