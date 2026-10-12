@@ -1,0 +1,19 @@
+// The example app on Workers. In your app, point `assets.directory` at
+// node_modules/@botiverse/porthole/dist (or your bundle of Porthole's client).
+{
+  "name": "porthole-example",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-01",
+  "vars": { "APP_ORIGIN": "http://localhost:8793", "CONTENT_DOMAIN": "content.localhost:8793" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "porthole-example",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations",
+    },
+  ],
+  // run_worker_first: every request (content origins included) goes through the Worker, so the
+  // app's static files are never served on a content origin.
+  "assets": { "directory": "../../dist", "binding": "ASSETS", "run_worker_first": true },
+}

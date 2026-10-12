@@ -5,6 +5,7 @@ import { presets, type PortholeConfig } from "../../src/index.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
 import { nodeHost, nodeProbe, sendResponse, toRequest } from "../../src/node/index.ts";
 import {
+  conformancePage,
   createContentHost,
   prefixedName,
   proxyTo,
@@ -64,10 +65,7 @@ export function kitConfigOf(source: string, instance: InstanceRef): PortholeConf
 
 /** Stored pages: two versions of one, as the served cases ask. */
 const PAGES = new Map(
-  ["1", "2"].map((version) => [
-    `page@${version}`,
-    `<!doctype html><html><head><title>Page</title></head><body><main id="artifact">version ${version}</main><script>document.documentElement.dataset.rtc = typeof RTCPeerConnection;</script></body></html>`,
-  ]),
+  (["1", "2"] as const).map((version) => [`page@${version}`, conformancePage(version)]),
 );
 
 const SCOPE = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/u;

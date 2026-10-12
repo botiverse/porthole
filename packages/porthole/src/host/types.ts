@@ -58,9 +58,12 @@ export interface MountOptions {
   /** The height to start at, before the content reports its own. */
   readonly initialHeightPx?: number;
   /**
-   * Fill the container (give it a height) instead of taking the content's height: the content
-   * scrolls inside its frame (an artifact viewer's page). The content's sizes are still reported
-   * (`resize`). A url-mode app always fills.
+   * Fill the container (give it a height) instead of taking the content's height.
+   *
+   * @deprecated Say it in the config, `layout: { kind: "fill" }`: every mount then fills, and the
+   * manual tells the agent so (a page that scrolls itself, `position: fixed` works). This option
+   * sizes only this frame, so the manual keeps saying the height follows the content (P071). A
+   * url-mode app always fills.
    */
   readonly fill?: boolean;
 }

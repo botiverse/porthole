@@ -92,12 +92,13 @@ function embedderPolicy(url: URL): string {
  * 'unsafe-inline', no 'strict-dynamic'), which opaque frames inherit, its own scripts carrying
  * the nonce, and the nonce handed to `createHost`.
  */
-function strictPolicy(html: string, closed: boolean): { policy: string; body: string } {
+function strictPolicy(html: string, closed: string | null): { policy: string; body: string } {
   const nonce = randomBytes(18).toString("base64");
   return {
     // `&closed=1`: a page closed like a strict host's (P058): its fetches and images only its own,
-    // which opaque frames inherit, so their content is as closed as the page.
-    policy: `script-src 'nonce-${nonce}'; object-src 'none'; base-uri 'none'${closed ? "; default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'" : ""}`,
+    // which opaque frames inherit, so their content is as closed as the page. `&closed=2`: its
+    // images only its own, data: ones too (P071).
+    policy: `script-src 'nonce-${nonce}'; object-src 'none'; base-uri 'none'${closed === "1" || closed === "2" ? `; default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self'${closed === "1" ? " data:" : ""}; connect-src 'self'` : ""}`,
     body: html.replaceAll("<script ", `<script nonce="${nonce}" `),
   };
 }
@@ -113,7 +114,7 @@ createServer((request, response) => {
       const html = found.type.startsWith("text/html");
       const strict =
         html && url.searchParams.get("nonce") === "1"
-          ? strictPolicy(found.body, url.searchParams.get("closed") === "1")
+          ? strictPolicy(found.body, url.searchParams.get("closed"))
           : null;
       const policies = [
         ...(html && !weakened.includes("embedder-csp") ? [embedderPolicy(url)] : []),

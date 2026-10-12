@@ -54,6 +54,9 @@ const SILENCE =
 
 const RECORDER = "<script>window.r = {};</script>";
 
+/** A one-pixel GIF, inline. */
+const PIXEL = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+
 export const LIMIT_PROBES: readonly Probe[] = [
   {
     id: "14.fill",
@@ -205,20 +208,34 @@ export const LIMIT_PROBES: readonly Probe[] = [
     title: "assets inline as data: URLs and CSS in a <style> work where nothing outside is open",
     async run(context) {
       const canary = await context.http();
-      const pixel =
-        "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
       const display = await context.launch({
         config: inline(),
         content: attack(
           `
     const image = document.getElementById("inline");
     r.inline = await new Promise((resolve) => { if (image.complete && image.naturalWidth > 0) resolve("loaded"); image.addEventListener("load", () => resolve("loaded")); image.addEventListener("error", () => resolve("failed")); setTimeout(() => resolve("pending"), 3000); });
-    r.styled = getComputedStyle(document.getElementById("styled")).width;`,
-          `<style>#styled { width: 37px }</style><div id="styled"></div><img id="inline" src="${pixel}"><img src="${canary.origin}/outside.png">`,
+    r.styled = getComputedStyle(document.getElementById("styled")).width;
+    if (r.inline !== "loaded") {
+      r.dataBlocked = await inheritedBlocks("data", () => { new Image().src = ${js(PIXEL)}; });
+    }
+    if (r.styled !== "37px") {
+      r.styleBlocked = await inheritedBlocks("inline", () => { const style = document.createElement("style"); style.textContent = "#styled { width: 38px }"; document.head.append(style); });
+    }`,
+          `<style>#styled { width: 37px }</style><div id="styled"></div><img id="inline" src="${PIXEL}"><img src="${canary.origin}/outside.png">`,
         ),
       });
       const verdict = await context.result(display);
       await settle();
+      // The frame's own policy allows data: images and inline styles: a block of either is the
+      // page's own CSP, which an opaque frame inherits (P058, P071).
+      if (
+        (verdict.inline !== "loaded" && verdict.dataBlocked === true) ||
+        (verdict.styled !== "37px" && verdict.styleBlocked === true)
+      ) {
+        context.inapplicable(
+          "the page's own CSP, which an opaque frame inherits, blocks data: images or inline styles (img-src, style-src): opaque content here can't inline its assets, whatever its config",
+        );
+      }
       expect(verdict).toMatchObject({ inline: "loaded", styled: "37px" });
       expect(canary.requests()).toEqual([]);
     },

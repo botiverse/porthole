@@ -54,6 +54,25 @@ jobs:
           path: .dev/leak-results
           retention-days: 7
 
+  examples:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @botiverse/porthole run build
+      - run: pnpm --filter @botiverse/porthole exec playwright install --with-deps chromium
+      # The shipped example app, through the suite an adopter runs.
+      - run: pnpm --filter @botiverse/porthole exec playwright test -c examples/conformance/playwright.config.mjs
+        env:
+          PORTHOLE_ENGINES: chromium
+          PORTHOLE_EXAMPLE_RESULTS: ${{ github.workspace }}/.dev/example-results
+
   prod-shape:
     runs-on: ubuntu-24.04
     timeout-minutes: 60

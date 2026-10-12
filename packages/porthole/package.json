@@ -3,10 +3,15 @@
   "version": "0.2.2",
   "description": "A host-side sandbox for agent-made HTML: isolation, egress hardening, a themed shell, gated host functions, and the agent manual, from one config.",
   "license": "Apache-2.0",
+  "bin": {
+    "porthole": "./src/cli.ts"
+  },
   "files": [
     "src",
     "dist",
-    "docs"
+    "docs",
+    "examples",
+    "README.md"
   ],
   "type": "module",
   "sideEffects": false,
@@ -19,6 +24,9 @@
     "./node": "./src/node/index.ts"
   },
   "publishConfig": {
+    "bin": {
+      "porthole": "./dist/cli.js"
+    },
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",

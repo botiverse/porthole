@@ -52,6 +52,7 @@ PORTHOLE_LEAK_WEAKEN=sync-guard pnpm test:leak  # a negative control: its probes
 ops/prod-shape/run.sh # the prod-shape profile in docker compose (TLS edge, DNS, siblings; three engines)
 PORTHOLE_PROD_ENGINES=chromium ops/prod-shape/run.sh   # a subset
 pnpm --filter @botiverse/porthole build         # dist/ (JS + .d.ts, the conformance harness) for packing
+PORTHOLE_ENGINES=chromium pnpm --filter @botiverse/porthole exec playwright test -c examples/conformance/playwright.config.mjs   # the examples (needs a build)
 pnpm exec oxfmt <file>                          # format (never prettier)
 ```
 
@@ -70,6 +71,8 @@ packages/porthole/leak/  the leak suite run against Porthole's reference host; r
                          React binding in real browsers (leak/react/app.tsx, bundled by esbuild);
                          kit/ the host kit's reference app, kit.spec.ts the runner against it
 packages/porthole/prod-shape/  the prod-shape suite (run in ops/prod-shape's containers)
+packages/porthole/examples/    shipped: one app on Node and Workers, and the suite against it
+                         (adopter-facing: keep it working, with docs/ADOPTING.md and the README)
 ops/prod-shape/          docker compose: Caddy, CoreDNS, the kit app, the browsers
 ```
 

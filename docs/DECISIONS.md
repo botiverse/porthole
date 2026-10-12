@@ -1772,3 +1772,40 @@ own served flag in the `log` callback, a `-g` filter to find its tests.
 **Revisit when** an app needs an address that exists but must not be told apart from one that
 doesn't (then `at` grows a way to say "ask the app").
 
+## P071 · 2026-10-12 · Adopting from the package alone: a README, examples, ADOPTING.md, and fixes a cold adopter hit · Accepted
+
+**Decision.** A fresh agent adopted 0.2.2 from the npm package alone (Node and Workers, about 25
+minutes, 130 lines); everything it hit was documentation, or small. 0.2.3:
+- **Docs in the package:** a README with a quickstart; `docs/ADOPTING.md`, the adopter's path
+  apart from DESIGN (the server, the page, its CSP, Workers, local development, the agent's
+  tools, conformance, expected noise); DESIGN's snippet fixed (`Response.redirect` needs an
+  absolute URL outside a browser; `configs` keyed `artifact`, the preset an artifact names by
+  default; one secret name, `PORTHOLE_SECRET`).
+- **Runnable examples in the package:** `examples/app.mjs` (one app, runtime-agnostic, with a
+  conformance test mode), `examples/node/`, `examples/workers/` (D1 migration, `wrangler.jsonc`
+  with `run_worker_first`), `examples/conformance/` (the suite against it, three engines). The
+  page reports a client module that fails to load; the sign-in page has no `form-action`, which
+  would hold the redirect back to the content origin.
+- **`npx porthole`:** `secret` makes a `PORTHOLE_SECRET`; `d1-schema` prints the migration.
+- **One way to fill:** the config's `layout.kind: "fill"`, which the manual follows.
+  `MountOptions.fill` and `<PortholeFrame fill>` are deprecated (they size the frame only).
+- **`'unsafe-eval'` in content's CSP is kept, and said:** content is the agent's own script
+  (`'unsafe-inline'`), so eval adds no capability; libraries content uses (Vue's in-browser
+  build, Alpine.js, Vega) and WebAssembly need it. Isolation comes from the origin, the sandbox and
+  egress.
+- **Conformance for an app that serves only stored pages:** `instances.shell` is optional (the
+  domain cases run on `artifact(scope, "1")`); `conformancePage(version)` is the exact test page
+  (also from `/server`, free of Playwright); `entry.denied`, `atSignIn` and `completeSignIn` are
+  optional; `entry.unknown: "derive"`; `conformanceProjects(devices)`; `onDemand`;
+  `defineHostConformance` takes any `TestType` without a cast. Test mode is documented with its
+  warning: never ship it.
+- **`14.inline-assets`** reports itself inapplicable where the page's own CSP (which an opaque
+  frame inherits) blocks data: images or inline styles, as its siblings do (P058).
+- **Host errors never quote a located URL** (it carries a ticket): they name its origin.
+
+**Why.** The cold adopter's top ten were all here: no README, the runnable example unshipped,
+adopter docs buried in DESIGN, no client snippet, a conformance runner that demanded what an
+artifact-only app lacks, two snippet bugs, no word on the page's CSP, two ways to fill (one of
+which left the manual wrong), Workers specifics, and local development.
+**Revisit when** a second cold adoption (after 0.3) finds friction these don't cover.
+

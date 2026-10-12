@@ -63,6 +63,8 @@ export {
 } from "./tickets.ts";
 export { FRAME_STATUS_METHOD } from "../isolation/types.ts";
 export { isHostLabel, prefixedName, type Naming } from "./naming.ts";
+// The page an app serves in conformance test mode (P071).
+export { conformancePage } from "../conformance/page.ts";
 // The types an app's callbacks take and give (P070).
 export type { PortholeConfig } from "../config/schema.ts";
 export type { FrameLocation, InstanceRef, ServedDocument } from "../isolation/types.ts";

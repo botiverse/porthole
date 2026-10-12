@@ -25,7 +25,7 @@
   },
   "overrides": [
     {
-      "files": ["**/test/**", "**/leak/**", "**/*.test.ts"],
+      "files": ["**/test/**", "**/leak/**", "**/*.test.ts", "**/examples/**", "**/prod-shape/**"],
       "rules": { "no-console": "off" }
     }
   ],

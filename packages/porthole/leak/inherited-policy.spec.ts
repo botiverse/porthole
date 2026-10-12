@@ -72,3 +72,14 @@ test("[14.sound] on a page whose own policy closes media: inapplicable, not fail
     /^inapplicable on this host: the page's own CSP, which an opaque frame inherits, blocks data: media \(media-src\)/u,
   );
 });
+
+test("[14.inline-assets] on a page whose own policy closes data: images: inapplicable, not failed", async ({
+  page,
+  browserName,
+}) => {
+  const tight = referenceHostWith({ nonce: true, closed: "images" });
+  const entry = leakTests(tight).find((each) => each.id === "14.inline-assets");
+  expect(await skipReason(entry, page, browserName)).toMatch(
+    /^inapplicable on this host: the page's own CSP, which an opaque frame inherits, blocks data: images or inline styles/u,
+  );
+});

@@ -5,6 +5,7 @@ import { expect, type Frame, type Page, type TestInfo, type TestType } from "@pl
 import type { PortholeConfig } from "../config/schema.ts";
 import type { FrameLocation, InstanceRef } from "../isolation/types.ts";
 import { entryTests, type EntryConformanceHost } from "./entry.ts";
+export { conformancePage } from "./page.ts";
 import type { ConformanceHarness } from "./harness/page.ts";
 import type { FrameOutcome } from "../host/types.ts";
 import type { ConformanceHost, LaunchedDisplay, LaunchSpec } from "./index.ts";
@@ -45,12 +46,16 @@ export interface HostConformanceOptions {
   /** The config a served instance is framed under (the app's served config for its preset). */
   readonly config: (instance: InstanceRef) => PortholeConfig;
   /**
-   * The instances the served cases ask for, each for the scope a case names. `shell` runs the
-   * domain-mode cases; `artifact` (versions of one stored page), `app` (url mode) and `proxy` (the
-   * MCP Apps sandbox proxy) run theirs where given, and are skipped (with the reason) where not.
+   * The instances the served cases ask for, each for the scope a case names (may be async: a
+   * page published on demand, `onDemand`). Give what the app serves; the cases for the rest are
+   * skipped, each with its reason:
+   * - `shell`: a served shell (domain mode). An app that serves only stored pages leaves it out:
+   *   the domain-mode cases then run on `artifact(scope, "1")`;
+   * - `artifact(scope, version)`: versions "1" and "2" of one stored page on `scope`'s origin,
+   *   each exactly `conformancePage(version)`;
+   * - `app`: a url-mode app; `proxy`: the MCP Apps sandbox proxy.
    */
-  readonly instances: Pick<ServedConformanceHost, "shell"> &
-    Partial<Pick<ServedConformanceHost, "artifact" | "app" | "proxy">>;
+  readonly instances: Partial<Pick<ServedConformanceHost, "shell" | "artifact" | "app" | "proxy">>;
   /**
    * Redirect entry (P068), where the app serves clean addresses: the cases open them directly,
    * signed in and out, and in a frame.
@@ -61,14 +66,20 @@ export interface HostConformanceOptions {
      * on demand.
      */
     readonly url: (scope: string) => string | Promise<string>;
-    /** A clean address the signed-in viewer may not open. */
-    readonly denied: (scope: string) => string | Promise<string>;
-    /** Whether `page` shows the app's own sign-in. */
-    readonly atSignIn: (page: Page) => Promise<boolean>;
-    /** On the app's sign-in page: signs in, as a person does. */
-    readonly completeSignIn: (page: Page) => Promise<void>;
-    /** Addresses on the content domain that name nothing: each a 404 there (P070). */
-    readonly unknown?: () => readonly string[] | Promise<readonly string[]>;
+    /** A clean address the signed-in viewer may not open. Absent: that case is skipped. */
+    readonly denied?: (scope: string) => string | Promise<string>;
+    /**
+     * Whether `page` shows the app's own sign-in. Absent: the browser left the content origin and
+     * shows no content.
+     */
+    readonly atSignIn?: (page: Page) => Promise<boolean>;
+    /** On the app's sign-in page: signs in, as a person does. Absent: the case stops there. */
+    readonly completeSignIn?: (page: Page) => Promise<void>;
+    /**
+     * Addresses on the content domain that name nothing: each a 404 there (P070). `"derive"`:
+     * `www`, the bare domain and a label no naming makes, under the domain of `url`'s address.
+     */
+    readonly unknown?: "derive" | (() => readonly string[] | Promise<readonly string[]>);
   };
   /** Case ids to skip, each with its reason (shown in the report). */
   readonly skip?: Readonly<Record<string, string>>;
@@ -320,7 +331,12 @@ export function hostConformance(options: HostConformanceOptions): HostConformanc
     },
     canary: (name) => Promise.resolve(`${CANARY}/${name}`),
     canaryHits: (name) => Promise.resolve(hits.get(name) ?? 0),
-    shell: options.instances.shell,
+    // An app that serves only stored pages: the domain-mode cases on its page's first version.
+    shell:
+      options.instances.shell ??
+      (artifact === undefined
+        ? (scope) => ({ scope, document: { kind: "shell", preset: "inlineWidget" } })
+        : (scope) => artifact(scope, "1")),
     // Asked for only by cases that run where the app gave them (`defineHostConformance` skips).
     artifact:
       artifact ??
@@ -335,16 +351,23 @@ export function hostConformance(options: HostConformanceOptions): HostConformanc
       ? null
       : {
           name: options.name,
+          url: given.url,
           // Signed in on the app's page, the harness there (a frame needs it).
           signIn: async (page) => {
             await open(page);
             await ready(page);
           },
-          url: given.url,
-          denied: given.denied,
-          atSignIn: given.atSignIn,
-          completeSignIn: given.completeSignIn,
-          ...(given.unknown === undefined ? {} : { unknown: given.unknown }),
+          ...(given.denied === undefined ? {} : { denied: given.denied }),
+          ...(given.atSignIn === undefined ? {} : { atSignIn: given.atSignIn }),
+          ...(given.completeSignIn === undefined ? {} : { completeSignIn: given.completeSignIn }),
+          ...(given.unknown === undefined
+            ? {}
+            : {
+                unknown:
+                  given.unknown === "derive"
+                    ? async () => derivedUnknown(await given.url("entry-unknown"))
+                    : given.unknown,
+              }),
           async frame(page, url) {
             await ready(page);
             const instance = await served.artifact("entry", "1");
@@ -415,14 +438,91 @@ const URL_CASES = [
   "served.url.framed",
 ];
 const PROXY_CASES = ["served.proxy.view", "served.proxy.parent-only", "served.proxy.egress"];
+const DOMAIN_CASES = [
+  "served.domain.origin",
+  "served.domain.no-reach",
+  "served.domain.no-top-navigation",
+  "served.domain.no-popups",
+  "served.domain.address",
+  "served.domain.storage-scope",
+  "served.domain.ticket-once",
+  "served.domain.frame-ancestors",
+  "served.domain.egress",
+];
+
+/**
+ * Addresses that name nothing, under the content domain of a clean address: `www`, the bare
+ * domain, and a label no naming makes (P071).
+ */
+function derivedUnknown(clean: string): string[] {
+  const url = new URL(clean);
+  const domain = url.hostname.split(".").slice(1).join(".");
+  const port = url.port === "" ? "" : `:${url.port}`;
+  return ["www.", "", "zz-porthole-nothing."].map(
+    (label) => `${url.protocol}//${label}${domain}${port}/`,
+  );
+}
+
+/**
+ * A memo for fixtures made on demand (a page published the first time a case asks for it): one
+ * promise per key, per worker (P071).
+ */
+export function onDemand<V>(make: (key: string) => Promise<V>): (key: string) => Promise<V> {
+  const made = new Map<string, Promise<V>>();
+  return (key) => {
+    let found = made.get(key);
+    if (found === undefined) {
+      found = make(key);
+      made.set(key, found);
+      // A failure is tried again by the next case, not remembered.
+      found.catch(() => made.delete(key));
+    }
+    return found;
+  };
+}
+
+/** One Playwright project per engine Porthole supports, as Porthole's own suites run them. */
+export interface ConformanceProject {
+  readonly name: "chromium" | "webkit" | "firefox";
+  readonly use: Record<string, unknown>;
+}
+
+/**
+ * The Playwright projects to run the suite on: Chromium, WebKit and Firefox, Firefox with the
+ * preferences its WebRTC probe needs (loopback ICE). Pass `devices` from `@playwright/test`
+ * (P071).
+ */
+export function conformanceProjects(
+  devices: Readonly<Record<string, Record<string, unknown>>>,
+  options: { readonly engines?: readonly ("chromium" | "webkit" | "firefox")[] } = {},
+): ConformanceProject[] {
+  const all: ConformanceProject[] = [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    { name: "webkit", use: { ...devices["Desktop Safari"] } },
+    {
+      name: "firefox",
+      use: {
+        ...devices["Desktop Firefox"],
+        launchOptions: {
+          firefoxUserPrefs: {
+            "media.peerconnection.ice.loopback": true,
+            "media.peerconnection.ice.obfuscate_host_addresses": false,
+          },
+        },
+      },
+    },
+  ];
+  const engines = options.engines ?? ["chromium", "webkit", "firefox"];
+  return all.filter((project) => engines.includes(project.name));
+}
 
 /**
  * Registers the leak and served suites against an app's real page, in a spec file of the app's
  * (so `-g "\[1\.connect\]"` selects one). The served cases for instances the app didn't give are
  * skipped, each with its reason.
  */
-export function defineHostConformance(
-  test: TestType<object, object>,
+export function defineHostConformance<T extends object, W extends object>(
+  test: TestType<T, W>,
   options: HostConformanceOptions,
 ): void {
   const typed = test as unknown as TestType<ConformanceFixtures, object>;
@@ -435,6 +535,12 @@ export function defineHostConformance(
   };
   if (options.instances.artifact === undefined) {
     absent(["served.artifact.versions"], "the app serves no versions of a stored page");
+  }
+  if (options.instances.shell === undefined && options.instances.artifact === undefined) {
+    absent(
+      DOMAIN_CASES,
+      "the app serves no documents on content origins (instances.shell or .artifact)",
+    );
   }
   if (options.instances.app === undefined) {
     absent(URL_CASES, "the app serves no url-mode apps");

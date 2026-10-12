@@ -4,6 +4,9 @@ The stable shape is in [ARCHITECTURE.md](ARCHITECTURE.md) and the reasons in
 [DECISIONS.md](DECISIONS.md). This is the concrete phase-1 plan. Web first:
 a framework-agnostic TypeScript core plus a thin React binding.
 
+Adopting Porthole? Start with [ADOPTING.md](ADOPTING.md) and the package's `examples/`. Paths
+below like `leak/…` and `ops/…` are Porthole's own repository, not the package.
+
 ## Threat model
 
 Two classes of attacker, handled by different layers (ARCHITECTURE § Trust
@@ -121,7 +124,9 @@ realm) and by the host where the engine passes the gesture up.
 `compile(config)` (`src/compile/compile.ts`) validates the config and returns:
 
 - `csp` / `cspDirectives`: the frame's policy. `default-src 'none'`; scripts may be
-  inline (agent content is inline) plus `blob:` and the script origins; each other
+  inline (agent content is inline), `'unsafe-eval'` (content is the agent's own script already,
+  so eval adds no capability, and libraries content uses compile with it, WebAssembly too: P071),
+  plus `blob:` and the script origins; each other
   kind opens only to its origins; `connect-src 'none'` unless something is
   declared; `frame-src`, `object-src`, `base-uri`, `form-action` all `'none'`;
   `webrtc 'block'`. Never `'self'` (P022). Empty in url mode.
@@ -351,15 +356,16 @@ with redirect entry):
 - `source`: a stored page by id and version;
 - `entry.at`: the instance a clean address's path names (redirect entry).
 
-**An adopter's whole wiring** (the kit reference app, `packages/porthole/leak/kit/app.ts`, is
-this, runnable):
+**An adopter's whole wiring** (the package's `examples/app.mjs` is this, runnable on Node and
+Workers; docs/ADOPTING.md walks through it):
 
 ```ts
 const content = createContentHost<Viewer>({
   domain: env.CONTENT_DOMAIN,                 // "content.example.com" | "content.localhost:8790"; "" = off
   appOrigins: [env.APP_ORIGIN],               // frame-ancestors, and the clash guard
-  secret: env.CONTENT_SECRET, tickets: d1TicketStore(env.DB),
-  configs: (source) => ({ page: presets.artifact({ isolation: "domain", contentOrigins: [source] }) }),
+  secret: env.PORTHOLE_SECRET, tickets: d1TicketStore(env.DB),   // npx porthole secret
+  // Keyed by the preset a stored page names: an artifact's is "artifact" unless it says otherwise.
+  configs: (source) => ({ artifact: presets.artifact({ isolation: "domain", contentOrigins: [source] }) }),
   name: prefixedName("a-"), reserved: ["p-*"],   // only labels the app itself serves there
   instance: (proposal, viewer) => mapToMyInstance(proposal),    // a proposal: validate, derive the scope
   access: async (instance, viewer) =>
@@ -369,7 +375,8 @@ const content = createContentHost<Viewer>({
   entry: {
     authorizeUrl: `${env.APP_ORIGIN}/porthole/authorize`,
     at: (scope, path) => pageAt(scope, path),                   // "/" → latest, "/v/3" → version 3
-    signIn: (returnTo) => Response.redirect(`/login?next=${encodeURIComponent(returnTo)}`, 303),
+    // Absolute: outside a browser, Response.redirect has no base URL.
+    signIn: (returnTo) => Response.redirect(`${env.APP_ORIGIN}/login?next=${encodeURIComponent(returnTo)}`, 303),
   },
   health: { probe: nodeProbe(), onChange: (view) => pushToClients(view) },  // optional: the opaque fallback
 });

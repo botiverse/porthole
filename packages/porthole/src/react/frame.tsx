@@ -216,8 +216,11 @@ export interface PortholeFrameProps {
   /** Run at once, without waiting to near the screen (it still counts toward the page's most). */
   readonly eager?: boolean;
   /**
-   * Fill the box (give it, or its parent, a height) and let the content scroll inside, instead of
-   * growing with the content: an artifact viewer's page. A url-mode app always fills.
+   * Fill the box (give it, or its parent, a height) instead of growing with the content.
+   *
+   * @deprecated Say it in the config, `layout: { kind: "fill" }`: every frame then fills, and the
+   * manual tells the agent so. This prop sizes only this frame, so the manual keeps saying the
+   * height follows the content (P071). A url-mode app always fills.
    */
   readonly fill?: boolean;
   readonly onInitialized?: () => void;

@@ -46,8 +46,11 @@ export const referenceHost = referenceHostWith({});
  */
 export function referenceHostWith(setup: {
   readonly nonce?: boolean;
-  /** A page whose own policy closes images and fetches to its origin (with `nonce`). */
-  readonly closed?: boolean;
+  /**
+   * A page whose own policy closes images and fetches to its origin (with `nonce`); `"images"`:
+   * data: images too.
+   */
+  readonly closed?: boolean | "images";
   /** A host that always has a confirm function (a default dialog): `confirms: false` is ignored. */
   readonly alwaysConfirms?: boolean;
 }): Omit<ConformanceHost, "launch"> & {
@@ -58,7 +61,7 @@ export function referenceHostWith(setup: {
     async launch(page: Page, spec: LaunchSpec): Promise<ReferenceDisplay> {
       if (!page.url().includes("/?csp=")) {
         await page.goto(
-          `/?csp=${encodeURIComponent(embedderCsp([spec.config]))}${setup.nonce === true ? "&nonce=1" : ""}${setup.closed === true ? "&closed=1" : ""}`,
+          `/?csp=${encodeURIComponent(embedderCsp([spec.config]))}${setup.nonce === true ? "&nonce=1" : ""}${setup.closed === true ? "&closed=1" : setup.closed === "images" ? "&closed=2" : ""}`,
         );
         await page.waitForFunction(() => "reference" in window);
       }

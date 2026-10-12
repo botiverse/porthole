@@ -122,9 +122,13 @@ export { entryTests, type EntryConformanceHost, type EntrySuiteOptions } from ".
 
 // The runner an app points at its real page and issue endpoint (P066).
 export {
+  conformancePage,
+  conformanceProjects,
   defineHostConformance,
   harnessScript,
   hostConformance,
+  onDemand,
+  type ConformanceProject,
   type HostConformance,
   type HostConformanceOptions,
 } from "./host-kit.ts";

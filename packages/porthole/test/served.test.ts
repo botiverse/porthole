@@ -86,4 +86,23 @@ describe("checkFrameLocation", () => {
       ),
     ).toThrow(/same site/u);
   });
+
+  it("never quotes a located URL's ticket in its message (P071)", () => {
+    let message = "";
+    try {
+      checkFrameLocation(
+        {
+          url: "https://evil.com/__porthole/d/x?ticket=pt_secret",
+          origin: "https://abc.example-usercontent.com",
+        },
+        sources,
+        host,
+      );
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain("https://evil.com");
+    expect(message).not.toContain("pt_secret");
+    expect(message).not.toContain("__porthole");
+  });
 });

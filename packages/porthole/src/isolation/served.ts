@@ -130,11 +130,12 @@ export function checkFrameLocation(
   try {
     url = new URL(location.url);
   } catch {
-    throw new TypeError(`The located URL ${JSON.stringify(location.url)} is not a URL`);
+    throw new TypeError("The located URL is not a URL");
   }
   if (origin === null || url.origin !== location.origin) {
     throw new TypeError(
-      `The located URL ${JSON.stringify(location.url)} is not on its origin ${JSON.stringify(location.origin)}`,
+      // Named by its origin only: a located URL carries a ticket, which never goes in a message.
+      `The located URL is not on its origin ${JSON.stringify(location.origin)} (it is on ${JSON.stringify(safeOrigin(location.url))})`,
     );
   }
   if (!contentOrigins.some((source) => originMatchesSource(location.origin, source))) {
@@ -147,5 +148,14 @@ export function checkFrameLocation(
     throw new TypeError(
       `The located origin ${location.origin} may be the same site as the host (${hostOrigin}): content must be served from a registrable domain the host uses for nothing else`,
     );
+  }
+}
+
+/** A URL's origin, for a message: never its path or query (a ticket). */
+function safeOrigin(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return "an unparsable address";
   }
 }

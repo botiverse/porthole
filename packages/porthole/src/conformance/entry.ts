@@ -18,18 +18,24 @@ export interface EntryConformanceHost {
    * `scope`: it draws `<main id="artifact">version 1</main>`.
    */
   url(scope: string): string | Promise<string>;
-  /** A clean address the signed-in viewer may not open. */
-  denied(scope: string): string | Promise<string>;
+  /** A clean address the signed-in viewer may not open. Absent: `served.entry.denied` is skipped. */
+  denied?(scope: string): string | Promise<string>;
   /**
    * Addresses on the content domain that name nothing (a label the app never assigns, the bare
    * domain, a path no instance has): each must be Porthole's 404 there, never the app's sign-in
    * (P070). Absent: the case is skipped.
    */
   unknown?(): readonly string[] | Promise<readonly string[]>;
-  /** Whether `page` shows the app's own sign-in. */
-  atSignIn(page: Page): Promise<boolean>;
-  /** On the app's sign-in page: signs in, as a person does (and the app goes back). */
-  completeSignIn(page: Page): Promise<void>;
+  /**
+   * Whether `page` shows the app's own sign-in. Absent: the browser left the content origin for
+   * another (the app's) and shows no content.
+   */
+  atSignIn?(page: Page): Promise<boolean>;
+  /**
+   * On the app's sign-in page: signs in, as a person does (and the app goes back). Absent: the
+   * signed-out case stops at the sign-in.
+   */
+  completeSignIn?(page: Page): Promise<void>;
   /**
    * Frames a clean address on the app's page as the app would (a location of that address),
    * returning the frame and the display's outcome once it has one.
@@ -111,11 +117,22 @@ export function entryTests(
   define(
     "served.entry.signed-out",
     "signed out, a clean address goes to the app's own sign-in, then back to the content",
-    async ({ page }) => {
+    async ({ page }, info) => {
       const url = await host.url("entry-signed-out");
       await page.goto(url);
-      expect(await host.atSignIn(page), "the app's sign-in").toBe(true);
+      const atSignIn =
+        host.atSignIn === undefined
+          ? new URL(page.url()).origin !== new URL(url).origin
+          : await host.atSignIn(page);
+      expect(atSignIn, `the app's sign-in (ended at ${page.url()})`).toBe(true);
       expect(await shows(page)).toBe(false);
+      if (host.completeSignIn === undefined) {
+        info.annotations.push({
+          type: "note",
+          description: "the sign-in wasn't completed: entry.completeSignIn not given",
+        });
+        return;
+      }
       await host.completeSignIn(page);
       await expect(page.locator("#artifact")).toHaveText("version 1");
       expect(page.url()).toBe(url);
@@ -125,9 +142,13 @@ export function entryTests(
   define(
     "served.entry.denied",
     "a viewer without access gets the app's refusal, never the content",
-    async ({ page }) => {
+    async ({ page }, info) => {
+      info.skip(
+        host.denied === undefined,
+        "the host gave no address its viewer may not open (denied)",
+      );
       await host.signIn(page);
-      const url = await host.denied("entry-denied");
+      const url = (await host.denied?.("entry-denied")) ?? "";
       const answer = await page.goto(url);
       expect(answer?.status()).toBe(403);
       expect(await shows(page)).toBe(false);
@@ -196,10 +217,11 @@ export function entryTests(
     "a clean address in a frame shows the content where the browser keeps the cookies, else asks for a tab: never the app's sign-in",
     async ({ page, browserName }, info) => {
       await host.signIn(page);
+      const before = page.url();
       const shown = await host.frame(page, await host.url("entry-framed"));
       const outcome = await shown.outcome();
       const frame = await shown.frame();
-      expect(await host.atSignIn(page)).toBe(false);
+      expect(page.url(), "the app's page stays where it was").toBe(before);
       expect(new URL(frame.url()).pathname).not.toMatch(/sign-?in/iu);
       if (outcome.state === "loaded") {
         await expect(frame.locator("#artifact")).toHaveText("version 1");
