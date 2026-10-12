@@ -138,3 +138,45 @@ test("the copy and openLink capabilities change what the lines say", () => {
   const downloads = manualLimits(presets.artifact({ capabilities: { downloadFile: {} } }), "");
   expect(downloads.find((each) => each.id === "downloads")?.text).toContain("ui/download-file");
 });
+
+describe("the silent line follows where errors go, as the Errors line does (#4)", () => {
+  const silent = (config: PortholeConfig) =>
+    manualLimits(config, "").find((limit) => limit.id === "silent")?.text ?? "";
+  const errors = (config: PortholeConfig) =>
+    manualLimits(config, "").find((limit) => limit.id === "errors")?.text ?? "";
+
+  test("agent: each block comes back to the agent, so it checks them", () => {
+    const config = presets.inlineWidget({ errors: "agent" });
+    expect(silent(config)).toContain("Each block comes back to you as an error, so check them.");
+    expect(silent(config)).not.toContain("nothing shows an error");
+    expect(errors(config)).toContain("comes back to you");
+  });
+
+  test("host: the app is told, the agent isn't", () => {
+    const config = presets.inlineWidget({ errors: "host" });
+    expect(silent(config)).toContain("The app is told of each block, but you aren't");
+    expect(silent(config)).not.toContain("nothing shows an error");
+    expect(errors(config)).toContain("goes to the app");
+  });
+
+  test("none: silent, and nothing reports", () => {
+    const config = presets.inlineWidget({ errors: "none" });
+    expect(silent(config)).toContain("fails silently");
+    expect(silent(config)).toContain("nothing shows an error");
+    expect(errors(config)).toContain("nothing reports");
+  });
+
+  test("unset: reported to the app where reportError is declared; silent where it isn't", () => {
+    const declared = presets.inlineWidget();
+    expect(silent(declared)).toContain("Each block is reported to the app.");
+    expect(silent(declared)).not.toContain("nothing shows an error");
+    expect(errors(declared)).toContain("is reported to the app");
+    const undeclared = presets.inlineWidget({ capabilities: { reportError: false } });
+    expect(silent(undeclared)).toContain("nothing shows an error");
+    expect(errors(undeclared)).toContain("nothing reports");
+  });
+
+  test("14.silent checks both: what the host hears, and that nothing is shown", () => {
+    expect(LIMIT_CHECKS.silent).toContain("14.silent");
+  });
+});

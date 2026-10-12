@@ -1474,7 +1474,7 @@ and served cases (`served.domain.address`, `served.domain.storage-scope`).
 So a new line can't go untested.
 
 The limits:
-- **Failure:** what's blocked fails silently.
+- **Failure:** what's blocked fails silently (worded by `errors` since 0.1.8: P067).
 - **Loading:** the network; assets inline.
 - **Shell-less behavior:** dialogs (confirm false, prompt null); print; downloads; forms;
   mailto:/tel:/sms: links; windows.
@@ -1588,3 +1588,26 @@ DESIGN § "The host kit" sketches the API.
 - Clash handling: throw (fail closed), or report and disable.
 - The issue body's shape: `{ instance }`, or the app's own fields.
 - Whether the conformance harness bundles its own React.
+
+## P067 · 2026-10-12 · The manual's silent line says where a block is reported, by `errors` · Accepted
+
+**Decision.** The `silent` limit (P064) follows the config's `errors` (P065), as the Errors line
+does:
+- no `reportError` (`errors: "none"`, or none declared): "fails silently … and nothing shows an
+  error", as before;
+- `agent`: a block shows nothing on the page, and comes back to the agent as an error, so it
+  checks them;
+- `host`: the app is told of each block, the agent isn't;
+- unset with `reportError` declared: each block is reported to the app.
+
+`14.silent` now checks both halves: nothing is shown and nothing leaves, and the host hears of a
+block where `reportError` is declared and nothing where it isn't (`errors: "none"`). Issue #4,
+0.1.8.
+**Why.** The shell reports every CSP violation through `reportError` ("Blocked by the sandbox:
+…"). For a host with `errors: "agent"` (Ferry), "nothing shows an error" was false, and it
+contradicted the manual's own Errors line. The check asserted only that no dialog opened, so it
+passed while the line claimed more than it proved.
+**Rejected.** Ending the line at "a blocked fetch rejects": the agent then isn't told that blocks
+come back to it, which is what makes it check them.
+**Revisit when** the shell reports blocks other than through `reportError`.
+

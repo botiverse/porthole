@@ -806,7 +806,7 @@ how content behaves, each one line derived from the config (`manualLimits`, P064
 
 | Limit | Says | Stated when | Checks (all three engines) |
 |-------|------|-------------|----------------------------|
-| `silent` | what's blocked fails silently: nothing loads, a fetch rejects, no error shows | always | `14.silent` |
+| `silent` | what's blocked shows nothing on the page (nothing loads, a fetch rejects); where it is reported follows `errors` (P067): back to the agent, to the app only, to the app, or (no `reportError`) nowhere | always | `14.silent` |
 | `network` | what loads from where, from the CSP's sources | always | `1.connect`, `2.resources` |
 | `inline-assets` | images, fonts and sound inline as data: URLs or SVG; CSS in a `<style>` | something is open (else Network: none says it) | `14.inline-assets` |
 | `dialogs` | alert/confirm/prompt show nothing: confirm false, prompt null | no `allow-modals` | `14.dialogs` |

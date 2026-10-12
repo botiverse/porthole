@@ -110,9 +110,17 @@ export function manualLimits(config: PortholeConfig, network: string): ManualLim
         : 'It shows in light, as you style it; to follow the person\'s light or dark theme, declare it in its head (<meta name="color-scheme" content="light dark">) and draw with the variables below.',
   );
 
+  // What a block does on the page, and where it is reported: as the Errors line says (#4).
+  const blocked = "a blocked script, style or image just doesn't load and a blocked fetch rejects";
   add(
     "silent",
-    "What the sandbox blocks fails silently: a blocked script, style or image just doesn't load, a blocked fetch rejects, and nothing shows an error.",
+    !declared.has("reportError")
+      ? "What the sandbox blocks fails silently: a blocked script, style or image just doesn't load, a blocked fetch rejects, and nothing shows an error."
+      : config.errors === "agent"
+        ? `What the sandbox blocks shows nothing on the page: ${blocked}. Each block comes back to you as an error, so check them.`
+        : config.errors === "host"
+          ? `What the sandbox blocks shows nothing on the page: ${blocked}. The app is told of each block, but you aren't: test what you write.`
+          : `What the sandbox blocks shows nothing on the page: ${blocked}. Each block is reported to the app.`,
   );
   add("network", network);
   // Assets: what isn't opened goes inline (Network: none already says "everything inline").

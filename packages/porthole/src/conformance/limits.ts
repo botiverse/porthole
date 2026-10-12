@@ -150,7 +150,7 @@ export const LIMIT_PROBES: readonly Probe[] = [
     id: "14.silent",
     item: 14,
     title:
-      "what the sandbox blocks fails silently: nothing loads, a fetch rejects, nothing is shown",
+      "what the sandbox blocks shows nothing on the page: nothing loads, a fetch rejects; the host hears of it where reportError is declared, and nothing where it isn't",
     async run(context) {
       const canary = await context.http();
       const seen = watch(context.page);
@@ -175,6 +175,26 @@ export const LIMIT_PROBES: readonly Probe[] = [
         script: "undefined",
         after: "ran",
       });
+      expect(canary.requests()).toEqual([]);
+      expect(seen.dialogs).toEqual([]);
+      // Where reportError is declared, each block is reported to the host (the manual says where
+      // it goes, by \`errors\`, #4); where it isn't, nothing is.
+      await expect
+        .poll(async () =>
+          (await display.errors()).some((each) => each.startsWith("Blocked by the sandbox:")),
+        )
+        .toBe(true);
+      const quiet = await context.launch({
+        config: inline({ errors: "none" }),
+        content: attack(
+          `
+    r.fetch = await fetch(${js(`${c}/quiet`)}).then(() => "sent", (e) => "rejected " + e.name);`,
+          `<img src="${c}/quiet.png">`,
+        ),
+      });
+      expect(await context.result(quiet, 15_000)).toMatchObject({ fetch: "rejected TypeError" });
+      await settle();
+      expect(await quiet.errors()).toEqual([]);
       expect(canary.requests()).toEqual([]);
       expect(seen.dialogs).toEqual([]);
     },
