@@ -3,6 +3,13 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## 0.2.1
+
+- The manual, for a whole-page viewer (P069): "Call <guide tool> once" with `guideToolName`;
+  `layout.kind: "fill"` says the page fills the app's viewer (not the window), keeping
+  phone-width-first; `theme.documents: "never"` drops every theme line but "always light". The
+  `14.sound` probe reports itself inapplicable where the page's own CSP blocks its media.
+
 ## 0.2.0
 
 - The host kit (P066): an app writes its policy (`instance`, `access`, `authorize`, `source`) and
