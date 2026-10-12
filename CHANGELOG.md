@@ -3,6 +3,14 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## 0.3.2
+
+- Every entry point bundles whole (P075): `/check` imports its check page's script as a module,
+  and `/conformance` its harness, instead of loading files beside the module at run time, which a
+  bundle (a single executable built by rolldown, a Worker) doesn't have. `checkPage` needs no
+  `page` option anywhere now. Each release is bundled with rolldown and esbuild, checked for loads
+  left for run time, and runs a check from its bundle before it is published (`test:bundle`).
+
 ## 0.3.1
 
 From Ferry's and Raft Artifacts' adoptions of 0.3.0 and a second cold adoption (P074). Additive.
