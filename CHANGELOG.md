@@ -3,6 +3,12 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## 0.3.4
+
+- A confirmation names the instance the host gave the frame in opaque frames too, not only served
+  ones (`request.display.instance`): `PortholeView` passes it either way, and an opaque frame never
+  gets it (P077).
+
 ## 0.3.3
 
 - A confirmation names the instance a served frame shows (`request.display.instance`, in
