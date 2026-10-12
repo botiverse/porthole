@@ -3,6 +3,11 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## 0.2.4
+
+- The package ships `docs/ADOPTING.md`, which 0.2.3's README links to and its build left out;
+  every doc in `docs/` is shipped from now on, and a test checks the README's links (P071).
+
 ## 0.2.3
 
 - Adopting from the package alone (P071): a README with a quickstart, `docs/ADOPTING.md`, and
