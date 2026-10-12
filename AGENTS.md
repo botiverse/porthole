@@ -28,13 +28,17 @@ Content never writes the clipboard (copy buttons call `copyText`, which the host
 performs and shows), and a host can let people annotate content (0.1.3).
 Hosts' friction from adopting it is fixed in 0.1.4: content and host errors apart,
 strict nonce CSPs, fill mode, reserved label prefixes, by-value React props.
+The host kit (0.2.0, P066, P068): `createContentHost` is the whole host side around
+served content (routing, issue endpoint, health gate, clean addresses through redirect
+entry), with a Node adapter (`/node`), a conformance runner an app points at its real page
+(`defineHostConformance`), a reference app (`leak/kit/`), and a prod-shape profile.
 
 ## Setup
 
 - Node ≥ 24 (TypeScript runs directly via type stripping — erasable syntax only:
   no enums, no parameter properties, no namespaces; relative imports carry `.ts`).
 - pnpm 11 workspace; one package, `packages/porthole` (`@botiverse/porthole`,
-  with `/react`, `/mcp`, `/conformance`, `/server` as subpath exports, P013).
+  with `/react`, `/mcp`, `/conformance`, `/server`, `/node` as subpath exports, P013).
 - The core is framework-agnostic TypeScript; the React binding is a thin subpath.
 
 ## Commands
@@ -45,7 +49,9 @@ pnpm test             # unit tests (vitest; packages/porthole/test), with /serve
 pnpm test:leak        # every Playwright suite (leak, served, MCP examples, React) on Chromium, WebKit, Firefox
 PORTHOLE_LEAK_ENGINES=chromium pnpm test:leak   # a subset, where an engine can't run
 PORTHOLE_LEAK_WEAKEN=sync-guard pnpm test:leak  # a negative control: its probes must fail (P032)
-pnpm --filter @botiverse/porthole build         # dist/ (JS + .d.ts) for packing
+ops/prod-shape/run.sh # the prod-shape profile in docker compose (TLS edge, DNS, siblings; three engines)
+PORTHOLE_PROD_ENGINES=chromium ops/prod-shape/run.sh   # a subset
+pnpm --filter @botiverse/porthole build         # dist/ (JS + .d.ts, the conformance harness) for packing
 pnpm exec oxfmt <file>                          # format (never prettier)
 ```
 
@@ -58,10 +64,13 @@ firefox`). Scratch files go under `.dev/scratch/` (gitignored).
 ```
 packages/porthole/src/   config/ compile/ shell/ guide/ theme/ presets/   the compiler side
                          protocol/ bridge/ transport/ platform/ isolation/ host/   the seams
-                         react/ mcp/ conformance/ server/                 the subpath entries
+                         react/ mcp/ conformance/ server/ node/           the subpath entries
 packages/porthole/test/  unit tests; agreement.test.ts is the config ↔ CSP ↔ shell ↔ manual check
 packages/porthole/leak/  the leak suite run against Porthole's reference host; react.spec.ts the
-                         React binding in real browsers (leak/react/app.tsx, bundled by esbuild)
+                         React binding in real browsers (leak/react/app.tsx, bundled by esbuild);
+                         kit/ the host kit's reference app, kit.spec.ts the runner against it
+packages/porthole/prod-shape/  the prod-shape suite (run in ops/prod-shape's containers)
+ops/prod-shape/          docker compose: Caddy, CoreDNS, the kit app, the browsers
 ```
 
 ## Conventions

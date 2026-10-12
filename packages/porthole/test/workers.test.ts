@@ -130,6 +130,60 @@ describe("/server on Workers", () => {
     );
   });
 
+  test("the host kit: the issue endpoint and the routing middleware, on workerd with D1 (P066)", async () => {
+    const ask = (viewer?: string) =>
+      mf.dispatchFetch("https://host.test/kit/issue", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(viewer === undefined ? {} : { "x-viewer": viewer }),
+        },
+        body: JSON.stringify({
+          instance: { scope: "anything", document: { kind: "artifact", id: "k1", version: "x" } },
+        }),
+      });
+    expect((await ask()).status).toBe(401);
+    const answer = await ask("person-7");
+    expect(answer.status).toBe(201);
+    const location = (await answer.json()) as { url: string; origin: string };
+    expect(location.origin).toBe("https://a-k1.kitcontent.test");
+    const page = await fetchAt(location.url);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain("kit 1");
+    expect((await fetchAt(location.url)).status).toBe(401);
+    expect(await (await mf.dispatchFetch("https://x.f.kitcontent.test/")).text()).toBe(
+      "the host's own routes",
+    );
+  });
+
+  test("the host kit's redirect entry on workerd: a clean address, authorize, a code, the page (P068)", async () => {
+    const top = { "sec-fetch-dest": "document" };
+    const begin = await fetchAt("https://a-k2.kitcontent.test/", top);
+    expect(begin.status).toBe(302);
+    const authorizeAt = begin.headers.get("location") ?? "";
+    expect(authorizeAt.startsWith("https://artifacts.example/kit/authorize?state=")).toBe(true);
+    const nonce = (begin.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+    // Signed out on a tab: the app's sign-in.
+    const signedOut = await fetchAt(authorizeAt, top);
+    expect(signedOut.status).toBe(303);
+    expect(signedOut.headers.get("location")).toContain("/signin?next=");
+    const authorized = await fetchAt(authorizeAt, { ...top, "x-viewer": "person-8" });
+    expect(authorized.status).toBe(302);
+    const code = authorized.headers.get("location") ?? "";
+    expect(code.startsWith("https://a-k2.kitcontent.test/__porthole/entry?code=")).toBe(true);
+    const redeemed = await fetchAt(code, { ...top, cookie: nonce });
+    expect(redeemed.status).toBe(303);
+    expect(redeemed.headers.get("location")).toBe("https://a-k2.kitcontent.test/");
+    const session = redeemed.headers
+      .getSetCookie()
+      .map((each) => each.split(";")[0] ?? "")
+      .join("; ");
+    const shown = await fetchAt("https://a-k2.kitcontent.test/", { ...top, cookie: session });
+    expect(shown.status).toBe(200);
+    expect(await shown.text()).toContain("kit 1");
+    expect((await fetchAt(code, { ...top, cookie: nonce })).status).toBe(403);
+  });
+
   test("another server's namespace and the bare domain go to the host's routes", async () => {
     for (const url of [
       "https://x.f.usercontent.test/",

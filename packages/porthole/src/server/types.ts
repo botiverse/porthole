@@ -72,6 +72,11 @@ export interface TicketRecord {
   readonly expiresAt: number;
   /** The grant's `sessionSeconds`, if it set one. */
   readonly sessionSeconds?: number;
+  /**
+   * An entry code's (P068): the clean path it returns to, and the nonce of the browser that asked
+   * (its cookie must come with the code). A ticket from `issue` has none.
+   */
+  readonly entry?: { readonly path: string; readonly nonce: string };
 }
 
 /** Where tickets live between `issue` and their one use. Default: in memory (one process). */
@@ -158,6 +163,25 @@ export interface ServerOptions {
   readonly upstream?: Upstream;
   /** The host's per-request check (P050). Absent: a good cookie is enough until it ends. */
   readonly authorize?: Authorizer;
+  /**
+   * Redirect entry (P068): a request on a clean address (`urlOf`) without a cookie for it is sent
+   * to the host's authorize route, on a host origin, which decides and sends it back with a
+   * one-time code (`enterBy`). Absent: a clean address without a cookie is refused, as before.
+   */
+  readonly entry?: { readonly authorizeUrl: string };
+}
+
+/** A redirect entry's state, as the host's authorize route reads it (`PortholeServer.entryState`). */
+export interface EntryState {
+  /** The label the clean address is on. */
+  readonly label: string;
+  /** The path (and query) it asked for. */
+  readonly path: string;
+  /** Whether it was asked from a frame. */
+  readonly framed: boolean;
+  /** Older than five minutes: start again from the clean address. */
+  readonly expired: boolean;
+  readonly nonce: string;
 }
 
 export interface PortholeServer {
@@ -181,4 +205,13 @@ export interface PortholeServer {
   access(request: Request): Promise<Access | null>;
   /** The frame source every content origin matches (`https://*.example-usercontent.com`). */
   readonly contentSource: string;
+  /** A clean address on a scope's origin (P068): what a tab, a link, a bookmark opens. */
+  urlOf(scope: string, path?: string): string;
+  /** A redirect entry's state, signature checked; null for one this server didn't make. */
+  entryState(token: string): EntryState | null;
+  /**
+   * Once the host decided (its authorize route): a one-time code for `instance`, which must be
+   * served on the state's label, and the URL that redeems it there (`/__porthole/entry`).
+   */
+  enterBy(state: EntryState, instance: InstanceRef, grant: Grant): Promise<string>;
 }

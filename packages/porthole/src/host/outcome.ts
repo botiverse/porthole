@@ -23,6 +23,7 @@ const SETTLE_MS = 400;
 const BLOCKS: readonly FrameBlock[] = [
   "framing",
   "cookies",
+  "sign-in",
   "session",
   "upstream",
   "denied",

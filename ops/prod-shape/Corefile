@@ -1,0 +1,12 @@
+# Every *.test name is the edge (Caddy), as wildcard DNS points a content domain at its edge.
+test:53 {
+  template IN A test {
+    answer "{{ .Name }} 60 IN A 172.29.53.10"
+  }
+  template IN AAAA test {
+    rcode NOERROR
+  }
+}
+.:53 {
+  forward . /etc/resolv.conf
+}

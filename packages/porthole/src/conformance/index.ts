@@ -116,3 +116,15 @@ export {
   type ServedDisplay,
   type ServedSuiteOptions,
 } from "./served.ts";
+
+// Redirect entry's cases (P068).
+export { entryTests, type EntryConformanceHost, type EntrySuiteOptions } from "./entry.ts";
+
+// The runner an app points at its real page and issue endpoint (P066).
+export {
+  defineHostConformance,
+  harnessScript,
+  hostConformance,
+  type HostConformance,
+  type HostConformanceOptions,
+} from "./host-kit.ts";

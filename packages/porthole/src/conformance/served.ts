@@ -549,9 +549,20 @@ export function servedTests(
       "an app shows nothing to a browser without its ticket's cookie",
       async ({ page }) => {
         const location = await host.locate(host.app("url-ticket"));
-        const bare = await page.goto(`${location.origin}/`);
-        expect(bare?.status()).toBe(401);
-        expect(await page.evaluate(() => document.documentElement.dataset.app ?? null)).toBeNull();
+        // A fresh browser: no cookie of the content's, none of the app's. Porthole refuses it, or
+        // (redirect entry, P068) hands it to the app's authorize route, which asks it to sign in.
+        const fresh = await page.context().browser()!.newContext();
+        try {
+          const other = await fresh.newPage();
+          const bare = await other.goto(`${location.origin}/`);
+          const away = new URL(other.url()).origin !== location.origin;
+          expect(bare?.status() === 401 || away, `ended at ${other.url()}`).toBe(true);
+          expect(
+            await other.evaluate(() => document.documentElement.dataset.app ?? null),
+          ).toBeNull();
+        } finally {
+          await fresh.close();
+        }
       },
     );
 

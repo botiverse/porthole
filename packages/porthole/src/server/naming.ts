@@ -24,13 +24,25 @@ const ID = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/u;
  * already be label-safe (lowercase letters, digits, inner hyphens); anything else throws rather
  * than being folded into another scope's name.
  */
-export function prefixedName(prefix: string): (scope: string) => string {
+/**
+ * How scopes are named (`ContentDomain.name`). A naming that can say which scope a label names
+ * (`scopeOf`) gives every scope clean addresses a redirect entry can open (P068).
+ */
+export interface Naming {
+  (scope: string): string;
+  /** The scope a label names, or null for a label this naming never makes. */
+  readonly scopeOf?: (label: string) => string | null;
+}
+
+export function prefixedName(prefix: string): Naming & {
+  readonly scopeOf: (label: string) => string | null;
+} {
   if (!PREFIX.test(prefix)) {
     throw new TypeError(
       "A name prefix is a lowercase letter, then letters or digits, then '-' (a-)",
     );
   }
-  return (scope) => {
+  const name = (scope: string): string => {
     const label = `${prefix}${scope}`;
     if (!ID.test(scope) || !isHostLabel(label)) {
       throw new TypeError(
@@ -39,6 +51,14 @@ export function prefixedName(prefix: string): (scope: string) => string {
     }
     return label;
   };
+  const scopeOf = (label: string): string | null => {
+    if (!label.startsWith(prefix)) {
+      return null;
+    }
+    const scope = label.slice(prefix.length);
+    return ID.test(scope) && isHostLabel(label) ? scope : null;
+  };
+  return Object.assign(name, { scopeOf });
 }
 
 const PREFIX_ENTRY = /^[a-z0-9]([a-z0-9-]{0,61})?\*$/u;

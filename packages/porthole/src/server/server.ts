@@ -8,7 +8,8 @@ import {
 } from "../isolation/served.ts";
 import type { FrameLocation, InstanceRef, ServedDocument } from "../isolation/types.ts";
 import { sandboxProxyDocument } from "../mcp/proxy.ts";
-import { createKeys, newTicket, ticketId } from "./keys.ts";
+import { base32, createKeys, newTicket, ticketId } from "./keys.ts";
+import { randomBytes } from "./crypto.ts";
 import { isHostLabel, reservedLabels } from "./naming.ts";
 import { enterPage, pageScript, SESSION_PATH, statusPage } from "./pages.ts";
 import type { FrameBlock } from "../host/types.ts";
@@ -16,6 +17,8 @@ import { memoryTicketStore } from "./tickets.ts";
 import type {
   Access,
   AuthorizeAnswer,
+  EntryState,
+  Grant,
   PortholeServer,
   ServerOptions,
   TicketRecord,
@@ -31,6 +34,15 @@ const PREFIX = "/__porthole/";
 const DOCUMENT_PATH = /^\/__porthole\/d\/([a-z2-7]{16})$/u;
 /** Where a url-mode app's ticket is taken, before the app's own landing path. */
 const ENTER_PATH = "/__porthole/enter";
+/** Where a redirect entry's code is redeemed, before its clean address (P068). */
+const ENTRY_PATH = "/__porthole/entry";
+/** How long a redirect entry may take (the person may sign in on the way), and its code. */
+const ENTRY_STATE_MS = 5 * 60_000;
+const ENTRY_CODE_SECONDS = 60;
+/** How long an entered path is remembered, so an entry that kept no cookie doesn't loop. */
+const ENTERED_SECONDS = 60;
+const NONCE = /^[a-z2-7]{16}$/u;
+const MAX_PATH = 2_048;
 
 const LABEL = /^[a-z2-7]{24}$/u;
 /** A host's opaque subject and reason codes. */
@@ -68,6 +80,8 @@ interface Session {
   readonly x: number;
   readonly a?: 1;
   readonly s?: string;
+  /** The clean path a document was entered at (P068): it is served there by this cookie. */
+  readonly p?: string;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -263,6 +277,19 @@ export function createServer(options: ServerOptions): PortholeServer {
     }
   }
   const frameAncestors = options.hostOrigins.join(" ");
+  let authorizeUrl: URL | null = null;
+  if (options.entry !== undefined) {
+    try {
+      authorizeUrl = new URL(options.entry.authorizeUrl);
+    } catch {
+      throw new TypeError("entry.authorizeUrl must be an absolute URL");
+    }
+    if (!options.hostOrigins.includes(authorizeUrl.origin) || authorizeUrl.hash !== "") {
+      throw new TypeError(
+        `entry.authorizeUrl must be on one of the host origins (${options.hostOrigins.join(", ")}), without a fragment`,
+      );
+    }
+  }
 
   const compiled = new Map<string, CompiledConfig>();
   for (const [name, config] of Object.entries(options.configs)) {
@@ -435,7 +462,7 @@ export function createServer(options: ServerOptions): PortholeServer {
    * page that frames it; on a tab of its own, `Lax`. (Engines that keep no cookie in a cross-site
    * frame, measured: WebKit, still get the document, which comes with the ticket's answer.)
    */
-  function sessionCookie(request: Request, record: TicketRecord): string {
+  function sessionCookie(request: Request, record: TicketRecord, path?: string): string {
     const sessionSeconds = record.sessionSeconds ?? DEFAULT_SESSION_SECONDS;
     const session: Session = {
       i: record.instance,
@@ -443,18 +470,29 @@ export function createServer(options: ServerOptions): PortholeServer {
       x: Date.now() + sessionSeconds * 1_000,
       ...(record.anonymous === true ? { a: 1 as const } : {}),
       ...(record.subject === undefined ? {} : { s: record.subject }),
+      ...(path === undefined ? {} : { p: path }),
     };
-    const framed = request.headers.get("sec-fetch-dest") !== "document";
     return [
       `${cookieName(keys.instanceKey(record.instance))}=${keys.sign(session)}`,
       "Path=/",
       "HttpOnly",
       `Max-Age=${sessionSeconds}`,
-      ...(framed
-        ? ["Secure", "SameSite=None", "Partitioned"]
-        : [...(secure ? ["Secure"] : []), "SameSite=Lax"]),
+      ...cookieContext(request),
     ].join("; ");
   }
+
+  /** A cookie's context: a third party's in a frame (partitioned), first-party `Lax` on a tab. */
+  function cookieContext(request: Request): string[] {
+    const framed = request.headers.get("sec-fetch-dest") !== "document";
+    return framed
+      ? ["Secure", "SameSite=None", "Partitioned"]
+      : [...(secure ? ["Secure"] : []), "SameSite=Lax"];
+  }
+
+  /** The cookie a redirect entry's browser holds while it is away (P068), by its nonce. */
+  const nonceCookie = (nonce: string): string => cookieName(`n-${nonce}`);
+  /** What an entered path's nonce cookie says after its code was redeemed: the loop guard. */
+  const enteredMark = (pathname: string): string => `e.${keys.instanceKey({ entered: pathname })}`;
 
   /** The access a request's own cookies give on `label`'s origin, for `key`'s instance or the app. */
   function accessOf(request: Request, label: string, key: string | null): Access | null {
@@ -489,6 +527,47 @@ export function createServer(options: ServerOptions): PortholeServer {
         named !== label ||
         (key === null ? instance.document.kind !== "external" : keys.instanceKey(instance) !== key)
       ) {
+        continue;
+      }
+      if (best === null || session.x > best.expiresAt) {
+        best = {
+          instance,
+          viewer: session.w,
+          origin: originOfLabel(label),
+          expiresAt: session.x,
+          ...(session.a === 1 ? { anonymous: true } : {}),
+          ...(typeof session.s === "string" ? { subject: session.s } : {}),
+        };
+      }
+    }
+    return best;
+  }
+
+  /** The access a request's cookies give to the document entered at `pathname` (P068). */
+  function accessAtPath(request: Request, label: string, pathname: string): Access | null {
+    let best: Access | null = null;
+    for (const [name, value] of cookiesOf(request)) {
+      if (!ourCookie(name)) {
+        continue;
+      }
+      const session = keys.verify(value);
+      if (
+        !isRecord(session) ||
+        session.p !== pathname ||
+        typeof session.w !== "string" ||
+        typeof session.x !== "number" ||
+        session.x <= Date.now() ||
+        (session.s !== undefined && typeof session.s !== "string")
+      ) {
+        continue;
+      }
+      let instance: InstanceRef;
+      try {
+        instance = cleanInstance(session.i);
+        if (instance.document.kind === "external" || nameOf(instance.scope) !== label) {
+          continue;
+        }
+      } catch {
         continue;
       }
       if (best === null || session.x > best.expiresAt) {
@@ -573,6 +652,16 @@ export function createServer(options: ServerOptions): PortholeServer {
         "session",
       );
     }
+    return serveAccess(request, access, cookie);
+  }
+
+  /** The document an access opens, once the host's check lets it in. */
+  async function serveAccess(
+    request: Request,
+    access: Access,
+    cookie: string | null,
+  ): Promise<Response> {
+    const method = request.method.toUpperCase();
     const refusal = await denied(request, access);
     if (refusal !== null) {
       return refusal;
@@ -586,6 +675,135 @@ export function createServer(options: ServerOptions): PortholeServer {
       headers.set("set-cookie", cookie);
     }
     return new Response(method === "HEAD" ? null : served.html, { status: 200, headers });
+  }
+
+  /**
+   * A clean address without a cookie for it (P068): off to the host's authorize route with a
+   * signed state, the browser holding the state's nonce in a cookie of this origin. A path just
+   * entered whose cookie still didn't come back is a browser that keeps none here: no loop.
+   */
+  function beginEntry(request: Request, url: URL, label: string, to: URL): Response {
+    const method = request.method.toUpperCase();
+    if (method !== "GET" && method !== "HEAD") {
+      return page(
+        401,
+        "Open this from the app",
+        "Open this address in a browser.",
+        method,
+        "session",
+      );
+    }
+    const path = `${url.pathname}${url.search}`;
+    if (path.length > MAX_PATH) {
+      return page(414, "Address too long", "This address is too long to open.", method);
+    }
+    const mark = enteredMark(url.pathname);
+    if (cookiesOf(request).some(([name, value]) => ourCookie(name) && value === mark)) {
+      return page(
+        401,
+        "Open this in a new tab",
+        "This browser keeps no sign-in for it inside a frame.",
+        method,
+        "cookies",
+      );
+    }
+    const nonce = base32(randomBytes(10));
+    const framed = request.headers.get("sec-fetch-dest") !== "document";
+    const state = keys.sign({
+      e: 1,
+      l: label,
+      p: path,
+      n: nonce,
+      x: Date.now() + ENTRY_STATE_MS,
+      f: framed ? 1 : 0,
+    });
+    const location = new URL(to);
+    location.searchParams.set("state", state);
+    return new Response(null, {
+      status: 302,
+      headers: {
+        location: location.href,
+        "set-cookie": [
+          `${nonceCookie(nonce)}=1`,
+          "Path=/",
+          "HttpOnly",
+          `Max-Age=${ENTRY_STATE_MS / 1_000}`,
+          ...cookieContext(request),
+        ].join("; "),
+        "cache-control": "no-store",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+      },
+    });
+  }
+
+  /**
+   * Redeems a redirect entry's code (P068): once, on its own label, in the browser that began it
+   * (its nonce cookie comes with it). Sets the session and goes to the clean address, the code
+   * gone from the address bar and from any referrer.
+   */
+  async function redeem(request: Request, url: URL, label: string): Promise<Response> {
+    const method = request.method.toUpperCase();
+    if (method !== "GET") {
+      return page(405, "Not allowed", "Open this link in a browser.", method);
+    }
+    const record = await take(url.searchParams.get("code"), label);
+    if (record?.entry === undefined) {
+      return page(
+        403,
+        "This sign-in link has been used",
+        "It works once, for a short time. Open the address again.",
+        method,
+        "session",
+      );
+    }
+    const { nonce, path } = record.entry;
+    const named = nonceCookie(nonce);
+    if (!cookiesOf(request).some(([name, value]) => name === named && value === "1")) {
+      return page(
+        401,
+        "Open this in a new tab",
+        "This browser keeps no sign-in for it inside a frame.",
+        method,
+        "cookies",
+      );
+    }
+    const origin = originOfLabel(label);
+    const target = new URL(path, origin);
+    const access: Access = {
+      instance: record.instance,
+      viewer: record.viewer,
+      origin,
+      expiresAt: Date.now() + (record.sessionSeconds ?? DEFAULT_SESSION_SECONDS) * 1_000,
+      ...(record.anonymous === true ? { anonymous: true } : {}),
+      ...(record.subject === undefined ? {} : { subject: record.subject }),
+    };
+    const refusal = await denied(request, access);
+    if (refusal !== null) {
+      return refusal;
+    }
+    const external = record.instance.document.kind === "external";
+    const headers = new Headers({
+      location: `${origin}${target.pathname}${target.search}`,
+      "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
+      "x-robots-tag": "noindex, nofollow",
+    });
+    headers.append(
+      "set-cookie",
+      sessionCookie(request, record, external ? undefined : target.pathname),
+    );
+    headers.append(
+      "set-cookie",
+      [
+        `${named}=${enteredMark(target.pathname)}`,
+        "Path=/",
+        "HttpOnly",
+        `Max-Age=${ENTERED_SECONDS}`,
+        ...cookieContext(request),
+      ].join("; "),
+    );
+    return new Response(null, { status: 303, headers });
   }
 
   async function enter(request: Request, url: URL, label: string): Promise<Response> {
@@ -696,6 +914,68 @@ export function createServer(options: ServerOptions): PortholeServer {
     }
   }
 
+  /** A one-time ticket (or entry code) for an instance the host decided a viewer may see. */
+  async function mint(
+    instance: InstanceRef,
+    grant: Grant,
+    entry?: TicketRecord["entry"],
+  ): Promise<{ readonly clean: InstanceRef; readonly key: string; readonly ticket: string }> {
+    const clean = cleanInstance(instance);
+    check(clean);
+    const anonymous = grant.anonymous === true;
+    if (anonymous) {
+      if (grant.viewer !== undefined) {
+        throw new TypeError("An anonymous grant names no viewer");
+      }
+      if (clean.document.kind === "external") {
+        throw new TypeError("A url-mode app is never opened anonymously (P046)");
+      }
+    } else if (
+      typeof grant.viewer !== "string" ||
+      grant.viewer.length === 0 ||
+      grant.viewer.length > 512
+    ) {
+      throw new TypeError("A grant's viewer is 1 to 512 characters (or the grant is anonymous)");
+    }
+    if (
+      grant.subject !== undefined &&
+      (typeof grant.subject !== "string" || grant.subject.length > SUBJECT_MAX)
+    ) {
+      throw new TypeError(`A grant's subject is a string of at most ${SUBJECT_MAX} characters`);
+    }
+    const ttl = seconds(grant.ttlSeconds, DEFAULT_TICKET_SECONDS, MAX_TICKET_SECONDS, "ttlSeconds");
+    const sessionSeconds = seconds(
+      grant.sessionSeconds,
+      DEFAULT_SESSION_SECONDS,
+      MAX_SESSION_SECONDS,
+      "sessionSeconds",
+    );
+    const key = keys.instanceKey(clean);
+    const viewer = anonymous ? "" : grant.viewer;
+    const probe = keys.sign({
+      i: clean,
+      w: viewer,
+      x: Number.MAX_SAFE_INTEGER,
+      ...(anonymous ? { a: 1 } : {}),
+      ...(grant.subject === undefined ? {} : { s: grant.subject }),
+      ...(entry === undefined ? {} : { p: entry.path }),
+    });
+    if (cookieName(key).length + probe.length + 120 > MAX_COOKIE_BYTES) {
+      throw new TypeError("This instance is too large to carry in a cookie (fewer origins?)");
+    }
+    const ticket = newTicket();
+    await tickets.put(ticketId(ticket), {
+      instance: clean,
+      viewer,
+      expiresAt: Date.now() + ttl * 1_000,
+      ...(grant.sessionSeconds === undefined ? {} : { sessionSeconds }),
+      ...(anonymous ? { anonymous: true } : {}),
+      ...(grant.subject === undefined ? {} : { subject: grant.subject }),
+      ...(entry === undefined ? {} : { entry }),
+    });
+    return { clean, key, ticket };
+  }
+
   const underDomain = (host: string): boolean => host === domain || host.endsWith(`.${domain}`);
 
   /**
@@ -749,68 +1029,64 @@ export function createServer(options: ServerOptions): PortholeServer {
     originFor: (scope) => originOfLabel(nameOf(scope)),
 
     async issue(instance, grant): Promise<FrameLocation> {
-      const clean = cleanInstance(instance);
-      check(clean);
-      const anonymous = grant.anonymous === true;
-      if (anonymous) {
-        if (grant.viewer !== undefined) {
-          throw new TypeError("An anonymous grant names no viewer");
-        }
-        if (clean.document.kind === "external") {
-          throw new TypeError("A url-mode app is never opened anonymously (P046)");
-        }
-      } else if (
-        typeof grant.viewer !== "string" ||
-        grant.viewer.length === 0 ||
-        grant.viewer.length > 512
-      ) {
-        throw new TypeError("A grant's viewer is 1 to 512 characters (or the grant is anonymous)");
-      }
-      if (
-        grant.subject !== undefined &&
-        (typeof grant.subject !== "string" || grant.subject.length > SUBJECT_MAX)
-      ) {
-        throw new TypeError(`A grant's subject is a string of at most ${SUBJECT_MAX} characters`);
-      }
-      const ttl = seconds(
-        grant.ttlSeconds,
-        DEFAULT_TICKET_SECONDS,
-        MAX_TICKET_SECONDS,
-        "ttlSeconds",
-      );
-      const sessionSeconds = seconds(
-        grant.sessionSeconds,
-        DEFAULT_SESSION_SECONDS,
-        MAX_SESSION_SECONDS,
-        "sessionSeconds",
-      );
-      const key = keys.instanceKey(clean);
-      const viewer = anonymous ? "" : grant.viewer;
-      const probe = keys.sign({
-        i: clean,
-        w: viewer,
-        x: Number.MAX_SAFE_INTEGER,
-        ...(anonymous ? { a: 1 } : {}),
-        ...(grant.subject === undefined ? {} : { s: grant.subject }),
-      });
-      if (cookieName(key).length + probe.length + 120 > MAX_COOKIE_BYTES) {
-        throw new TypeError("This instance is too large to carry in a cookie (fewer origins?)");
-      }
-      const ticket = newTicket();
-      await tickets.put(ticketId(ticket), {
-        instance: clean,
-        viewer,
-        expiresAt: Date.now() + ttl * 1_000,
-        ...(grant.sessionSeconds === undefined ? {} : { sessionSeconds }),
-        ...(anonymous ? { anonymous: true } : {}),
-        ...(grant.subject === undefined ? {} : { subject: grant.subject }),
-      });
+      const { clean, key, ticket } = await mint(instance, grant);
       const origin = originOfLabel(nameOf(clean.scope));
       const path =
         clean.document.kind === "external"
           ? `${ENTER_PATH}?ticket=${ticket}`
           : `${PREFIX}d/${key}?ticket=${ticket}`;
       return { url: `${origin}${path}`, origin, reports: true };
+    },
+
+    urlOf(scope, path = "/") {
+      if (!path.startsWith("/") || path.startsWith("//") || path.startsWith(PREFIX)) {
+        throw new TypeError("A clean address's path starts with one / and isn't Porthole's own");
+      }
+      return `${originOfLabel(nameOf(scope))}${path}`;
+    },
+
+    entryState(token) {
+      const state = token.length > 8_192 ? null : keys.verify(token);
+      if (
+        !isRecord(state) ||
+        state.e !== 1 ||
+        typeof state.l !== "string" ||
+        !ours(state.l) ||
+        typeof state.p !== "string" ||
+        !state.p.startsWith("/") ||
+        typeof state.n !== "string" ||
+        !NONCE.test(state.n) ||
+        typeof state.x !== "number" ||
+        (state.f !== 0 && state.f !== 1)
+      ) {
+        return null;
+      }
+      return {
+        label: state.l,
+        path: state.p,
+        nonce: state.n,
+        framed: state.f === 1,
+        expired: state.x <= Date.now(),
+      };
+    },
+
+    async enterBy(state: EntryState, instance: InstanceRef, grant: Grant): Promise<string> {
+      if (state.expired) {
+        throw new TypeError("This entry's state has expired: start again from the clean address");
+      }
+      const clean = cleanInstance(instance);
+      if (nameOf(clean.scope) !== state.label) {
+        throw new TypeError("The instance isn't served on the address the entry began at");
+      }
+      const { ticket } = await mint(
+        clean,
+        { ...grant, ttlSeconds: ENTRY_CODE_SECONDS },
+        {
+          path: state.path,
+          nonce: state.nonce,
+        },
+      );
+      return `${originOfLabel(state.label)}${ENTRY_PATH}?code=${ticket}`;
     },
 
     async access(request) {
@@ -844,6 +1120,9 @@ export function createServer(options: ServerOptions): PortholeServer {
         if (url.pathname === ENTER_PATH) {
           return await enter(request, url, label);
         }
+        if (url.pathname === ENTRY_PATH && authorizeUrl !== null) {
+          return await redeem(request, url, label);
+        }
         const script = pageScript(url.pathname);
         if (script !== null) {
           return script;
@@ -859,8 +1138,21 @@ export function createServer(options: ServerOptions): PortholeServer {
         if (document?.[1] !== undefined) {
           return await serveDocument(request, url, label, document[1]);
         }
+        if (url.pathname.startsWith(PREFIX)) {
+          return page(404, "Nothing here", "This address names no content.", method);
+        }
+        // A clean address (P068): the document entered here, else the app, else entry.
+        if (authorizeUrl !== null) {
+          const entered = accessAtPath(request, label, url.pathname);
+          if (entered !== null) {
+            return await serveAccess(request, entered, null);
+          }
+          if (options.upstream === undefined || accessOf(request, label, null) === null) {
+            return beginEntry(request, url, label, authorizeUrl);
+          }
+        }
         // Without an upstream, only Porthole's own paths are served here: any other is nothing.
-        if (url.pathname.startsWith(PREFIX) || options.upstream === undefined) {
+        if (options.upstream === undefined) {
           return page(404, "Nothing here", "This address names no content.", method);
         }
         return await serveApp(request, label);

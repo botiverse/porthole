@@ -1,0 +1,20 @@
+# The edge: TLS from Caddy's internal CA, as a real edge terminates it, Host passed through.
+{
+	local_certs
+	skip_install_trust
+	admin off
+}
+
+app.test, *.content.test {
+	reverse_proxy app:8080
+}
+
+clash.test {
+	reverse_proxy clash:8080
+}
+
+# Another site: frames what ?frame= names (a page no host of Porthole's would be).
+evil.test {
+	header Content-Type "text/html; charset=utf-8"
+	respond `<!doctype html><html><head><meta charset="utf-8"><title>Evil</title></head><body><p id="evil">Another site.</p><script>const frame = new URLSearchParams(location.search).get("frame"); if (frame) { const element = document.createElement("iframe"); element.src = frame; document.body.append(element); }</script></body></html>` 200
+}

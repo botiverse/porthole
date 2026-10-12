@@ -14,7 +14,8 @@
     "./react": "./src/react/index.ts",
     "./mcp": "./src/mcp/index.ts",
     "./conformance": "./src/conformance/index.ts",
-    "./server": "./src/server/index.ts"
+    "./server": "./src/server/index.ts",
+    "./node": "./src/node/index.ts"
   },
   "publishConfig": {
     "exports": {
@@ -37,11 +38,15 @@
       "./server": {
         "types": "./dist/server/index.d.ts",
         "default": "./dist/server/index.js"
+      },
+      "./node": {
+        "types": "./dist/node/index.d.ts",
+        "default": "./dist/node/index.js"
       }
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-harness.ts",
     "test:leak": "playwright test -c leak/playwright.config.ts"
   },
   "devDependencies": {

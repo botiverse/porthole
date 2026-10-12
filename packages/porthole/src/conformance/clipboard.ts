@@ -12,14 +12,17 @@ import { settle } from "./oracles.ts";
 
 const SEED = "porthole-seed";
 
-/** A text area of the oracle's own on the host's page. */
+/**
+ * A text area of the oracle's own on the host's page: in the conformance harness's layer where
+ * there is one (over an app's own page, P066), else at the top of the page.
+ */
 async function area(page: Page, id: string): Promise<void> {
   await page.evaluate((each) => {
     if (document.getElementById(each) === null) {
       const element = document.createElement("textarea");
       element.id = each;
       element.style.cssText = "display:block;width:200px;height:40px";
-      document.body.prepend(element);
+      (document.getElementById("porthole-conformance") ?? document.body).prepend(element);
     }
   }, id);
 }

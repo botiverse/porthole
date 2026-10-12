@@ -131,6 +131,13 @@ export type {
 } from "./bridge/types.ts";
 export { createHost } from "./host/create-host.ts";
 export { writeClipboard } from "./host/clipboard.ts";
+export {
+  httpLocator,
+  LocateError,
+  servedOrOpaque,
+  type HttpLocatorOptions,
+  type ServedMeta,
+} from "./host/locator.ts";
 export type {
   AnnotationControls,
   DisplayControls,

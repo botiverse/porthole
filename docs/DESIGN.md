@@ -340,94 +340,148 @@ host that speaks to the shell sends it (P057). The shell cases also run against 
 host on `createHost` whose frames take their content's height
 (`leak/served/core-host.spec.ts`), as a React host's do.
 
-### The host kit (0.2.0, proposed: P066)
+### The host kit (0.2.0: P066, P068)
 
-Two hosts each wrote the same ~1,700 lines around `/server`. The host kit makes that
-machinery Porthole's, so an app writes its policy and its config. That is four callbacks:
-- `instance`: an issue request to the instance it means;
+Two hosts each wrote the same ~2,000 lines around `/server`. The host kit makes that machinery
+Porthole's, so an app writes its policy and its settings. The policy is four callbacks (five
+with redirect entry):
+- `instance`: the instance an issue request proposes, as the app means it;
 - `access`: may this viewer see it, and with what grant;
-- `authorize`: may this cookie still see it, on each request;
-- `source`: a stored page by id and version.
+- `authorize`: may this cookie still see it, on each request (P050);
+- `source`: a stored page by id and version;
+- `entry.at`: the instance a clean address's path names (redirect entry).
 
-**Server: `createContentHost(options)` (`@botiverse/porthole/server`, runtime-agnostic).**
+**An adopter's whole wiring** (the kit reference app, `packages/porthole/leak/kit/app.ts`, is
+this, runnable):
 
 ```ts
-const content = createContentHost({
-  domain: env.CONTENT_DOMAIN,          // "content.example.com" | "content.localhost:8790"; "" = off
-  appOrigins: [env.APP_ORIGIN],        // frame-ancestors, and the clash guard
-  secret, tickets: d1TicketStore(env.DB),
+const content = createContentHost<Viewer>({
+  domain: env.CONTENT_DOMAIN,                 // "content.example.com" | "content.localhost:8790"; "" = off
+  appOrigins: [env.APP_ORIGIN],               // frame-ancestors, and the clash guard
+  secret: env.CONTENT_SECRET, tickets: d1TicketStore(env.DB),
   configs: (source) => ({ page: presets.artifact({ isolation: "domain", contentOrigins: [source] }) }),
-  name: prefixedName("a-"), reserved: ["f", "p-*"],
-  instance: (body, viewer) => InstanceRef | null,     // the app's mapping
-  access: (instance, viewer, request) => Grant | null, // issue-time policy
-  authorize: (request) => AuthorizeAnswer,            // per-request policy (P050)
-  source: (id, version) => ({ html }) | null,         // stored pages
-  health: { label: "porthole-health" },               // optional self-probe
+  name: prefixedName("a-"), reserved: ["p-*"],
+  instance: (proposal, viewer) => mapToMyInstance(proposal),    // a proposal: validate, derive the scope
+  access: async (instance, viewer) =>
+    viewer !== null && (await canSee(viewer, instance)) ? { viewer: viewer.id, subject: viewer.id } : null,
+  authorize: ({ subject }) => (revoked(subject) ? { allow: false, code: "revoked" } : { allow: true }),
+  source: (id, version) => store.page(id, version),             // { html } | null
+  entry: {
+    authorizeUrl: `${env.APP_ORIGIN}/porthole/authorize`,
+    at: (scope, path) => pageAt(scope, path),                   // "/" → latest, "/v/3" → version 3
+    signIn: (returnTo) => Response.redirect(`/login?next=${encodeURIComponent(returnTo)}`, 303),
+  },
+  health: { probe: nodeProbe() },             // optional: the opaque fallback
 });
+// Hono / Workers: content first, then the app's own routes.
+app.use("*", async (c, next) => (await content.fetch(c.req.raw)) ?? next());
+app.post("/api/frames", (c) => content.issue(viewerOf)(c.req.raw));
+app.get("/porthole/authorize", (c) => content.authorize(viewerOf)(c.req.raw));
+// The page: frame-src from content.frameSources; meta from content.meta(); "open in a new tab"
+// and "copy link" from content.urlOf(scope, path).
 ```
 
-It gives:
-- **`content.fetch(request)`: the routing middleware.**
-  - Any host under the content domain is Porthole's, so the app never answers there.
-  - Reserved labels, and hosts outside the content domain, return null, for the app's own routes
-    (previews).
-  - A content domain that can't be served (a missing secret, a clash) answers a plain 503 and
-    never falls through to the app.
-  - Hono: `app.use("*", async (c, next) => (await content.fetch(c.req.raw)) ?? next())`.
-  - Workers: `(await content.fetch(req)) ?? app.fetch(req, env, ctx)`.
-- **`content.issue(viewerOf)`: the issue endpoint**, a fetch handler.
-  - Body `{ instance }`.
-  - `instance()` → `access()` → a ticket → `201 FrameLocation`.
-  - Refusals: `401` (no viewer), `403` (`access` said no), `404`, `409`, and `503` (not served:
-    unhealthy, or off).
-  - An optional per-viewer rate limit.
-- **`content.meta()`:** `{ served, contentSource, health }`, for the app's page and CSP;
-  `content.frameSources` lists the frame sources.
-- **Domain helpers:** `contentDomain(input, { appOrigins })` parses (scheme from loopback or
-  `*.localhost`, the port) and gives `originOf(label)`, `source` and `isContentHost(host)`. It
-  refuses, with the rule named, a content domain that holds an app origin or is the same site
-  as one.
-- **The health gate (optional).**
-  - Porthole answers a who-am-I on its health label: a keyed id, so another deployment's answer
-    doesn't count.
-  - The kit probes it over the real network: every 60 s while unhealthy, every 10 min while
-    healthy, 10 s timeout.
-  - While unhealthy, `issue` answers `503 not-served` and `meta().served` is false.
+**Server: `createContentHost(options)` (`@botiverse/porthole/server`, runtime-agnostic: Node,
+Workers, Deno, Bun).** It gives:
+- **`fetch(request)`, the routing middleware.** Every host under the content domain is
+  Porthole's, so the app never answers there. Reserved labels (previews) and the app's own hosts
+  return null, for the app's routes. Settings that can't be served answer a plain 503, never the
+  app's. `owns(request)` says the same for a WebSocket upgrade.
+- **`issue(viewerOf)`, the issue endpoint** (a fetch handler). The body is always `{ instance }`
+  (an `InstanceRef`, the wire shape). The app's `instance` callback treats it as a proposal: it
+  validates it, derives the scope from what it names (a session, a page), and refuses anything
+  else (404). App ids travel in the document's fields. **The client never chooses an origin**:
+  the scope the server maps to does. Then `access` (401 without a viewer, 403 refused), a ticket,
+  and `201 FrameLocation`. `503 not-served` while content isn't served; `409` when `/server`
+  refuses the instance; an optional per-viewer rate limit (429).
+- **`authorize(viewerOf)` and `urlOf(scope, path)`: redirect entry** (below).
+- **`meta()`** `{ served, contentSource, health }` for the app's page; **`frameSources`** for
+  its CSP (`frame-src`), the authorize route's path included.
+- **Domain helpers.** `contentDomain(input, { appOrigins })` parses (the scheme from loopback or
+  `*.localhost`, the port) and gives `originOf(label)`, `source`, `isContentHost(host)`,
+  `labelOf(host)`; `ContentDomainError` names the rule (`invalid`, `clash`, `same-site`).
+- **Clashes.** Porthole never serves a content domain that holds an app origin or may share its
+  site. With the health gate (the opaque fallback) on, such settings are a lasting "unhealthy:
+  misconfigured, <reason>": logged once (`porthole.content.misconfigured`, with its `code`),
+  `meta().served` false, frames run opaque. Without it, `createContentHost` throws the typed
+  error at startup. Fail closed either way; there is no separate switch.
+- **The health gate (optional).** Porthole answers a who-am-I on its health label
+  (`/__porthole/health`, a keyed id, so another deployment's answer doesn't count). The kit
+  probes it over the real network (DNS, the edge, TLS): every 60 s while unhealthy, every 10 min
+  while healthy, 10 s timeout. While unhealthy, `issue` answers `503 not-served` and the page's
+  `servedOrOpaque` picks opaque configs. On Workers the probe is optional (a host that doesn't
+  enable it serves from startup).
 
-**Node: `@botiverse/porthole/node`.** `nodeHost(content, app)` returns a request listener and
-an upgrade listener for `http.createServer`:
-- WebSockets on reserved labels go to the app's upgrade;
-- a url-mode app's socket goes to `onAppSocket(access, …)`;
-- any other socket on the content domain gets 404.
+**Redirect entry (P068).** Every instance has a clean, stable address
+(`https://a-<id>.content.example.com/v/3`) that opens directly: a new tab, a reload, a bookmark,
+a link sent to someone with access.
+1. A request on a clean address without a cookie for it gets a 302 to the app's authorize route
+   with a signed state (label, path, nonce, five minutes), and a cookie holding the nonce on the
+   content origin (partitioned in a frame, `Lax` on a tab, like the session cookie).
+2. `authorize` asks `entry.at(scope, path)` and `access`. No viewer: on a tab, the app's own
+   sign-in (`signIn(returnTo)`), which comes back to the same route; **in a frame, never the
+   sign-in**: a plain page asking for a new tab (`blocked: sign-in`). No access: the app's
+   refusal on a tab, a plain page in a frame; never content.
+3. Granted, a 302 back to `/__porthole/entry?code=…`: a one-time code (60 s), bound to the
+   label, the path and the nonce. The content origin redeems it only on that label and only with
+   the nonce's cookie, sets the session (bound to the path) and 303s to the clean address. The
+   code is in an address for that one hop (gone from history), every redirect sends
+   `no-referrer`, and Porthole never logs it.
+4. A browser that keeps no cookie in a frame (WebKit, P025) has no nonce at the redeem: it gets
+   the "open in a new tab" outcome (`blocked: cookies`), and an entered path whose session still
+   didn't come back is caught on the second bounce. No loops.
 
-It also gives `nodeProbe`, a probe that resolves `*.localhost` to loopback. `/server` stays free
-of Node.
+Use tickets (`issue` → `FrameLocation`) for frames: no extra round trip, and no dependence on the
+app's own cookie reaching its authorize route inside a frame (measured: Firefox and WebKit don't
+send a `Lax` app cookie on a frame navigation that came through a cross-site redirect; Chromium
+does). Use clean addresses for tabs, links, bookmarks and reloads: a host's "open in a new tab"
+and "copy link" use `urlOf`, never a ticket. The first open of an instance per browser costs one
+extra round trip through the app.
 
-**Client: `httpLocator(url, { headers, credentials, onNotServed })`** (core). It POSTs
-`{ instance }`, passes the abort signal, and throws the server's message.
-`servedOrOpaque(meta, domainConfigs, opaqueConfigs)` picks the configs. It says nothing until
-meta is known, so a frame never starts opaque and then restarts served.
+**Node: `@botiverse/porthole/node`.** `nodeHost(content, { request, upgrade, appSocket })`
+returns a request listener and an upgrade listener for `http.createServer`: content hosts to
+`content.fetch`, WebSockets on reserved labels to the app's upgrade, a url-mode app's socket to
+`appSocket(access, …)` once its cookie checks out, any other socket on the content domain a 404.
+`toRequest`/`sendResponse` convert; `nodeProbe()` is the health probe (`*.localhost` resolved to
+loopback, no redirects, 4 KB read). `/server` stays free of Node.
 
-**Conformance runner (`@botiverse/porthole/conformance`).** `defineHostConformance(test, { page,
-locate, nonce?, skip? })`:
-- `page`: how to open the app's real page, with its real CSP;
-- `locate`: the app's issue call.
+**Client** (core). `httpLocator(url, { headers, credentials, onNotServed })` POSTs
+`{ instance }`, passes the abort signal, refuses redirects, and throws a `LocateError` with the
+endpoint's status and code. `servedOrOpaque(meta, servedConfigs, opaqueConfigs)` gives
+`{ served, configs }`, or null until meta is known, so a frame never starts opaque and then
+restarts served. A redirect entry's pages on the app origin report the frame's status too
+(`blocked: sign-in`), and the frame transport hears that from the host's own origin only for
+frame status.
 
-Porthole injects its own harness bundle under the page's nonce. That bundle is the React
-binding's leak and served hosts, which both apps had copied. Porthole also routes the canaries and
-the foreign origin, and registers `leakTests` and `servedTests`.
+**Conformance runner (`@botiverse/porthole/conformance`).** `defineHostConformance(test,
+{ name, open, issue, config, instances, entry?, nonce?, skip? })` registers the leak suite, the
+served cases and the redirect entry cases against the app's real page:
+- `open(page)` opens it as a person sees it (signed in, its real CSP);
+- the harness is framework-free, on the core's `createHost` (no React: an app's own frame
+  components are its own e2e's; Porthole's React binding is Porthole's own tests'). It loads as a
+  script from the page's own origin (routed by the test), with the page's nonce, so a strict CSP
+  needs nothing added;
+- served frames are located by the app's issue endpoint from the page, with its cookies;
+- the canaries and a foreign origin are routed; cases for instances the app doesn't give
+  (versions, url mode, the MCP Apps proxy) are skipped with the reason.
 
-**Prod shape (repo).** `ops/prod-shape/`:
-- a docker compose with Caddy's internal CA serving `app.test`, `*.content.test` (same-site
-  siblings, as in production without the PSL) and `evil.test`;
-- the reference host built on the kit itself;
-- a Playwright image that trusts the CA, with sibling-instance cookie tests.
+`hostConformance(options)` gives the hosts for an app that registers the cases itself.
 
-A GitHub Actions workflow runs on every push: loopback suites and the prod-shape suite, three
-engines each.
+**Prod shape** (`ops/prod-shape/`, `ops/prod-shape/run.sh`). Docker compose: Caddy's internal
+CA serving `app.test`, `*.content.test` (same-site siblings, as in production without a Public
+Suffix List entry), `clash.test` and `evil.test`; wildcard DNS (CoreDNS); the kit reference app
+behind the edge, its health probe over the real TLS; a misconfigured twin that must run opaque,
+and a strict one that must not start; a Playwright image trusting the CA (Chromium's NSS store,
+the system store for WebKit; Playwright's Firefox reads neither, so its project overrides
+certificate errors). The suite (`packages/porthole/prod-shape`) runs the whole runner over https,
+then the sibling cases: Porthole's cookies host-only and `__Host-`; a sibling label (an app's
+preview) can't plant a cookie that opens content, or frame it; another site can't frame it; the
+clash. CI (`.github/workflows/ci.yml`) runs on every push: the checks, the loopback suites on
+each engine, and the prod-shape profile.
 
-**Compatibility.** Every 0.1.x export stays. `createServer` is what the kit wraps.
-`src/compat.ts` re-exports anything renamed, with the version it changed in.
+**Compatibility.** Every 0.1.x export stays as it was; the kit wraps `createServer`. Nothing was
+renamed, so there is no compat module. `FrameBlock` gains `sign-in`; `ContentDomain.name` takes
+a `Naming` (any function still fits).
 
 ### Protocol adapters
 

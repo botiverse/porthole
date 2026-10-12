@@ -9,6 +9,11 @@
  *
  * and calls `issue` from its own authenticated API when a viewer opens served content.
  *
+ * The host kit (P066): `createContentHost` wraps `createServer` with the routing middleware
+ * (`fetch`), the issue endpoint (`issue`), the content domain's parsing and clash guards
+ * (`contentDomain`), and an optional health gate with an opaque fallback. An app writes its four
+ * policy callbacks and its settings; on Node, `@botiverse/porthole/node` adapts it.
+ *
  * Runs on any runtime with web-standard `Request`/`Response` and `crypto.getRandomValues`: Node,
  * Cloudflare Workers (no `nodejs_compat` needed), Deno, Bun (P044). On Workers, keep tickets in D1
  * (`d1TicketStore`, P045).
@@ -29,6 +34,26 @@
  */
 export { createServer } from "./server.ts";
 export {
+  createContentHost,
+  HEALTH_PATH,
+  type ContentHealthView,
+  type ContentHost,
+  type ContentHostEvent,
+  type ContentHostOptions,
+  type EntryOptions,
+  type ContentMeta,
+  type HealthOptions,
+  type HealthProbe,
+} from "./host.ts";
+export {
+  clashOf,
+  contentDomain,
+  ContentDomainError,
+  hostnameOf,
+  type ContentDomainInfo,
+  type ContentDomainProblem,
+} from "./domain.ts";
+export {
   d1TicketSchema,
   d1TicketStore,
   memoryTicketStore,
@@ -36,7 +61,7 @@ export {
   type D1StatementLike,
 } from "./tickets.ts";
 export { FRAME_STATUS_METHOD } from "../isolation/types.ts";
-export { isHostLabel, prefixedName } from "./naming.ts";
+export { isHostLabel, prefixedName, type Naming } from "./naming.ts";
 export { proxyTo, type ProxyOptions } from "./proxy.ts";
 export type {
   Access,
@@ -45,6 +70,7 @@ export type {
   AuthorizeRequest,
   Authorizer,
   ContentDomain,
+  EntryState,
   Grant,
   PortholeServer,
   ServerOptions,

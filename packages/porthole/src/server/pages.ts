@@ -1,5 +1,6 @@
 import { FRAME_STATUS_METHOD } from "../isolation/types.ts";
 import type { FrameBlock } from "../host/types.ts";
+import { base64url, sha256, utf8 } from "./crypto.ts";
 
 /**
  * The server's own pages on a content origin: why it shows nothing of the content, and the page a
@@ -125,4 +126,47 @@ export function enterPage(
   const headers = new Headers(pageHeaders(frameAncestors, true));
   headers.set("set-cookie", cookie);
   return new Response(body, { status: 200, headers });
+}
+
+/** The status script's hash, for a page that carries it inline (`script-src 'sha256-…'`). */
+let statusHash: string | null = null;
+const hashOfStatus = (): string => {
+  statusHash ??= base64url(sha256(utf8(STATUS_SCRIPT)))
+    .replace(/-/gu, "+")
+    .replace(/_/gu, "/");
+  const padding = (4 - (statusHash.length % 4)) % 4;
+  return `'sha256-${statusHash}${"=".repeat(padding)}'`;
+};
+
+/**
+ * A redirect entry's page on the app's own origin (P068): why it shows nothing, told to the page
+ * that frames it like a content origin's page. Plain, no app chrome; its one script inline under
+ * its hash (the app origin serves no script of Porthole's).
+ */
+export function appStatusPage(
+  status: number,
+  title: string,
+  detail: string,
+  frameAncestors: string,
+  reason: FrameBlock,
+  hostOrigins: readonly string[],
+  link?: { readonly href: string; readonly text: string },
+  method = "GET",
+): Response {
+  const more =
+    link === undefined
+      ? ""
+      : `<p><a href="${escape(link.href)}" target="_top" rel="noopener">${escape(link.text)}</a></p>`;
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(title)}</title><style>${STYLE}a{color:inherit}</style></head><body><main data-porthole-status="${status}" data-porthole-reason="${escape(reason)}" data-porthole-hosts="${escape(JSON.stringify(hostOrigins))}"><h1>${escape(title)}</h1><p>${escape(detail)}</p>${more}</main><script>${STATUS_SCRIPT}</script></body></html>`;
+  return new Response(method === "HEAD" ? null : body, {
+    status,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; script-src ${hashOfStatus()}; base-uri 'none'; form-action 'none'; frame-ancestors ${frameAncestors}`,
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "x-robots-tag": "noindex, nofollow",
+    },
+  });
 }

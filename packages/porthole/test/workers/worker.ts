@@ -1,5 +1,12 @@
 import { presets } from "../../src/index.ts";
-import { createServer, d1TicketStore, prefixedName, type D1Like } from "../../src/server/index.ts";
+import {
+  createContentHost,
+  createServer,
+  d1TicketStore,
+  prefixedName,
+  type ContentHost,
+  type D1Like,
+} from "../../src/server/index.ts";
 
 /**
  * A Cloudflare Worker serving Porthole content the way a host would wire it (P044): `/server` on a
@@ -52,9 +59,67 @@ function porthole(env: Env) {
   return server;
 }
 
+/** The host kit on Workers (P066): an app's whole wiring, its four policies and its settings. */
+let hosted: ContentHost<{ readonly id: string }> | null = null;
+function kit(env: Env) {
+  hosted ??= createContentHost<{ readonly id: string }>({
+    domain: "kitcontent.test",
+    appOrigins: [HOST],
+    secret: env.SECRET,
+    tickets: d1TicketStore(env.DB),
+    configs: (source) => ({
+      artifact: presets.artifact({ isolation: "domain", contentOrigins: [source] }),
+    }),
+    name: prefixedName("a-"),
+    reserved: ["f"],
+    instance: (proposal) =>
+      proposal.document.kind === "artifact" && /^[a-z0-9]+$/u.test(proposal.document.id)
+        ? { scope: proposal.document.id, document: { kind: "artifact", id: "page", version: "1" } }
+        : null,
+    access: (_instance, viewer) =>
+      viewer === null ? null : { viewer: viewer.id, subject: viewer.id },
+    authorize: ({ subject }) =>
+      subject !== undefined && revoked.has(subject)
+        ? { allow: false, code: "revoked" }
+        : { allow: true },
+    source: (id, version) =>
+      Promise.resolve(
+        id === "page" ? { html: `<!doctype html><h1 id="v">kit ${version}</h1>` } : null,
+      ),
+    // Redirect entry (P068): every scope's / is its page's first version.
+    entry: {
+      authorizeUrl: `${HOST}/kit/authorize`,
+      at: (scope, path) =>
+        path === "/" ? { scope, document: { kind: "artifact", id: "page", version: "1" } } : null,
+      signIn: (returnTo) =>
+        new Response(null, {
+          status: 303,
+          headers: { location: `${HOST}/signin?next=${encodeURIComponent(returnTo)}` },
+        }),
+    },
+  });
+  return hosted;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    const fromKit = await kit(env).fetch(request);
+    if (fromKit !== null) {
+      return fromKit;
+    }
+    if (url.origin === HOST && url.pathname === "/kit/authorize") {
+      return kit(env).authorize((asked) => {
+        const who = asked.headers.get("x-viewer");
+        return who === null ? null : { id: who };
+      })(request);
+    }
+    if (url.hostname === "host.test" && url.pathname === "/kit/issue") {
+      return kit(env).issue((asked) => {
+        const who = asked.headers.get("x-viewer");
+        return who === null ? null : { id: who };
+      })(request);
+    }
     if (url.hostname === "host.test") {
       const id = url.searchParams.get("id") ?? "1";
       const instance = {

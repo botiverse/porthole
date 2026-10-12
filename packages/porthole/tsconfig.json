@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "lib": ["es2024", "dom", "dom.iterable"], "types": ["node"] },
-  "include": ["src", "test", "leak"]
+  "include": ["src", "test", "leak", "scripts", "prod-shape"]
 }

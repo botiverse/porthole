@@ -1559,35 +1559,58 @@ manual's "may report the reader's system setting".
 - Making `"never"` the default for pages: hosts that theme pages would lose it.
 **Revisit when** a host needs a theme of its own that isn't light (then a fixed scheme value).
 
-## P066 · 2026-10-12 · The host kit: an app writes its policy, Porthole the machinery around `/server` · Proposed
+## P066 · 2026-10-12 · The host kit: an app writes its policy, Porthole the machinery around `/server` · Accepted
 
-**Decision (proposed, awaiting the coordinator's OK).** Porthole 0.2.0 takes in the host-side
-machinery both hosts wrote around `/server`:
-- Host-routing middleware: fetch/Workers, plus a Node adapter with WebSocket upgrade, handing
-  reserved labels back to the app.
-- Content-domain parsing and its misconfiguration guards.
-- An issue-endpoint factory, with a client `httpLocator`.
-- An optional health gate with an opaque fallback.
-- A conformance runner an app points at its real page.
-- A prod-shaped docker profile and CI on push.
+**Decision.** Porthole 0.2.0 takes in the host-side machinery both hosts wrote around `/server`
+(DESIGN § "The host kit"):
+- `createContentHost`: the routing middleware (fetch/Workers; reserved labels handed back), the
+  issue endpoint, `meta`, `frameSources`, the domain helpers and their guards, and an optional
+  health gate with an opaque fallback;
+- `@botiverse/porthole/node`: the Node adapter, WebSocket upgrades included, and the health
+  probe;
+- the client's `httpLocator` and `servedOrOpaque`;
+- a framework-free conformance runner an app points at its real page (`defineHostConformance`);
+- a prod-shaped docker profile (`ops/prod-shape`) and CI on every push.
 
-The app keeps four callbacks (`instance`, `access`, `authorize`, `source`) and its config.
-DESIGN § "The host kit" sketches the API.
+The app keeps four callbacks (`instance`, `access`, `authorize`, `source`), plus `entry.at` with
+redirect entry (P068), and its settings. Answers to the questions left open by the proposal:
+1. **Clashes.** Porthole never serves a content domain that holds an app origin or may share
+   its site. With the health gate (the opaque fallback) on, such settings are a lasting
+   "unhealthy: misconfigured, <reason>": logged once with a stable event name
+   (`porthole.content.misconfigured`, its `code`), `meta().served` false, frames opaque.
+   Without it, `contentDomain`/`createContentHost` throw a `ContentDomainError` at startup.
+   Fail closed either way; no separate switch.
+2. **The issue body** is always `{ instance }`, the `InstanceRef` wire shape. The app's
+   `instance` callback treats it as a proposal: it validates and normalizes it, derives the scope
+   from what it names, and refuses anything else. App ids travel in the document's fields. The
+   client never chooses an origin.
+3. **The conformance harness has no React.** It is framework-free, on the core's `createHost`,
+   loaded on the app's page as a script from the page's own origin under its nonce. An app's own
+   frame components are covered by its own e2e; Porthole's React binding by Porthole's tests.
 
+The Workers path uses no Node API (tested under workerd with D1); the health probe is optional
+there.
 **Why.**
 - The first host wrote 1,738 lines (domain, displays, health, the content router, the client's
-  served frames, its conformance host).
-- The second host wrote 2,305 lines (content service, content mapping, the frame API, the
-  client frame, its conformance tools).
-- Most of it is the same code.
-- Their copies already disagree in small ways. The first host derives the scheme from its public
-  URL, the second from `*.localhost`. The first logs a domain clash and disables the domain, the
-  second fails closed. Neither tests over TLS.
+  served frames, its conformance host); the second 2,305 (content service, content mapping, the
+  frame API, the client frame, its conformance tools). Most of it is the same code.
+- Their copies already disagreed: the scheme from a public URL or from `*.localhost`; a clash
+  logged and disabled, or failed closed. Neither was tested over TLS or on same-site siblings.
 
-**To be decided before coding:**
-- Clash handling: throw (fail closed), or report and disable.
-- The issue body's shape: `{ instance }`, or the app's own fields.
-- Whether the conformance harness bundles its own React.
+**Measured** in the prod shape (https, Caddy's internal CA, `*.content.test` siblings):
+- the whole leak suite and the served cases pass on Chromium, WebKit and Firefox, as on
+  loopback;
+- a `Domain=content.test` cookie set by a sibling label reaches every content origin (same site
+  without a Public Suffix List entry, P047); `__Host-` cookies can't be set that way, and nothing
+  a sibling plants opens content;
+- Playwright's Firefox reads neither the system's trust store nor an enterprise policy, so its
+  prod-shape project overrides certificate errors (pages stay https, secure contexts); Chromium
+  and WebKit check the chain.
+
+**Rejected.** A separate switch for clash handling (two ways to fail, one of them open); the
+app's own body fields on the wire (each app's client would choose what the server trusts);
+bundling React in the harness (it would test Porthole's binding on the app's page, not the app).
+**Revisit when** a third host needs something the four callbacks can't say.
 
 ## P067 · 2026-10-12 · The manual's silent line says where a block is reported, by `errors` · Accepted
 
@@ -1610,4 +1633,72 @@ passed while the line claimed more than it proved.
 **Rejected.** Ending the line at "a blocked fetch rejects": the agent then isn't told that blocks
 come back to it, which is what makes it check them.
 **Revisit when** the shell reports blocks other than through `reportError`.
+
+## P068 · 2026-10-12 · Redirect entry: every instance has a clean address that opens directly · Accepted
+
+**Decision.** With `entry` set, every instance has a clean, stable address (`urlOf(scope,
+path)`, `https://a-<id>.content.example.com/v/3`) that works when opened directly: a new tab, a
+reload, a bookmark, a link sent to someone with access.
+- A request on a clean address without a cookie for it is sent (302) to the app's authorize
+  route (`ContentHost.authorize`, on an app origin) with a signed state: the label, the path, a
+  nonce, five minutes. The content origin sets a cookie holding the nonce, in the session
+  cookie's context (partitioned in a frame, `Lax` on a tab).
+- The route asks the app: `entry.at(scope, path)` (the path names the instance; the query never
+  does) and `access`. Not signed in: on a tab, the app's own sign-in (`signIn(returnTo)`), which
+  comes back to the route; in a frame, never the sign-in, a plain page asking for a new tab
+  (`blocked: sign-in`). No access: the app's refusal page on a tab (`entry.refusal`), a plain
+  page in a frame; never content.
+- Granted: a 302 to `/__porthole/entry?code=…` on the instance's own origin. The code is a
+  one-time ticket (60 s) bound to the label, the path and the nonce. It is redeemed once, only on
+  its label, only with the nonce's cookie; the session it buys is bound to the path; a 303 goes
+  to the clean address.
+- A browser that keeps no cookie in a frame (WebKit, P025) arrives at the redeem without the
+  nonce: the "open in a new tab" outcome (`blocked: cookies`). A path whose session still didn't
+  come back after a redeem is caught on the next bounce (the nonce cookie marks it entered for
+  60 s): the same outcome, no loop.
+- The redirect pages on the app origin are Porthole's (no app chrome), framable only by the app
+  origins, their one script inline under its hash; the frame transport hears frame status, and
+  nothing else, from the host's own origin.
+- Tickets stay: frames should use them (no extra round trip; no dependence on the app's cookie
+  inside a frame). Clean addresses are for tabs, links, bookmarks and reloads: a host's "open in a
+  new tab" and "copy link" use `urlOf`. Redirect entry needs a naming that says a label's scope
+  (`prefixedName` does; keyed labels are one-way).
+
+**Security.**
+- *Open redirects.* The authorize route redirects only to `/__porthole/entry` on the label in a
+  state it verified; the redeem redirects only to its own origin plus the path from that state,
+  as an absolute URL (`//evil.example/x` stays a path on the instance's origin). The app's
+  `signIn` gets the authorize URL as `returnTo` and must come back only to its own paths.
+- *CSRF and state binding.* The state is signed (HMAC under the server's key, typed apart from
+  session cookies) and expires in five minutes. The code is bound to the state's nonce, whose
+  cookie lives only in the browser that began: a code sent to someone else's browser (login
+  CSRF, session fixation) opens nothing. A code is bound to its label: taken to another
+  instance's origin, it is refused and spent.
+- *The code.* It lives in an address for one hop (a redirect, so never in history), every
+  redirect answer sends `Referrer-Policy: no-referrer` and `Cache-Control: no-store`, and
+  Porthole never logs it (an edge's access log may: keep codes out of logs there, or log paths
+  without queries).
+- *The new opening.* A request without a cookie used to be refused; it is now handed to the
+  app, whose session decides. The app's sign-in and refusal never render in a frame. The host's
+  own origin may now report a frame's status (only that: a protocol message from there is
+  dropped, `test/transport.test.ts`).
+
+**Measured** (the `served.entry.*` cases, on loopback and in the prod shape): a clean address
+opens directly signed in, signed out through the app's sign-in, and gives the app's refusal
+without access, on all three engines; a replayed code and a code taken to another instance's
+origin open nothing. In a frame, the app's `SameSite=Lax` cookie reaches its authorize route
+after the cross-site redirect from the content origin on Chromium (the frame shows the content),
+and not on Firefox or WebKit (the frame asks for a tab to sign in). That is why frames should use
+tickets.
+
+**Rejected.**
+- A `?ticket=` address for tabs and links: not stable, not shareable, and spent once.
+- An entry page that checks the cookie with a script: the nonce cookie at the redeem tells the
+  same thing on the server, before anything renders, with no script on either origin.
+- Binding the session to the query too: two queries on one path would take two cookies for one
+  document.
+
+**Revisit when** a host needs clean addresses for keyed labels (a lookup from label to scope),
+or a browser starts sending `Lax` cookies on framed redirects everywhere (then frames could use
+clean addresses too).
 

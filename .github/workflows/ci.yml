@@ -1,0 +1,70 @@
+name: ci
+
+# Every push: the checks (types, lint, format, unit tests with /server in workerd), the browser
+# suites on loopback on each engine Porthole supports, and the prod-shape profile (P066): the
+# host kit behind a TLS edge with real DNS, on same-site sibling origins, in docker compose.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run check
+      - run: pnpm --filter @botiverse/porthole run build
+
+  loopback:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, webkit, firefox]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @botiverse/porthole exec playwright install --with-deps ${{ matrix.engine }}
+      - run: pnpm test:leak
+        env:
+          PORTHOLE_LEAK_ENGINES: ${{ matrix.engine }}
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loopback-${{ matrix.engine }}
+          path: .dev/leak-results
+          retention-days: 7
+
+  prod-shape:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: ops/prod-shape/run.sh
+        env:
+          PORTHOLE_PROD_WORKERS: "2"

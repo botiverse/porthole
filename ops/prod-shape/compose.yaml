@@ -1,0 +1,108 @@
+# The prod-shape profile (P066): Porthole's host kit as production runs it, on one machine.
+# - edge: Caddy terminating TLS with its own internal CA for app.test, *.content.test (same-site
+#   siblings, as a content domain is without a Public Suffix List entry), clash.test and evil.test;
+# - dns: wildcard DNS (every *.test name is the edge), for the browsers and the app's health probe;
+# - app: the kit reference app (packages/porthole/leak/kit) behind the edge, trusting the CA;
+# - clash: the same app misconfigured (its content domain holds its own origin), with the health
+#   gate on, so it runs opaque and says why; clash-strict: the same without it, which must not start;
+# - playwright: the browsers, trusting the CA, running packages/porthole/prod-shape.
+# Run: ops/prod-shape/run.sh (from anywhere). The repository is mounted read-only.
+name: porthole-prod-shape
+
+networks:
+  shape:
+    ipam:
+      config:
+        - subnet: 172.29.53.0/24
+
+volumes:
+  caddy-data: {}
+
+x-kit: &kit
+  image: node:24.20.0-slim
+  working_dir: /repo/packages/porthole
+  volumes:
+    - ../..:/repo:ro
+    - caddy-data:/caddy:ro
+  dns: [172.29.53.53]
+  # Node trusts the edge's CA once Caddy has made it.
+  command:
+    - sh
+    - -c
+    - until [ -f /caddy/caddy/pki/authorities/local/root.crt ]; do sleep 0.2; done; exec node leak/kit/server.ts
+
+services:
+  dns:
+    image: coredns/coredns:1.14.7
+    command: ["-conf", "/etc/coredns/Corefile"]
+    volumes:
+      - ./Corefile:/etc/coredns/Corefile:ro
+    networks:
+      shape:
+        ipv4_address: 172.29.53.53
+
+  edge:
+    image: caddy:2.11.7-alpine
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    networks:
+      shape:
+        ipv4_address: 172.29.53.10
+
+  app:
+    <<: *kit
+    environment:
+      NODE_EXTRA_CA_CERTS: /caddy/caddy/pki/authorities/local/root.crt
+      PORTHOLE_KIT_PORT: "8080"
+      PORTHOLE_KIT_LISTEN: 0.0.0.0
+      PORTHOLE_KIT_APP_ORIGIN: https://app.test
+      PORTHOLE_KIT_CONTENT_DOMAIN: content.test
+      PORTHOLE_KIT_SECRET: prod-shape-secret-not-a-real-one-0123456789
+    networks:
+      shape:
+        ipv4_address: 172.29.53.20
+
+  clash:
+    <<: *kit
+    environment:
+      NODE_EXTRA_CA_CERTS: /caddy/caddy/pki/authorities/local/root.crt
+      PORTHOLE_KIT_PORT: "8080"
+      PORTHOLE_KIT_LISTEN: 0.0.0.0
+      PORTHOLE_KIT_APP_ORIGIN: https://clash.test
+      PORTHOLE_KIT_CONTENT_DOMAIN: clash.test
+      PORTHOLE_KIT_SECRET: prod-shape-secret-not-a-real-one-0123456789
+    networks:
+      shape:
+        ipv4_address: 172.29.53.21
+
+  clash-strict:
+    <<: *kit
+    profiles: [strict]
+    command: ["node", "leak/kit/server.ts"]
+    environment:
+      PORTHOLE_KIT_PORT: "8080"
+      PORTHOLE_KIT_LISTEN: 0.0.0.0
+      PORTHOLE_KIT_APP_ORIGIN: https://clash.test
+      PORTHOLE_KIT_CONTENT_DOMAIN: clash.test
+      PORTHOLE_KIT_SECRET: prod-shape-secret-not-a-real-one-0123456789
+      PORTHOLE_KIT_HEALTH: "0"
+    networks: [shape]
+
+  playwright:
+    build:
+      context: .
+      dockerfile: playwright.Dockerfile
+    working_dir: /repo/packages/porthole
+    command: ["sh", "/repo/ops/prod-shape/trust-and-test.sh"]
+    environment:
+      PORTHOLE_PROD_ENGINES: ${PORTHOLE_PROD_ENGINES:-chromium,webkit,firefox}
+      PORTHOLE_PROD_WORKERS: ${PORTHOLE_PROD_WORKERS:-4}
+      PORTHOLE_PROD_GREP: ${PORTHOLE_PROD_GREP:-}
+    volumes:
+      - ../..:/repo:ro
+      - caddy-data:/caddy:ro
+    shm_size: 2gb
+    dns: [172.29.53.53]
+    depends_on: [dns, edge, app, clash]
+    networks: [shape]

@@ -81,6 +81,8 @@ export type FrameBlock =
   | "framing"
   /** The browser keeps no cookie for it inside a frame (WebKit, P025): open it on a tab. */
   | "cookies"
+  /** The person isn't signed in at the app, and its sign-in never shows in a frame: a tab (P068). */
+  | "sign-in"
   /** Its ticket was used or its session ended. */
   | "session"
   /** Its app didn't answer. */

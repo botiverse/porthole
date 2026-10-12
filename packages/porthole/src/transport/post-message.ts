@@ -12,12 +12,23 @@ export function postMessageTransport(
   frameWindow: () => Window | null,
   expectedOrigin: string,
   host: Window = window,
+  /**
+   * Another origin the frame's window may say some things from: the host's own, whose pages a
+   * served frame passes through on a redirect entry (P068), for their frame status only.
+   */
+  also?: { readonly origin: string; readonly accept: (data: unknown) => boolean },
 ): Transport {
   const listeners = new Set<(message: unknown) => void>();
   let closed = false;
   const onMessage = (event: MessageEvent) => {
     const source = frameWindow();
-    if (closed || source === null || event.source !== source || event.origin !== expectedOrigin) {
+    if (closed || source === null || event.source !== source) {
+      return;
+    }
+    if (
+      event.origin !== expectedOrigin &&
+      (also === undefined || event.origin !== also.origin || !also.accept(event.data))
+    ) {
       return;
     }
     for (const listener of listeners) {

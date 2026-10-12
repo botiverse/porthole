@@ -1,6 +1,14 @@
 import type { ColorScheme } from "../config/schema.ts";
+import { FRAME_STATUS_METHOD } from "../isolation/types.ts";
 import { postMessageTransport } from "../transport/post-message.ts";
 import type { PlatformHost, Surface, SurfaceSpec } from "./types.ts";
+
+/** A frame-status message (`porthole/notifications/frame-status`), by its method alone. */
+const isFrameStatus = (data: unknown): boolean =>
+  data !== null &&
+  typeof data === "object" &&
+  (data as { jsonrpc?: unknown }).jsonrpc === "2.0" &&
+  (data as { method?: unknown }).method === FRAME_STATUS_METHOD;
 
 /**
  * The web platform: an `<iframe>` whose policy attributes are set before its document is given,
@@ -54,7 +62,17 @@ export const webPlatform: PlatformHost = {
     container.append(frame);
 
     const view = container.ownerDocument.defaultView ?? window;
-    const transport = postMessageTransport(() => frame.contentWindow, origin, view);
+    // A served frame may pass through the host's own pages (a redirect entry's, P068): what they
+    // say of the frame's status is heard too, and nothing else from there.
+    const own = view.origin;
+    const transport = postMessageTransport(
+      () => frame.contentWindow,
+      origin,
+      view,
+      origin === "null" || own === "null" || own === origin
+        ? undefined
+        : { origin: own, accept: isFrameStatus },
+    );
     return {
       transport,
       element: frame,

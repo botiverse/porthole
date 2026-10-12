@@ -7,6 +7,7 @@ import { defineConfig, devices } from "@playwright/test";
  */
 
 const port = Number(process.env.PORTHOLE_LEAK_PORT ?? 8797);
+const kitPort = Number(process.env.PORTHOLE_KIT_PORT ?? 8798);
 const engines = (process.env.PORTHOLE_LEAK_ENGINES ?? "chromium,webkit,firefox").split(",");
 
 const all = [
@@ -38,15 +39,25 @@ export default defineConfig({
     baseURL: `http://127.0.0.1:${port}`,
     trace: "retain-on-failure",
   },
-  webServer: {
-    command: "node leak/server.ts",
-    cwd: "..",
-    url: `http://127.0.0.1:${port}/`,
-    reuseExistingServer: false,
-    env: {
-      PORTHOLE_LEAK_PORT: String(port),
-      PORTHOLE_LEAK_WEAKEN: process.env.PORTHOLE_LEAK_WEAKEN ?? "",
+  webServer: [
+    {
+      command: "node leak/server.ts",
+      cwd: "..",
+      url: `http://127.0.0.1:${port}/`,
+      reuseExistingServer: false,
+      env: {
+        PORTHOLE_LEAK_PORT: String(port),
+        PORTHOLE_LEAK_WEAKEN: process.env.PORTHOLE_LEAK_WEAKEN ?? "",
+      },
     },
-  },
+    // The host kit's reference app, for the conformance runner (leak/kit.spec.ts, P066).
+    {
+      command: "node leak/kit/server.ts",
+      cwd: "..",
+      url: `http://localhost:${kitPort}/api/meta`,
+      reuseExistingServer: false,
+      env: { PORTHOLE_KIT_PORT: String(kitPort) },
+    },
+  ],
   projects: all.filter((project) => engines.includes(project.name)),
 });
