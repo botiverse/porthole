@@ -3,6 +3,19 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## 0.2.2
+
+- From the host kit's first two adopters (P070, #5, #6): an address that names nothing (a label
+  the naming never makes, the bare domain, a path `entry.at` says has nothing) is a 404 on the
+  content domain, never a trip to the app's sign-in; `reserved` is only for labels the app
+  serves; the entry hooks get the address decoded (`EntryContext`) and `refusal` may return
+  nothing; `/server` exports `InstanceRef` and the other callback types; the server's pages talk
+  past a desktop scheme among the host origins (`ferry://app`), so framed url-mode apps no longer
+  hang; `nodeHost` streams with backpressure, stops with the client, and never ends a broken body
+  as whole; `health.onChange`; the runner takes async instances and entry addresses, adds
+  `served.entry.unknown`, and locates its tests in the app's spec file; the package ships the
+  docs.
+
 ## 0.2.1
 
 - The manual, for a whole-page viewer (P069): "Call <guide tool> once" with `guideToolName`;
