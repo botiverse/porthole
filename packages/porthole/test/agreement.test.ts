@@ -65,6 +65,13 @@ const CASES: Record<string, PortholeConfig> = {
   "artifact page, hotlinked images and media from any https site": presets.artifact({
     egress: { anyHttps: ["img", "media"] },
   }),
+  "artifact page, one CDN opened only under some paths": presets.artifact({
+    egress: {
+      script: ["https://cdn.example.net/npm/", "https://cdn.example.net/pyodide/"],
+      style: ["https://cdn.example.net/npm/"],
+      connect: ["https://cdn.example.net/pyodide/"],
+    },
+  }),
   "artifact page, library CDNs and any https image": presets.artifact({
     egress: { ...LIBRARY_CDNS, anyHttps: ["img"] },
   }),
@@ -102,9 +109,12 @@ function variablesIn(text: string): Set<string> {
 /** The origins a text names (in URLs, by their origin). */
 const originsIn = (text: string): Set<string> =>
   new Set(
-    [...text.matchAll(/\b(?:https?|wss?):\/\/(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*(?::\d+)?/gu)].map(
-      ([url]) => url,
-    ),
+    [
+      // An origin, and a directory path prefix if it has one (P063).
+      ...text.matchAll(
+        /\b(?:https?|wss?):\/\/(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*(?::\d+)?(?:\/(?:[a-z0-9_~-][a-z0-9._~-]*\/)+)?/gu,
+      ),
+    ].map(([url]) => url),
   );
 
 /** The host sources a CSP lists (not keywords or schemes). */

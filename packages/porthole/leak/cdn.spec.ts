@@ -166,3 +166,32 @@ test("images from any https site, when the host opts in: they load; scripts, sty
   await settle(closedFrame);
   expect(reached).toHaveLength(closedReached);
 });
+
+test("a CDN opened only under a path prefix: a library there loads, one elsewhere on the CDN doesn't (P063)", async ({
+  page,
+  context,
+}) => {
+  const reached: string[] = [];
+  await context.route("https://cdn.jsdelivr.net/**", (route) => {
+    reached.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ contentType: "text/javascript", body: LIBRARY });
+  });
+  const config = presets.artifact({ egress: { script: ["https://cdn.jsdelivr.net/npm/"] } });
+  const page1 = (path: string) =>
+    `<!doctype html><html><head><title>Lib</title><script src="https://cdn.jsdelivr.net${path}"></script></head><body><main id="artifact">x</main></body></html>`;
+  const inside = await referenceHost.launch(page, {
+    config,
+    content: page1("/npm/porthole-probe-lib@1.0.0/index.min.js"),
+  });
+  const insideFrame = await inside.frame();
+  await expect.poll(() => libraryOf(insideFrame)).toBe("loaded");
+  const outside = await referenceHost.launch(page, {
+    config,
+    content: page1("/gh/someone/repo@main/lib.js"),
+  });
+  const outsideFrame = await outside.frame();
+  await expect(outsideFrame.locator("#artifact")).toBeAttached();
+  await settle(outsideFrame);
+  expect(await libraryOf(outsideFrame), "outside the prefix").toBe("none");
+  expect(reached).toEqual(["/npm/porthole-probe-lib@1.0.0/index.min.js"]);
+});

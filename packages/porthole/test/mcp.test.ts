@@ -173,6 +173,28 @@ describe("the handshake", () => {
     });
   });
 
+  it("tells the view the origins of path-prefixed egress, the spec's domains being origins (P063)", async () => {
+    const t = setup({
+      preset: {
+        egress: {
+          connect: ["https://api.example.org/v1/"],
+          script: ["https://cdn.example.org/npm/", "https://cdn.example.org/pyodide/"],
+          img: ["https://img.example.org"],
+        },
+      },
+    });
+    t.view({ id: 1, method: "ui/initialize", params: {} });
+    await t.settle();
+    expect(
+      (t.resultOf(1) as { hostCapabilities: { sandbox: unknown } }).hostCapabilities.sandbox,
+    ).toEqual({
+      csp: {
+        connectDomains: ["https://api.example.org"],
+        resourceDomains: ["https://cdn.example.org", "https://img.example.org"],
+      },
+    });
+  });
+
   it("sends nothing before the view is initialized, then all of it, in order", async () => {
     const t = setup();
     t.connection.sendToolInputPartial({ code: "a" });

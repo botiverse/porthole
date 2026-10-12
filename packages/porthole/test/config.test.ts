@@ -3,8 +3,13 @@ import {
   compile,
   ConfigError,
   createHost,
+  allEgressOrigins,
+  allEgressSources,
+  egressSourceProblem,
+  isEgressSource,
   isOriginSource,
   originSourceProblem,
+  sourceOrigin,
   presets,
   validateConfig,
   type PortholeConfig,
@@ -21,6 +26,92 @@ const refusal = (input: unknown): string => {
   }
   throw new Error("expected the config to be refused");
 };
+
+describe("egress sources with a path prefix (P063)", () => {
+  test.each([
+    "https://cdn.jsdelivr.net/npm/",
+    "https://cdn.jsdelivr.net/pyodide/",
+    "https://cdn.jsdelivr.net/gh/python-visualization/",
+    "https://cdn.example.com:8443/a-b_c.d~e/f/",
+    "wss://live.example.com/feed/",
+    "http://localhost:5173/assets/",
+  ])("accepts %s", (source) => {
+    expect(isEgressSource(source)).toBe(true);
+    // Only egress takes a path: an origin is still an origin.
+    expect(isOriginSource(source)).toBe(false);
+  });
+
+  test.each([
+    "https://cdn.example.com/",
+    "https://cdn.example.com/npm",
+    "https://cdn.example.com/npm//x/",
+    "https://cdn.example.com/../x/",
+    "https://cdn.example.com/a/../b/",
+    "https://cdn.example.com/./a/",
+    "https://cdn.example.com/.hidden/",
+    "https://cdn.example.com/NPM/",
+    "https://cdn.example.com/a%2f/",
+    "https://cdn.example.com/a?x=1/",
+    "https://cdn.example.com/a#b/",
+    "https://cdn.example.com/a*/",
+    "https://cdn.example.com/a;b/",
+    "https://cdn.example.com/a,b/",
+    "https://cdn.example.com/a b/",
+    `https://cdn.example.com/${"a".repeat(260)}/`,
+    "https://*.example.com/npm/",
+    "https://*.com/npm/",
+    "http://cdn.example.com/npm/",
+    "https://cdn.example.com/npm/; script-src *",
+  ])("refuses %j", (source) => {
+    expect(isEgressSource(source)).toBe(false);
+  });
+
+  test("says why, and refuses a wildcard host with a path", () => {
+    expect(egressSourceProblem("https://*.example.com/npm/")).toMatch(/wildcard host/u);
+    expect(egressSourceProblem("https://cdn.example.com/npm")).toMatch(/directory prefix/u);
+    expect(sourceOrigin("https://cdn.example.com/npm/")).toBe("https://cdn.example.com");
+    expect(sourceOrigin("https://cdn.example.com")).toBe("https://cdn.example.com");
+  });
+
+  test("open egress and capabilities, go into the CSP verbatim, never into content origins or frames", () => {
+    const config = presets.artifact({
+      egress: {
+        script: [
+          "https://cdn.jsdelivr.net/npm/",
+          "https://cdn.jsdelivr.net/gh/python-visualization/",
+        ],
+        connect: ["https://cdn.jsdelivr.net/pyodide/"],
+      },
+      capabilities: { readData: { connect: ["https://api.example.com/v2/"] } },
+    });
+    const directives = Object.fromEntries(
+      compile(config).cspDirectives.map(([name, ...rest]) => [name, rest]),
+    );
+    expect(directives["script-src"]).toEqual([
+      "'unsafe-inline'",
+      "'unsafe-eval'",
+      "blob:",
+      "https://cdn.jsdelivr.net/npm/",
+      "https://cdn.jsdelivr.net/gh/python-visualization/",
+    ]);
+    expect(directives["connect-src"]).toEqual([
+      "https://cdn.jsdelivr.net/pyodide/",
+      "https://api.example.com/v2/",
+    ]);
+    expect(allEgressSources(config)).toContain("https://cdn.jsdelivr.net/npm/");
+    expect(allEgressOrigins(config)).toEqual([
+      "https://cdn.jsdelivr.net",
+      "https://api.example.com",
+    ]);
+    expect(compile(config).guide(["widget"])).toContain("https://cdn.jsdelivr.net/npm/");
+    expect(() =>
+      presets.artifact({ isolation: "domain", contentOrigins: ["https://*.example.com/a/"] }),
+    ).toThrow(/not an origin/u);
+    expect(() =>
+      presets.inlineWidget({ embedder: { frameSrc: ["https://frames.example.com/a/"] } }),
+    ).toThrow(/not an origin/u);
+  });
+});
 
 describe("origin sources", () => {
   test.each([

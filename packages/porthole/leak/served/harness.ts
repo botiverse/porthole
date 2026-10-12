@@ -299,6 +299,16 @@ async function start(): Promise<Harness> {
   const configs: Record<string, PortholeConfig> = {
     inlineWidget: presets.inlineWidget({ isolation: "domain", contentOrigins: [contentSource] }),
     artifact: presets.artifact({ isolation: "domain", contentOrigins: [contentSource] }),
+    // A shell that may reach one site only under a path prefix (P063).
+    inlinePathPrefix: presets.inlineWidget({
+      isolation: "domain",
+      contentOrigins: [contentSource],
+      egress: {
+        script: ["https://any-site.example/allowed/"],
+        img: ["https://any-site.example/allowed/"],
+        connect: ["https://any-site.example/allowed/"],
+      },
+    }),
     // A shell whose images and media load from any https site (P059).
     inlineAnyHttps: presets.inlineWidget({
       isolation: "domain",

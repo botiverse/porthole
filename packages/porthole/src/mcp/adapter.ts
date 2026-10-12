@@ -1,5 +1,6 @@
 import type { CallOutcome } from "../bridge/types.ts";
 import { egressOrigins } from "../compile/policy.ts";
+import { sourceOrigin } from "../config/validate.ts";
 import type { CapabilityName } from "../config/capabilities.ts";
 import {
   JSON_RPC_ERRORS,
@@ -137,11 +138,13 @@ function connect(session: AdapterSession, options: McpAppsAdapterOptions): McpAp
   const hostCapabilities = (): Record<string, unknown> => {
     const declared = (name: CapabilityName) => bridge.declared(name);
     const { config } = session.compiled;
-    const connectDomains = egressOrigins(config, "connect");
+    // The spec's domains are origins: a source's path prefix is dropped here (P063); the CSP
+    // the view runs under keeps it, so what loads may be narrower than these say.
+    const connectDomains = [...new Set(egressOrigins(config, "connect").map(sourceOrigin))];
     const resourceDomains = [
       ...new Set(
         (["script", "style", "img", "font", "media"] as const).flatMap((kind) =>
-          egressOrigins(config, kind),
+          egressOrigins(config, kind).map(sourceOrigin),
         ),
       ),
     ];

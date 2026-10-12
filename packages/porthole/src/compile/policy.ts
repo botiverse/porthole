@@ -1,5 +1,6 @@
 import { CAPABILITIES, type CapabilityName, type Gate } from "../config/capabilities.ts";
 import type { PortholeConfig } from "../config/schema.ts";
+import { sourceOrigin } from "../config/validate.ts";
 
 /**
  * The frame's policies, derived from the config: its CSP (in the shell's `<meta>` for opaque
@@ -31,7 +32,10 @@ export function effectiveGates(config: PortholeConfig, name: CapabilityName): re
 
 const unique = (values: readonly string[]): string[] => [...new Set(values)];
 
-/** The origins content may reach for `kind`: the base allowlist plus every declared capability's. */
+/**
+ * The sources content may reach for `kind`: the base allowlist plus every declared capability's.
+ * Each is an origin, or an origin with a path prefix (P063), as the CSP lists it.
+ */
 export function egressOrigins(config: PortholeConfig, kind: EgressKind): string[] {
   const fromCapabilities = declaredCapabilities(config).flatMap((name) => {
     const capability = config.capabilities[name];
@@ -40,10 +44,15 @@ export function egressOrigins(config: PortholeConfig, kind: EgressKind): string[
   return unique([...(config.egress[kind] ?? []), ...fromCapabilities]);
 }
 
-/** Every origin content may reach, of any kind. */
-export function allEgressOrigins(config: PortholeConfig): string[] {
+/** Every source content may reach, of any kind, as the CSP lists them (paths kept, P063). */
+export function allEgressSources(config: PortholeConfig): string[] {
   const kinds: EgressKind[] = ["connect", "script", "style", "img", "font", "media"];
   return unique(kinds.flatMap((kind) => egressOrigins(config, kind)));
+}
+
+/** Every origin content may reach, of any kind: a source's path dropped (P063). */
+export function allEgressOrigins(config: PortholeConfig): string[] {
+  return unique(allEgressSources(config).map(sourceOrigin));
 }
 
 const list = (sources: readonly string[]): string[] =>

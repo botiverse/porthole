@@ -507,7 +507,16 @@ P035).
 
 Origins are exact, or `https://*.` a domain of the host's own: a wildcard over a
 public suffix (`*.com`, `*.co.uk`, `*.github.io`) is refused, as is any scheme
-source, with one exception (P060). A host may let passive content load from any
+source, with one exception (P060). An egress source (not a content origin, not an
+embedder frame) may carry a directory path prefix, one exact host only:
+`https://cdn.jsdelivr.net/npm/` opens that CDN under `/npm/` and nothing else of it
+(P063). The CSP lists it verbatim and matches by prefix. A browser ignores the path
+after a redirect (CSP3), so a prefix narrows what content loads directly, not what a
+redirect from inside it reaches: hygiene, not a wall (inline code and eval run
+anyway). Where an origin is needed (the MCP Apps `sandbox.csp` domains,
+`allEgressOrigins`), the path is dropped (`leak/cdn.spec.ts`,
+`leak/served/any-https.spec.ts`: a URL under the prefix loads, one outside it,
+`/allowedx/` included, doesn't). A host may let passive content load from any
 https site (`egress.anyHttps: ["img", "media", "font"]`, P059): those directives
 get `https:`, scripts, styles, data and frames never do, and the manual says so
 (`leak/cdn.spec.ts`: a hotlinked image loads; a script, a stylesheet and a fetch

@@ -187,6 +187,54 @@ export function isOriginSource(value: unknown): value is string {
   return originSourceProblem(value) === null;
 }
 
+/**
+ * A path prefix an egress source may carry (P063): a directory, starting and ending with `/`, of
+ * lowercase letters, digits and `-._~/`, at least one segment, no empty or dot segments.
+ */
+const EGRESS_PATH = /^(\/[a-z0-9_~-][a-z0-9._~-]*)+\/$/u;
+const MAX_EGRESS_PATH = 256;
+const WITH_PATH = /^((?:https|http|wss|ws):\/\/(?:\[::1\]|[^/:]+)(?::\d{1,5})?)(\/.*)$/u;
+
+/**
+ * Whether `value` is an egress source Porthole accepts: an origin source, or an origin with a
+ * directory path prefix (`https://cdn.example.com/npm/`), which CSP matches by prefix.
+ */
+export function isEgressSource(value: unknown): value is string {
+  return egressSourceProblem(value) === null;
+}
+
+/**
+ * Why `value` isn't an egress source Porthole accepts, in words to act on; null if it is. An
+ * origin source as `originSourceProblem` takes it, or one exact host (no wildcard) with a path
+ * prefix (P063).
+ */
+export function egressSourceProblem(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return originSourceProblem(value);
+  }
+  const match = WITH_PATH.exec(value);
+  if (match === null) {
+    return originSourceProblem(value);
+  }
+  const [, origin = "", path = ""] = match;
+  const problem = originSourceProblem(origin);
+  if (problem !== null) {
+    return problem;
+  }
+  if (origin.includes("://*.")) {
+    return `${JSON.stringify(value)} has a path under a wildcard host: a path narrows one host's files; name the host (https://cdn.example.com/npm/)`;
+  }
+  if (path.length > MAX_EGRESS_PATH || path.includes("..") || !EGRESS_PATH.test(path)) {
+    return `${JSON.stringify(value)} has a path that isn't a directory prefix: it starts and ends with /, has at least one segment, and only lowercase letters, digits and - . _ ~ / (at most ${MAX_EGRESS_PATH}); or name the origin alone`;
+  }
+  return null;
+}
+
+/** The origin of an egress source: the source itself, or what comes before its path (P063). */
+export function sourceOrigin(source: string): string {
+  return WITH_PATH.exec(source)?.[1] ?? source;
+}
+
 /** Why `value` isn't an origin source Porthole accepts, in words to act on; null if it is. */
 export function originSourceProblem(value: unknown): string | null {
   const shape = "is not an origin (scheme://host[:port], lowercase, no path)";
@@ -235,16 +283,25 @@ function only(value: Record<string, unknown>, keys: readonly string[], path: str
   }
 }
 
-function sources(value: unknown, path: string): void {
+/**
+ * A list of sources: origins (content origins, the embedder's frames), or egress sources, which
+ * may carry a path prefix (P063).
+ */
+function sources(value: unknown, path: string, kind: "origin" | "egress" = "origin"): void {
   if (value === undefined) {
     return;
   }
   if (!Array.isArray(value)) {
-    fail(path, "must be an array of origins");
+    fail(
+      path,
+      kind === "egress"
+        ? "must be an array of origins (or origins with a path)"
+        : "must be an array of origins",
+    );
     return;
   }
   value.forEach((source, index) => {
-    const problem = originSourceProblem(source);
+    const problem = kind === "egress" ? egressSourceProblem(source) : originSourceProblem(source);
     if (problem !== null) {
       fail(`${path}[${index}]`, problem);
     }
@@ -322,8 +379,8 @@ export function validateConfig(input: unknown): PortholeConfig {
         gate(each, `${path}.gates[${index}]`),
       );
     }
-    sources(capability.connect, `${path}.connect`);
-    sources(capability.resource, `${path}.resource`);
+    sources(capability.connect, `${path}.connect`, "egress");
+    sources(capability.resource, `${path}.resource`, "egress");
     if (capability.guide !== undefined && typeof capability.guide !== "string") {
       fail(`${path}.guide`, "must be a string");
     }
@@ -336,7 +393,7 @@ export function validateConfig(input: unknown): PortholeConfig {
   const kinds = ["connect", "script", "style", "img", "font", "media"];
   only(egress, [...kinds, "anyHttps"], "config.egress");
   for (const kind of kinds) {
-    sources(egress[kind], `config.egress.${kind}`);
+    sources(egress[kind], `config.egress.${kind}`, "egress");
   }
   if (egress.anyHttps !== undefined) {
     if (!Array.isArray(egress.anyHttps)) {

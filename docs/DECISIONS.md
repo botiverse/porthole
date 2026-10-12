@@ -1457,3 +1457,46 @@ Follow-up to 0.1.5 (the second host's adoption).
 - It passes against a host whose shells open images and media (`leak/served/any-https.spec.ts`,
   with its canaries on a routed https site). The image and the audio reached the site; the fetch,
   script, stylesheet and frame didn't.
+
+## P063 · 2026-10-11 · Egress sources may carry a directory path prefix · Accepted
+
+**Decision.** Every egress list accepts an origin, as before, or an origin with a path prefix:
+- `egress.script`, `style`, `font`, `img`, `media` and `connect`;
+- a capability's `connect` and `resource` lists.
+
+A path starts and ends with `/` (a directory, as CSP path matching reads it) and has at least one
+segment. It uses only lowercase letters, digits and `-._~/`: no empty or dot segments, no `..`,
+`%`, `?`, `#`, `*`, `;`, `,` or whitespace, and at most 256 characters.
+
+**A wildcard host with a path is refused.** A path narrows one host's files. A wildcard plus a
+path would read as narrow while opening every subdomain, and no host has asked for it.
+
+The CSP lists a source verbatim. Content origins and the embedder's frames stay origin-only.
+Wherever an origin is needed, the path is dropped (`sourceOrigin`): the MCP Apps
+`hostCapabilities.sandbox.csp` domains, which the spec defines as origins, and `allEgressOrigins`.
+`allEgressSources` keeps the paths, and the manual names sources with their paths. An MCP view's
+declared domains stay origins. The egress probe (P062) and the public-suffix check (P060) are
+unchanged: a path source has an exact host, and the probe reads schemes.
+
+**Why.** The second host's owner decided to open exactly a given allowlist: jsDelivr only under
+`/npm/`, `/pyodide/` and `/gh/python-visualization/`. jsDelivr's `/gh/` proxies any GitHub repo,
+so opening the whole CDN would open any repo's code. The validator refused every path.
+
+**Caveat.** CSP3 ignores the path after a redirect, so a prefix narrows what content loads
+directly, not what a redirect from inside it reaches. Inline code and `eval` run anyway. It is
+hygiene, not a wall.
+
+**Tested.**
+- Unit tests: the accepted and refused forms, the reason for each, the CSP verbatim, origins
+  derived for MCP and `allEgressOrigins`, content origins and frames still origin-only, and an
+  agreement case where the manual names exactly the path sources the CSP lists.
+- Browsers (all three engines):
+  - opaque: a library under `/npm/` loads, one under `/gh/` on the same CDN doesn't reach it;
+  - served: a fetch, an image and a script under `/allowed/` load, and outside it (`/outside/`,
+    `/allowedx/`) they don't;
+  - `served.domain.egress` against that host.
+
+**Rejected.** Exact-file sources (a path not ending in `/`): pinned file URLs change with every
+version. Uppercase paths: CSP path matching is case-sensitive, and every source here is
+lowercase.
+**Revisit when** a host needs a wildcard host with a path, or an uppercase path.
