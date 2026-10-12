@@ -3,6 +3,14 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## 0.3.3
+
+- A confirmation names the instance a served frame shows (`request.display.instance`, in
+  `confirm` and `renderConfirm`), so a host can word its dialog from its own records (P076, #10).
+- `ContentHost.start()` runs once; `nodeServer` starts a host made in its `listen` callback right
+  away instead of at the first request, and no longer starts again one the app started (P076,
+  #10).
+
 ## 0.3.2
 
 - Every entry point bundles whole (P075): `/check` imports its check page's script as a module,
