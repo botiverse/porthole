@@ -3,6 +3,26 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## 0.3.0
+
+Developer experience, for the people adopting Porthole and the agents writing for it.
+
+- The host kit's client, bootstrap and relay (P072): `defineDisplays` (one registry of display
+  kinds for the server, the page, the CSP and the manual); `content.routes(viewerOf)` (one mount
+  under `/porthole`: frames, authorize, meta, handoff; `issue` answers the clean `link`);
+  `contentHostFor` (Workers) and `nodeServer` (Node); `portholeClient`, `frameFallback`,
+  `entryTarget`; React `PortholeView`, `usePortholeLink`, `cssVariableTheme`, `useRunAgain`, and
+  provider-wide `scheme`, `theme`, `nonce: "auto"`, `handlers`, `openLink`, `notify`,
+  `renderConfirm`; the viewer handoff for token-authenticated pages; `upstreamHeaders`,
+  `statusPage`, cookie-clean `appSocket` and `content.forget()` for url-mode relays;
+  `health.onServedChange`; logger adapters.
+- The agent's side (P073): `lintContent`, `admitContent` (the show tool refuses only what certainly
+  fails, saying what to change), `checkPage` with `playwrightDriver` and `cdpDriver` (Cloudflare
+  Browser Rendering), `showTool`, `guideTool`, `checkTool`, `answerGuide`, `guideChanges`, and an
+  MCP server example. Every example in the manual passes the check under every preset.
+- Additive: every 0.2 import works. Apps move their old frame and authorize routes to
+  `/porthole` themselves.
+
 ## 0.2.4
 
 - The package ships `docs/ADOPTING.md`, which 0.2.3's README links to and its build left out;
