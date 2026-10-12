@@ -1724,3 +1724,51 @@ both themes), and the host skipped `14.sound` by hand on a page whose `media-src
 frame inherits.
 **Revisit when** a host's viewer is the whole window (the wording is still true there).
 
+## P070 · 2026-10-12 · The host kit, from its first two adopters: unknown addresses 404, pages that talk past a desktop scheme, streams that stop · Accepted
+
+**Decision.** 0.2.2 fixes what Ferry and Raft Artifacts hit adopting the kit (#5, #6), so neither
+needs a workaround. Additions only; the API is otherwise the same.
+1. **An address that names nothing is a 404 on the content domain.** A label the naming never
+   makes (`www`, `f`, garbage), the bare domain, and a clean address whose `entry.at` (asked on
+   the content origin with no viewer) gives null or undefined get Porthole's 404 there. Only an
+   instance that exists and lacks a cookie goes to the app's authorize route. `/server` takes it
+   as `entry.named(label, path)`; a naming's `scopeOf` already refuses labels it never makes.
+2. **`reserved` is for labels the app itself serves** on the content domain (Ferry's `p-*`
+   previews); a label nothing serves needs no entry (item 1).
+3. **The entry hooks get the address decoded** (`EntryContext`: label, scope, path, clean URL,
+   instance, framed), and `refusal` may return nothing to use Porthole's page.
+4. **`/server` exports the types an app's callbacks use**: `InstanceRef`, `FrameLocation`,
+   `ServedDocument`, `PortholeConfig`, `EntryContext`.
+5. **The runner:** `instances` and the entry addresses may be async (a page published on demand,
+   its real instance then asked of the issue endpoint); `entry.unknown` adds
+   `served.entry.unknown`; tests are located at the app's `defineHostConformance` call (compiled
+   there with `vm`'s file name and line), so `playwright test <spec>` selects them.
+6. **The pages' frame status survives a desktop scheme among the host origins (#5).** Each web
+   host origin is told in its own `try`; where the host origins hold another scheme
+   (`ferry://app`, which no browser takes as a target origin) and the parent isn't known to be a
+   web host origin (`location.ancestorOrigins`), the word goes to the parent as `*`. Before, one
+   throwing `postMessage` stopped the entry page before its cookie check, so every framed
+   url-mode app stayed on "Opening the app…".
+7. **`nodeHost` streams (#6):** the request carries a signal aborted when the client leaves
+   (`proxyTo` passes it to the relay); the body is written as the socket drains and cancelled
+   when the client leaves; an error mid-body destroys the response.
+8. **`health.onChange(view)`** is told each change of the gate's state.
+9. **The npm package carries the docs** (`docs/DESIGN.md`, `DECISIONS.md` and the rest).
+
+**Risks.**
+- Item 1 tells anyone whether an address names something (404, or a trip to the app). Labels
+  under `prefixedName` were guessable already; an app that must not say so can answer `at` for
+  every well-formed address and let `access` refuse.
+- Item 6 sends the frame status to `*` in one case. The pages that send it are framable only by
+  the host origins (`frame-ancestors`), so their parent is one, and what they say (entering,
+  blocked and why) is no secret. Bounded by `test/pages.test.ts` and the kit's
+  `served.url.framed`, which runs with a desktop scheme among the host origins on every engine.
+
+**Why.** Before 0.2.0 these labels were 404s on the content domain, and production said so. The
+other items are each a workaround an adopter wrote: the content-origin state re-parsed in its
+hooks, labels left out of `reserved` (which looked like the way to keep them unanswered), http
+origins only so the entry page wouldn't hang, its own streaming relay before `nodeHost`, its
+own served flag in the `log` callback, a `-g` filter to find its tests.
+**Revisit when** an app needs an address that exists but must not be told apart from one that
+doesn't (then `at` grows a way to say "ask the app").
+

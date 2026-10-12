@@ -40,6 +40,7 @@ export {
   type ContentHost,
   type ContentHostEvent,
   type ContentHostOptions,
+  type EntryContext,
   type EntryOptions,
   type ContentMeta,
   type HealthOptions,
@@ -62,6 +63,9 @@ export {
 } from "./tickets.ts";
 export { FRAME_STATUS_METHOD } from "../isolation/types.ts";
 export { isHostLabel, prefixedName, type Naming } from "./naming.ts";
+// The types an app's callbacks take and give (P070).
+export type { PortholeConfig } from "../config/schema.ts";
+export type { FrameLocation, InstanceRef, ServedDocument } from "../isolation/types.ts";
 export { proxyTo, type ProxyOptions } from "./proxy.ts";
 export type {
   Access,

@@ -5,7 +5,7 @@
 	admin off
 }
 
-app.test, *.content.test {
+app.test, content.test, *.content.test {
 	reverse_proxy app:8080
 }
 

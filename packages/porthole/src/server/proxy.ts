@@ -120,6 +120,8 @@ export function proxyTo(options: ProxyOptions = {}): Upstream {
       method,
       headers: upstreamRequestHeaders(request.headers, access.origin, target),
       redirect: "manual",
+      // The browser went away (`nodeHost` aborts it): so does the relay (P070).
+      signal: request.signal,
       ...(hasBody ? { body: request.body, duplex: "half" } : {}),
     });
     return new Response(method === "HEAD" ? null : answer.body, {

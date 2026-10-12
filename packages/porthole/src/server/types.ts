@@ -1,5 +1,6 @@
 import type { PortholeConfig } from "../config/schema.ts";
 import type { FrameLocation, InstanceRef } from "../isolation/types.ts";
+import type { Naming } from "./naming.ts";
 
 export interface ContentDomain {
   /**
@@ -17,13 +18,14 @@ export interface ContentDomain {
    * names like `a-<id>`) must return one lowercase DNS label, the same for the same scope, a
    * different one for a different scope, and never a `reserved` one.
    */
-  readonly name?: (scope: string) => string;
+  readonly name?: Naming;
   /**
-   * Labels this server never serves or names: another server's namespace under the same domain
-   * (`f` for `<instance>.f.<domain>`, `www`), or the host's own (`p-*`: every label starting
-   * `p-`). Each entry is a whole label, or a prefix ending in `*`; or a function that says
-   * whether a label is reserved. Requests for them, and for the names under them, get null (the
-   * host's routes), so a host routes them without wrapping `handle`.
+   * Labels something else serves on this domain, so this server never names them and hands their
+   * requests back: another server's namespace (`f` for `<instance>.f.<domain>`, where that server
+   * answers), or the host's own (`p-*`: its previews). Each entry is a whole label, or a prefix
+   * ending in `*`; or a function that says whether a label is reserved. Requests for them, and for
+   * the names under them, get null (the host's routes), so a host routes them without wrapping
+   * `handle`. Labels nothing serves need no entry: they get this server's 404 (P070).
    */
   readonly reserved?: readonly string[] | ((label: string) => boolean);
 }
@@ -168,7 +170,16 @@ export interface ServerOptions {
    * to the host's authorize route, on a host origin, which decides and sends it back with a
    * one-time code (`enterBy`). Absent: a clean address without a cookie is refused, as before.
    */
-  readonly entry?: { readonly authorizeUrl: string };
+  readonly entry?: {
+    readonly authorizeUrl: string;
+    /**
+     * Whether a clean address names anything (P070): asked before sending a browser away, with
+     * the address's label and pathname. False: this server's 404, never the authorize route. A
+     * naming that says a label's scope (`Naming.scopeOf`) already answers 404 for a label it never
+     * makes.
+     */
+    readonly named?: (label: string, path: string, request: Request) => boolean | Promise<boolean>;
+  };
 }
 
 /** A redirect entry's state, as the host's authorize route reads it (`PortholeServer.entryState`). */

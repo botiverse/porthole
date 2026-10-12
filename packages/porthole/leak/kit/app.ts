@@ -157,7 +157,9 @@ export async function startKit(settings: KitSettings): Promise<Kit> {
   const secure = settings.appOrigin.startsWith("https:");
   const content = createContentHost<string>({
     domain: settings.contentDomain,
-    appOrigins: [settings.appOrigin],
+    // A desktop app's own scheme beside the web origin, as Ferry's is (`ferry://app`): the
+    // content's pages must still talk to the web page that frames them (#5, P070).
+    appOrigins: [settings.appOrigin, "porthole-kit://app"],
     secret: settings.secret ?? randomBytes(32).toString("base64url"),
     configs: kitConfigs,
     name: prefixedName("k-"),

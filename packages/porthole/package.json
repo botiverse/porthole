@@ -5,7 +5,8 @@
   "license": "Apache-2.0",
   "files": [
     "src",
-    "dist"
+    "dist",
+    "docs"
   ],
   "type": "module",
   "sideEffects": false,
@@ -46,7 +47,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/build-harness.ts",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-harness.ts && node scripts/copy-docs.ts",
     "test:leak": "playwright test -c leak/playwright.config.ts"
   },
   "devDependencies": {

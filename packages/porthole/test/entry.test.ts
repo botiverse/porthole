@@ -295,9 +295,59 @@ describe("a clean address opened directly", () => {
     const framed = await open(app, new Browser("iframe"), `${origin("secret1")}/`, "ada");
     expect(framed.answer.status).toBe(403);
     expect(await framed.answer.text()).toContain('data-porthole-reason="denied"');
+    // An address that names nothing is a 404 on the content origin: no trip to the app (P070).
     const missing = await open(app, new Browser(), `${origin("abc")}/nothing`, "ada");
     expect(missing.answer.status).toBe(404);
-    expect(refusals).toEqual([403, 404]);
+    expect(missing.hops).toHaveLength(1);
+    expect(refusals).toEqual([403]);
+  });
+
+  it("a refusal hook that answers nothing falls back to Porthole's page, and gets the address decoded", async () => {
+    const seen: unknown[] = [];
+    const app = kit(
+      {},
+      {
+        refusal: (_status, _request, entry) => {
+          seen.push(entry);
+          return null;
+        },
+      },
+    );
+    const { answer } = await open(app, new Browser(), `${origin("secret2")}/?x=1`, "ada");
+    expect(answer.status).toBe(403);
+    expect(await answer.text()).toContain('data-porthole-reason="denied"');
+    expect(seen).toEqual([
+      {
+        label: "a-secret2",
+        scope: "secret2",
+        path: "/?x=1",
+        url: `${origin("secret2")}/?x=1`,
+        instance: page("secret2"),
+        framed: false,
+      },
+    ]);
+  });
+
+  it("the sign-in hook gets the address being opened", async () => {
+    const contexts: unknown[] = [];
+    const app = kit(
+      {},
+      {
+        signIn: (_returnTo, _request, entry) => {
+          contexts.push(entry);
+          return new Response(null, { status: 303, headers: { location: `${APP}/signin` } });
+        },
+      },
+    );
+    await open(app, new Browser(), `${origin("abc")}/v/2`);
+    expect(contexts).toEqual([
+      expect.objectContaining({
+        scope: "abc",
+        path: "/v/2",
+        instance: page("abc", "2"),
+        framed: false,
+      }),
+    ]);
   });
 
   it("a state that isn't the server's, or is too old, gets no code", async () => {
@@ -346,6 +396,38 @@ describe("a clean address opened directly", () => {
     const app = kit({}, { at: () => page("other") });
     const { answer } = await open(app, new Browser(), `${origin("abc")}/`, "ada");
     expect(answer.status).toBe(409);
+  });
+});
+
+describe("addresses that name nothing (P070)", () => {
+  it("a label the naming never makes, the bare domain, and a path that names nothing: Porthole's 404, never the authorize route", async () => {
+    const app = kit();
+    for (const url of [
+      "https://www.usercontent.example.net/",
+      "https://f.usercontent.example.net/",
+      "https://usercontent.example.net/",
+      "https://zz-garbage.usercontent.example.net/x",
+      "https://x.f.usercontent.example.net/",
+      `${origin("abc")}/v/x`,
+    ]) {
+      const answer = await visit(app, new Browser(), url);
+      expect(answer.status, url).toBe(404);
+      expect(answer.headers.get("location"), url).toBeNull();
+    }
+  });
+
+  it("an app's at that answers undefined means nothing too", async () => {
+    const app = kit({}, { at: () => undefined });
+    const answer = await visit(app, new Browser(), `${origin("abc")}/`);
+    expect(answer.status).toBe(404);
+  });
+
+  it("a reserved label is still the app's: handed back, not answered", async () => {
+    const app = kit({ reserved: ["p-*"] });
+    const answer = await app.content.fetch(
+      new Request("https://p-preview.usercontent.example.net/"),
+    );
+    expect(answer).toBeNull();
   });
 });
 

@@ -1,10 +1,14 @@
-import { createServer as createHttpServer, request as httpRequest } from "node:http";
+import {
+  createServer as createHttpServer,
+  request as httpRequest,
+  type RequestListener,
+} from "node:http";
 import type { AddressInfo } from "node:net";
 import { connect } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { httpLocator, LocateError, presets, servedOrOpaque } from "../src/index.ts";
 import type { InstanceRef } from "../src/isolation/types.ts";
-import { nodeHost, nodeProbe } from "../src/node/index.ts";
+import { nodeHost, nodeProbe, sendResponse } from "../src/node/index.ts";
 import {
   ContentDomainError,
   contentDomain,
@@ -302,7 +306,8 @@ describe("the health gate", () => {
       const answer = (await hosted.content.fetch(new Request(url))) as Response;
       return { status: answer.status, body: await answer.text() };
     };
-    hosted = kit({ health: { probe } });
+    const flips: string[] = [];
+    hosted = kit({ health: { probe, onChange: (view) => flips.push(view.state) } });
     const { content, events, ask } = hosted;
     expect(content.meta()).toMatchObject({ served: false, health: { state: "checking" } });
     await content.check();
@@ -323,6 +328,8 @@ describe("the health gate", () => {
       "porthole.content.healthy",
       "porthole.content.unhealthy",
     ]);
+    // onChange: each change of state, as meta().served follows it (P070).
+    expect(flips).toEqual(["unhealthy", "healthy", "unhealthy"]);
     content.close();
   });
 });
@@ -465,6 +472,124 @@ describe("on Node", () => {
         state: "unhealthy",
         reason: expect.stringMatching(/porthole-health\.content\.localhost: ECONN(REFUSED|RESET)/u),
       });
+    } finally {
+      server.close();
+    }
+  });
+});
+
+describe("nodeHost streams (#6, P070)", () => {
+  const listen = async (handler: RequestListener) => {
+    const server = createHttpServer(handler);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    return { server, port: (server.address() as AddressInfo).port };
+  };
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  it("sendResponse waits for a slow client, and cancels the body when it goes away", async () => {
+    let pulled = 0;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>(
+      {
+        // A fast source (a macrotask a chunk), so a writer that never waits runs away.
+        async pull(controller) {
+          await new Promise((resolve) => setImmediate(resolve));
+          pulled += 65_536;
+          controller.enqueue(new Uint8Array(65_536));
+        },
+        cancel() {
+          cancelled = true;
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const { server, port } = await listen((_request, response) => {
+      void sendResponse(response, new Response(body));
+    });
+    try {
+      const socket = connect(port, "127.0.0.1");
+      socket.write("GET / HTTP/1.1\r\nHost: x\r\n\r\n");
+      socket.pause();
+      await wait(400);
+      // Bounded by the socket's buffers, not by how fast the body can be made.
+      expect(pulled).toBeLessThan(32 * 1_048_576);
+      socket.destroy();
+      await vi.waitFor(() => expect(cancelled).toBe(true));
+    } finally {
+      server.close();
+    }
+  });
+
+  it("nodeHost aborts the request's signal when the client leaves, so an upstream stops", async () => {
+    const seen: { request: Request | null } = { request: null };
+    let cancelled = false;
+    const domain = contentDomain("content.localhost", { appOrigins: ["http://localhost:1"] });
+    const fake = {
+      domain,
+      owns: () => true,
+      access: () => Promise.resolve(null),
+      fetch: (request: Request) => {
+        seen.request = request;
+        return Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode("data: 1\n\n"));
+              },
+              cancel() {
+                cancelled = true;
+              },
+            }),
+            { headers: { "content-type": "text/event-stream" } },
+          ),
+        );
+      },
+    } as unknown as Parameters<typeof nodeHost>[0];
+    const { server, port } = await listen(
+      nodeHost(fake, { request: (_q, r) => r.end("app") }).request,
+    );
+    try {
+      const socket = connect(port, "127.0.0.1");
+      socket.write("GET /events HTTP/1.1\r\nHost: a-1.content.localhost\r\n\r\n");
+      await new Promise<void>((resolve) => socket.once("data", () => resolve()));
+      socket.destroy();
+      await vi.waitFor(() => {
+        expect(seen.request?.signal.aborted).toBe(true);
+        expect(cancelled).toBe(true);
+      });
+    } finally {
+      server.close();
+    }
+  });
+
+  it("a body that fails mid-way ends the connection: it never looks complete", async () => {
+    const { server, port } = await listen((_request, response) => {
+      let sent = false;
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (sent) {
+            controller.error(new Error("the upstream broke"));
+            return;
+          }
+          sent = true;
+          controller.enqueue(new TextEncoder().encode("partial"));
+        },
+      });
+      void sendResponse(response, new Response(body, { headers: { "content-length": "100" } }));
+    });
+    try {
+      const outcome = await new Promise<string>((resolve) => {
+        const asked = httpRequest({ port, host: "127.0.0.1", path: "/" }, (response) => {
+          let text = "";
+          response.on("data", (chunk: Buffer) => (text += chunk.toString()));
+          response.on("end", () => resolve(`ended: ${text}`));
+          response.on("aborted", () => resolve("aborted"));
+          response.on("error", () => resolve("aborted"));
+        });
+        asked.on("error", () => resolve("aborted"));
+        asked.end();
+      });
+      expect(outcome).toBe("aborted");
     } finally {
       server.close();
     }

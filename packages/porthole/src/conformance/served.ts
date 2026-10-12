@@ -58,20 +58,20 @@ export interface ServedConformanceHost {
   /** How many requests reached `canary(name)`. */
   canaryHits(name: string): Promise<number>;
   /** A served shell (domain isolation) for `scope`. */
-  shell(scope: string): InstanceRef;
+  shell(scope: string): InstanceRef | Promise<InstanceRef>;
   /**
    * A url-mode app for `scope`: its page loads a script from its own origin that sets
    * `document.documentElement.dataset.app = "ready"`.
    */
-  app(scope: string): InstanceRef;
+  app(scope: string): InstanceRef | Promise<InstanceRef>;
   /**
    * A stored artifact page (domain isolation) for `scope`: version `"1"` and `"2"` of one page,
    * each with `<main id="artifact">version N</main>` and a script that records
    * `document.documentElement.dataset.rtc = typeof RTCPeerConnection`.
    */
-  artifact(scope: string, version: "1" | "2"): InstanceRef;
+  artifact(scope: string, version: "1" | "2"): InstanceRef | Promise<InstanceRef>;
   /** The MCP Apps sandbox proxy (domain isolation) for `scope`, opening the view's `egress`. */
-  proxy(scope: string, egress?: EgressConfig): InstanceRef;
+  proxy(scope: string, egress?: EgressConfig): InstanceRef | Promise<InstanceRef>;
 }
 
 export interface ServedSuiteOptions {
@@ -198,8 +198,11 @@ export function servedTests(
       ["url", (scope: string) => host.app(scope)],
     ] as const;
     // A served shell draws (and has a height to click in) once its host gives it content.
-    const showMode = (page: Page, mode: "domain" | "url", instance: InstanceRef) =>
-      host.show(page, instance, mode === "domain" ? { content: SHELL_CONTENT } : {});
+    const showMode = async (
+      page: Page,
+      mode: "domain" | "url",
+      instance: InstanceRef | Promise<InstanceRef>,
+    ) => host.show(page, await instance, mode === "domain" ? { content: SHELL_CONTENT } : {});
 
     for (const [mode, instance] of modes) {
       define(
@@ -298,7 +301,9 @@ export function servedTests(
       "served.domain.address",
       "a served frame's address is its own, carrying at most Porthole's ticket: never the app's",
       async ({ page }) => {
-        const display = await host.show(page, host.shell("address"), { content: SHELL_CONTENT });
+        const display = await host.show(page, await host.shell("address"), {
+          content: SHELL_CONTENT,
+        });
         const frame = await display.frame();
         const seen = await frame.evaluate(() => ({
           origin: location.origin,
@@ -316,13 +321,19 @@ export function servedTests(
       "served.domain.storage-scope",
       "storage persists within a scope and is never shared across scopes",
       async ({ page }) => {
-        const first = await host.show(page, host.shell("scope-a"), { content: SHELL_CONTENT });
+        const first = await host.show(page, await host.shell("scope-a"), {
+          content: SHELL_CONTENT,
+        });
         await (await first.frame()).evaluate(() => localStorage.setItem("kept", "a"));
         await first.destroy();
-        const again = await host.show(page, host.shell("scope-a"), { content: SHELL_CONTENT });
+        const again = await host.show(page, await host.shell("scope-a"), {
+          content: SHELL_CONTENT,
+        });
         expect(await (await again.frame()).evaluate(() => localStorage.getItem("kept"))).toBe("a");
         expect(again.origin).toBe(first.origin);
-        const other = await host.show(page, host.shell("scope-b"), { content: SHELL_CONTENT });
+        const other = await host.show(page, await host.shell("scope-b"), {
+          content: SHELL_CONTENT,
+        });
         expect(other.origin).not.toBe(first.origin);
         expect(await (await other.frame()).evaluate(() => localStorage.getItem("kept"))).toBeNull();
       },
@@ -332,8 +343,8 @@ export function servedTests(
       "served.artifact.versions",
       "each version of a page shows as stored, on its scope's origin, hardened before it runs",
       async ({ page }) => {
-        const one = await host.show(page, host.artifact("artifact-scope", "1"));
-        const two = await host.show(page, host.artifact("artifact-scope", "2"));
+        const one = await host.show(page, await host.artifact("artifact-scope", "1"));
+        const two = await host.show(page, await host.artifact("artifact-scope", "2"));
         expect(two.origin).toBe(one.origin);
         for (const [display, version] of [
           [one, "1"],
@@ -352,7 +363,7 @@ export function servedTests(
       "served.domain.ticket-once",
       "a ticket opens its content once; without it there is nothing",
       async ({ page, browserName }) => {
-        const location = await host.locate(host.shell("ticket-once"));
+        const location = await host.locate(await host.shell("ticket-once"));
         const first = await page.goto(location.url);
         expect(first?.status()).toBe(200);
         // A fresh browser state: no cookie, only the used ticket.
@@ -372,7 +383,7 @@ export function servedTests(
       "served.domain.frame-ancestors",
       "only the host's origins may frame content",
       async ({ page }) => {
-        const location = await host.locate(host.shell("foreign"));
+        const location = await host.locate(await host.shell("foreign"));
         await host.frameFromForeignOrigin(page, location.url);
         await page.waitForTimeout(SETTLE_MS);
         for (const frame of page.frames().slice(1)) {
@@ -400,7 +411,9 @@ export function servedTests(
       "served.domain.egress",
       "the CSP in the document's headers closes egress; only what the config opens to any https site (images, media) reaches it",
       async ({ page }) => {
-        const display = await host.show(page, host.shell("egress"), { content: SHELL_CONTENT });
+        const display = await host.show(page, await host.shell("egress"), {
+          content: SHELL_CONTENT,
+        });
         const frame = await display.frame();
         const kinds = ["fetch", "img", "media", "script", "style", "frame"] as const;
         const urls = Object.fromEntries(
@@ -494,7 +507,7 @@ export function servedTests(
       "served.proxy.view",
       "the sandbox proxy becomes the view, hardened, talking to its host directly",
       async ({ page }) => {
-        const display = await host.show(page, host.proxy("proxy-view"));
+        const display = await host.show(page, await host.proxy("proxy-view"));
         await proxyReady(display);
         const canary = await host.canary("proxy-undeclared");
         await display.post(resourceReady(PROBE_VIEW(canary)));
@@ -515,7 +528,7 @@ export function servedTests(
       "served.proxy.parent-only",
       "the sandbox proxy takes a view only from its host",
       async ({ page }) => {
-        const display = await host.show(page, host.proxy("proxy-parent"));
+        const display = await host.show(page, await host.proxy("proxy-parent"));
         await proxyReady(display);
         const frame = await display.frame();
         await frame.evaluate(
@@ -534,7 +547,7 @@ export function servedTests(
         const canary = await host.canary("proxy-declared");
         const display = await host.show(
           page,
-          host.proxy("proxy-egress", { connect: [new URL(canary).origin] }),
+          await host.proxy("proxy-egress", { connect: [new URL(canary).origin] }),
         );
         await proxyReady(display);
         await display.post(resourceReady(PROBE_VIEW(canary)));
@@ -548,7 +561,7 @@ export function servedTests(
       "served.url.ticket",
       "an app shows nothing to a browser without its ticket's cookie",
       async ({ page }) => {
-        const location = await host.locate(host.app("url-ticket"));
+        const location = await host.locate(await host.app("url-ticket"));
         // A fresh browser: no cookie of the content's, none of the app's. Porthole refuses it, or
         // (redirect entry, P068) hands it to the app's authorize route, which asks it to sign in.
         const fresh = await page.context().browser()!.newContext();
@@ -570,7 +583,7 @@ export function servedTests(
       "served.url.tab",
       "an app opened on a tab of its own runs, its requests riding on its cookie",
       async ({ page }) => {
-        const location = await host.locate(host.app("url-tab"));
+        const location = await host.locate(await host.app("url-tab"));
         await page.goto(location.url);
         await expect(page.locator("html")).toHaveAttribute("data-app", "ready");
       },
@@ -583,7 +596,7 @@ export function servedTests(
         // Measured (P025): WebKit keeps no cookie in a cross-site frame, partitioned or not, so a
         // framed app's subresources are refused there; such hosts open the app on a tab.
         typed.fail(browserName === "webkit", "WebKit keeps no cookie in a cross-site frame");
-        const display = await host.show(page, host.app("url-framed"));
+        const display = await host.show(page, await host.app("url-framed"));
         const frame = await display.frame();
         await expect
           .poll(() => frame.evaluate(() => document.documentElement.dataset.app ?? null), {

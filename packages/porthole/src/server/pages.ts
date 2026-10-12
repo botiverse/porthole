@@ -22,8 +22,22 @@ export const ENTER_SCRIPT_PATH = "/__porthole/enter.js";
 /** Answers 204 when the request carries a good session for its origin's app, 401 otherwise. */
 export const SESSION_PATH = "/__porthole/session";
 
+/**
+ * Tells the page that frames this one how loading went, at each web host origin. A desktop app's
+ * own scheme (`ferry://app`) is no target origin a browser takes (postMessage throws), so where
+ * the host origins hold one, and the parent isn't known to be a web host origin, the word goes to
+ * the parent as `*`: these pages' `frame-ancestors` already hold their parent to the host origins,
+ * and what they say is no secret (P070). One origin failing never stops the page.
+ */
 const say = (): string =>
-  `const say = (params) => { if (window.parent === window) return; for (const origin of hosts) window.parent.postMessage({ jsonrpc: "2.0", method: ${JSON.stringify(FRAME_STATUS_METHOD)}, params }, origin); };`;
+  `const say = (params) => {
+    if (window.parent === window) return;
+    const message = { jsonrpc: "2.0", method: ${JSON.stringify(FRAME_STATUS_METHOD)}, params };
+    const web = hosts.filter((origin) => origin.startsWith("https://") || origin.startsWith("http://"));
+    for (const origin of web) { try { window.parent.postMessage(message, origin); } catch (_) {} }
+    const parent = location.ancestorOrigins && location.ancestorOrigins.length > 0 ? location.ancestorOrigins[0] : null;
+    if (web.length < hosts.length && (parent === null || !web.includes(parent))) { try { window.parent.postMessage(message, "*"); } catch (_) {} }
+  };`;
 
 /** Tells the host the page is blocked, and why (from the page's data attributes). */
 const STATUS_SCRIPT = `(() => {

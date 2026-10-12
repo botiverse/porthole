@@ -682,8 +682,17 @@ export function createServer(options: ServerOptions): PortholeServer {
    * signed state, the browser holding the state's nonce in a cookie of this origin. A path just
    * entered whose cookie still didn't come back is a browser that keeps none here: no loop.
    */
-  function beginEntry(request: Request, url: URL, label: string, to: URL): Response {
+  async function beginEntry(request: Request, url: URL, label: string, to: URL): Promise<Response> {
     const method = request.method.toUpperCase();
+    // An address that names nothing is nothing here (P070): never a trip to the app's sign-in.
+    const scopeOf = content.name?.scopeOf;
+    const named = options.entry?.named;
+    if (
+      (scopeOf !== undefined && scopeOf(label) === null) ||
+      (named !== undefined && !(await named(label, url.pathname, request)))
+    ) {
+      return page(404, "Nothing here", "This address names no content.", method);
+    }
     if (method !== "GET" && method !== "HEAD") {
       return page(
         401,
@@ -1148,7 +1157,7 @@ export function createServer(options: ServerOptions): PortholeServer {
             return await serveAccess(request, entered, null);
           }
           if (options.upstream === undefined || accessOf(request, label, null) === null) {
-            return beginEntry(request, url, label, authorizeUrl);
+            return await beginEntry(request, url, label, authorizeUrl);
           }
         }
         // Without an upstream, only Porthole's own paths are served here: any other is nothing.

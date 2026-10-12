@@ -1,13 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { expect, type Frame, type Page, type TestType } from "@playwright/test";
+import { runInThisContext } from "node:vm";
+import { expect, type Frame, type Page, type TestInfo, type TestType } from "@playwright/test";
 import type { PortholeConfig } from "../config/schema.ts";
 import type { FrameLocation, InstanceRef } from "../isolation/types.ts";
 import { entryTests, type EntryConformanceHost } from "./entry.ts";
 import type { ConformanceHarness } from "./harness/page.ts";
 import type { FrameOutcome } from "../host/types.ts";
 import type { ConformanceHost, LaunchedDisplay, LaunchSpec } from "./index.ts";
-import { leakTests, type ConformanceFixtures } from "./probes.ts";
+import { leakTests, type ConformanceFixtures, type ConformanceTest } from "./probes.ts";
 import { servedTests, type ServedConformanceHost, type ServedDisplay } from "./served.ts";
 
 /**
@@ -55,14 +56,19 @@ export interface HostConformanceOptions {
    * signed in and out, and in a frame.
    */
   readonly entry?: {
-    /** The clean address of `instances.artifact(scope, "1")` (`ContentHost.urlOf`). */
-    readonly url: (scope: string) => string;
+    /**
+     * The clean address of `instances.artifact(scope, "1")` (`ContentHost.urlOf`); may publish it
+     * on demand.
+     */
+    readonly url: (scope: string) => string | Promise<string>;
     /** A clean address the signed-in viewer may not open. */
-    readonly denied: (scope: string) => string;
+    readonly denied: (scope: string) => string | Promise<string>;
     /** Whether `page` shows the app's own sign-in. */
     readonly atSignIn: (page: Page) => Promise<boolean>;
     /** On the app's sign-in page: signs in, as a person does. */
     readonly completeSignIn: (page: Page) => Promise<void>;
+    /** Addresses on the content domain that name nothing: each a 404 there (P070). */
+    readonly unknown?: () => readonly string[] | Promise<readonly string[]>;
   };
   /** Case ids to skip, each with its reason (shown in the report). */
   readonly skip?: Readonly<Record<string, string>>;
@@ -338,9 +344,10 @@ export function hostConformance(options: HostConformanceOptions): HostConformanc
           denied: given.denied,
           atSignIn: given.atSignIn,
           completeSignIn: given.completeSignIn,
+          ...(given.unknown === undefined ? {} : { unknown: given.unknown }),
           async frame(page, url) {
             await ready(page);
-            const instance = served.artifact("entry", "1");
+            const instance = await served.artifact("entry", "1");
             const id = await invoke(page, "show", options.config(instance), instance, {
               location: { url, origin: new URL(url).origin },
             });
@@ -435,32 +442,68 @@ export function defineHostConformance(
   if (options.instances.proxy === undefined) {
     absent(PROXY_CASES, "the app serves no MCP Apps views");
   }
-  typed.describe(`Porthole leak suite (${options.name})`, () => {
-    for (const each of leakTests(hosts.leak, { skip })) {
-      // Playwright reads the fixtures a test uses from its parameter's destructuring.
-      typed(each.title, async ({ page, browserName }, info) => {
-        await hosts.begin(page);
-        await each.run({ page, browserName }, info);
-      });
-    }
-  });
-  typed.describe(`Porthole served modes (${options.name})`, () => {
-    for (const each of servedTests(hosts.served, { skip })) {
-      typed(each.title, async ({ page, browserName }, info) => {
-        await hosts.begin(page);
-        await each.run({ page, browserName }, info);
-      });
-    }
-  });
-  const entry = hosts.entry;
-  if (entry !== null) {
-    typed.describe(`Porthole redirect entry (${options.name})`, () => {
-      for (const each of entryTests(entry, { skip })) {
-        typed(each.title, async ({ page, browserName }, info) => {
+  // Registered as the app's own spec file's (P070): Playwright locates a test where `test()` is
+  // called, so `playwright test <spec>` and `<spec>:<line>` select these.
+  const at = callerOf(defineHostConformance);
+  const describeOf = Reflect.get(test, "describe") as unknown as Register;
+  const describe = calledFrom(describeOf, at);
+  const register = calledFrom(typed as unknown as Register, at);
+  const suite = (title: string, tests: readonly ConformanceTest[]) => {
+    describe(title, () => {
+      for (const each of tests) {
+        // Playwright reads the fixtures a test uses from its parameter's destructuring.
+        register(each.title, async ({ page, browserName }: ConformanceFixtures, info: TestInfo) => {
           await hosts.begin(page);
           await each.run({ page, browserName }, info);
         });
       }
     });
+  };
+  suite(`Porthole leak suite (${options.name})`, leakTests(hosts.leak, { skip }));
+  suite(`Porthole served modes (${options.name})`, servedTests(hosts.served, { skip }));
+  if (hosts.entry !== null) {
+    suite(`Porthole redirect entry (${options.name})`, entryTests(hosts.entry, { skip }));
   }
+}
+
+/** Where a function was called from: the caller's file and line, or null. */
+function callerOf(callee: (...args: never[]) => unknown): { file: string; line: number } | null {
+  const holder: { stack?: string } = {};
+  Error.captureStackTrace(holder, callee);
+  // The first frame is the caller's: "    at file:///…/app.spec.ts:16:1" or "    at fn (/…/app.spec.ts:16:1)".
+  const frame = (holder.stack ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.startsWith("at "));
+  const where = (frame ?? "").slice(3).replace(/^.*\((.*)\)$/u, "$1");
+  const found = /^(.+):(\d+):\d+$/u.exec(where);
+  if (found?.[1] === undefined || found[2] === undefined) {
+    return null;
+  }
+  try {
+    return {
+      file: found[1].startsWith("file://") ? fileURLToPath(found[1]) : found[1],
+      line: Number(found[2]),
+    };
+  } catch {
+    return null;
+  }
+}
+
+type Register = (title: string, body: unknown) => void;
+
+/**
+ * `register` (Playwright's `test` or `test.describe`), called from a function compiled as the
+ * caller's file and line (`vm`'s `filename` and `lineOffset`), so the tests it makes are located
+ * there. Without a caller, `register` itself.
+ */
+function calledFrom(register: Register, at: { file: string; line: number } | null): Register {
+  if (at === null) {
+    return (title, body) => register(title, body);
+  }
+  const call = runInThisContext("(register, title, body) => register(title, body)", {
+    filename: at.file,
+    lineOffset: Math.max(0, at.line - 1),
+  }) as (register: Register, title: string, body: unknown) => void;
+  return (title, body) => call(register, title, body);
 }

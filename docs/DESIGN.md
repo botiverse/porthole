@@ -360,7 +360,7 @@ const content = createContentHost<Viewer>({
   appOrigins: [env.APP_ORIGIN],               // frame-ancestors, and the clash guard
   secret: env.CONTENT_SECRET, tickets: d1TicketStore(env.DB),
   configs: (source) => ({ page: presets.artifact({ isolation: "domain", contentOrigins: [source] }) }),
-  name: prefixedName("a-"), reserved: ["p-*"],
+  name: prefixedName("a-"), reserved: ["p-*"],   // only labels the app itself serves there
   instance: (proposal, viewer) => mapToMyInstance(proposal),    // a proposal: validate, derive the scope
   access: async (instance, viewer) =>
     viewer !== null && (await canSee(viewer, instance)) ? { viewer: viewer.id, subject: viewer.id } : null,
@@ -371,7 +371,7 @@ const content = createContentHost<Viewer>({
     at: (scope, path) => pageAt(scope, path),                   // "/" → latest, "/v/3" → version 3
     signIn: (returnTo) => Response.redirect(`/login?next=${encodeURIComponent(returnTo)}`, 303),
   },
-  health: { probe: nodeProbe() },             // optional: the opaque fallback
+  health: { probe: nodeProbe(), onChange: (view) => pushToClients(view) },  // optional: the opaque fallback
 });
 // Hono / Workers: content first, then the app's own routes.
 app.use("*", async (c, next) => (await content.fetch(c.req.raw)) ?? next());
@@ -384,9 +384,12 @@ app.get("/porthole/authorize", (c) => content.authorize(viewerOf)(c.req.raw));
 **Server: `createContentHost(options)` (`@botiverse/porthole/server`, runtime-agnostic: Node,
 Workers, Deno, Bun).** It gives:
 - **`fetch(request)`, the routing middleware.** Every host under the content domain is
-  Porthole's, so the app never answers there. Reserved labels (previews) and the app's own hosts
-  return null, for the app's routes. Settings that can't be served answer a plain 503, never the
-  app's. `owns(request)` says the same for a WebSocket upgrade.
+  Porthole's, so the app never answers there. Reserved labels and the app's own hosts return
+  null, for the app's routes. `reserved` is only for labels the app itself serves on the content
+  domain (Ferry's `p-*` previews); a label nothing serves needs no entry. A label the naming
+  never makes, the bare domain, and a clean address `entry.at` says names nothing all get
+  Porthole's 404 there, never a trip to the app (P070). Settings that can't be served answer a
+  plain 503, never the app's. `owns(request)` says the same for a WebSocket upgrade.
 - **`issue(viewerOf)`, the issue endpoint** (a fetch handler). The body is always `{ instance }`
   (an `InstanceRef`, the wire shape). The app's `instance` callback treats it as a proposal: it
   validates it, derives the scope from what it names (a session, a page), and refuses anything
@@ -409,19 +412,25 @@ Workers, Deno, Bun).** It gives:
   (`/__porthole/health`, a keyed id, so another deployment's answer doesn't count). The kit
   probes it over the real network (DNS, the edge, TLS): every 60 s while unhealthy, every 10 min
   while healthy, 10 s timeout. While unhealthy, `issue` answers `503 not-served` and the page's
-  `servedOrOpaque` picks opaque configs. On Workers the probe is optional (a host that doesn't
+  `servedOrOpaque` picks opaque configs. `health.onChange(view)` is told each change of state
+  (P070), for an app that pushes "frames served" to its clients. On Workers the probe is optional (a host that doesn't
   enable it serves from startup).
 
 **Redirect entry (P068).** Every instance has a clean, stable address
 (`https://a-<id>.content.example.com/v/3`) that opens directly: a new tab, a reload, a bookmark,
 a link sent to someone with access.
-1. A request on a clean address without a cookie for it gets a 302 to the app's authorize route
+1. A request on a clean address that names nothing gets Porthole's 404 on the content origin:
+   the naming never made its label, or `entry.at(scope, path)`, asked with no viewer, says
+   nothing (null or undefined) is there (P070).
+   A request on a clean address without a cookie for it gets a 302 to the app's authorize route
    with a signed state (label, path, nonce, five minutes), and a cookie holding the nonce on the
    content origin (partitioned in a frame, `Lax` on a tab, like the session cookie).
 2. `authorize` asks `entry.at(scope, path)` and `access`. No viewer: on a tab, the app's own
-   sign-in (`signIn(returnTo)`), which comes back to the same route; **in a frame, never the
-   sign-in**: a plain page asking for a new tab (`blocked: sign-in`). No access: the app's
-   refusal on a tab, a plain page in a frame; never content.
+   sign-in (`signIn(returnTo, request, entry)`), which comes back to the same route; **in a
+   frame, never the sign-in**: a plain page asking for a new tab (`blocked: sign-in`). No
+   access: the app's refusal on a tab (`refusal(status, request, entry)`; nothing returned:
+   Porthole's page), a plain page in a frame; never content. Both hooks get the address decoded
+   (`EntryContext`: label, scope, path, clean URL, the instance, framed).
 3. Granted, a 302 back to `/__porthole/entry?code=…`: a one-time code (60 s), bound to the
    label, the path and the nonce. The content origin redeems it only on that label and only with
    the nonce's cookie, sets the session (bound to the path) and 303s to the clean address. The
@@ -442,8 +451,11 @@ extra round trip through the app.
 returns a request listener and an upgrade listener for `http.createServer`: content hosts to
 `content.fetch`, WebSockets on reserved labels to the app's upgrade, a url-mode app's socket to
 `appSocket(access, …)` once its cookie checks out, any other socket on the content domain a 404.
-`toRequest`/`sendResponse` convert; `nodeProbe()` is the health probe (`*.localhost` resolved to
-loopback, no redirects, 4 KB read). `/server` stays free of Node.
+`toRequest`/`sendResponse` convert (P070): the request carries a signal aborted when the client
+goes away (`proxyTo` passes it on, so a proxied event stream ends with its page); the body is
+written as the socket drains and cancelled when the client leaves; an error mid-body destroys
+the response rather than end it looking whole. `nodeProbe()` is the health probe (`*.localhost`
+resolved to loopback, no redirects, 4 KB read). `/server` stays free of Node.
 
 **Client** (core). `httpLocator(url, { headers, credentials, onNotServed })` POSTs
 `{ instance }`, passes the abort signal, refuses redirects, and throws a `LocateError` with the
@@ -465,7 +477,12 @@ served cases and the redirect entry cases against the app's real page:
 - the canaries and a foreign origin are routed; cases for instances the app doesn't give
   (versions, url mode, the MCP Apps proxy) are skipped with the reason.
 
-`hostConformance(options)` gives the hosts for an app that registers the cases itself.
+The tests are located in the app's own spec file, at the `defineHostConformance` call, so
+`playwright test <spec>` and `<spec>:<line>` select them (P070). `instances` and the entry
+addresses may be async (an app publishes a test page on demand and returns its real instance,
+which the issue endpoint then gets); `entry.unknown` lists addresses that name nothing, each of
+which must be a 404 on the content domain. `hostConformance(options)` gives the hosts for an app
+that registers the cases itself.
 
 **Prod shape** (`ops/prod-shape/`, `ops/prod-shape/run.sh`). Docker compose: Caddy's internal
 CA serving `app.test`, `*.content.test` (same-site siblings, as in production without a Public
@@ -479,7 +496,9 @@ preview) can't plant a cookie that opens content, or frame it; another site can'
 clash. CI (`.github/workflows/ci.yml`) runs on every push: the checks, the loopback suites on
 each engine, and the prod-shape profile.
 
-**Compatibility.** Every 0.1.x export stays as it was; the kit wraps `createServer`. Nothing was
+**Compatibility.** Every 0.1.x export stays as it was; the kit wraps `createServer`. The npm
+package carries these docs (`docs/`), and `/server` exports the types an app's callbacks take
+(`InstanceRef`, `FrameLocation`, `ServedDocument`, `PortholeConfig`, `EntryContext`). Nothing was
 renamed, so there is no compat module. `FrameBlock` gains `sign-in`; `ContentDomain.name` takes
 a `Naming` (any function still fits).
 

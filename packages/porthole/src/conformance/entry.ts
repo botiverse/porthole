@@ -17,9 +17,15 @@ export interface EntryConformanceHost {
    * The clean address of a stored page the signed-in viewer may open (`ContentHost.urlOf`), for
    * `scope`: it draws `<main id="artifact">version 1</main>`.
    */
-  url(scope: string): string;
+  url(scope: string): string | Promise<string>;
   /** A clean address the signed-in viewer may not open. */
-  denied(scope: string): string;
+  denied(scope: string): string | Promise<string>;
+  /**
+   * Addresses on the content domain that name nothing (a label the app never assigns, the bare
+   * domain, a path no instance has): each must be Porthole's 404 there, never the app's sign-in
+   * (P070). Absent: the case is skipped.
+   */
+  unknown?(): readonly string[] | Promise<readonly string[]>;
   /** Whether `page` shows the app's own sign-in. */
   atSignIn(page: Page): Promise<boolean>;
   /** On the app's sign-in page: signs in, as a person does (and the app goes back). */
@@ -86,7 +92,7 @@ export function entryTests(
     "a clean address opens directly for a signed-in viewer, and stays clean; a reload rides on its cookie",
     async ({ page }) => {
       await host.signIn(page);
-      const url = host.url("entry-direct");
+      const url = await host.url("entry-direct");
       await page.goto(url);
       await expect(page.locator("#artifact")).toHaveText("version 1");
       expect(page.url(), "the address bar shows the clean address, no code").toBe(url);
@@ -106,7 +112,7 @@ export function entryTests(
     "served.entry.signed-out",
     "signed out, a clean address goes to the app's own sign-in, then back to the content",
     async ({ page }) => {
-      const url = host.url("entry-signed-out");
+      const url = await host.url("entry-signed-out");
       await page.goto(url);
       expect(await host.atSignIn(page), "the app's sign-in").toBe(true);
       expect(await shows(page)).toBe(false);
@@ -121,7 +127,7 @@ export function entryTests(
     "a viewer without access gets the app's refusal, never the content",
     async ({ page }) => {
       await host.signIn(page);
-      const url = host.denied("entry-denied");
+      const url = await host.denied("entry-denied");
       const answer = await page.goto(url);
       expect(answer?.status()).toBe(403);
       expect(await shows(page)).toBe(false);
@@ -130,11 +136,34 @@ export function entryTests(
   );
 
   define(
+    "served.entry.unknown",
+    "an address that names nothing is a 404 on the content domain: never a trip to the app's sign-in",
+    async ({ page }, info) => {
+      info.skip(
+        host.unknown === undefined,
+        "the host gave no addresses that name nothing (unknown)",
+      );
+      const request = page.context().request;
+      for (const url of (await host.unknown?.()) ?? []) {
+        const answer = await request.get(url, {
+          maxRedirects: 0,
+          headers: { "sec-fetch-dest": "document" },
+        });
+        expect(answer.status(), url).toBe(404);
+        expect(answer.headers().location, url).toBeUndefined();
+        const opened = await page.goto(url);
+        expect(opened?.status(), url).toBe(404);
+        expect(new URL(page.url()).origin, url).toBe(new URL(url).origin);
+      }
+    },
+  );
+
+  define(
     "served.entry.code-once",
     "an entry code works once: replayed, it opens nothing",
     async ({ page }) => {
       await host.signIn(page);
-      const code = await codeFor(page, host.url("entry-once"));
+      const code = await codeFor(page, await host.url("entry-once"));
       const request = page.context().request;
       const top = { "sec-fetch-dest": "document" };
       const first = await request.get(code, { maxRedirects: 0, headers: top });
@@ -150,8 +179,8 @@ export function entryTests(
     "an entry code taken to another instance's origin opens nothing there",
     async ({ page }) => {
       await host.signIn(page);
-      const code = new URL(await codeFor(page, host.url("entry-mine")));
-      const other = new URL(host.url("entry-theirs"));
+      const code = new URL(await codeFor(page, await host.url("entry-mine")));
+      const other = new URL(await host.url("entry-theirs"));
       const request = page.context().request;
       const answer = await request.get(`${other.origin}${code.pathname}${code.search}`, {
         maxRedirects: 0,
@@ -167,7 +196,7 @@ export function entryTests(
     "a clean address in a frame shows the content where the browser keeps the cookies, else asks for a tab: never the app's sign-in",
     async ({ page, browserName }, info) => {
       await host.signIn(page);
-      const shown = await host.frame(page, host.url("entry-framed"));
+      const shown = await host.frame(page, await host.url("entry-framed"));
       const outcome = await shown.outcome();
       const frame = await shown.frame();
       expect(await host.atSignIn(page)).toBe(false);
@@ -194,7 +223,7 @@ export function entryTests(
       await host.signIn(page);
       // The app's page stays; the browser forgets every sign-in.
       await page.context().clearCookies();
-      const shown = await host.frame(page, host.url("entry-framed-out"));
+      const shown = await host.frame(page, await host.url("entry-framed-out"));
       expect(await shown.outcome()).toMatchObject({ state: "blocked", reason: "sign-in" });
       const frame = await shown.frame();
       await expect(frame.locator("h1")).toHaveText("Open this in a new tab to sign in");

@@ -28,5 +28,13 @@ defineHostConformance(test, {
     denied: (scope) => `http://k-secret-${scope}.kitcontent.localhost:${port}/`,
     atSignIn: async (page) => (await page.locator("#sign-in-page").count()) > 0,
     completeSignIn: (page) => page.locator("#sign-in").click(),
+    // A label the app never assigns, the bare domain, a path no page has (P070).
+    unknown: () => [
+      `http://www.kitcontent.localhost:${port}/`,
+      `http://f.kitcontent.localhost:${port}/`,
+      `http://kitcontent.localhost:${port}/`,
+      `http://zz-x.kitcontent.localhost:${port}/`,
+      `http://k-abc.kitcontent.localhost:${port}/nothing`,
+    ],
   },
 });

@@ -40,8 +40,15 @@ export interface NodeHost {
   readonly upgrade: UpgradeListener;
 }
 
-/** The Node request as a fetch `Request`: an absolute-form target kept as it came (P056). */
-export function toRequest(request: IncomingMessage, scheme: "https" | "http"): Request {
+/**
+ * The Node request as a fetch `Request`: an absolute-form target kept as it came (P056). `signal`
+ * (`nodeHost` gives one, aborted when the client goes away) lets an upstream stop its work.
+ */
+export function toRequest(
+  request: IncomingMessage,
+  scheme: "https" | "http",
+  signal?: AbortSignal,
+): Request {
   const headers = new Headers();
   for (const [name, value] of Object.entries(request.headers)) {
     for (const each of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
@@ -55,10 +62,21 @@ export function toRequest(request: IncomingMessage, scheme: "https" | "http"): R
   const method = request.method ?? "GET";
   const body =
     method === "GET" || method === "HEAD" ? null : (Readable.toWeb(request) as ReadableStream);
-  return new Request(url, { method, headers, body, duplex: "half" } as RequestInit);
+  return new Request(url, {
+    method,
+    headers,
+    body,
+    duplex: "half",
+    ...(signal === undefined ? {} : { signal }),
+  } as RequestInit);
 }
 
-/** Writes a fetch `Response` to a Node response, cookies one header each. */
+/**
+ * Writes a fetch `Response` to a Node response, cookies one header each (P070): it waits for the
+ * socket to drain before reading on (a slow client never makes it buffer the body), cancels the
+ * body when the client goes away (an event stream ends with the page that asked for it), and on
+ * an error mid-body destroys the response rather than end it looking complete.
+ */
 export async function sendResponse(response: ServerResponse, answer: Response): Promise<void> {
   const headers: Record<string, string | string[]> = {};
   for (const [name, value] of answer.headers) {
@@ -75,10 +93,45 @@ export async function sendResponse(response: ServerResponse, answer: Response): 
     response.end();
     return;
   }
-  for await (const chunk of answer.body as unknown as AsyncIterable<Uint8Array>) {
-    response.write(chunk);
+  const reader = answer.body.getReader();
+  let gone = false;
+  const leave = () => {
+    gone = true;
+    reader.cancel().catch(() => undefined);
+  };
+  // The client went away before the end: stop reading, and let the body's source know.
+  response.once("close", () => {
+    if (!response.writableFinished) {
+      leave();
+    }
+  });
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done || gone) {
+        break;
+      }
+      if (!response.write(value)) {
+        await new Promise<void>((resolve) => {
+          const on = () => {
+            response.off("drain", on);
+            response.off("close", on);
+            resolve();
+          };
+          response.on("drain", on);
+          response.on("close", on);
+        });
+      }
+    }
+  } catch (error) {
+    // The head is sent: a body cut short must not look whole.
+    leave();
+    response.destroy(error instanceof Error ? error : new Error(String(error)));
+    return;
   }
-  response.end();
+  if (!gone) {
+    response.end();
+  }
 }
 
 /** Whether a Node request's Host (or absolute-form target) is under the content domain. */
@@ -110,7 +163,15 @@ export function nodeHost<V>(content: ContentHost<V>, app: NodeHostOptions): Node
         app.request(request, response);
         return;
       }
-      content.fetch(toRequest(request, scheme())).then(
+      // Aborted when the client goes away first, so an upstream (a proxied app's event stream)
+      // stops with it.
+      const gone = new AbortController();
+      response.once("close", () => {
+        if (!response.writableFinished) {
+          gone.abort();
+        }
+      });
+      content.fetch(toRequest(request, scheme(), gone.signal)).then(
         (answer) => {
           if (answer === null) {
             // A label the app routes itself.
@@ -120,9 +181,11 @@ export function nodeHost<V>(content: ContentHost<V>, app: NodeHostOptions): Node
           return sendResponse(response, answer);
         },
         () => {
-          if (!response.headersSent) {
-            response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+          if (response.headersSent) {
+            response.destroy();
+            return;
           }
+          response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
           response.end("Content couldn't be served.");
         },
       );

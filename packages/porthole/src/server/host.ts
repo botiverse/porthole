@@ -47,6 +47,12 @@ export interface HealthOptions {
   /** How the check is fetched (default: `fetch`; on Node, `nodeProbe()`). */
   readonly probe?: HealthProbe;
   readonly timeoutMs?: number;
+  /**
+   * Told each time the gate's state changes (P070): checking to healthy or unhealthy, and every
+   * flip between them, with the new view. `meta().served` changes with it, so an app that tells
+   * its clients whether frames are served pushes it from here.
+   */
+  readonly onChange?: (view: ContentHealthView) => void;
 }
 
 /** Where content stands, for the app's own meta and logs. */
@@ -95,7 +101,13 @@ export interface ContentHostOptions<V> {
    * that says which scope a label names (`prefixedName` does).
    */
   readonly name?: Naming;
-  /** Labels the app routes itself (`p-*` previews): `fetch` hands them back. */
+  /**
+   * Labels the app itself serves on the content domain, which `fetch` hands back (null) so the
+   * app's own routes answer there: Ferry's `p-*` previews, another server's namespace it routes
+   * on. Not for labels nothing should answer: a label the naming never makes, the bare domain
+   * and an address `entry.at` says names nothing all get Porthole's 404, with nothing to list
+   * (P070). The health label is reserved by the gate itself.
+   */
   readonly reserved?: readonly string[] | ((label: string) => boolean);
   /**
    * Policy 1, mapping: the instance a request proposes (`{ instance }`), as the app means it,
@@ -145,22 +157,49 @@ export interface EntryOptions<V> {
   /** The app's authorize route (`ContentHost.authorize`), an absolute URL on an app origin. */
   readonly authorizeUrl: string;
   /**
-   * Policy 1 for a clean address: the instance a scope's path means, or null (404). The path is
-   * the address's pathname; its query rides along but never chooses the instance.
+   * Policy 1 for a clean address: the instance a scope's path means, or null/undefined: nothing
+   * (404). The path is the address's pathname; its query rides along but never chooses the
+   * instance. Asked twice: on the content origin, with no viewer, whether the address names
+   * anything at all (nothing: Porthole's 404 there, never the app's sign-in, P070); then at the
+   * authorize route with the viewer. Say what exists the same way for both; `access` says who
+   * may see it.
    */
   readonly at: (
     scope: string,
     path: string,
     viewer: V | null,
     request: Request,
-  ) => Awaitable<InstanceRef | null>;
+  ) => Awaitable<InstanceRef | null | undefined>;
   /**
    * The app's own sign-in, which comes back to `returnTo` (the authorize URL) once signed in.
-   * Only ever on a tab: in a frame, the person is asked to open a new tab instead.
+   * Only ever on a tab: in a frame, the person is asked to open a new tab instead. `entry` is the
+   * address being opened, decoded (P070).
    */
-  readonly signIn: (returnTo: string, request: Request) => Awaitable<Response>;
-  /** The app's refusal page on a tab (a frame gets Porthole's plain one). Default: Porthole's. */
-  readonly refusal?: (status: 403 | 404, request: Request) => Awaitable<Response>;
+  readonly signIn: (returnTo: string, request: Request, entry: EntryContext) => Awaitable<Response>;
+  /**
+   * The app's refusal page on a tab (a frame gets Porthole's plain one), for the address in
+   * `entry`. Nothing (null, undefined): Porthole's own (P070).
+   */
+  readonly refusal?: (
+    status: 403 | 404,
+    request: Request,
+    entry: EntryContext,
+  ) => Awaitable<Response | null | undefined>;
+}
+
+/** The clean address a redirect entry is opening, as its authorize route decoded it (P070). */
+export interface EntryContext {
+  /** The address's label, and the scope it names (null: one the naming never makes). */
+  readonly label: string;
+  readonly scope: string | null;
+  /** The path (and query) asked for. */
+  readonly path: string;
+  /** The clean address itself: where the person comes back to. */
+  readonly url: string;
+  /** The instance the path names for this viewer (`entry.at`), or null. */
+  readonly instance: InstanceRef | null;
+  /** Whether it was asked from a frame. */
+  readonly framed: boolean;
 }
 
 export interface ContentHost<V> {
@@ -294,7 +333,21 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
         ...(options.upstream === undefined ? {} : { upstream: options.upstream }),
         ...(options.entry === undefined
           ? {}
-          : { entry: { authorizeUrl: options.entry.authorizeUrl } }),
+          : {
+              entry: {
+                authorizeUrl: options.entry.authorizeUrl,
+                // Whether a clean address names anything, before a browser is sent away (P070).
+                named: async (label: string, path: string, request: Request) => {
+                  const scope = options.name?.scopeOf?.(label) ?? null;
+                  const at = options.entry?.at;
+                  return (
+                    scope !== null &&
+                    at !== undefined &&
+                    (await at(scope, path, null, request)) != null
+                  );
+                },
+              },
+            }),
         ...(options.authorize === undefined
           ? {}
           : {
@@ -385,6 +438,13 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
             ? { evt: "porthole.content.healthy" }
             : { evt: "porthole.content.unhealthy", reason },
         );
+      }
+      if (before.state !== view.state) {
+        try {
+          gate.onChange?.(view);
+        } catch {
+          // The app's listener failing changes nothing here.
+        }
       }
       running = null;
       schedule();
@@ -622,13 +682,22 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
           const instance =
             scope === null
               ? null
-              : await entry.at(
+              : ((await entry.at(
                   scope,
                   new URL(state.path, "https://x.invalid").pathname,
                   viewer,
                   request,
-                );
+                )) ?? null);
           const grant = instance === null ? null : await options.access(instance, viewer, request);
+          // The address being opened, decoded, for the app's sign-in and refusal pages.
+          const context: EntryContext = {
+            label: state.label,
+            scope,
+            path: state.path,
+            url: clean,
+            instance,
+            framed,
+          };
           if (instance === null || grant === null) {
             if (viewer === null) {
               // The app's sign-in never shows in a frame: the person opens a tab for it.
@@ -640,11 +709,12 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
                     "sign-in",
                     method,
                   )
-                : await entry.signIn(request.url, request);
+                : await entry.signIn(request.url, request, context);
             }
             const status = instance === null ? 404 : 403;
-            if (!framed && entry.refusal !== undefined) {
-              return await entry.refusal(status, request);
+            const own = framed ? null : await entry.refusal?.(status, request, context);
+            if (own !== null && own !== undefined) {
+              return own;
             }
             return status === 404
               ? appPage(404, "Not found", "There is nothing here.", "not-found", method)

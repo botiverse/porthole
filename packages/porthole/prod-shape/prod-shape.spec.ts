@@ -33,6 +33,14 @@ const options: HostConformanceOptions = {
     denied: (scope) => `${content(`k-secret-${scope}`)}/`,
     atSignIn: async (page) => (await page.locator("#sign-in-page").count()) > 0,
     completeSignIn: (page) => page.locator("#sign-in").click(),
+    // A label the app never assigns, the bare domain, a path no page has (P070).
+    unknown: () => [
+      "https://www.content.test/",
+      "https://f.content.test/",
+      "https://content.test/",
+      "https://zz-x.content.test/",
+      `${content("k-abc")}/nothing`,
+    ],
   },
 };
 
@@ -139,7 +147,7 @@ test.describe("prod shape", () => {
     test(`${who} can't frame content, by ticket or by clean address`, async ({ page }) => {
       await kit.begin(page);
       await page.goto(`${APP}/login?as=probe`);
-      const location = await kit.served.locate(kit.served.shell("framed-by-other"));
+      const location = await kit.served.locate(await kit.served.shell("framed-by-other"));
       await page.goto(`${framer}/?frame=${encodeURIComponent(location.url)}`);
       await page.waitForTimeout(800);
       expect(await contentShown(page)).toBe(false);
