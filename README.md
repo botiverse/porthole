@@ -55,6 +55,10 @@ milestone (see DESIGN.md). Read, in order:
 4. [docs/DESIGN.md](docs/DESIGN.md) — the concrete phase-1 design.
 5. [docs/DECISIONS.md](docs/DECISIONS.md) — why things are the way they are.
 
+Adopting it in an app: [docs/ADOPTING.md](docs/ADOPTING.md), and before you open anything to
+the network, [Choosing egress](docs/ADOPTING.md#choosing-egress): the three levels, what each
+opens and the risk it re-opens.
+
 See also [AGENTS.md](AGENTS.md) for how to work in this repo.
 
 ## License

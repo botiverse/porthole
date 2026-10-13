@@ -42,6 +42,46 @@ manual tells the agent so (the page scrolls itself; `position: fixed` works). `M
 and `<PortholeFrame fill>` are deprecated: they size the frame but leave the manual saying the
 height follows the content.
 
+### Choosing egress
+
+Egress is what content may load and send out: scripts, styles, fonts, images, audio and video, and
+data (fetch, WebSocket). Every preset starts closed, and a kind opens more only through its
+`options.egress`. There are three levels:
+
+| Level | Config (`options`) | What it opens | The risk it re-opens | Typical host | The agent's manual says | Why | Tested by |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **Closed** (the default) | nothing to write | Nothing from outside the frame: content runs on what it carries (inline code, `data:` and `blob:` URLs). | None. | Widgets that draw their own SVG and CSS; any host that hasn't decided yet. | `Network: none. Nothing loads from outside` (and `write everything inline`) | [P006](DECISIONS.md#p006--2026-10-11--egress-is-closed-by-default-including-channels-a-frame-csp-doesnt-cover--accepted), [P022](DECISIONS.md#p022--2026-10-11--every-preset-starts-with-egress-closed-library-cdns-are-a-one-line-opt-in--accepted) | probes `1.connect`, `2.resources`, `3.webrtc`, `4.*` (nested frames), `5.*` (navigating out), `8.*` (resource hints), `10.self`; served `served.domain.egress` |
+| **Library CDNs** (`LIBRARY_CDNS`, plus script hosts of your own) | `egress: LIBRARY_CDNS`; more script hosts: `egress: { ...LIBRARY_CDNS, script: [...LIBRARY_CDNS.script, "https://cdn.example.com"] }` | Scripts, styles, fonts, images and data from cdnjs, jsDelivr, unpkg and esm.sh; Google Fonts. Nothing else. | Code you don't control runs in the frame (a compromised or look-alike package), still inside the sandbox and egress; and a path requested from a CDN is a narrow channel out, read by the CDN's operator. The manual tells agents to pin versions. | Ferry's widgets (`LIBRARY_CDNS`), Raft Artifacts' pages (`LIBRARY_CDNS` and a few script hosts of its own): agents load Chart.js, ECharts, d3, Mermaid. | `scripts, styles, fonts, images and data (fetch, WebSocket) from https://cdnjs.cloudflare.com` … and `pin an exact version` | [P022](DECISIONS.md#p022--2026-10-11--every-preset-starts-with-egress-closed-library-cdns-are-a-one-line-opt-in--accepted), [P048](DECISIONS.md#p048--2026-10-11--artifact-pages-reach-library-cdns-only-by-the-hosts-config--accepted) | `leak/cdn.spec.ts` (a CDN library loads only when the config opens it, opaque and served; another origin never); probes `1.connect`, `2.resources` (an allowed origin loads, no other does) |
+| **Passive from any https site** (`anyHttps`, on top of either) | `egress: { ...LIBRARY_CDNS, anyHttps: ["img"] }`; closed but for them: `egress: { anyHttps: ["img"] }` | The passive kinds you name (`img`, `media`, `font`) from any https site. Never scripts, styles, data, workers or frames, and never `http:`: a config naming another kind is refused. | Any site an image names learns that someone viewed the content, and from which address; content can send data out in an image URL to a server of its choosing (the channel P006 closes); whoever owns an image controls what it shows, inside the frame. | A host showing content that already exists, with hotlinked media: Raft's HTML attachment previews, reports whose `<img>` point at other sites (the case P059 was written for). | `images from any https site` (`fonts, images, audio and video from any https site` for all three) | [P059](DECISIONS.md#p059--2026-10-11--passive-content-may-load-from-any-https-site-by-the-hosts-explicit-choice--accepted), [P062](DECISIONS.md#p062--2026-10-11--serveddomainegress-holds-a-host-to-its-own-configs-egress--accepted) | `leak/cdn.spec.ts` (a hotlinked image loads; a script, a stylesheet and a fetch to the same site never reach it; without the flag, nothing does); served `served.domain.egress` (the image must reach an https canary; scripts, styles, fetches and frames never), `leak/served/any-https.spec.ts` |
+
+How to decide: **start closed; add `LIBRARY_CDNS` if agents use libraries; add passive `anyHttps`
+only for existing content with hotlinks**, and only the kinds it hotlinks (usually `img`). An
+agent writing new content can inline what it shows, so agent-made pages never need `anyHttps`.
+
+```js
+import { defineDisplays, LIBRARY_CDNS } from "@botiverse/porthole";
+
+export const displays = defineDisplays({
+  // Closed: nothing to write.
+  widget: { preset: "inlineWidget" },
+  // Library CDNs (and, if you need one, a script host of your own).
+  artifact: { preset: "artifact", options: { egress: { ...LIBRARY_CDNS, script: [...(LIBRARY_CDNS.script ?? []), "https://cdn.example.com"] } } },
+  // Existing pages with hotlinked images: Library CDNs, and images from any https site.
+  attachment: { preset: "artifact", options: { egress: { ...LIBRARY_CDNS, anyHttps: ["img"] } } },
+});
+```
+
+- Each kind's documents name it as their preset (`document.preset: "attachment"`); `egress` is
+  the kind's whole policy, so kinds that differ in egress are kinds of their own.
+- Origins are exact (`https://cdn.example.com`), or `https://*.` a domain of your own; a wildcard
+  over a public suffix (`*.com`, `*.github.io`) is refused.
+- An opaque frame also inherits your page's CSP ([P058](DECISIONS.md#p058--2026-10-11--an-opaque-frame-is-as-closed-as-its-page-the-suite-says-when-a-case-cant-be-observed--accepted)): where your page closes images or
+  fetches, opaque content is that closed whatever its egress opens (see "The page's CSP"). A
+  served frame has only its own policy.
+- `checkPage` and `lintContent` tell the agent when its content reaches past the kind's egress, by
+  directive. The manual names exactly the origins the CSP allows (`test/agreement.test.ts`), and
+  DESIGN.md § "Egress hardening, each with its test" is the long form.
+
 ## 3. Opaque displays: the page only
 
 ```js

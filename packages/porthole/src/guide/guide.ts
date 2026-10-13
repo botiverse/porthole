@@ -87,6 +87,16 @@ const KIND_WORDS: Readonly<Record<EgressKind, string>> = {
 /** What the manual calls `https:` (any https site), where a config opens passive kinds to it. */
 export const ANY_HTTPS_SITE = "any https site";
 
+/** Kinds in words, as a list: "fonts, images, audio and video" (media's two words are two items). */
+const kindsInWords = (kinds: readonly EgressKind[]): string => {
+  const words = kinds.flatMap((kind) =>
+    kind === "media" ? ["audio", "video"] : [KIND_WORDS[kind]],
+  );
+  return words.length === 1
+    ? (words[0] ?? "")
+    : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`;
+};
+
 /** The sources content may load `kind` from, as the manual names them: origins, any https site. */
 const sourcesFor = (config: PortholeConfig, kind: EgressKind): string[] => [
   ...(anyHttps(config, kind) ? [ANY_HTTPS_SITE] : []),
@@ -109,16 +119,18 @@ function network(config: PortholeConfig): string {
       byOrigin.set(origin, [...(byOrigin.get(origin) ?? []), kind]);
     }
   }
+  // Any https site last, the widest: "…; fonts, images, audio and video from any https site" (P059).
+  const anywhere = byOrigin.get(ANY_HTTPS_SITE);
+  byOrigin.delete(ANY_HTTPS_SITE);
   const groups = new Map<string, string[]>();
   for (const [origin, each] of byOrigin) {
-    const words = each.map((kind) => KIND_WORDS[kind]);
-    const key =
-      words.length === 1
-        ? (words[0] ?? "")
-        : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`;
+    const key = kindsInWords(each);
     groups.set(key, [...(groups.get(key) ?? []), origin]);
   }
-  const parts = [...groups].map(([words, origins]) => `${words} from ${origins.join(", ")}`);
+  const parts = [
+    ...[...groups].map(([words, origins]) => `${words} from ${origins.join(", ")}`),
+    ...(anywhere === undefined ? [] : [`${kindsInWords(anywhere)} from ${ANY_HTTPS_SITE}`]),
+  ];
   return `Network: only ${parts.join("; ")}. Anything else fails.`;
 }
 
@@ -416,13 +428,10 @@ export function generateToolDescription(config: PortholeConfig): string {
       ),
     ),
   ];
-  const passive = (["img", "media", "font"] as const)
-    .filter((kind) => anyHttps(config, kind))
-    .map((kind) => KIND_WORDS[kind]);
+  // The same words, in the same order, as the manual's Network line.
+  const passive = (["font", "img", "media"] as const).filter((kind) => anyHttps(config, kind));
   const fromAnywhere =
-    passive.length === 0
-      ? ""
-      : `${passive.length === 1 ? passive[0] : `${passive.slice(0, -1).join(", ")} and ${passive.at(-1)}`} from ${ANY_HTTPS_SITE}`;
+    passive.length === 0 ? "" : `${kindsInWords(passive)} from ${ANY_HTTPS_SITE}`;
   const net =
     origins.length === 0 && fromAnywhere === ""
       ? "with no network (nothing loads from outside)"

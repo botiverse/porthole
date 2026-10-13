@@ -748,7 +748,9 @@ absent.
 
 ## Egress hardening, each with its test
 
-Closed by default; opened only to origins the config declares. The leak suite
+Closed by default; opened only to origins the config declares. For a host choosing a level
+(closed, library CDNs, passive media from any https site), ADOPTING.md § "Choosing egress" is the
+summary; this section is the long form. The leak suite
 (`src/conformance/probes.ts`, run by `pnpm test:leak` against the reference host)
 attempts each channel from inside the content, as an agent's code would, and asserts
 with an out-of-band oracle that nothing left: an HTTP canary that also counts raw TCP
