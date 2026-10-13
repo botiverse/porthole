@@ -3,6 +3,13 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## 0.3.5
+
+- ADOPTING.md § "Choosing egress" (#7): the three levels (closed, `LIBRARY_CDNS`, passive kinds
+  from any https site) in one table, with the config for each, what it opens, the risk it
+  re-opens, who uses it, what the agent's manual says, and its decisions and tests; linked from
+  the README. The manual and the tool description word the any-https level the same way.
+
 ## 0.3.4
 
 - A confirmation names the instance the host gave the frame in opaque frames too, not only served
