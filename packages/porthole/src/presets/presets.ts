@@ -66,8 +66,9 @@ export interface UrlPresetOptions {
 
 /**
  * Library CDNs a host may open with one line (`egress: LIBRARY_CDNS`): read-only package caches
- * for scripts, styles, fonts, images and data, plus Google Fonts. Not on by default: every preset
- * starts with egress closed.
+ * for scripts, styles, fonts, images and data, plus Google Fonts, and three libraries' own CDNs
+ * for their scripts only (Tailwind's Play CDN, jQuery, Plotly; P078). Not on by default: every
+ * preset starts with egress closed.
  */
 export const LIBRARY_CDNS: EgressConfig = {
   script: [
@@ -75,6 +76,10 @@ export const LIBRARY_CDNS: EgressConfig = {
     "https://cdn.jsdelivr.net",
     "https://unpkg.com",
     "https://esm.sh",
+    // Libraries' own CDNs, scripts only (P078): Tailwind's Play CDN, jQuery, Plotly.
+    "https://cdn.tailwindcss.com",
+    "https://code.jquery.com",
+    "https://cdn.plot.ly",
   ],
   style: [
     "https://cdnjs.cloudflare.com",

@@ -5,6 +5,8 @@ import {
   type HandledCapability,
 } from "../config/capabilities.ts";
 import { createHost } from "../host/create-host.ts";
+import type { PlatformHost } from "../platform/types.ts";
+import { webPlatform } from "../platform/web.ts";
 import type { DisplayHandle } from "../host/types.ts";
 import type { FrameLocation } from "../isolation/types.ts";
 import {
@@ -32,6 +34,19 @@ const DECLINED: { readonly [N in HandledCapability]: () => unknown } = {
   },
   readData: () => {
     throw new Error("The host declined the read");
+  },
+};
+
+/**
+ * The web platform, with no person on the page: no call comes from a click (P078). The driver's
+ * own evaluations count as gestures in some engines (Firefox), which would let a call on load
+ * through a host's gesture check; nobody clicks in a check.
+ */
+const NOBODY: PlatformHost = {
+  name: "web, unattended",
+  createSurface(container, spec) {
+    const surface = webPlatform.createSurface(container, spec);
+    return { ...surface, userActivation: () => false };
   },
 };
 
@@ -149,6 +164,7 @@ const check = {
       // Every host function the config declares, answered as a host that declines (P074): a
       // person asked to confirm says no, a handler says no, and each call is noted.
       handlers: declining(Object.keys(spec.config.capabilities), calls),
+      platform: NOBODY,
       confirm: () => Promise.resolve("declined"),
       // A served config's instance, issued by the check's own server on this page's origin.
       locator: {

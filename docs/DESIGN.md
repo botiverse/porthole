@@ -581,7 +581,8 @@ What both adopters still wrote after 0.2 moves into Porthole (ADOPTING.md is the
   Apps view (as a page with the view's egress) and a driver without `serve` run opaque. Each
   inline script is named (`//# sourceURL=porthole-script-<n>`) and its first line recorded, so an
   error's line is the content's own line, as lint numbers it. Every host function the config
-  declares is answered as a host that declines (`confirm` says no; each handler answers no), and
+  declares is answered as a host that declines (`confirm` says no; each handler answers no; no
+  call comes from a click, P078), and
   each call the host sees is reported (`run.calls`): refused by a gate whatever the person says (no
   click, bad arguments, too often) a problem, declined or answered a note. A global the shell
   refuses itself without a click (`sendPrompt`) rejects in the content, so it shows as an error. The report's `text` names each
@@ -821,7 +822,7 @@ for that to lapse and click with raw input.
 |------|-----------|-------|------------------|
 | The host's check (P050) | `authorize.check` after a ticket or cookie verifies, before anything is served; a deny is a 403 page saying `denied` and the host's code, and the display's `outcome` says so even after `loaded` | `leak/served/authorize.spec.ts`: a revoked subject's ticket (a page, an app); a framed app's next request and reload mid-session (Chromium, Firefox: WebKit keeps no framed cookie, P025); a framed page's next load; an app and a page in a tab | `authorize` → every case but WebKit's framed page (`session` either way) |
 | Url-mode delegation (P049) | `allow` from `permissions`, `""` by default | `leak/served/permissions.spec.ts`: full screen follows it on all three; clipboard writes on Chromium only (WebKit and Firefox let any frame write in a click) | `url-permissions` → the default case (all three) |
-| Library CDNs for artifacts (P048) | `egress: LIBRARY_CDNS` in the host's artifact config; closed by default (P022) | `leak/cdn.spec.ts`: opaque and served, a CDN library loads only when opened; another origin never | — (the CSP of rows 1–2) |
+| Library CDNs for artifacts (P048, P078) | `egress: LIBRARY_CDNS` in the host's artifact config; closed by default (P022); Tailwind's, jQuery's and Plotly's own CDNs for scripts only | `leak/cdn.spec.ts`: opaque and served, a CDN library loads only when opened; another origin never; a stylesheet, an image and a fetch never reach the libraries' own CDNs | — (the CSP of rows 1–2) |
 | Workers (P044, P045) | no Node module in `/server`; D1 tickets taken by one `DELETE … RETURNING` | `test/workers.test.ts` (workerd, no `nodejs_compat`, real D1: once per ticket, a race, anonymous, a revocation, flat names, reserved namespaces) | — |
 
 ### The clipboard, and copy buttons

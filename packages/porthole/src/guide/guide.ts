@@ -141,6 +141,33 @@ const optsIn = (config: PortholeConfig): boolean =>
 const loadsScripts = (config: PortholeConfig): boolean =>
   egressOrigins(config, "script").length > 0;
 
+/** The copy of Plotly's map shapes (topojson) to give it, on jsDelivr (P078). */
+export const PLOTLY_TOPOJSON_URL = "https://cdn.jsdelivr.net/npm/plotly.js@3.4.0/dist/topojson/";
+
+/**
+ * Libraries with CDNs of their own, where the config opens them for scripts (P078): how to load
+ * each, pinned, and what it needs that the sandbox closes. Verified in the sandbox, each preset.
+ */
+function ownCdns(config: PortholeConfig): string[] {
+  const scripts = egressOrigins(config, "script");
+  const said: string[] = [];
+  if (scripts.includes("https://cdn.tailwindcss.com")) {
+    said.push(
+      '- Tailwind: <script src="https://cdn.tailwindcss.com/3.4.17"></script> (the Play CDN builds the CSS as the page runs; its console warning about production is expected).',
+    );
+  }
+  if (scripts.includes("https://code.jquery.com")) {
+    said.push('- jQuery: <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>.');
+  }
+  if (scripts.includes("https://cdn.plot.ly")) {
+    const shapes = egressOrigins(config, "connect").includes("https://cdn.jsdelivr.net");
+    said.push(
+      `- Plotly: <script src="https://cdn.plot.ly/plotly-3.4.0.min.js"></script>. Its maps (scattergeo, choropleth) fetch their shapes from cdn.plot.ly as they draw, which is closed here: ${shapes ? `give them the copy on jsDelivr, Plotly.newPlot(box, data, layout, { topojsonURL: "${PLOTLY_TOPOJSON_URL}" }).` : "they don't draw; use a scatter or a table."}`,
+    );
+  }
+  return said;
+}
+
 function widget(c: Context): string {
   const { config, noun } = c;
   const { layout, limits } = config;
@@ -189,6 +216,7 @@ function widget(c: Context): string {
     loadsScripts(config)
       ? "\nLibraries: pin an exact version at least two weeks old (chart.js@4.4.1 in its URL), never @latest or a range, so the code can't be swapped under you and draws the same every time."
       : null,
+    ...ownCdns(config),
     "",
     themeless
       ? `Colors: these variables hold the app's palette; use them, or colors of your own. Give the ${noun} its own background.`

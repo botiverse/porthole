@@ -2160,3 +2160,55 @@ its origin is named from it.
 opaque (failing on 0.3.3 for opaque); for an opaque frame, the instance is in none of the frame's
 attributes, its document, its address or name, nor any message its page heard.
 
+## P078 · 2026-10-13 · LIBRARY_CDNS adds Tailwind's, jQuery's and Plotly's own CDNs, for scripts only · Accepted
+
+**Decision.** `LIBRARY_CDNS.script` adds `https://cdn.tailwindcss.com` (Tailwind's Play CDN),
+`https://code.jquery.com` and `https://cdn.plot.ly` (#11). Scripts only: none of them is in
+`style`, `img`, `font` or `connect`. They are the class P048 opened: a library's own CDN, serving
+versioned static files, whose access logs a content author can't read. Agent-made pages load them
+often (Claude's artifacts allow them too), and one list serves every host, so the manual reads
+the same everywhere: Raft's HTML attachment previews and Artifacts, and Ferry. Raft Artifacts'
+own list of these hosts (`PAGE_SCRIPT_HOSTS`) can go.
+
+**Existing hosts widen on upgrade.** Every host that passes `LIBRARY_CDNS` (Ferry's widgets, Raft
+Artifacts) gets the three when it takes 0.4.0, with no change of its own. That is acceptable:
+- The risk is P048's, unchanged in kind. Code the host doesn't control runs in the frame, still
+  in the sandbox and under egress. A requested path is a narrow channel out whose reader is the
+  CDN's operator. These hosts serve scripts and nothing else, so no data comes back from them.
+- A host that passes `LIBRARY_CDNS` has chosen "read-only public library CDNs", and these are
+  that.
+- A host that wants the old list writes it out: `egress: { ...LIBRARY_CDNS, script: [its four] }`.
+- The minor version (0.4.0) says a preset's list widened.
+
+**The manual** names the three in its Network line, as it names every origin it opens, and gives
+each a line under Libraries with a pinned URL: Tailwind 3.4.17, jQuery 3.7.1, Plotly 3.4.0.
+- **Plotly's maps** (scattergeo, choropleth) fetch their shapes (topojson) from `cdn.plot.ly` as
+  they draw, which `connect-src` closes. The manual gives them the copy on jsDelivr, whose data
+  `LIBRARY_CDNS` opens: `Plotly.newPlot(box, data, layout, { topojsonURL:
+  "https://cdn.jsdelivr.net/npm/plotly.js@3.4.0/dist/topojson/" })`. That copy is byte for byte
+  what `cdn.plot.ly/un/` serves to Plotly 4.1 today (checked). Where jsDelivr's data isn't open,
+  the manual says the maps don't draw. Opening `connect` to `cdn.plot.ly` would be a decision of
+  its own.
+- **Tailwind's Play CDN** builds its CSS as the page runs: it injects a `<style>`
+  (`style-src 'unsafe-inline'`, which every preset has) and needs nothing the CSP closes, so the
+  CSP doesn't change. Its console warning about production is expected, and the manual says so.
+- **`lintContent`** asks for a version in the path from these hosts: Tailwind's bare URL
+  redirects to its latest, and `jquery-latest` and `plotly-latest` are moving names.
+
+**Verified** against the real CDNs (`scripts/verify-libraries.ts`, 2026-10-13): the manual's own
+lines (Tailwind styling an element, jQuery running, a Plotly map drawing its land from the
+jsDelivr copy) under the inline widget, artifact (opaque and served) and MCP Apps presets, on
+Chromium, WebKit and Firefox: 45 of 45. Without `topojsonURL`, the map fails, and `checkPage`
+reports the `connect-src` block of `cdn.plot.ly/un/world_110m.json`.
+**Tested.** `leak/cdn.spec.ts` (routed, three engines): a script loads from each of the three, and a
+stylesheet, an image and a fetch never reach them, opaque and served. `test/policy.test.ts`: the
+hosts are in `script-src` only. `test/check.test.ts`: the manual's lines and the lint.
+**Also in 0.4.0: nobody clicks in a check.** Running the suite on Firefox showed that
+`checkPage`'s own evaluations in the page count as a gesture there, so a call on load that needs a
+click (`downloadFile`, and `sendPrompt` where the shell let it through) reached the host as if
+clicked, and was reported as a note instead of the refusal people's browsers give. The check page
+now mounts with a platform that reports no user activation: a call on load that needs a click is
+refused, and reported as a problem, on every engine (`leak/check.spec.ts`).
+**Revisit when** a host needs one of them for anything but scripts, or Raft's trace of blocked
+loads (its follow-up) proposes more hosts, such as mirrors reachable from mainland China.
+

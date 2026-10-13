@@ -101,6 +101,87 @@ test("a served artifact page loads its library from a CDN only under a config th
   expect(hits.cdn).toBe(1);
 });
 
+/** The libraries' own CDNs, scripts only (P078). */
+const OWN_CDNS = ["https://cdn.tailwindcss.com", "https://code.jquery.com", "https://cdn.plot.ly"];
+
+/** Routes the libraries' own CDNs; records `<host> <path>` for each request that reached one. */
+async function routeOwnCdns(context: BrowserContext): Promise<string[]> {
+  const reached: string[] = [];
+  for (const host of OWN_CDNS) {
+    await context.route(`${host}/**`, (route) => {
+      const url = new URL(route.request().url());
+      reached.push(`${url.host} ${url.pathname}`);
+      return route.fulfill({
+        contentType: url.pathname.endsWith(".js") ? "text/javascript" : "text/plain",
+        body: url.pathname.endsWith(".js")
+          ? "document.documentElement.dataset.libraries = String(Number(document.documentElement.dataset.libraries ?? 0) + 1);"
+          : "x",
+        headers: { "access-control-allow-origin": "*" },
+      });
+    });
+  }
+  return reached;
+}
+
+/** From each of the libraries' CDNs: a script, a stylesheet, an image and a fetch. */
+const OWN_CDN_PAGE = `<!doctype html><html><head><title>Libraries</title>
+${OWN_CDNS.map((host) => `<link rel="stylesheet" href="${host}/style.css"><script src="${host}/lib.js"></script>`).join("\n")}
+</head><body><main id="artifact">${OWN_CDNS.map((host) => `<img src="${host}/pixel.gif" alt="">`).join("")}</main>
+<script>
+  Promise.allSettled(${JSON.stringify(OWN_CDNS)}.map((host) => fetch(host + "/data.json"))).then(
+    (all) => (document.body.dataset.fetched = String(all.filter((each) => each.status === "fulfilled").length)),
+  );
+</script></body></html>`;
+
+const reachedOwnCdns = (reached: readonly string[]) =>
+  [...reached].sort((a, b) => a.localeCompare(b));
+
+test("the libraries' own CDNs serve scripts and nothing else: a stylesheet, an image and a fetch never reach them (P078)", async ({
+  page,
+  context,
+}) => {
+  const reached = await routeOwnCdns(context);
+  const scripts = OWN_CDNS.map((host) => `${new URL(host).host} /lib.js`).sort((a, b) =>
+    a.localeCompare(b),
+  );
+  // Opaque.
+  const open = await referenceHost.launch(page, {
+    config: presets.artifact({ egress: LIBRARY_CDNS }),
+    content: OWN_CDN_PAGE,
+  });
+  const frame = await open.frame();
+  await expect.poll(() => frame.evaluate(() => document.body.dataset.fetched ?? "")).toBe("0");
+  await expect
+    .poll(() => frame.evaluate(() => document.documentElement.dataset.libraries ?? "0"))
+    .toBe(String(OWN_CDNS.length));
+  await settle(frame);
+  expect(reachedOwnCdns(reached)).toEqual(scripts);
+
+  // Served (domain mode), under the harness's config that opens LIBRARY_CDNS.
+  reached.length = 0;
+  const served = await harness();
+  served.pages.set("libraries@1", OWN_CDN_PAGE);
+  const instance: InstanceRef = {
+    scope: "own-cdns",
+    document: { kind: "artifact", id: "libraries", version: "1", preset: "artifactCdn" },
+  };
+  const display = await mount(
+    page,
+    served.hostOrigin,
+    served.configs.artifactCdn as PortholeConfig,
+    await served.porthole.issue(instance, { viewer: "probe" }),
+    instance,
+  );
+  expect(await outcomeOf(display.read)).toEqual({ state: "loaded" });
+  const shown = await display.frame();
+  await expect.poll(() => shown.evaluate(() => document.body.dataset.fetched ?? "")).toBe("0");
+  await expect
+    .poll(() => shown.evaluate(() => document.documentElement.dataset.libraries ?? "0"))
+    .toBe(String(OWN_CDNS.length));
+  await settle(shown);
+  expect(reachedOwnCdns(reached)).toEqual(scripts);
+});
+
 const ANY_SITE = "https://any-site.example";
 const PIXEL = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
 

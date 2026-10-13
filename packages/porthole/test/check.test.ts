@@ -13,6 +13,7 @@ import {
   showTool,
   GUIDE_EXAMPLES,
 } from "../src/index.ts";
+import { generateGuide } from "../src/guide/guide.ts";
 import type { CDPSession as PlaywrightSession } from "@playwright/test";
 import { cdpDriver, checkPage, type CdpSession, type CheckDriver } from "../src/check/index.ts";
 import type { CheckRunData } from "../src/check/instrument.ts";
@@ -78,6 +79,53 @@ describe("lintContent", () => {
         '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>',
       ),
     ).toEqual([]);
+  });
+
+  it("asks for a version in the path from the libraries' own CDNs, and says how their maps draw (P078)", () => {
+    const open = presets.artifact({ egress: LIBRARY_CDNS });
+    const page = (body: string) => `<!doctype html><html><head></head><body>${body}</body></html>`;
+    expect(
+      lintContent(
+        open,
+        page(
+          [
+            '<script src="https://cdn.tailwindcss.com/3.4.17"></script>',
+            '<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>',
+            '<script src="https://cdn.plot.ly/plotly-3.4.0.min.js"></script>',
+          ].join("\n"),
+        ),
+      ),
+    ).toEqual([]);
+    const unpinned = lintContent(
+      open,
+      page(
+        [
+          '<script src="https://cdn.tailwindcss.com"></script>',
+          '<script src="https://cdn.tailwindcss.com?plugins=forms"></script>',
+          '<script src="https://code.jquery.com/jquery-latest.min.js"></script>',
+          '<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>',
+        ].join("\n"),
+      ),
+    );
+    expect(rules(unpinned)).toEqual(Array.from({ length: 4 }, () => "warning unpinned"));
+    expect(unpinned[0]?.message).toMatch(/^Pin an exact version of Tailwind/u);
+    // The manual: each library's line, and the map shapes' copy where jsDelivr's data is open.
+    const manual = generateGuide(open);
+    expect(manual).toContain(
+      '- Tailwind: <script src="https://cdn.tailwindcss.com/3.4.17"></script>',
+    );
+    expect(manual).toContain(
+      '- jQuery: <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>',
+    );
+    expect(manual).toContain(
+      'topojsonURL: "https://cdn.jsdelivr.net/npm/plotly.js@3.4.0/dist/topojson/"',
+    );
+    const plotlyOnly = generateGuide(
+      presets.artifact({ egress: { script: ["https://cdn.plot.ly"] } }),
+    );
+    expect(plotlyOnly).toContain("which is closed here: they don't draw");
+    expect(plotlyOnly).not.toContain("Tailwind");
+    expect(generateGuide(presets.artifact())).not.toContain("Plotly:");
   });
 
   it("takes a whole document sent as a widget as its body", () => {

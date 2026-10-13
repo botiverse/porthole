@@ -37,6 +37,24 @@ describe("the frame's CSP", () => {
     expect(csp).not.toMatch(/script-src[^;]*fonts/u);
   });
 
+  test("opens the libraries' own CDNs to scripts only (P078)", () => {
+    const directives = new Map(
+      compile(presets.artifact({ egress: LIBRARY_CDNS }))
+        .csp.split("; ")
+        .map((each) => [each.split(" ")[0] ?? "", each] as const),
+    );
+    for (const host of [
+      "https://cdn.tailwindcss.com",
+      "https://code.jquery.com",
+      "https://cdn.plot.ly",
+    ]) {
+      expect(directives.get("script-src"), host).toContain(host);
+      for (const other of ["style-src", "img-src", "connect-src", "font-src", "media-src"]) {
+        expect(directives.get(other), `${host} in ${other}`).not.toContain(host);
+      }
+    }
+  });
+
   test("never allows 'self': an opaque frame has nothing of its own to load", () => {
     for (const config of [
       presets.inlineWidget({ egress: LIBRARY_CDNS }),

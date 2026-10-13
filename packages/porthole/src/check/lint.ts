@@ -84,6 +84,24 @@ const REACHES: readonly { readonly kind: EgressKind; readonly pattern: RegExp }[
 const CDN_PACKAGE =
   /^https:\/\/(?:cdn\.jsdelivr\.net\/npm|unpkg\.com|esm\.sh)\/((?:@[^/]+\/)?[^/@]+)(@[^/]*)?/u;
 
+/**
+ * Libraries' own CDNs (P078): the version is in the path (`/3.4.17`, `jquery-3.7.1.min.js`,
+ * `plotly-3.4.0.min.js`); without it the host serves its latest (Tailwind redirects to it).
+ */
+const OWN_CDN: readonly {
+  readonly name: string;
+  readonly host: RegExp;
+  readonly pinned: RegExp;
+}[] = [
+  {
+    name: "Tailwind",
+    host: /^https:\/\/cdn\.tailwindcss\.com(?:[/?#]|$)/u,
+    pinned: /^\/\d+\.\d+\.\d+/u,
+  },
+  { name: "jQuery", host: /^https:\/\/code\.jquery\.com\//u, pinned: /\d+\.\d+\.\d+/u },
+  { name: "Plotly", host: /^https:\/\/cdn\.plot\.ly\/plotly/u, pinned: /\d+\.\d+\.\d+/u },
+];
+
 export function lintContent(config: PortholeConfig, content: string): Finding[] {
   if (config.mode === "url") {
     return [];
@@ -200,6 +218,15 @@ export function lintContent(config: PortholeConfig, content: string): Finding[] 
           "egress",
           "warning",
           `Nothing loads from ${origin} here (${kind}): ${kind === "script" || kind === "style" ? "write it inline, or use a library from an allowed CDN" : kind === "connect" ? "the content can't call it; work from data in the content" : "put it inline as a data: URL"}.`,
+          match.index,
+        );
+      }
+      const own = OWN_CDN.find((each) => each.host.test(address));
+      if (own !== undefined && kind === "script" && !own.pinned.test(new URL(address).pathname)) {
+        add(
+          "unpinned",
+          "warning",
+          `Pin an exact version of ${own.name} (its version in the URL's path), never its latest: the code then can't change under the ${it}.`,
           match.index,
         );
       }
