@@ -3,6 +3,17 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## 0.4.0
+
+- `LIBRARY_CDNS` adds three libraries' own CDNs, for scripts only: Tailwind's Play CDN
+  (`https://cdn.tailwindcss.com`), jQuery (`https://code.jquery.com`) and Plotly
+  (`https://cdn.plot.ly`) (P078, #11). **Hosts that pass `LIBRARY_CDNS` get them on upgrade**;
+  write the list out to keep the old one. The manual gives each a pinned line, and tells agents
+  how Plotly's maps draw here (`topojsonURL`, the copy on jsDelivr); `lintContent` asks for a
+  version in their URLs. Verified against the real CDNs under every preset, on three engines.
+- `checkPage`: nobody clicks in a check, on any engine: a call on load that needs a click is
+  refused and reported as a problem (Firefox counted the check's own evaluations as gestures).
+
 ## 0.3.5
 
 - ADOPTING.md § "Choosing egress" (#7): the three levels (closed, `LIBRARY_CDNS`, passive kinds
