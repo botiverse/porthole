@@ -3,6 +3,13 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## 0.4.1
+
+- Annotation marks keep the words under them readable on a light page and a dark one: a lighter
+  fill (18%, 26% for the active mark) with an amber underline (text) or outline (an element), and
+  a ring around the active mark and a flash instead of more fill over its words (the 50% and 90%
+  yellow left light text yellow on dark yellow).
+
 ## 0.4.0
 
 - `LIBRARY_CDNS` adds three libraries' own CDNs, for scripts only: Tailwind's Play CDN
