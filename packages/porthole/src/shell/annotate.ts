@@ -340,7 +340,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       // The shell's own layer, over the content: marks, the outline of what would be picked.
       let layer = null;
       let shadow = null;
-      const STYLE = ".mark{position:absolute;border-radius:2px;background:rgba(250,204,21,.3);box-shadow:inset 0 -2px 0 rgba(202,138,4,.8)}.mark.element{background:rgba(250,204,21,.12);box-shadow:none;outline:2px solid rgba(202,138,4,.85);outline-offset:1px}.mark.active{background:rgba(250,204,21,.5)}.mark.element.active{background:rgba(250,204,21,.22);outline-width:3px}.mark.flash{animation:flash 1.8s ease-out}@keyframes flash{from{background:rgba(250,204,21,.9)}}.hover{position:absolute;outline:2px solid #2563eb;outline-offset:1px;background:rgba(37,99,235,.12)}.tag{position:absolute;max-width:70vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace;padding:0 6px;border-radius:4px;background:#1e293b;color:#fff}";
+      // Marks lie over the content's text, so their fill is light (the text under them keeps its
+      // contrast, on a light page and a dark one alike) and an underline or outline says where
+      // they are; the active one and a flash add a ring around it, not more fill over its words.
+      const STYLE = ".mark{position:absolute;border-radius:2px;background:rgba(250,204,21,.18);box-shadow:inset 0 -2px 0 rgba(234,179,8,.95)}.mark.element{background:rgba(250,204,21,.07);box-shadow:none;outline:2px solid rgba(234,179,8,.9);outline-offset:1px}.mark.active{background:rgba(250,204,21,.26);box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 2px rgba(234,179,8,.45)}.mark.element.active{background:rgba(250,204,21,.12);box-shadow:none;outline-width:3px}.mark.flash{animation:flash 1.8s ease-out}@keyframes flash{from{box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 6px rgba(250,204,21,.6)}}.hover{position:absolute;outline:2px solid #2563eb;outline-offset:1px;background:rgba(37,99,235,.12)}.tag{position:absolute;max-width:70vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace;padding:0 6px;border-radius:4px;background:#1e293b;color:#fff}";
       const ensureLayer = () => {
         if (layer === null) {
           layer = createElement.call(document, "div");
