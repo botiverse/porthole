@@ -4,6 +4,7 @@ import {
   isCapabilityName,
   type HandledCapability,
 } from "../config/capabilities.ts";
+import { addressWithoutQuery } from "../bridge/navigation.ts";
 import { createHost } from "../host/create-host.ts";
 import type { PlatformHost } from "../platform/types.ts";
 import { webPlatform } from "../platform/web.ts";
@@ -208,6 +209,12 @@ const check = {
       if (refusal !== "failed") {
         calls.push({ capability, outcome: refusal });
       }
+    });
+    // A navigation the shell stopped (P080): the content tried to leave its page.
+    display.on("navigationBlocked", ({ url }) => {
+      run.data.errors.push(
+        `It tried to navigate its frame to ${addressWithoutQuery(url)}, and was stopped: content never leaves its page`,
+      );
     });
     display.on("outcome", (outcome) => {
       run.data.outcome = outcome.state === "blocked" ? `blocked: ${outcome.reason}` : outcome.state;

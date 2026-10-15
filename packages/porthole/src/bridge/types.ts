@@ -5,6 +5,7 @@ import type {
   HandledCapability,
 } from "../config/capabilities.ts";
 import type { InstanceRef } from "../isolation/types.ts";
+import type { RefusalReason } from "./refusal.ts";
 
 /**
  * The host-function bridge (ARCHITECTURE § Framework layer): carries a capability call from the
@@ -48,6 +49,9 @@ export type CapabilityHandlers = { readonly [N in HandledCapability]?: Capabilit
  * Asked once per display before its first call of a `consent`-gated capability (P079): may this
  * content have them (read the viewer's data)? The request is that first call. A host remembers
  * the answer where it likes (per viewer, per widget); Porthole keeps it for the display's life.
+ * `false` is a no (content is told `denied`); a thrown `Refused` is a no with its reason, kept
+ * the same way (P080); anything else it throws is no answer yet (`consent_required`), and the next
+ * call asks again.
  */
 export type Consent = (request: ConfirmRequest) => boolean | Promise<boolean>;
 
@@ -126,7 +130,14 @@ export type Refusal =
 export type CallOutcome<T> =
   /** `stale`: a `readData` answered from the host's cache (`DataCache`). */
   | { readonly ok: true; readonly value: T; readonly stale?: true }
-  | { readonly ok: false; readonly refusal: Refusal; readonly message?: string };
+  | {
+      readonly ok: false;
+      readonly refusal: Refusal;
+      /** What the host's handler threw: the host's own words, never sent to content. */
+      readonly message?: string;
+      /** What content is told (P080): the host's `Refused`, else Porthole's for the refusal. */
+      readonly reason?: RefusalReason;
+    };
 
 /** What an adapter adds to a call, beyond what the content sent. */
 export interface CallOptions {

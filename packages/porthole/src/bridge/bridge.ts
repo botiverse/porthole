@@ -9,6 +9,15 @@ import type { AnnotationReport } from "../annotate/types.ts";
 import { parseReport } from "../annotate/validate.ts";
 import type { PortholeConfig } from "../config/schema.ts";
 import { effectiveGates } from "../compile/policy.ts";
+import { blockedNavigationMessage } from "./navigation.ts";
+import {
+  defaultReason,
+  isRefused,
+  pendingReason,
+  reasonOf,
+  type Refused,
+  type RefusalReason,
+} from "./refusal.ts";
 import type {
   CallOptions,
   CallOutcome,
@@ -34,6 +43,8 @@ import type {
 export type BridgeEvent =
   | { readonly type: "resize"; readonly height: number; readonly width?: number }
   | { readonly type: "error"; readonly message: string }
+  /** The shell cancelled a navigation of the frame to `url` (P080): the content's word. */
+  | { readonly type: "navigationBlocked"; readonly url: string }
   | { readonly type: "annotation"; readonly report: AnnotationReport }
   | { readonly type: "refused"; readonly capability: CapabilityName; readonly refusal: Refusal }
   | { readonly type: "muted" };
@@ -45,9 +56,10 @@ export interface BridgeOptions {
   readonly confirm?: Confirm;
   /**
    * Asked before a `consent`-gated call (P079). The host's, made to ask once per display by the
-   * caller (`createHost` keeps the answer across the display's frames).
+   * caller (`createHost` keeps the answer across the display's frames). A `Refused` refuses every
+   * such call with it, asking nothing (P080).
    */
-  readonly consent?: Consent;
+  readonly consent?: Consent | Refused;
   /** The host's cache, for reads that may be answered stale (`CallOptions.stale`, P079). */
   readonly cached?: DataCache;
   /** Whether the embedding page has user activation now; undefined where it can't tell. */
@@ -143,7 +155,15 @@ const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
       ...(structuredContent === undefined ? {} : { structuredContent }),
     };
   },
-  reportError: (args) => {
+  reportError: (args, config) => {
+    // A navigation the shell cancelled (P080): Porthole words it, naming the address without its
+    // query; the address itself goes to the host whole.
+    const blocked = isRecord(args) ? args.navigationBlocked : undefined;
+    if (blocked !== undefined) {
+      return typeof blocked === "string" && blocked !== "" && blocked.length <= MAX_URL
+        ? { message: blockedNavigationMessage(blocked, config), navigationBlocked: blocked }
+        : null;
+    }
     const message = isRecord(args) ? args.message : undefined;
     return typeof message === "string" && message !== ""
       ? { message: message.slice(0, 2_000) }
@@ -174,22 +194,32 @@ const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
 
 /**
  * The host's `consent`, asked once (P079): the first call asks, every later one gets that answer,
- * for as long as the returned function is kept (`createHost` keeps one per display). A consent
- * function that fails is a no for that call, and is asked again at the next.
+ * for as long as the returned function is kept (`createHost` keeps one per display). A `Refused`
+ * it throws is an answer, kept and thrown again at every call (P080); anything else it throws is
+ * no answer: thrown for that call, and the next asks again.
  */
 export function onceConsent(consent: Consent): Consent {
-  let answer: Promise<boolean> | null = null;
-  return (request) =>
-    (answer ??= Promise.resolve()
+  let answer: Promise<boolean | Refused> | null = null;
+  return async (request) => {
+    const asked = (answer ??= Promise.resolve()
       .then(() => consent(request))
       .then(
         // Only a real yes: anything else a host's function gives is a no (fail closed).
         (allowed: unknown) => allowed === true,
-        () => {
+        (error: unknown) => {
+          if (isRefused(error)) {
+            return error;
+          }
           answer = null;
-          return false;
+          throw error;
         },
       ));
+    const given = await asked;
+    if (typeof given !== "boolean") {
+      throw given;
+    }
+    return given;
+  };
 }
 
 export function createBridge(options: BridgeOptions): HostFunctionBridge {
@@ -203,9 +233,15 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
     capability: CapabilityName,
     refusal: Refusal,
     message?: string,
+    reason?: RefusalReason,
   ): CallOutcome<T> => {
     onEvent({ type: "refused", capability, refusal });
-    return { ok: false, refusal, ...(message === undefined ? {} : { message }) };
+    return {
+      ok: false,
+      refusal,
+      ...(message === undefined ? {} : { message }),
+      reason: reason ?? defaultReason(capability, refusal),
+    };
   };
 
   const withinRate = (capability: CapabilityName, perMinute: number): boolean => {
@@ -253,21 +289,27 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
         }
       }
       if (gates.includes("consent")) {
-        if (options.consent === undefined) {
+        const consent = options.consent;
+        if (consent === undefined) {
           return refuse<Result>(capability, "no-consent");
         }
-        let allowed = false;
-        try {
-          const answer: unknown = await options.consent({
-            capability,
-            args,
-            display,
-          } as ConfirmRequest);
-          allowed = answer === true;
-        } catch {
-          allowed = false;
+        // The host's policy, known before any call: every one refused with its reason (P080).
+        if (isRefused(consent)) {
+          return refuse<Result>(capability, "denied", undefined, reasonOf(consent));
         }
-        if (!allowed) {
+        let answer: unknown = false;
+        try {
+          answer = await consent({ capability, args, display } as ConfirmRequest);
+        } catch (error) {
+          // A Refused is the host's no, with its reason; any other failure is no answer yet.
+          return refuse<Result>(
+            capability,
+            "denied",
+            undefined,
+            isRefused(error) ? reasonOf(error) : pendingReason(capability),
+          );
+        }
+        if (answer !== true) {
           return refuse<Result>(capability, "denied");
         }
       }
@@ -321,7 +363,11 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
         } else if (capability === "annotate") {
           onEvent({ type: "annotation", report: args as CapabilityArgs["annotate"] });
         } else {
-          onEvent({ type: "error", message: (args as CapabilityArgs["reportError"]).message });
+          const report = args as CapabilityArgs["reportError"];
+          if (report.navigationBlocked !== undefined) {
+            onEvent({ type: "navigationBlocked", url: report.navigationBlocked });
+          }
+          onEvent({ type: "error", message: report.message });
         }
         return { ok: true, value: undefined as Result };
       }
@@ -353,10 +399,12 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
         );
         return { ok: true, value: value as Result };
       } catch (error) {
+        // A host's Refused tells content its reason (P080); any other error stays the host's.
         return refuse<Result>(
           capability,
           "failed",
           error instanceof Error ? error.message : String(error),
+          isRefused(error) ? reasonOf(error) : undefined,
         );
       }
     }

@@ -27,6 +27,7 @@ import type {
   Proceed,
   Refusal,
 } from "../bridge/types.ts";
+import { isRefused, reasonOf, Refused, type RefusalReason } from "../bridge/refusal.ts";
 import type { CapabilityName } from "../config/capabilities.ts";
 import type { ColorScheme, PortholeConfig } from "../config/schema.ts";
 import { writeClipboard } from "../host/clipboard.ts";
@@ -65,6 +66,8 @@ interface PageState {
   readonly confirm?: Confirm;
   /** The provider's consent and cache (P079), read when a frame asks. */
   readonly consent?: Consent;
+  /** The provider's consent is a `Refused` (P080): its reason, by value. */
+  readonly refusesAll?: RefusalReason;
   readonly cached?: DataCache;
   readonly hostInfo?: { readonly name: string; readonly version: string };
   readonly nonce?: string;
@@ -127,9 +130,10 @@ export interface PortholeProviderProps {
   readonly confirm?: Confirm;
   /**
    * Whether a frame below may make its `consent`-gated calls (read the viewer's data, P079):
-   * asked once per display, before the first. Omitted: those calls are refused.
+   * asked once per display, before the first. Omitted: those calls are refused. A `Refused`
+   * refuses them all with its reason, and their handlers may be left out (P080).
    */
-  readonly consent?: Consent;
+  readonly consent?: Consent | Refused;
   /** What the host last had for a resource, answered stale first (P079). */
   readonly cached?: DataCache;
   /** How the host names itself in the handshake. */
@@ -204,7 +208,15 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
     ownConsent.current = props.consent;
     ownCached.current = props.cached;
   });
-  const consent = useCallback<Consent>((request) => ownConsent.current?.(request) ?? false, []);
+  const consent = useCallback<Consent>((request) => {
+    const given = ownConsent.current;
+    if (isRefused(given)) {
+      throw given;
+    }
+    return given?.(request) ?? false;
+  }, []);
+  // A Refused for every frame below, by value (an inline one starts nothing again).
+  const refusesAll = useByValue(isRefused(props.consent) ? reasonOf(props.consent) : undefined);
   const cached = useCallback<DataCache>((args, context) => ownCached.current?.(args, context), []);
   const consents = props.consent !== undefined;
   const caches = props.cached !== undefined;
@@ -284,6 +296,7 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
       confirm,
       copyText,
       ...(consents ? { consent } : {}),
+      ...(refusesAll === undefined ? {} : { refusesAll }),
       ...(caches ? { cached } : {}),
       ...(hostInfo === undefined ? {} : { hostInfo }),
       ...(locates ? { locate } : {}),
@@ -301,6 +314,7 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
       copyText,
       consents,
       consent,
+      refusesAll,
       caches,
       cached,
       hostInfo,
@@ -401,8 +415,11 @@ export interface PortholeFrameProps {
   readonly handlers?: CapabilityHandlers;
   /** Who confirms this frame's gated calls, over the provider's. */
   readonly confirm?: Confirm;
-  /** Whether this frame may make its `consent`-gated calls, over the provider's (P079). */
-  readonly consent?: Consent;
+  /**
+   * Whether this frame may make its `consent`-gated calls, over the provider's (P079). A `Refused`
+   * refuses them all with its reason, and their handlers may be left out (P080).
+   */
+  readonly consent?: Consent | Refused;
   /** This frame's data cache, over the provider's (P079). */
   readonly cached?: DataCache;
   /** Bump to run the content again from the start. */
@@ -436,6 +453,12 @@ export interface PortholeFrameProps {
   readonly onError?: (message: string, source: "content" | "host") => void;
   /** The content navigated its frame away; it was started again (or stopped, after a few). */
   readonly onNavigated?: () => void;
+  /**
+   * The shell stopped the content navigating its frame to `url` (P080): the address whole, the
+   * content's word. Served frames only, where the config declares `reportError`; `onContentError`
+   * hears it too, without the address's query.
+   */
+  readonly onNavigationBlocked?: (blocked: { readonly url: string }) => void;
   readonly onRefused?: (capability: CapabilityName, refusal: Refusal) => void;
   /** Too many declines: the display stops asking until it runs again. */
   readonly onMuted?: () => void;
@@ -642,6 +665,10 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
   const config = useByValue(frame.config);
   const instance = useByValue(frame.instance);
   const fills = config.mode === "url" || frame.fill === true || config.layout.kind === "fill";
+  // A consent that refuses everything (P080), this frame's or else the provider's, by value: a
+  // display made with it needs no data handlers, so a change makes the display again.
+  const ownRefusal = useByValue(isRefused(frame.consent) ? reasonOf(frame.consent) : undefined);
+  const refusesAll = frame.consent === undefined ? page.refusesAll : ownRefusal;
 
   // The latest props, read when the display calls back (never during render).
   const latest = useEffectEvent(() => frame);
@@ -690,6 +717,9 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
         }
         case "navigated":
           frame.onNavigated?.();
+          return;
+        case "navigationBlocked":
+          frame.onNavigationBlocked?.(detail as DisplayEvents["navigationBlocked"]);
           return;
         case "refused": {
           const { capability, refusal } = detail as DisplayEvents["refused"];
@@ -767,15 +797,22 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
                 ),
             }
           : {}),
-        ...(asksConsent
-          ? {
-              consent: (request: ConfirmRequest) =>
-                (latest().consent ?? pageConsent ?? (() => false))({
-                  ...request,
-                  display: { ...request.display, id: latest().displayId, title: latest().title },
-                }),
-            }
-          : {}),
+        ...(refusesAll !== undefined
+          ? { consent: new Refused(refusesAll.code, refusesAll.message) }
+          : asksConsent
+            ? {
+                consent: (request: ConfirmRequest) => {
+                  const given = latest().consent ?? pageConsent ?? (() => false);
+                  if (isRefused(given)) {
+                    throw given;
+                  }
+                  return given({
+                    ...request,
+                    display: { ...request.display, id: latest().displayId, title: latest().title },
+                  });
+                },
+              }
+            : {}),
         ...(caches
           ? {
               cached: (args: { readonly uri: string }, context: CallContext) =>
@@ -805,6 +842,7 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
       "resize",
       "error",
       "navigated",
+      "navigationBlocked",
       "refused",
       "muted",
       "outcome",
@@ -839,6 +877,7 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
     pageConfirm,
     pageConsent,
     pageCached,
+    refusesAll,
     hostInfo,
     locate,
     nonce,

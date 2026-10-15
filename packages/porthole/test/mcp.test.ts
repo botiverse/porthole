@@ -298,6 +298,7 @@ describe("requests go through the bridge", () => {
     expect(t.answerTo(1)?.error).toEqual({
       code: -32000,
       message: "ui/open-link refused (declined)",
+      data: { code: "denied", message: "You didn't allow this." },
     });
     expect(t.answerTo(2)?.result).toEqual({ isError: true });
   });
@@ -432,6 +433,35 @@ describe("notifications from the view", () => {
       ["resize", { height: 120, width: 300 }],
       ["reportError", { message: '{"reason":"boom"}' }],
     ]);
+  });
+
+  it("carries a navigation the shell stopped into reportError, with its address (P080)", async () => {
+    const t = setup();
+    t.view({
+      method: "porthole/navigation-blocked",
+      params: { url: "https://elsewhere.example/?d=1" },
+    });
+    await t.settle();
+    expect(t.calls.map((call) => [call.capability, call.args])).toEqual([
+      ["reportError", { navigationBlocked: "https://elsewhere.example/?d=1" }],
+    ]);
+  });
+
+  it("answers a refused read with why, in the error's data (P080)", async () => {
+    const t = setup({
+      outcome: () => ({
+        ok: false,
+        refusal: "failed",
+        reason: { code: "not_allowed", message: "Only issues are shown here." },
+      }),
+    });
+    t.view({ id: 1, method: "resources/read", params: { uri: "app://secrets" } });
+    await t.settle();
+    expect(t.answerTo(1)?.error).toEqual({
+      code: -32000,
+      message: "resources/read refused (failed)",
+      data: { code: "not_allowed", message: "Only issues are shown here." },
+    });
   });
 
   it("passes a teardown request on to the framework", () => {

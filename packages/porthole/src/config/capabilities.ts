@@ -147,7 +147,11 @@ export interface CapabilityArgs {
     readonly content?: readonly unknown[];
     readonly structuredContent?: Readonly<Record<string, unknown>>;
   };
-  readonly reportError: { readonly message: string };
+  /**
+   * `navigationBlocked`: the address a navigation of the frame went to when the shell cancelled it
+   * (P080), the content's word; `message` is then Porthole's, which names it without its query.
+   */
+  readonly reportError: { readonly message: string; readonly navigationBlocked?: string };
   readonly resize: { readonly height: number; readonly width?: number };
   readonly copyText: { readonly text: string };
   /** What the frame reported, once checked (`AnnotationReport`). */

@@ -12,6 +12,7 @@ import {
   VENDORED_LIBRARIES,
   libraryPath,
   presets,
+  REFUSAL_CODES,
   type CapabilityName,
   type CompiledConfig,
   type PortholeConfig,
@@ -223,6 +224,12 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
       expect(entry?.includes("from a click"), `${name}: user activation`).toBe(
         gates.includes("user-activation"),
       );
+      if (name === "readData") {
+        // Every reason a refusal can give content, taught where content reads data (P080).
+        for (const code of REFUSAL_CODES) {
+          expect(entry, `readData: refusal ${code}`).toContain(code);
+        }
+      }
       for (const gate of gates) {
         if (typeof gate === "object") {
           expect(entry, `${name}: rate limit`).toContain(
@@ -231,6 +238,10 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
         }
       }
     }
+  });
+
+  test("the manual teaches refusal codes exactly where content reads data (P080)", () => {
+    expect(text.includes("consent_required")).toBe(config.capabilities.readData !== undefined);
   });
 
   test("the manual names exactly the origins the CSP allows", () => {

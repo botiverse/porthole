@@ -85,7 +85,9 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // own getters, kept now, so content can neither stop it nor lie to it. Same-document ones (an
   // anchor) go on, and so do reloads: the same address, on the frame's own origin (or none, in a
   // srcdoc frame), which history can change only within that origin. The host's own (a new
-  // frame) are none of this document's.
+  // frame) are none of this document's. Each one stopped is told to the host (P080), as an error
+  // report: below, once the shell can speak.
+  let navigationBlocked = (_url) => {};
   const navigationApi = window.navigation;
   const getterOf = (proto, name) => {
     const descriptor = proto ? Object.getOwnPropertyDescriptor(proto, name) : undefined;
@@ -94,13 +96,17 @@ export const SHELL_RUNTIME = String.raw`(() => {
   const navigateProto = typeof NavigateEvent === "function" ? NavigateEvent.prototype : null;
   const destinationOf = getterOf(navigateProto, "destination");
   const navigationTypeOf = getterOf(navigateProto, "navigationType");
-  const sameDocumentOf = getterOf(typeof NavigationDestination === "function" ? NavigationDestination.prototype : null, "sameDocument");
+  const destinationProto = typeof NavigationDestination === "function" ? NavigationDestination.prototype : null;
+  const sameDocumentOf = getterOf(destinationProto, "sameDocument");
+  const urlOf = getterOf(destinationProto, "url");
   const preventNavigation = Event.prototype.preventDefault;
   const applyOf = Reflect.apply;
   if (navigationApi && typeof navigationApi.addEventListener === "function" && destinationOf !== null && sameDocumentOf !== null && navigationTypeOf !== null) {
     navigationApi.addEventListener("navigate", (event) => {
-      if (!applyOf(sameDocumentOf, applyOf(destinationOf, event, []), []) && applyOf(navigationTypeOf, event, []) !== "reload") {
+      const destination = applyOf(destinationOf, event, []);
+      if (!applyOf(sameDocumentOf, destination, []) && applyOf(navigationTypeOf, event, []) !== "reload") {
         applyOf(preventNavigation, event, []);
+        navigationBlocked(urlOf === null ? "" : String(applyOf(urlOf, destination, [])));
       }
     }, true);
   }
@@ -475,12 +481,26 @@ export const SHELL_RUNTIME = String.raw`(() => {
     reported += 1;
     send({ method: "notifications/message", params: { level: "error", logger: "porthole", data: String(message).slice(0, 2000) } });
   };
-  const send = (message) => {
-    if (plan.protocol === "shell" && window.parent !== window) {
-      // Nothing secret is ever said from here, so any parent may hear it; what it hears is the
-      // content's word, which the host gates before it acts on it.
+  // Nothing secret is ever said from here, so any parent may hear it; what it hears is the
+  // content's word, which the host gates before it acts on it.
+  const post = (message) => {
+    if (window.parent !== window) {
       window.parent.postMessage(Object.assign({ jsonrpc: "2.0" }, message), "*");
     }
+  };
+  const send = (message) => {
+    if (plan.protocol === "shell") {
+      post(message);
+    }
+  };
+  // A navigation the guard above stopped (P080): one of the run's error reports, told even where
+  // the content speaks for itself (an MCP Apps view), in Porthole's own notification.
+  navigationBlocked = (url) => {
+    if (!declared("reportError") || reported >= plan.maxErrorReports || url === "") {
+      return;
+    }
+    reported += 1;
+    post({ method: "porthole/navigation-blocked", params: { url: url.slice(0, 4096) } });
   };
 
   // A parsed tree's scripts are held (each replaced by a numbered marker) and run later, in order,
@@ -1020,7 +1040,13 @@ export const SHELL_RUNTIME = String.raw`(() => {
       if (waiting !== undefined) {
         pending.delete(data.id);
         if (data.error) {
-          waiting.reject(new Error(String(data.error.message || "refused")));
+          // A refusal says why (P080): its code, and a sentence to show the person.
+          const why = data.error.data !== null && typeof data.error.data === "object" ? data.error.data : {};
+          const error = new Error(String(typeof why.message === "string" && why.message !== "" ? why.message : data.error.message || "refused"));
+          if (typeof why.code === "string") {
+            error.code = why.code;
+          }
+          waiting.reject(error);
         } else {
           waiting.resolve(data.result);
         }

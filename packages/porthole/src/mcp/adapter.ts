@@ -14,8 +14,13 @@ import {
   MCP_APPS_PROTOCOL_VERSION,
   type HostContext,
 } from "../protocol/mcp-apps.ts";
-import { COPY_TEXT_METHOD, MCP_APPS_STYLE_VARIABLES } from "../protocol/mcp-apps.ts";
+import {
+  COPY_TEXT_METHOD,
+  MCP_APPS_STYLE_VARIABLES,
+  NAVIGATION_BLOCKED_METHOD,
+} from "../protocol/mcp-apps.ts";
 import { liveData } from "../protocol/live-data.ts";
+import { reasonFor } from "../bridge/refusal.ts";
 
 /**
  * The MCP Apps adapter (P004, P007): the host side of the protocol for full MCP Apps views, written
@@ -190,12 +195,13 @@ function connect(session: AdapterSession, options: McpAppsAdapterOptions): McpAp
       refuse(request.id, JSON_RPC_ERRORS.internal, `${request.method} failed`);
       return;
     }
-    reply(request, outcome, result);
+    reply(request, capability, outcome, result);
   }
 
   /** Answers a request with a capability's outcome. */
   function reply(
     request: JsonRpcRequest,
+    capability: CapabilityName,
     outcome: CallOutcome<unknown>,
     result: (value: unknown) => unknown,
   ): void {
@@ -204,8 +210,17 @@ function connect(session: AdapterSession, options: McpAppsAdapterOptions): McpAp
     } else if (outcome.refusal === "not-declared") {
       refuse(request.id, JSON_RPC_ERRORS.methodNotFound, `${request.method} isn't offered here`);
     } else {
-      // The spec's "implementation-defined" error for a refused request.
-      refuse(request.id, -32_000, `${request.method} refused (${outcome.refusal})`);
+      // The spec's "implementation-defined" error for a refused request, with why in its data
+      // (`{ code, message }`, P080).
+      send({
+        jsonrpc: "2.0",
+        id: request.id,
+        error: {
+          code: -32_000,
+          message: `${request.method} refused (${outcome.refusal})`,
+          data: reasonFor(capability, outcome),
+        },
+      });
     }
   }
 
@@ -275,7 +290,7 @@ function connect(session: AdapterSession, options: McpAppsAdapterOptions): McpAp
           invalid("needs a uri");
           return;
         }
-        reply(request, await live.read(params.uri), (value) =>
+        reply(request, "readData", await live.read(params.uri), (value) =>
           isRecord(value) ? value : { contents: [] },
         );
         return;
@@ -298,7 +313,7 @@ function connect(session: AdapterSession, options: McpAppsAdapterOptions): McpAp
           answer(request.id, {});
           return;
         }
-        reply(request, await live.subscribe(params.uri), () => ({}));
+        reply(request, "subscribeData", await live.subscribe(params.uri), () => ({}));
         return;
       case MCP_APPS_METHODS.updateModelContext:
         if (
@@ -387,6 +402,11 @@ function connect(session: AdapterSession, options: McpAppsAdapterOptions): McpAp
             ),
           });
         }
+        return;
+      case NAVIGATION_BLOCKED_METHOD:
+        // The shell, hardening the view's frame, stopped a navigation (P080): an error report,
+        // with its address.
+        void bridge.call("reportError", { navigationBlocked: params.url });
         return;
       case MCP_APPS_METHODS.requestTeardown:
         session.emit({ type: "teardown-requested" });

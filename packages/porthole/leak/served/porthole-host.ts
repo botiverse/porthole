@@ -15,6 +15,8 @@ export interface DisplayRecord {
   readonly errors: string[];
   readonly contentErrors: string[];
   readonly hostErrors: { readonly message: string; readonly kind: string }[];
+  /** The addresses the shell stopped the frame navigating to (`navigationBlocked`, P080). */
+  readonly navigationsBlocked: string[];
 }
 
 interface PortholeHostPage {
@@ -29,12 +31,14 @@ interface PortholeHostPage {
 
 /**
  * What else a mount is given: content to send a shell, whether the frame fills its box, and
- * whether the host serves it live data (`window.liveData` on the host page, P079).
+ * whether the host serves it live data (`window.liveData` on the host page, P079), or refuses it
+ * all (P080).
  */
 export interface MountExtras {
   readonly content?: string;
   readonly fill?: boolean;
-  readonly live?: boolean;
+  /** `"refused"`: the host refuses every data call, with no handlers (P080). */
+  readonly live?: boolean | "refused";
 }
 
 export const app = (scope: string): InstanceRef => ({

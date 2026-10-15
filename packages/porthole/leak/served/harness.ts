@@ -180,7 +180,7 @@ async function sourceOf(pathname: string): Promise<Response | null> {
 const PORTHOLE_HOST_PAGE = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Porthole host</title></head>
 <body><main id="displays"></main><script type="module">
-  import { createHost } from "/src/index.ts";
+  import { createHost, Refused } from "/src/index.ts";
   // A host's data for live widgets (P079): resources by URI as JSON, their subscribers, the
   // viewer's consent (asked once per display) and a cache of last values.
   const liveData = (window.liveData = {
@@ -189,6 +189,8 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
     reads: [],
     values: new Map([["app://counter", { n: 1 }]]),
     cache: new Map(),
+    // Reads the host refuses, by URI, with the reason content is told (P080).
+    refusals: new Map(),
     subscribers: new Map(),
     set(uri, value) {
       this.values.set(uri, value);
@@ -200,6 +202,10 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
     handlers: {
       readData: ({ uri }) => {
         liveData.reads.push(uri);
+        const refused = liveData.refusals.get(uri);
+        if (refused) {
+          throw new Refused(refused.code, refused.message);
+        }
         return result(uri, liveData.values.get(uri));
       },
       subscribeData: ({ uri }, { changed, signal }) => {
@@ -220,14 +226,19 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
     displays: [],
     mount(config, location, instance, options = {}) {
       const index = this.records.length;
-      const record = { outcomes: [], initialized: false, errors: [], contentErrors: [], hostErrors: [] };
+      const record = { outcomes: [], initialized: false, errors: [], contentErrors: [], hostErrors: [], navigationsBlocked: [] };
       this.records.push(record);
       const box = document.createElement("section");
       box.style.cssText = "width: 600px; height: 300px";
       document.getElementById("displays").append(box);
       // A null location: the host's backend failing to give one.
       const host = createHost(config, {
-        ...(options.live ? liveOptions() : {}),
+        // "refused": a page where live data never runs: consent a Refused, no handlers (P080).
+        ...(options.live === "refused"
+          ? { consent: new Refused("not_allowed", "Live data shows on the dashboard.") }
+          : options.live
+            ? liveOptions()
+            : {}),
         locator: {
           locate: async () => {
             if (location === null) {
@@ -247,6 +258,7 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
       display.on("error", ({ message, source }) => record.errors.push(source + ": " + message));
       display.on("contentError", ({ message }) => record.contentErrors.push(message));
       display.on("hostError", (error) => record.hostErrors.push(error));
+      display.on("navigationBlocked", ({ url }) => record.navigationsBlocked.push(url));
       return index;
     },
   };

@@ -25,6 +25,7 @@ const liveInstance = (): InstanceRef => ({
 async function showLive(
   page: Page,
   content: string,
+  live: true | "refused" = true,
 ): Promise<{ frame: Frame; origin: string; shown: Mounted }> {
   const served = await harness();
   const instance = liveInstance();
@@ -35,7 +36,7 @@ async function showLive(
     liveConfig(served.configs.liveWidget),
     location,
     instance,
-    { content, live: true },
+    { content, live },
   );
   await expect
     .poll(async () => (await shown.frame()).url(), { timeout: 10_000 })
@@ -182,6 +183,12 @@ test.describe("a live widget (P079)", () => {
       // replaced its document on a navigation the page's frame-src blocked (measured: WebKit,
       // for navigation.navigate() to an outside site, which fires no navigate event first).
       const record = await shown.read();
+      // The host was told (P080): the sibling's address whole, and a content error naming it
+      // without its query (where the secret is).
+      expect(record.navigationsBlocked).toContain(sibling);
+      const told = record.contentErrors.find((message) => message.includes("navigate its frame"));
+      expect(told).toContain(`http://sibling-${name}.localhost:${port}/?…`);
+      expect(told).not.toContain("secret");
       if (record.outcomes.length > 1) {
         expect(record.outcomes[0]).toEqual({ state: "loaded" });
         test.info().annotations.push({
@@ -276,20 +283,76 @@ document.documentElement.dataset.done = "1";
       `<script>
 (async () => {
   const r = {};
-  r.read = await readData("app://counter").then(() => "read", (e) => e.message);
-  r.follow = await new Promise((resolve) => subscribeData("app://counter", () => resolve("data"), (e) => resolve(e.message)));
+  r.read = await readData("app://counter").then(() => "read", (e) => e.code + ": " + e.message);
+  r.follow = await new Promise((resolve) => subscribeData("app://counter", () => resolve("data"), (e) => resolve(e.code + ": " + e.message)));
   window.probe = r;
   document.documentElement.dataset.done = "1";
 })();
 </script>`,
     );
     const r = await probed(frame);
-    expect(r.read).toContain("denied");
-    expect(r.follow).toContain("denied");
+    // Why, as a code and a sentence to show (P080).
+    expect(r.read).toBe("denied: You didn't allow this to read your data.");
+    expect(r.follow).toBe("denied: You didn't allow this to read your data.");
     const asked = await page.evaluate(
       () => (window as unknown as { liveData: { asked: number; reads: string[] } }).liveData,
     );
     expect(asked.asked).toBe(1);
     expect(asked.reads).toEqual([]);
+  });
+
+  test("a host that refuses every data call, with no handlers: the content is told why (P080)", async ({
+    page,
+  }) => {
+    const { frame, shown } = await showLive(
+      page,
+      `<script>
+(async () => {
+  const r = {};
+  r.read = await readData("app://counter").then(() => "read", (e) => e.code + ": " + e.message);
+  r.follow = await new Promise((resolve) => subscribeData("app://counter", () => resolve("data"), (e) => resolve(e.code + ": " + e.message)));
+  window.probe = r;
+  document.documentElement.dataset.done = "1";
+})();
+</script>`,
+      "refused",
+    );
+    const r = await probed(frame);
+    expect(r.read).toBe("not_allowed: Live data shows on the dashboard.");
+    expect(r.follow).toBe("not_allowed: Live data shows on the dashboard.");
+    expect((await shown.read()).hostErrors).toEqual([]);
+  });
+
+  test("a read the host's handler refuses: its code and sentence reach the content (P080)", async ({
+    page,
+  }) => {
+    const served = await harness();
+    await page.goto(`${served.hostOrigin}/porthole-host`);
+    await page.waitForFunction(() => "liveData" in window);
+    await page.evaluate(() =>
+      (window as unknown as { liveData: { refusals: Map<string, unknown> } }).liveData.refusals.set(
+        "app://secrets",
+        {
+          code: "not_allowed",
+          message: "Only issues are shown here.",
+        },
+      ),
+    );
+    const { frame } = await showLive(
+      page,
+      `<script>
+(async () => {
+  const r = {};
+  r.secrets = await readData("app://secrets").then(() => "read", (e) => e.code + ": " + e.message);
+  r.counter = await readData("app://counter").then((value) => value.n, (e) => e.code);
+  window.probe = r;
+  document.documentElement.dataset.done = "1";
+})();
+</script>`,
+    );
+    expect(await probed(frame)).toEqual({
+      secrets: "not_allowed: Only issues are shown here.",
+      counter: 1,
+    });
   });
 });

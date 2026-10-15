@@ -3,6 +3,34 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## 0.5.1
+
+From Ferry's adoption of 0.5.0's live widgets (P080). Additive, except that a refused data call's
+error message in the shell's globals is now a sentence for the person (its old text, `Refused
+(denied)`, stays the JSON-RPC error's own message).
+
+- **The host hears a navigation the shell stopped** (#12): `DisplayEvents.navigationBlocked`
+  (`{ url }`, the address whole; React `onNavigationBlocked`), and a `contentError` naming the
+  address without its query or fragment, so a host that passes content errors to the agent
+  (`errors: "agent"`) tells it its widget tried to leave its page. It is an error report: only
+  where the config declares `reportError`, within its reports and rate. The shell sends Porthole's
+  own `porthole/navigation-blocked` (`NAVIGATION_BLOCKED_METHOD`); both adapters carry it, MCP Apps
+  views included. Served frames only: an opaque frame's navigations get no events (the host hears
+  `navigated` when one replaces its document). `checkPage` reports it.
+- **A host that refuses every data call needs no handlers** (#13): pass a `Refused` as `consent`
+  (`HostOptions.consent`, React's provider and frame `consent`), e.g.
+  `consent: new Refused("not_allowed", "Live data shows on the dashboard.")`: every
+  `consent`-gated call is refused with it, nothing is asked, and `readData`/`subscribeData` may be
+  declared without handlers. React compares it by value.
+- **A refusal tells content why** (#14): a refused request's error carries
+  `data: { code, message }` (`RefusalReason`, `REFUSAL_CODES`): `consent_required`, `denied`,
+  `rate_limited`, `not_allowed` or `failed`, and a sentence to show. Hosts word their own with
+  `throw new Refused(code, message)` from a handler or a consent function (kept as the answer);
+  any other error a handler throws is `failed` in Porthole's words (its message stays the host's).
+  The shell's `readData` rejects, and `subscribeData`'s `onError` is called, with an `Error` whose
+  `code` is the code and whose `message` is the sentence. The manual teaches both. A consent
+  function that throws anything else is now `consent_required` to content (`denied` before).
+
 ## 0.5.0
 
 Live widgets (P079): content that shows its host's data, current, read as the person viewing it,

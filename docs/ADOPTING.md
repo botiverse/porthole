@@ -94,7 +94,7 @@ Its only way out is your host: `readData` (MCP `resources/read`) and `subscribeD
 `resources/subscribe`, `resources/unsubscribe`, `notifications/resources/updated`).
 
 ```js
-import { defineDisplays } from "@botiverse/porthole";
+import { defineDisplays, Refused } from "@botiverse/porthole";
 
 export const displays = defineDisplays({
   // No egress option exists for it; served, it loads Porthole's Chart.js and D3 from its origin.
@@ -104,10 +104,14 @@ export const displays = defineDisplays({
 createHost(displays.configFor(instance, contentSource), {
   locator,
   handlers: {
-    // As the viewer: your own access rules, never the author's. Return MCP's read result.
-    readData: async ({ uri }, { displayId }) => ({
-      contents: [{ uri, mimeType: "application/json", text: JSON.stringify(await load(uri)) }],
-    }),
+    // As the viewer: your own access rules, never the author's. Return MCP's read result; refuse
+    // what you don't serve with a Refused, whose code and sentence the widget shows (P080).
+    readData: async ({ uri }, { displayId }) => {
+      if (!servedUri(uri)) throw new Refused("not_allowed", "This widget can read issues only.");
+      return {
+        contents: [{ uri, mimeType: "application/json", text: JSON.stringify(await load(uri)) }],
+      };
+    },
     // Call changed() when it changes (the content reads it again), or changed(result) to send it.
     subscribeData: ({ uri }, { changed, signal }) => {
       const stop = realtime.on(uri, () => changed());
@@ -125,12 +129,37 @@ createHost(displays.configFor(instance, contentSource), {
 - **Your handlers decide what a URI may name.** Answer only the resources you mean widgets to read
   (a whitelist of URI shapes), with the viewer's rights. The content's URI is its word.
 - **Consent is your UI.** Without a `consent` function every data call is refused (fail closed).
-  React: `PortholeProvider` and `PortholeFrame` take `consent` and `cached`.
+  React: `PortholeProvider` and `PortholeFrame` take `consent` and `cached`. A consent function
+  that throws a `Refused` gives that answer, kept like `false`; anything else it throws is no
+  answer yet (the next call asks again).
+- **A page where data must not run** (beside a frame that reaches the network, below): pass a
+  `Refused` as `consent` and no data handlers. Every data call is refused with it, nothing is asked,
+  and the widget shows your sentence:
+
+  ```js
+  createHost(displays.configFor(instance, contentSource), {
+    locator,
+    consent: new Refused("not_allowed", "Live data shows on the dashboard."),
+  });
+  ```
+
+  Any other capability you declare still needs its handler.
+- **Refusals tell the widget why** (P080). A refused call's JSON-RPC error carries
+  `data: { code, message }`; the shell's `readData` rejects (and `subscribeData`'s `onError` is
+  called) with an `Error` whose `code` and `message` are those. `code` is `consent_required` (no
+  answer yet), `denied` (the viewer said no), `rate_limited`, `not_allowed` (not here, or not this
+  URI) or `failed` (your handler threw); `message` is your `Refused`'s sentence, else Porthole's.
+  The manual tells the agent to draw the widget without the data, with that sentence. A handler's
+  other errors are `failed` in Porthole's words: their messages stay yours.
 - **Rates stay gates**: 120 reads and 60 subscriptions a minute per display by default; change them
   with the capability's `gates` (keep `"consent"` in the list).
 - **Your page's CSP**: send `displays.embedderCsp(source, …)` (`frame-src` of your content origins
   and the authorize route, nothing else). It keeps a frame from navigating to an outside site; the
-  shell keeps a served frame from navigating to another content origin (P079).
+  shell keeps a served frame from navigating to another content origin (P079), and tells you:
+  `display.on("navigationBlocked", ({ url }) => …)` (React `onNavigationBlocked`) gets the address
+  whole, and `contentError` a sentence naming it without its query, for the agent (P080). Only
+  where the config declares `reportError`, and only served frames: an opaque frame's navigations
+  get no events (you hear `navigated` when one replaces its document).
 - **Keep live widgets off pages with frames that reach the network.** A frame can `postMessage` any
   frame on its page, and nothing in it can stop that: a url-mode app (a dev server's preview) or an
   `anyHttps` display beside a live widget could be handed what it read. Displays with closed egress
@@ -400,8 +429,9 @@ in the config also has the manual name them). The descriptions are the manual's 
   warnings with the result. `refuseOn: "never"` only warns.
 - **`guideChanges(from, to)`** is the notice for the agent when a kind flips between served and
   opaque (null when its manual reads the same).
-- **`errors: "agent"`** sends what content throws (and what the sandbox blocks) back to the agent
-  once people see it: listen for `contentError` and pass it on.
+- **`errors: "agent"`** sends what content throws (and what the sandbox blocks, and a navigation
+  the shell stopped, P080) back to the agent once people see it: listen for `contentError` and pass
+  it on.
 
 ### Checking a page before people see it
 

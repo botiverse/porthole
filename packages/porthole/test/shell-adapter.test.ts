@@ -161,7 +161,11 @@ describe("the shell adapter", () => {
     expect(sent).toContainEqual({
       jsonrpc: "2.0",
       id: 2,
-      error: { code: -32000, message: "Refused (not-declared)" },
+      error: {
+        code: -32000,
+        message: "Refused (not-declared)",
+        data: { code: "not_allowed", message: "This isn't available here." },
+      },
     });
   });
 

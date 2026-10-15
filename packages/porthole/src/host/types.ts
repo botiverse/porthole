@@ -1,4 +1,5 @@
 import type { AnnotateMode, AnnotationMark, AnnotationReport } from "../annotate/types.ts";
+import type { Refused } from "../bridge/refusal.ts";
 import type { Confirm, CapabilityHandlers, Consent, DataCache, Refusal } from "../bridge/types.ts";
 import type { CompiledConfig } from "../compile/compile.ts";
 import type { CapabilityName } from "../config/capabilities.ts";
@@ -22,9 +23,11 @@ export interface HostOptions<C extends AdapterConnection = ShellConnection> {
   /**
    * Whether a display may make its `consent`-gated calls (read the viewer's data, P079): asked
    * once per display, before the first, and kept for the display's life (its reloads too).
-   * Absent: those calls are refused.
+   * Absent: those calls are refused. A `Refused` instead of a function refuses every one with its
+   * reason, asking nothing, and those capabilities need no handler (a page where live data must
+   * not run, P080).
    */
-  readonly consent?: Consent;
+  readonly consent?: Consent | Refused;
   /**
    * What the host last had for a resource (P079): a read of one the content subscribes to is
    * answered with it at once, marked stale, then with the handler's fresh result.
@@ -154,6 +157,14 @@ export interface DisplayEvents {
   readonly error: { readonly message: string; readonly source: "content" | "host" };
   /** The content navigated its frame away; the frame was started again from its content. */
   readonly navigated: undefined;
+  /**
+   * The shell stopped the content navigating its frame to `url` (P079, P080): the address whole,
+   * as the content gave it (its word: untrusted, may carry data in its query). Only where the
+   * config declares `reportError` (it counts as one of the run's reports), and only in frames with
+   * an origin of their own (served): an opaque frame's navigations get no events. A
+   * `contentError` follows, naming the address without its query or fragment.
+   */
+  readonly navigationBlocked: { readonly url: string };
   /** A call didn't run. */
   readonly refused: { readonly capability: CapabilityName; readonly refusal: Refusal };
   /** Too many declines: the display stops asking until it runs again. */

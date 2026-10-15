@@ -2341,3 +2341,95 @@ accepts either outcome, as the opaque probes do. The opaque probes `5.*` keep fa
 **Revisit when** MCP Apps specifies subscriptions (follow it), an engine Porthole supports lacks the
 Navigation API, a host needs libraries in opaque frames, or agents' live widgets reach for a library
 the two don't cover.
+
+## P080 · 2026-10-15 · The host hears a navigation the shell stopped; a host may refuse all data without handlers; a refusal tells content why · Accepted
+
+From Ferry's adoption of 0.5.0's live widgets (#12, #13, #14). 0.5.1, additive but for the text of
+a refused data call's error (below).
+
+**Decision.**
+- **A navigation the shell stopped is an error report (#12).** When the navigate guard (P079)
+  cancels a navigation, the shell sends Porthole's own notification `porthole/navigation-blocked`
+  with `{ url }` (`NAVIGATION_BLOCKED_METHOD`), where the config declares `reportError` and within
+  its reports (`limits.maxErrorReports` a run, the capability's rate). Both adapters carry it into
+  `reportError`; the shell sends it even where the content speaks for itself (an MCP Apps view).
+  The host gets `navigationBlocked: { url }` (React `onNavigationBlocked`), the address whole, and a
+  `contentError` (so `errors: "agent"` hosts pass it on as they do every content error) that
+  Porthole words and that names the address without its query or fragment: "It tried to navigate
+  its frame to https://x.example/path?…, and was stopped: content never leaves its page.", with
+  where links go when `openLink` is declared. `checkPage` reports it as an error.
+- **A host may refuse every data call without handlers (#13).** `HostOptions.consent` (React's
+  `consent` on the provider and the frame) takes a `Refused` in place of the function: every
+  `consent`-gated call is refused with it, nothing is asked, the host's cache isn't read, and those
+  capabilities need no handler at mount. Any other declared capability still needs one, and so does
+  one whose gates the host stripped of `consent`. React compares the `Refused` by value (its code and
+  message), so one written inline restarts nothing; a change between a `Refused` and a function makes
+  the display again, since its handlers differ.
+- **A refusal tells content why (#14).** A refused request's JSON-RPC error carries
+  `data: { code, message }` (`RefusalReason`): `code` is one of `REFUSAL_CODES`,
+  `consent_required` (no answer yet: the host's consent function failed, and the next call asks
+  again), `denied` (the viewer said no, or the person asked to confirm declined), `rate_limited`,
+  `not_allowed` (no consent function, an undeclared or malformed call, a `consent` given as a
+  `Refused` with that code: not here) or `failed` (the handler threw); `message` is a sentence for
+  the person viewing it. A host words its own by throwing `new Refused(code, message)` from a
+  handler (a URI it doesn't serve) or from a consent function (kept as the display's answer, as
+  `false` is), or by passing one as `consent`; otherwise Porthole's sentence for the code (naming
+  the data for `readData` and `subscribeData`). Anything else a handler throws is `failed` in
+  Porthole's words: the error's own message stays the host's (`CallOutcome.message`). The shell's
+  `readData` and `subscribeData`'s `onError` reject with an `Error` whose `message` is that sentence
+  and whose `code` is the code; the manual teaches the codes and to show the sentence. The JSON-RPC
+  error's own `message` is unchanged (`Refused (denied)`). A host's `refused` event still names the
+  bridge's `Refusal` (a handler's `Refused` is `failed` there, a consent's `denied`).
+
+**Why.**
+- 0.5.0's guard was silent: a host that learned of navigations from the frame reloading (Ferry's
+  display tests; its agents hearing that their widget left its page) heard nothing, so an agent
+  never learned its widget's link or form was dead. A blocked navigation is something the sandbox
+  blocked, which `reportError` already reports ("Blocked by the sandbox: …"), so it rides the same
+  capability, bound and rate, and no frame says anything to a host whose config says errors go
+  nowhere (PRINCIPLE 4). The address is the content's word either way; the host gets it whole (it
+  holds the viewer's data already), while the sentence that may reach the agent drops the query and
+  fragment, where a widget that read the viewer's data would have put it.
+- A page where live data must not run (Ferry: a transcript beside a preview that reaches the
+  network, P079's residual) passed handlers that threw, only to satisfy the mount's check, and a
+  consent that said no. The check exists so a manual never teaches a function nobody serves; with
+  every call refused before any handler, the function is taught and answered, with a reason. A
+  value rather than a flag: the policy is the consent's answer, known before any call, and the same
+  `Refused` words the reason (PRINCIPLE 8: one option, no knob).
+- "Refused (denied)" told a widget nothing it could show. The reasons are the five a widget draws
+  differently (wait for permission, show it isn't allowed, back off, say it isn't available here,
+  show an error), in the error's `data`, which JSON-RPC leaves to the implementation: no new
+  method, and an App SDK view reads them from the error it already gets (PRINCIPLE 2).
+
+**Rejected.**
+- A `navigationBlocked` event for every config, without `reportError`: content would speak to a
+  host that declared no channel for it.
+- `consent: false` for refuse-all: indistinguishable at a glance from an absent consent (also a
+  refusal, but one that keeps the handler check), and it carries no words.
+- Passing a handler's error message to content: hosts' errors carry internals (a database
+  address); content gets them only through a `Refused`.
+- New `Refusal` members for the consent cases: the host-facing union stays as it was; the code
+  content gets is a separate, smaller vocabulary.
+
+**Residual.** Opaque frames get no navigate events (P079): the guard can't see their navigations,
+so nothing is reported; a navigation the page's `frame-src` blocks replaces the frame's document,
+which the host hears as `navigated` (P031), without the address. WebKit fires no navigate event for
+`navigation.navigate()` to a site the page's `frame-src` blocks (P079): `navigated` there too.
+Content can send `porthole/navigation-blocked` itself, with any address: it is its word, bound like
+any error report.
+
+**Tested.** `test/refusals.test.ts` (on `createHost` over a stand-in platform: each code over the
+wire, the consent's `Refused` kept, a failing consent asked again, a handler's `Refused` and a plain
+throw that keeps the host's words; `consent` as a `Refused` mounts without data handlers, refuses
+both, never reads the cache, and still needs any other handler; `navigationBlocked` whole and the
+content error without the query, a non-http address by its scheme, nothing without `reportError`,
+the rate, malformed reports dropped); `test/mcp.test.ts` (the `/mcp` adapter carries both);
+`test/agreement.test.ts` (the codes taught exactly where `readData` is); `leak/served/live.spec.ts`
+(each served navigation case tells the host the sibling's address, and its content error omits
+the secret; a viewer's no reaches the content as `denied` and the sentence; a host refusing all,
+with no handlers, as `not_allowed` and its sentence; a handler's `Refused` for one URI);
+`leak/react.spec.ts` (a `Refused` on the frame and on the provider: no data handlers, the content
+told why, nothing started again on re-render); `leak/check.spec.ts` (a served widget that
+navigates is told so, without the query). On Chromium, WebKit and Firefox.
+**Revisit when** MCP or MCP Apps standardizes error data for refused requests (follow it), or a
+host needs the navigation without `reportError`.

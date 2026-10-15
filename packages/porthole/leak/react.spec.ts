@@ -711,6 +711,45 @@ test("the content's errors go to onContentError, the host's to onHostError, each
   expect((await events(page, "unserved", "error"))[0]?.detail).toMatchObject({ source: "host" });
 });
 
+/** Content that reads data and shows why it couldn't (P080). */
+const READS = `<p id="why">waiting</p>
+<script>
+  readData("app://issues").then(
+    () => (document.getElementById("why").textContent = "read"),
+    (error) => (document.getElementById("why").textContent = error.code + ": " + error.message),
+  );
+</script>`;
+
+test("consent as a Refused, the frame's or the provider's: no data handlers, the content told why, nothing started again (P080)", async ({
+  page,
+}) => {
+  const state = (): AppState => ({
+    provider: "default",
+    consent: "refused",
+    frames: [
+      frame({ displayId: "own", config: "live", consent: "refused", content: READS }),
+      frame({ displayId: "provider's", config: "live", content: READS }),
+    ],
+  });
+  await open(page, state());
+  for (const id of ["own", "provider's"]) {
+    await expect(frameOf(page, id).locator("#why")).toHaveText(
+      "not_allowed: Live data shows on the dashboard.",
+    );
+    expect(await events(page, id, "host-error")).toEqual([]);
+    expect(await events(page, id, "refused")).toEqual([
+      { display: id, event: "refused", detail: "readData:denied" },
+    ]);
+  }
+  // A new Refused on every render, the same by value: no frame starts again.
+  for (let round = 0; round < 3; round += 1) {
+    await open(page, state());
+  }
+  await page.waitForTimeout(300);
+  expect(await events(page, "own", "initialized")).toHaveLength(1);
+  expect(await events(page, "provider's", "initialized")).toHaveLength(1);
+});
+
 const TALL = `<!doctype html><html><head><title>Tall</title></head><body>
 <h1 id="top">Top</h1><div style="height: 2000px">a long page</div><p id="end">End</p></body></html>`;
 

@@ -8,7 +8,8 @@ import { annotateMode, checkMarks, parseReport } from "../annotate/validate.ts";
 import { createBridge, onceConsent, type BridgeEvent } from "../bridge/bridge.ts";
 import type { HostFunctionBridge } from "../bridge/types.ts";
 import { compile } from "../compile/compile.ts";
-import { declaredCapabilities } from "../compile/policy.ts";
+import { declaredCapabilities, effectiveGates } from "../compile/policy.ts";
+import { isRefused } from "../bridge/refusal.ts";
 import { capabilitySpec } from "../config/capabilities.ts";
 import type { ColorScheme, PortholeConfig } from "../config/schema.ts";
 import { locateServed } from "./locate.ts";
@@ -79,10 +80,14 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
     compiled,
     mount(container: HTMLElement, mount: MountOptions): DisplayHandle<C> {
       const handlers = { ...options.handlers, ...mount.handlers };
+      // A host whose consent is a Refused refuses every consent-gated call before its handler:
+      // those need none (P080).
+      const refusesAll = isRefused(options.consent);
       const missing = declaredCapabilities(config).filter(
         (name) =>
           capabilitySpec(name).served === "handler" &&
-          (handlers as Record<string, unknown>)[name] === undefined,
+          (handlers as Record<string, unknown>)[name] === undefined &&
+          !(refusesAll && effectiveGates(config, name).includes("consent")),
       );
       if (missing.length > 0) {
         throw new TypeError(`No handler for the declared capabilities: ${missing.join(", ")}`);
@@ -117,8 +122,12 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       let destroyed = false;
       let restarts = 0;
       let generation = 0;
-      // The viewer's answer for this display (P079): asked once, kept across its frames.
-      const consent = options.consent === undefined ? undefined : onceConsent(options.consent);
+      // The viewer's answer for this display (P079): asked once, kept across its frames; or the
+      // host's refusal of them all (P080).
+      const consent =
+        options.consent === undefined || isRefused(options.consent)
+          ? options.consent
+          : onceConsent(options.consent);
       let abort: AbortController | null = null;
       let outcomeWatch: OutcomeWatch | null = null;
       let themeFrame: number | null = null;
@@ -291,6 +300,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             });
             return;
           }
+          case "navigationBlocked":
+            emit("navigationBlocked", { url: event.url });
+            return;
           case "error":
             contentError(event.message);
             return;

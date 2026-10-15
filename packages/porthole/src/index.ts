@@ -122,10 +122,19 @@ export {
   MCP_APPS_METHODS,
   MCP_APPS_PROTOCOL_VERSION,
   MCP_APPS_STYLE_VARIABLES,
+  NAVIGATION_BLOCKED_METHOD,
   PORTHOLE_STYLES,
   STALE_META,
   type HostContext,
 } from "./protocol/mcp-apps.ts";
+// Why a call was refused, as content is told it, and the host's own refusals (P080).
+export {
+  REFUSAL_CODES,
+  Refused,
+  isRefused,
+  type RefusalCode,
+  type RefusalReason,
+} from "./bridge/refusal.ts";
 export type {
   CallContext,
   CallOptions,

@@ -382,7 +382,7 @@ function gateWords(gates: readonly Gate[], effect: string): string {
   const sentences: string[] = [];
   if (gates.includes("consent")) {
     sentences.push(
-      "The first data call asks the person to allow it; if they don't, every one fails (show that the data isn't allowed, not an error).",
+      "The first data call asks the person to allow it; if they don't, every one fails with code denied (show that the data isn't allowed, not an error).",
     );
   }
   if (gates.includes("confirm")) {
@@ -401,6 +401,20 @@ function gateWords(gates: readonly Gate[], effect: string): string {
   return sentences.join(" ");
 }
 
+/**
+ * What a data refusal tells content (P080): the codes and the sentence, for the author to draw. With
+ * the shell's globals they are the error's own fields; without, the JSON-RPC error's data.
+ */
+function refusalWords(c: Context, global: boolean): string {
+  const where = global
+    ? "The error's code says why"
+    : "A refusal is an error whose data is { code, message }; code says why";
+  return `${where}: consent_required (not allowed yet), denied (the person said no), rate_limited, not_allowed (not here: some places show the ${c.noun} without data) or failed; ${global ? "its" : ""} message is a sentence for the person. Draw the ${c.noun} without that data, with that sentence where it would be; don't retry in a loop.`.replace(
+    / {2,}/gu,
+    " ",
+  );
+}
+
 const ENTRIES: { readonly [N in CapabilityName]: (c: Context, gates: readonly Gate[]) => string } =
   {
     sendPrompt: (c, gates) =>
@@ -417,11 +431,11 @@ const ENTRIES: { readonly [N in CapabilityName]: (c: Context, gates: readonly Ga
       `- Tools: the MCP Apps request tools/call (with the App SDK, app.callServerTool). ${gateWords(gates, "the call")}`,
     readData: (c, gates) =>
       c.global("readData")
-        ? `- readData(uri): reads the app's data at uri (a resource the app names), as the person viewing the ${c.noun} may see it, and returns a promise of it: JSON parsed, else text. ${gateWords(gates, "the request")} It rejects when the app refuses or fails: draw the ${c.noun} without that data, saying why.`
-        : `- Data: the MCP Apps request resources/read (with the App SDK, app.readServerResource). ${gateWords(gates, "the request")}`,
+        ? `- readData(uri): reads the app's data at uri (a resource the app names), as the person viewing the ${c.noun} may see it, and returns a promise of it: JSON parsed, else text. ${gateWords(gates, "the request")} It rejects when the app refuses or fails. ${refusalWords(c, true)}`
+        : `- Data: the MCP Apps request resources/read (with the App SDK, app.readServerResource). ${gateWords(gates, "the request")} ${refusalWords(c, false)}`,
     subscribeData: (c, gates) =>
       c.global("subscribeData")
-        ? `- subscribeData(uri, onData, onError): keeps the ${c.noun} current. It calls onData(value, { stale }) with the data at uri now, and again each time it changes; the first value may be the app's last copy (stale: true), with the current one right after. It returns a function that stops it. onError(error) hears a refusal. ${gateWords(gates, "the request")} Draw from onData every time; don't poll.`
+        ? `- subscribeData(uri, onData, onError): keeps the ${c.noun} current. It calls onData(value, { stale }) with the data at uri now, and again each time it changes; the first value may be the app's last copy (stale: true), with the current one right after. It returns a function that stops it. onError(error) hears a refusal, with the same code and message as readData's. ${gateWords(gates, "the request")} Draw from onData every time; don't poll.`
         : `- Live data: the MCP request resources/subscribe with { uri }; the app then sends notifications/resources/updated with { uri } each time it changes: read it again (resources/read). resources/unsubscribe stops it. ${gateWords(gates, "the request")}`,
     setModelContext: (_c, gates) =>
       `- Context for the agent: the MCP Apps request ui/update-model-context (with the App SDK, app.updateModelContext). ${gateWords(gates, "it")}`,

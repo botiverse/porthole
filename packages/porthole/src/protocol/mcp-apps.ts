@@ -133,6 +133,13 @@ export const COPY_TEXT_METHOD = "porthole/copy-text";
  */
 export const STALE_META = "porthole/stale";
 
+/**
+ * Porthole's own notification from the shell (P080): it cancelled a navigation of the frame to
+ * `{ url }` (P079). The content's word, sent only where `reportError` is declared, and counted as
+ * one of its reports; the host's adapter carries it into `reportError`.
+ */
+export const NAVIGATION_BLOCKED_METHOD = "porthole/navigation-blocked";
+
 /** The logger name the shell's error reports (`notifications/message`, level `error`) carry. */
 export const SHELL_LOGGER = "porthole";
 

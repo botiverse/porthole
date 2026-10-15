@@ -87,6 +87,21 @@ test("a live widget drawing the app's data with Porthole's Chart.js passes the c
   expect(report.runs[0]?.calls).toContainEqual({ capability: "subscribeData", outcome: "denied" });
 });
 
+test("a served widget that navigates its frame is told so, without the address's query (P080)", async ({
+  browser,
+}) => {
+  const report = await checkPage({
+    config: presets.liveWidget(SERVED),
+    content: `<p>x</p><script>setTimeout(() => { location.href = "/next?id=secret"; }, 50);</script>`,
+    driver: playwrightDriver(browser),
+    settleMs: 700,
+  });
+  expect(report.ok).toBe(false);
+  expect(report.text).toContain("It tried to navigate its frame to");
+  expect(report.text).toMatch(/\/next\?…, and was stopped/u);
+  expect(report.text).not.toContain("secret");
+});
+
 const BROKEN = [
   "<style>.wide { width: 900px }</style><div class=wide>wide</div>",
   '<img src="https://porthole-canary.example/x.png">',

@@ -62,6 +62,7 @@ describe("the bridge's order: declared → valid → muted → rate → gesture 
     expect(await bridge.call("sendPrompt", { text: "hi" })).toEqual({
       ok: false,
       refusal: "not-declared",
+      reason: { code: "not_allowed", message: "This isn't available here." },
     });
     expect(handled).toEqual([]);
     expect(asked).toEqual([]);
@@ -118,6 +119,7 @@ describe("the bridge's order: declared → valid → muted → rate → gesture 
     expect(await no.bridge.call("sendPrompt", { text: "Explain March" })).toEqual({
       ok: false,
       refusal: "declined",
+      reason: { code: "denied", message: "You didn't allow this." },
     });
     expect(no.handled).toEqual([]);
   });
@@ -127,6 +129,7 @@ describe("the bridge's order: declared → valid → muted → rate → gesture 
     expect(await bridge.call("sendPrompt", { text: "hi" })).toEqual({
       ok: false,
       refusal: "no-confirm",
+      reason: { code: "not_allowed", message: "This isn't available here." },
     });
     expect(handled).toEqual([]);
   });
@@ -272,10 +275,12 @@ describe("the bridge's order: declared → valid → muted → rate → gesture 
         },
       },
     );
+    // The handler's words stay the host's: content is told Porthole's (P080).
     expect(await bridge.call("callTool", { name: "x" })).toEqual({
       ok: false,
       refusal: "failed",
       message: "tool server down",
+      reason: { code: "failed", message: "The app couldn't do this." },
     });
   });
 

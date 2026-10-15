@@ -5,6 +5,7 @@ import {
   defineDisplays,
   portholeClient,
   presets,
+  Refused,
   type AnnotateMode,
   type AnnotationMark,
   type PortholeConfig,
@@ -29,6 +30,8 @@ const CONFIGS: Readonly<Record<string, PortholeConfig>> = {
   notes: presets.artifact({ capabilities: { annotate: {} } }),
   // Declares a capability the test app serves no handler for: a display that can't be made.
   unserved: presets.inlineWidget({ capabilities: { callTool: {} } }),
+  // A live widget (P079), served no data handlers by the test app (P080).
+  live: presets.liveWidget(),
   url: presets.url({ contentOrigins: [APP_ORIGIN] }),
   urlPopups: presets.url({
     contentOrigins: [APP_ORIGIN],
@@ -58,13 +61,20 @@ export interface FrameSpec {
   readonly inline?: boolean;
   readonly annotations?: readonly AnnotationMark[];
   readonly focusedAnnotation?: string | null;
+  /** The frame's consent: a Refused, new on every render (P080). */
+  readonly consent?: "refused";
 }
 
 export interface AppState {
   readonly frames: readonly FrameSpec[];
   /** "late": a host's own confirm that answers yes later, without `proceed` (out of the click). */
   readonly provider: "default" | "custom" | "late" | "none";
+  /** The provider's consent: a Refused, new on every render (P080). */
+  readonly consent?: "refused";
 }
+
+/** A page where live data never runs (P080): new on every render, as a host writes it inline. */
+const refusedHere = () => new Refused("not_allowed", "Live data shows on the dashboard.");
 
 type LogEntry = { readonly display: string; readonly event: string; readonly detail?: unknown };
 
@@ -114,6 +124,8 @@ function render(state: AppState): void {
           ? {}
           : { focusedAnnotation: frame.focusedAnnotation }),
         onAnnotation: (report) => record(frame.displayId, "annotation", report),
+        ...(frame.consent === "refused" ? { consent: refusedHere() } : {}),
+        onNavigationBlocked: ({ url }) => record(frame.displayId, "navigation-blocked", url),
         ...(frame.config.startsWith("url")
           ? {
               instance: {
@@ -169,6 +181,7 @@ function render(state: AppState): void {
         locator: { locate: locator.locate },
         hostInfo: { name: "react-test-host", version: "1" },
         ...(confirm === undefined ? {} : { confirm }),
+        ...(state.consent === "refused" ? { consent: refusedHere() } : {}),
       },
       frames,
     ),

@@ -8,8 +8,10 @@ import {
   type JsonRpcRequest,
   type JsonRpcResponse,
 } from "./jsonrpc.ts";
+import { reasonFor, type RefusalReason } from "../bridge/refusal.ts";
 import {
   COPY_TEXT_METHOD,
+  NAVIGATION_BLOCKED_METHOD,
   MCP_APPS_METHODS as M,
   MCP_APPS_PROTOCOL_VERSION,
   type HostContext,
@@ -67,7 +69,7 @@ const REQUESTS: Readonly<
 function answer(
   capability: CapabilityName,
   outcome: CallOutcome<unknown>,
-): { result: unknown } | { error: { code: number; message: string } } {
+): { result: unknown } | { error: { code: number; message: string; data?: RefusalReason } } {
   const flagged =
     capability === "sendPrompt" ||
     capability === "openLink" ||
@@ -76,7 +78,14 @@ function answer(
   if (!outcome.ok) {
     return flagged
       ? { result: { isError: true } }
-      : { error: { code: -32000, message: `Refused (${outcome.refusal})` } };
+      : {
+          // Why, in the error's data (`{ code, message }`, P080).
+          error: {
+            code: -32000,
+            message: `Refused (${outcome.refusal})`,
+            data: reasonFor(capability, outcome),
+          },
+        };
   }
   if (flagged) {
     return { result: outcome.value === true ? {} : { isError: true } };
@@ -235,6 +244,10 @@ export const shellAdapter: ProtocolAdapter<ShellConnection> = {
                 typeof data === "string" ? data : JSON.stringify(data ?? null).slice(0, 2_000),
             });
           }
+          return;
+        case NAVIGATION_BLOCKED_METHOD:
+          // The shell stopped a navigation (P080): an error report, with its address.
+          void bridge.call("reportError", { navigationBlocked: params.url });
           return;
         case M.requestTeardown:
           session.emit({ type: "teardown-requested" });

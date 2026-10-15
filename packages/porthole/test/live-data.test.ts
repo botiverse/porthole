@@ -219,9 +219,11 @@ describe("the consent gate (P079)", () => {
 
   test("a no refuses every data call, and no handler runs", async () => {
     const { bridge, reads, events } = live({ consent: () => false });
+    const denied = { code: "denied", message: "You didn't allow this to read your data." };
     expect(await bridge.call("readData", { uri: "app://a" })).toEqual({
       ok: false,
       refusal: "denied",
+      reason: denied,
     });
     expect(
       await bridge.call(
@@ -229,7 +231,7 @@ describe("the consent gate (P079)", () => {
         { uri: "app://a" },
         { subscription: { changed: () => {}, signal: new AbortController().signal } },
       ),
-    ).toEqual({ ok: false, refusal: "denied" });
+    ).toEqual({ ok: false, refusal: "denied", reason: denied });
     expect(reads).toEqual([]);
     expect(events).toContainEqual({ type: "refused", capability: "readData", refusal: "denied" });
   });
@@ -239,6 +241,7 @@ describe("the consent gate (P079)", () => {
     expect(await bridge.call("readData", { uri: "app://a" })).toEqual({
       ok: false,
       refusal: "no-consent",
+      reason: { code: "not_allowed", message: "This data isn't available here." },
     });
     expect(reads).toEqual([]);
   });
@@ -253,8 +256,10 @@ describe("the consent gate (P079)", () => {
         return true;
       },
     });
+    // No answer yet: content is told it needs the viewer's consent (P080).
     expect(await bridge.call("readData", { uri: "app://a" })).toMatchObject({
       refusal: "denied",
+      reason: { code: "consent_required" },
     });
     down = false;
     expect(await bridge.call("readData", { uri: "app://a" })).toMatchObject({ ok: true });

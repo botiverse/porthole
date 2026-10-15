@@ -38,7 +38,9 @@ agent's side: `lintContent`, `admitContent`, `checkPage` (`/check`), tool defini
 0.5 (P079): live widgets: `presets.liveWidget` (no network of its own), Porthole's vendored
 libraries on content origins (`egress.libraries`, `scripts/vendor-libraries.ts`), the `consent`
 gate, `subscribeData` (MCP resource subscriptions), the host's cache, and the shell's guard against
-a served frame navigating itself away.
+a served frame navigating itself away. 0.5.1 (P080): the host hears a navigation the guard stopped
+(`navigationBlocked`), a `Refused` as `consent` refuses all data without handlers, and refusals
+tell content why (`data: { code, message }`).
 
 ## Setup
 
