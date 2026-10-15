@@ -23,11 +23,39 @@ export interface CallContext {
 
 export type CapabilityHandler<N extends CapabilityName> = (
   args: CapabilityArgs[N],
-  context: CallContext,
+  context: N extends "subscribeData" ? SubscriptionContext : CallContext,
 ) => CapabilityResults[N] | Promise<CapabilityResults[N]>;
+
+/**
+ * A subscription's context (`subscribeData`, P079): how the host tells the content its resource
+ * changed, and when to stop.
+ */
+export interface SubscriptionContext extends CallContext {
+  /**
+   * The resource changed: the content is told (`notifications/resources/updated`) and reads it
+   * again. Pass the new `resources/read` result to answer that read without another call to
+   * `readData`.
+   */
+  readonly changed: (result?: unknown) => void;
+  /** Aborted when the content unsubscribes, its frame stops, or the display is destroyed. */
+  readonly signal: AbortSignal;
+}
 
 /** The host's handlers: one for each declared capability served by a handler. */
 export type CapabilityHandlers = { readonly [N in HandledCapability]?: CapabilityHandler<N> };
+
+/**
+ * Asked once per display before its first call of a `consent`-gated capability (P079): may this
+ * content have them (read the viewer's data)? The request is that first call. A host remembers
+ * the answer where it likes (per viewer, per widget); Porthole keeps it for the display's life.
+ */
+export type Consent = (request: ConfirmRequest) => boolean | Promise<boolean>;
+
+/**
+ * What the host last had for a resource (P079), answered at once, marked stale, to a read of a
+ * resource the content subscribes to; the fresh result follows as an update. Undefined: none.
+ */
+export type DataCache = (args: CapabilityArgs["readData"], context: CallContext) => unknown;
 
 /**
  * The display a confirmation is for, as the host named it: its id and title, and the instance the
@@ -87,13 +115,27 @@ export type Refusal =
   | "redirected"
   /** The display was muted after too many declines (until it runs again). */
   | "muted"
+  /** It is `consent`-gated and there is no `consent` function. */
+  | "no-consent"
+  /** The host's `consent` said no (for this display's life). */
+  | "denied"
   | "rate-limited"
   /** The host's handler threw or rejected. */
   | "failed";
 
 export type CallOutcome<T> =
-  | { readonly ok: true; readonly value: T }
+  /** `stale`: a `readData` answered from the host's cache (`DataCache`). */
+  | { readonly ok: true; readonly value: T; readonly stale?: true }
   | { readonly ok: false; readonly refusal: Refusal; readonly message?: string };
+
+/** What an adapter adds to a call, beyond what the content sent. */
+export interface CallOptions {
+  readonly userActivated?: boolean;
+  /** `subscribeData`: the subscription's channel back and its end (`SubscriptionContext`). */
+  readonly subscription?: Pick<SubscriptionContext, "changed" | "signal">;
+  /** `readData`: the host's cache may answer, marked stale (the content subscribes to it). */
+  readonly stale?: boolean;
+}
 
 /** What adapters call; one per display. */
 export interface HostFunctionBridge {
@@ -101,7 +143,7 @@ export interface HostFunctionBridge {
   call<N extends CapabilityName>(
     capability: N,
     args: unknown,
-    options?: { readonly userActivated?: boolean },
+    options?: CallOptions,
   ): Promise<CallOutcome<CapabilityResults[N]>>;
   declared(capability: CapabilityName): boolean;
 }

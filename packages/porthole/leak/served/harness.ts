@@ -21,7 +21,7 @@ import type { ServedConformanceHost, ServedDisplay } from "../../src/conformance
 import { checkFrameLocation } from "../../src/isolation/served.ts";
 import type { FrameLocation, InstanceRef } from "../../src/isolation/types.ts";
 import { createServer, proxyTo, type PortholeServer } from "../../src/server/index.ts";
-import { weaken, weakened } from "../weakenings.ts";
+import { weaken, weakenServed, weakened } from "../weakenings.ts";
 
 /**
  * Porthole's reference serving for the served-mode cases, started in each test worker on ports of
@@ -48,6 +48,8 @@ export interface Harness {
   readonly pages: Map<string, string>;
   /** Subjects the host has revoked: their tickets and cookies are denied from the next request. */
   readonly revoked: Set<string>;
+  /** Every URL the main server (host page and content origins) was asked for, in order. */
+  readonly requests: string[];
 }
 
 /** A library as a CDN serves it, for the CDN cases (routed by the test, never fetched). */
@@ -179,6 +181,40 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Porthole host</title></head>
 <body><main id="displays"></main><script type="module">
   import { createHost } from "/src/index.ts";
+  // A host's data for live widgets (P079): resources by URI as JSON, their subscribers, the
+  // viewer's consent (asked once per display) and a cache of last values.
+  const liveData = (window.liveData = {
+    consent: true,
+    asked: 0,
+    reads: [],
+    values: new Map([["app://counter", { n: 1 }]]),
+    cache: new Map(),
+    subscribers: new Map(),
+    set(uri, value) {
+      this.values.set(uri, value);
+      for (const changed of this.subscribers.get(uri) ?? []) changed();
+    },
+  });
+  const result = (uri, value) => ({ contents: [{ uri, mimeType: "application/json", text: JSON.stringify(value ?? null) }] });
+  const liveOptions = () => ({
+    handlers: {
+      readData: ({ uri }) => {
+        liveData.reads.push(uri);
+        return result(uri, liveData.values.get(uri));
+      },
+      subscribeData: ({ uri }, { changed, signal }) => {
+        const set = liveData.subscribers.get(uri) ?? new Set();
+        set.add(changed);
+        liveData.subscribers.set(uri, set);
+        signal.addEventListener("abort", () => set.delete(changed));
+      },
+    },
+    consent: () => {
+      liveData.asked += 1;
+      return liveData.consent;
+    },
+    cached: ({ uri }) => (liveData.cache.has(uri) ? result(uri, liveData.cache.get(uri)) : undefined),
+  });
   window.portholeHost = {
     records: [],
     displays: [],
@@ -191,6 +227,7 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
       document.getElementById("displays").append(box);
       // A null location: the host's backend failing to give one.
       const host = createHost(config, {
+        ...(options.live ? liveOptions() : {}),
         locator: {
           locate: async () => {
             if (location === null) {
@@ -236,6 +273,7 @@ async function start(): Promise<Harness> {
     `<!doctype html><html><head><title>Chart</title><script src="${CDN_LIBRARY}"></script></head><body><main id="artifact">a page with a library</main></body></html>`,
   );
   const revoked = new Set<string>();
+  const requests: string[] = [];
 
   const app = createHttpServer((request, response) => {
     const pathname = new URL(request.url ?? "/", "http://app").pathname;
@@ -311,6 +349,8 @@ async function start(): Promise<Harness> {
       egress: LIBRARY_CDNS,
     }),
     mcpApp: presets.mcpApp({ isolation: "domain", contentOrigins: [contentSource] }),
+    // A live widget (P079): no network of its own, Porthole's libraries on its origin.
+    liveWidget: presets.liveWidget({ isolation: "domain", contentOrigins: [contentSource] }),
     url: presets.url({ contentOrigins: [contentSource] }),
   };
   const porthole = createServer({
@@ -339,13 +379,21 @@ async function start(): Promise<Harness> {
   const hostCsp = embedderCsp(Object.values(configs));
   hostCspOf = () => hostCsp;
   handle = async (request) => {
+    requests.push(request.url);
     // A content address that never answers: a load that never settles.
     if (new URL(request.url).pathname === "/__hang") {
       return new Promise<Response>(() => {});
     }
     const served = await porthole.handle(request);
     if (served !== null) {
-      return served;
+      // A negative control on the shell's navigation guard reaches served shells too (P079).
+      return weakened.includes("navigate-guard") &&
+        (served.headers.get("content-type") ?? "").startsWith("text/html")
+        ? new Response(weakenServed(await served.text()), {
+            status: served.status,
+            headers: served.headers,
+          })
+        : served;
     }
     const pathname = new URL(request.url).pathname;
     if (pathname === "/host") {
@@ -369,6 +417,7 @@ async function start(): Promise<Harness> {
     hits,
     pages,
     revoked,
+    requests,
   };
 }
 

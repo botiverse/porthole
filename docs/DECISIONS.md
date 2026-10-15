@@ -2212,3 +2212,132 @@ refused, and reported as a problem, on every engine (`leak/check.spec.ts`).
 **Revisit when** a host needs one of them for anything but scripts, or Raft's trace of blocked
 loads (its follow-up) proposes more hosts, such as mirrors reachable from mainland China.
 
+
+## P079 · 2026-10-15 · Live widgets: no network of their own, Porthole's libraries on their origin, the host's data behind the viewer's consent, and frames that never navigate away · Accepted
+
+**Decision.** Content that shows its host's data, current, read as the person viewing it (a
+dashboard tile, a kept widget) gets a preset of its own and the mechanisms it needs. 0.5.0.
+- **`presets.liveWidget(options)`**: an inline widget whose egress stays closed. Its options are
+  a widget's less `egress` (a JavaScript caller passing one gets a `ConfigError`): no option opens
+  its network. It declares `readData` and `subscribeData`, each gated `consent` and a rate (120 and
+  60 a minute). In domain isolation it sets `egress.libraries`. A host adds what any widget may
+  have (a link, a copy button) or changes the data capabilities' gates, as for any capability.
+- **Porthole's libraries (`egress.libraries`)**: Chart.js 4.5.1 and D3 7.9.0
+  (`VENDORED_LIBRARIES`), copied byte for byte from their npm packages (exact devDependencies, so
+  the lockfile fixes the bytes) into a generated module (`scripts/vendor-libraries.ts`; P075: no
+  file beside a module), with their licenses (MIT, ISC). `/server` serves them on every content
+  origin at `/__porthole/lib/<name>@<version>/<file>` (the jsDelivr layout agents know), inside
+  its reserved prefix: no ticket or cookie, `cache-control: immutable`, `nosniff`,
+  `cross-origin-resource-policy: same-site`, GET and HEAD only, and nothing else under the path.
+  A released path keeps its bytes; a new version is a new path beside it. The frame's CSP gets
+  `script-src <content origin>/__porthole/lib/` per content origin: path-limited, so P022 holds
+  (no `'self'`: nothing else served on the origin runs as a script). Domain isolation only; the
+  manual gives a `<script>` line for each, and the chart topic says they are there.
+- **The `consent` gate**: the host's `consent(request)` (`HostOptions.consent`, React's
+  `PortholeProvider`/`PortholeFrame` `consent`) is asked once per display before its first
+  consent-gated call, the request being that call; Porthole keeps the answer for the display's life
+  (`onceConsent`, across its frames); the host remembers it where it likes (per viewer, per widget).
+  A no refuses every such call (`denied`) and no handler runs; no `consent` function refuses them
+  (`no-consent`, fail closed); a consent function that throws is a no for that call and is asked
+  again at the next. It comes after the rate and gesture gates and before `confirm`.
+- **`subscribeData`** speaks MCP's own subscriptions, which MCP Apps doesn't list: the view is the
+  host's MCP client, as it is for `resources/read`. `resources/subscribe` and
+  `resources/unsubscribe` with `{ uri }`, and the host's `notifications/resources/updated` with
+  `{ uri }`, after which the view reads it again. The host offers it as MCP does,
+  `hostCapabilities.serverResources: { subscribe: true }` (the official App SDK's schema keeps the
+  field open, so its views still connect). The handler gets `changed(result?)` and an `AbortSignal`
+  that ends with the subscription, the frame or the display; a `result` passed to `changed` answers
+  the content's next read without the read handler. One subscription per URI per frame;
+  unsubscribing is never gated.
+- **The host's cache (`HostOptions.cached`, `DataCache`)**: a read of a resource the content
+  subscribes to is answered at once from it, after the gates, marked
+  `_meta["porthole/stale"]: true` (`STALE_META`); the fresh read follows in the background, is kept
+  for the content's next read, and is announced as an update. A read of an unsubscribed resource
+  never gets the cache: no update would follow it.
+- **Shell globals**: `readData(uri)` (the first content's value: JSON parsed when its MIME type says
+  JSON, else its text) and `subscribeData(uri, onData, onError)` (onData(value, { stale, uri }) now
+  and at every change; a read at a time, one more if it changed meanwhile; one subscription per URI
+  however many follow it; returns a stop function).
+- **No navigation to another document, in every shell**: the shell cancels each navigation the
+  frame starts to another document (the Navigation API's `navigate` event, read through the
+  platform's own getters kept at document start, its listener the first), before any request. It
+  works where the frame has an origin of its own (served: domain isolation, MCP Apps proxies),
+  which is where the page's `frame-src` must let frames in. An opaque frame gets no navigate
+  events (the spec disables them for opaque origins; measured on Chromium: `navigation` is there,
+  with no entries, and `location.href` goes on), so there `frame-src` stays the wall (P033).
+  Same-document ones (an anchor) and reloads (the same address, on the frame's own origin) go on.
+  Not only for live widgets: it is cheap and breaks nothing a shell's content did on purpose (links
+  already open outside through `openLink`, P030; a page that reloads itself still does).
+
+**Why.**
+- A widget that reads the viewer's data must have no way out but its host: Claude's dashboards
+  take the same rule (no fetch, no external scripts; libraries from the host). The default egress
+  is already closed (P022); what a live widget adds is that no option can open it, and libraries
+  that don't need a CDN, whose request paths are a channel out (P048).
+- Two leaks Ferry measured in its own widget shell (2026-10-11): WebRTC gathering candidates (here
+  since P006: `webrtc 'block'` and the shell's removal, probe `3.webrtc`, a child frame can't get the
+  constructors: `4.*`), and a frame navigating itself away with data in the URL. Porthole's wall
+  for the second is the embedding page's `frame-src` (P006, P033), but a page that frames served
+  content must allow the content origins, so **a served frame could navigate itself to another
+  content origin, with data in the URL** (measured on Chromium 153, WebKit 26.6 and Firefox 155:
+  under the `navigate-guard` negative control, every one of `leak/served/live.spec.ts`' sibling
+  navigations reaches the harness's server, the display restarting each time; with the guard, none
+  does). On a host whose content origins include
+  a url-mode app relayed to someone's machine (a dev server's preview), that is a way out. The
+  guard closes it in the frame, where it starts.
+- Consent is the host's policy (PRINCIPLE 8), its gate is mechanism (PRINCIPLE 4): one answer per
+  display, asked lazily, so a widget that never reads data never asks.
+
+**Rejected.**
+- A config field (`network: "none"`) or a flag on `inlineWidget`: a preset is the knob-free path
+  (PRINCIPLE 8), the CSP needs nothing new, and the guarantee is that no option opens egress.
+- `consent` among `readData`'s default gates: it would refuse every call of hosts that declare
+  `readData` today (MCP Apps views proxying to a server). The live widget preset has it.
+- Libraries for opaque live widgets from the host app's own origin: a `srcdoc` frame inherits the
+  embedding page's policy (nonce pages refuse them, P054), and it adds a second origin to name.
+  Opaque live widgets get no libraries; the manual says so.
+- A third library. Plotly and ECharts are 1–3 MB; Mermaid draws diagrams, not data; a Markdown
+  renderer would turn the host's data into HTML in a frame that holds the viewer's data (injection);
+  a Chart.js date adapter is for time axes D3 already covers.
+- Data inside `notifications/resources/updated`: MCP's notification carries the URI only; the kept
+  fresh result gives the same one round trip and keeps the wire standard.
+- Serving the libraries only to configs that set `egress.libraries`: the files are public, fixed
+  and same-site only; a server that knows which config a request is for would need a ticket.
+
+**Residual, documented (ADOPTING § Live widgets).**
+- A frame can `postMessage` any frame on its page (`top.frames[i]`), and nothing in it can stop
+  that. A live widget on a page with frames that reach the network (a url-mode app, an `anyHttps`
+  display) can hand them what it read. Hosts keep live widgets off such pages.
+- An opaque frame on a page that also frames content origins (one `frame-src` for every kind) can
+  navigate itself to them: the guard has no events there. Show live widgets served, or keep opaque
+  ones on pages whose `frame-src` is `'none'` (no content domain: `defineDisplays` gives every kind
+  one or the other).
+- An engine without the Navigation API falls back to `frame-src`: an outside site stays shut, other
+  content origins don't.
+- A clean address opened as a tab has no host, so no data.
+- Upstream: MCP Apps lists no resource subscriptions; to propose `serverResources.subscribe` and
+  the three methods to the spec (ext-apps), with this entry as the evidence.
+
+**Tested.** `test/live-data.test.ts` (the preset, its CSP, validation; consent: once, a no kept,
+fail closed, a throw asked again, invalid calls before consent, rates; MCP's subscribe, update,
+read again, a pushed result, unsubscribe, close, refusal, the cache stale then fresh, only after
+consent, only when subscribed); `test/libraries.test.ts` (the module is npm's bytes, pinned, with
+licenses; served without a ticket, immutable, nothing else under the path); `test/agreement.test.ts`
+(two live widget cases: the libraries taught exactly where the CSP loads them; consent's words
+exactly where the gate is); `leak/served/live.spec.ts` (a served live widget on a page with
+Porthole's embedder CSP: fetch, no-cors fetch, XHR, beacon, WebSocket, EventSource, an image, a CSS
+image, a stylesheet and an external script reach no oracle (no request, no connection); no RTC
+constructor, no peer, no STUN at a UDP oracle, no child frame; `location`, `replace`,
+`open(…, "_self")` and `navigation.navigate` to another content origin and to an outside site send
+no request (the document is kept, or the display started again); Chart.js and D3 load and draw; data read and followed, consent
+asked once; the cache first, stale, then fresh; a viewer's no refuses both), passing on
+Chromium, WebKit and Firefox. Negative control: `navigate-guard` (also applied to the served
+harness's documents) → the four navigation cases on all three engines (each sibling navigation
+reaches the harness's server). Measured on WebKit: `navigation.navigate()` to a site the page's
+`frame-src` blocks fires no navigate event (the block comes first), and WebKit then replaces the
+frame's document, so the display is started again (P031); nothing reaches the site, and the case
+accepts either outcome, as the opaque probes do. The opaque probes `5.*` keep failing under
+`embedder-csp` with the guard in place (measured, Chromium): their wall is the page's `frame-src`.
+**Revisit when** MCP Apps specifies subscriptions (follow it), an engine Porthole supports lacks the
+Navigation API, a host needs libraries in opaque frames, or agents' live widgets reach for a library
+the two don't cover.

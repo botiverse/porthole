@@ -16,6 +16,7 @@ export const CAPABILITY_NAMES = [
   "downloadFile",
   "callTool",
   "readData",
+  "subscribeData",
   "setModelContext",
   "reportError",
   "resize",
@@ -34,10 +35,15 @@ export type CapabilityName = (typeof CAPABILITY_NAMES)[number];
  * - `confirm`: the host's `confirm` function shows a person the call's whole effect, and the call
  *   goes only if they accept. No `confirm` function means the call is refused (fail closed).
  * - `rateLimit`: at most `perMinute` calls per display per minute; the rest are refused.
+ * - `consent` (P079): the host's `consent` function is asked once per display, before the first
+ *   call of any of its consent-gated capabilities, whether this content may have them (a viewer
+ *   allowing a widget to read their data). A no refuses every such call for the display's life;
+ *   no `consent` function refuses them all (fail closed).
  */
 export type Gate =
   | "user-activation"
   | "confirm"
+  | "consent"
   | { readonly rateLimit: { readonly perMinute: number } };
 
 export interface CapabilitySpec {
@@ -86,7 +92,19 @@ export const CAPABILITIES = {
   readData: {
     defaultGates: [rate(120)],
     served: "handler",
+    global: "readData",
     request: { method: "resources/read", sdk: "app.readServerResource" },
+  },
+  /**
+   * Live data (P079): content subscribes to a resource and the host tells it when it changed
+   * (MCP `resources/subscribe`, `resources/unsubscribe`, `notifications/resources/updated`);
+   * it then reads it again (`readData`, which it needs). The App SDK has no method for it.
+   */
+  subscribeData: {
+    defaultGates: [rate(60)],
+    served: "handler",
+    global: "subscribeData",
+    request: { method: "resources/subscribe" },
   },
   setModelContext: {
     defaultGates: [rate(30)],
@@ -124,6 +142,7 @@ export interface CapabilityArgs {
     readonly arguments: Readonly<Record<string, unknown>>;
   };
   readonly readData: { readonly uri: string };
+  readonly subscribeData: { readonly uri: string };
   readonly setModelContext: {
     readonly content?: readonly unknown[];
     readonly structuredContent?: Readonly<Record<string, unknown>>;
@@ -144,7 +163,9 @@ export interface CapabilityResults {
   /** Whether the download started. */
   readonly downloadFile: boolean;
   readonly callTool: unknown;
+  /** An MCP `resources/read` result (`{ contents }`), as the host answers it. */
   readonly readData: unknown;
+  readonly subscribeData: undefined;
   readonly setModelContext: undefined;
   readonly reportError: undefined;
   readonly resize: undefined;

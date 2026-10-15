@@ -8,6 +8,9 @@ import {
   declaredCapabilities,
   effectiveGates,
   egressOrigins,
+  LIBRARY_PATH,
+  VENDORED_LIBRARIES,
+  libraryPath,
   presets,
   type CapabilityName,
   type CompiledConfig,
@@ -15,6 +18,7 @@ import {
 } from "../src/index.ts";
 import { SHELL_RUNTIME } from "../src/shell/runtime.ts";
 import { sizeWords } from "../src/guide/limits.ts";
+import { librarySources } from "../src/compile/policy.ts";
 
 /**
  * The agreement test (P003, OBJECTIVE 2): for every preset, the CSP, the shell's wiring and the
@@ -29,6 +33,7 @@ const ALL_HANDLED: PortholeConfig["capabilities"] = {
   downloadFile: {},
   callTool: {},
   readData: {},
+  subscribeData: {},
   setModelContext: {},
 };
 
@@ -88,6 +93,12 @@ const CASES: Record<string, PortholeConfig> = {
     isolation: "domain",
     contentOrigins: ["https://*.example-usercontent.com"],
   }),
+  "live widget, served (P079)": presets.liveWidget({
+    isolation: "domain",
+    contentOrigins: ["https://*.example-usercontent.com"],
+    capabilities: { openLink: {}, copyText: {} },
+  }),
+  "live widget, opaque: no libraries": presets.liveWidget(),
   "MCP Apps view": presets.mcpApp({
     capabilities: { ...ALL_HANDLED, copyText: {}, annotate: {} },
     egress: { connect: ["https://api.example.com"], img: ["https://images.example.com"] },
@@ -117,11 +128,14 @@ const originsIn = (text: string): Set<string> =>
     ),
   );
 
-/** The host sources a CSP lists (not keywords or schemes). */
+/**
+ * The host sources a CSP lists (not keywords or schemes), less Porthole's libraries' path on the
+ * content origins (P079): the manual teaches those as paths on the frame's own address.
+ */
 const cspOrigins = (compiled: CompiledConfig): Set<string> =>
   new Set(
     compiled.cspDirectives.flatMap(([, ...sources]) =>
-      sources.filter((source) => source.includes("://")),
+      sources.filter((source) => source.includes("://") && !source.endsWith(LIBRARY_PATH)),
     ),
   );
 
@@ -131,7 +145,8 @@ const ENTRY_PREFIXES: { readonly [N in Exclude<CapabilityName, "resize">]: reado
   openLink: ["- openLink(", "- Links:"],
   downloadFile: ["- Downloads:"],
   callTool: ["- Tools:"],
-  readData: ["- Data:"],
+  readData: ["- readData(", "- Data:"],
+  subscribeData: ["- subscribeData(", "- Live data:"],
   setModelContext: ["- Context for the agent:"],
   reportError: ["- Errors:"],
   copyText: ["- copyText(", "- Copying:"],
@@ -202,6 +217,9 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
       expect(entry?.includes("unless they confirm"), `${name}: confirm`).toBe(
         gates.includes("confirm"),
       );
+      expect(entry?.includes("asks the person to allow it"), `${name}: consent`).toBe(
+        gates.includes("consent"),
+      );
       expect(entry?.includes("from a click"), `${name}: user activation`).toBe(
         gates.includes("user-activation"),
       );
@@ -245,13 +263,24 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
         ?.slice(1)
         .filter((source) => source.includes("://")) ?? [];
     expect(directive("connect-src")).toEqual(egressOrigins(config, "connect"));
-    expect(directive("script-src")).toEqual(egressOrigins(config, "script"));
+    expect(directive("script-src")).toEqual([
+      ...egressOrigins(config, "script"),
+      ...librarySources(config),
+    ]);
     expect(directive("style-src")).toEqual(egressOrigins(config, "style"));
     expect(directive("img-src")).toEqual(egressOrigins(config, "img"));
     expect(directive("font-src")).toEqual(egressOrigins(config, "font"));
     expect(directive("media-src")).toEqual(egressOrigins(config, "media"));
     expect(directive("frame-src")).toEqual([]);
     expect(compiled.csp).not.toContain("'self'");
+  });
+
+  test("the manual teaches Porthole's libraries exactly where the CSP loads them (P079)", () => {
+    const served = librarySources(config).length > 0;
+    for (const library of VENDORED_LIBRARIES) {
+      expect(text.includes(`<script src="${libraryPath(library)}">`), library.name).toBe(served);
+    }
+    expect(text.includes(LIBRARY_PATH)).toBe(served);
   });
 
   test("the manual states the config's limits and theme event", () => {

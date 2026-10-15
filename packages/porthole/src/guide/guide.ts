@@ -11,8 +11,10 @@ import {
   declaredCapabilities,
   effectiveGates,
   egressOrigins,
+  librarySources,
   type EgressKind,
 } from "../compile/policy.ts";
+import { VENDORED_LIBRARIES, libraryPath } from "../libraries/libraries.ts";
 import { shellPlan } from "../shell/plan.ts";
 import { themeDefault } from "../theme/variables.ts";
 import { GUIDE_EXAMPLES } from "./examples.ts";
@@ -103,6 +105,9 @@ const sourcesFor = (config: PortholeConfig, kind: EgressKind): string[] => [
   ...egressOrigins(config, kind),
 ];
 
+/** Whether Porthole's own libraries load in the frame (`egress.libraries`, served, P079). */
+const servesLibraries = (config: PortholeConfig): boolean => librarySources(config).length > 0;
+
 /** What content may load, in prose, from the same origins the CSP lists. */
 function network(config: PortholeConfig): string {
   const kinds: EgressKind[] = ["script", "style", "font", "img", "media", "connect"];
@@ -110,7 +115,13 @@ function network(config: PortholeConfig): string {
     .map((kind) => [kind, sourcesFor(config, kind)] as const)
     .filter(([, origins]) => origins.length > 0);
   if (open.length === 0) {
-    return "Network: none. Nothing loads from outside (no scripts, styles, fonts, images or data from any server) and any fetch fails, so write everything inline: SVG and CSS draw charts well.";
+    // A live widget's data comes from the app alone (P079), and its scripts from Porthole's copies.
+    const data = declaredCapabilities(config).includes("readData")
+      ? " Your data comes only from the app (readData)."
+      : "";
+    return servesLibraries(config)
+      ? `Network: none. Nothing loads from outside (no scripts, styles, fonts, images or data from any server) and any fetch fails, so write everything inline; the only scripts that load are the libraries below, from this frame's own address.${data}`
+      : `Network: none. Nothing loads from outside (no scripts, styles, fonts, images or data from any server) and any fetch fails, so write everything inline: SVG and CSS draw charts well.${data}`;
   }
   // Origins that serve the same kinds go together: "scripts, styles and data from a, b; fonts from c".
   const byOrigin = new Map<string, EgressKind[]>();
@@ -168,6 +179,24 @@ function ownCdns(config: PortholeConfig): string[] {
   return said;
 }
 
+/**
+ * Porthole's own libraries (`egress.libraries`, P079): a script line for each, at its path on the
+ * frame's own origin, the only scripts that load where egress is otherwise closed.
+ */
+function ownLibraries(config: PortholeConfig): string[] {
+  if (!servesLibraries(config)) {
+    return [];
+  }
+  return [
+    "",
+    "Libraries, served from this frame's own address (pinned; nothing else loads):",
+    ...VENDORED_LIBRARIES.map(
+      (library) =>
+        `- ${library.title} ${library.version} (${library.use}): <script src="${libraryPath(library)}"></script>, then window.${library.global}.`,
+    ),
+  ];
+}
+
 function widget(c: Context): string {
   const { config, noun } = c;
   const { layout, limits } = config;
@@ -217,6 +246,7 @@ function widget(c: Context): string {
       ? "\nLibraries: pin an exact version at least two weeks old (chart.js@4.4.1 in its URL), never @latest or a range, so the code can't be swapped under you and draws the same every time."
       : null,
     ...ownCdns(config),
+    ...ownLibraries(config),
     "",
     themeless
       ? `Colors: these variables hold the app's palette; use them, or colors of your own. Give the ${noun} its own background.`
@@ -297,9 +327,11 @@ function chart(c: Context): string {
   const sequential = Object.keys(config.theme.variables).filter((name) =>
     /^--color-chart-seq-\d+$/u.test(name),
   );
-  const libraries = loadsScripts(config)
-    ? `Libraries (Chart.js, ECharts, d3) draw in px too, in a box with a set height (Chart.js responsive: true, maintainAspectRatio: false). They don't read CSS variables: pass in getComputedStyle(document.documentElement).getPropertyValue("${categorical[0] ?? "--color-text-primary"}").trim()${config.theme.documents === "never" ? "" : `, redraw on window "${config.theme.event}"`}, and override their palette and white background.`
-    : "No chart library loads here: draw the SVG yourself, from a script, as below.";
+  const libraries = servesLibraries(config)
+    ? `${VENDORED_LIBRARIES.map((library) => library.title).join(" and ")} load from this frame's own address (topic widget, Libraries) and draw in px too, in a box with a set height (Chart.js responsive: true, maintainAspectRatio: false). They don't read CSS variables: pass in getComputedStyle(document.documentElement).getPropertyValue("${categorical[0] ?? "--color-text-primary"}").trim()${config.theme.documents === "never" ? "" : `, redraw on window "${config.theme.event}"`}, and override their palette and white background. Or draw the SVG yourself, from a script, as below.`
+    : loadsScripts(config)
+      ? `Libraries (Chart.js, ECharts, d3) draw in px too, in a box with a set height (Chart.js responsive: true, maintainAspectRatio: false). They don't read CSS variables: pass in getComputedStyle(document.documentElement).getPropertyValue("${categorical[0] ?? "--color-text-primary"}").trim()${config.theme.documents === "never" ? "" : `, redraw on window "${config.theme.event}"`}, and override their palette and white background.`
+      : "No chart library loads here: draw the SVG yourself, from a script, as below.";
   return lines(
     `# Charts (a chart is a ${c.noun})`,
     "",
@@ -348,6 +380,11 @@ function chart(c: Context): string {
 /** How a capability's gates read to the author: one sentence each. */
 function gateWords(gates: readonly Gate[], effect: string): string {
   const sentences: string[] = [];
+  if (gates.includes("consent")) {
+    sentences.push(
+      "The first data call asks the person to allow it; if they don't, every one fails (show that the data isn't allowed, not an error).",
+    );
+  }
   if (gates.includes("confirm")) {
     sentences.push(
       `The app shows the person ${effect} first, and nothing happens unless they confirm.`,
@@ -378,8 +415,14 @@ const ENTRIES: { readonly [N in CapabilityName]: (c: Context, gates: readonly Ga
       `- Downloads: the MCP Apps request ui/download-file (with the App SDK, app.downloadFile). ${gateWords(gates, "the file")}`,
     callTool: (_c, gates) =>
       `- Tools: the MCP Apps request tools/call (with the App SDK, app.callServerTool). ${gateWords(gates, "the call")}`,
-    readData: (_c, gates) =>
-      `- Data: the MCP Apps request resources/read (with the App SDK, app.readServerResource). ${gateWords(gates, "the request")}`,
+    readData: (c, gates) =>
+      c.global("readData")
+        ? `- readData(uri): reads the app's data at uri (a resource the app names), as the person viewing the ${c.noun} may see it, and returns a promise of it: JSON parsed, else text. ${gateWords(gates, "the request")} It rejects when the app refuses or fails: draw the ${c.noun} without that data, saying why.`
+        : `- Data: the MCP Apps request resources/read (with the App SDK, app.readServerResource). ${gateWords(gates, "the request")}`,
+    subscribeData: (c, gates) =>
+      c.global("subscribeData")
+        ? `- subscribeData(uri, onData, onError): keeps the ${c.noun} current. It calls onData(value, { stale }) with the data at uri now, and again each time it changes; the first value may be the app's last copy (stale: true), with the current one right after. It returns a function that stops it. onError(error) hears a refusal. ${gateWords(gates, "the request")} Draw from onData every time; don't poll.`
+        : `- Live data: the MCP request resources/subscribe with { uri }; the app then sends notifications/resources/updated with { uri } each time it changes: read it again (resources/read). resources/unsubscribe stops it. ${gateWords(gates, "the request")}`,
     setModelContext: (_c, gates) =>
       `- Context for the agent: the MCP Apps request ui/update-model-context (with the App SDK, app.updateModelContext). ${gateWords(gates, "it")}`,
     copyText: (c, gates) =>
@@ -462,7 +505,9 @@ export function generateToolDescription(config: PortholeConfig): string {
     passive.length === 0 ? "" : `${kindsInWords(passive)} from ${ANY_HTTPS_SITE}`;
   const net =
     origins.length === 0 && fromAnywhere === ""
-      ? "with no network (nothing loads from outside)"
+      ? servesLibraries(config)
+        ? `with no network (nothing loads from outside; ${VENDORED_LIBRARIES.map((library) => library.title).join(" and ")} load from the app)`
+        : "with no network (nothing loads from outside)"
       : origins.length === 0
         ? `loading only ${fromAnywhere}`
         : `loading only from ${origins.join(", ")}${fromAnywhere === "" ? "" : `, and ${fromAnywhere}`}`;
@@ -476,6 +521,11 @@ export function generateToolDescription(config: PortholeConfig): string {
     }
     if (spec.global === "openLink") {
       return ["openLink(url) asks the person to open a link."];
+    }
+    if (spec.global === "readData") {
+      return [
+        `readData(uri)${c.global("subscribeData") ? " and subscribeData(uri, onData)" : ""} read the app's data, as the person viewing it may see it.`,
+      ];
     }
     return [];
   });

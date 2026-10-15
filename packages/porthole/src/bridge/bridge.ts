@@ -10,6 +10,7 @@ import { parseReport } from "../annotate/validate.ts";
 import type { PortholeConfig } from "../config/schema.ts";
 import { effectiveGates } from "../compile/policy.ts";
 import type {
+  CallOptions,
   CallOutcome,
   CapabilityHandler,
   CapabilityHandlers,
@@ -17,6 +18,8 @@ import type {
   ConfirmAnswer,
   ConfirmDisplay,
   ConfirmRequest,
+  Consent,
+  DataCache,
   HostFunctionBridge,
   Refusal,
 } from "./types.ts";
@@ -24,7 +27,8 @@ import type {
 /**
  * The host-function bridge: every capability call from a frame passes here, and nowhere else
  * reaches a host handler. In order: declared → arguments well formed → not muted → within its
- * rate → a user gesture, if gated so → a person's confirmation, if gated so → the handler.
+ * rate → a user gesture, if gated so → the viewer's consent, if gated so → a person's
+ * confirmation, if gated so → the handler (or, for a stale-allowed read, the host's cache).
  */
 
 export type BridgeEvent =
@@ -39,6 +43,13 @@ export interface BridgeOptions {
   readonly display: ConfirmDisplay;
   readonly handlers: CapabilityHandlers;
   readonly confirm?: Confirm;
+  /**
+   * Asked before a `consent`-gated call (P079). The host's, made to ask once per display by the
+   * caller (`createHost` keeps the answer across the display's frames).
+   */
+  readonly consent?: Consent;
+  /** The host's cache, for reads that may be answered stale (`CallOptions.stale`, P079). */
+  readonly cached?: DataCache;
   /** Whether the embedding page has user activation now; undefined where it can't tell. */
   readonly userActivation?: () => boolean | undefined;
   readonly onEvent: (event: BridgeEvent) => void;
@@ -70,6 +81,12 @@ export function linkTarget(value: unknown): string | null {
     return null;
   }
   return url.href;
+}
+
+/** A resource's URI, as `resources/read` and `resources/subscribe` carry it. */
+function resourceUri(args: unknown): { uri: string } | null {
+  const uri = isRecord(args) ? args.uri : undefined;
+  return typeof uri === "string" && uri !== "" && uri.length <= MAX_URL ? { uri } : null;
 }
 
 type Validator<N extends CapabilityName> = (
@@ -108,10 +125,8 @@ const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
     const given = args.arguments ?? {};
     return isRecord(given) ? { name: args.name, arguments: given } : null;
   },
-  readData: (args) => {
-    const uri = isRecord(args) ? args.uri : undefined;
-    return typeof uri === "string" && uri !== "" && uri.length <= MAX_URL ? { uri } : null;
-  },
+  readData: (args) => resourceUri(args),
+  subscribeData: (args) => resourceUri(args),
   setModelContext: (args) => {
     if (!isRecord(args)) {
       return null;
@@ -157,6 +172,26 @@ const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
   },
 };
 
+/**
+ * The host's `consent`, asked once (P079): the first call asks, every later one gets that answer,
+ * for as long as the returned function is kept (`createHost` keeps one per display). A consent
+ * function that fails is a no for that call, and is asked again at the next.
+ */
+export function onceConsent(consent: Consent): Consent {
+  let answer: Promise<boolean> | null = null;
+  return (request) =>
+    (answer ??= Promise.resolve()
+      .then(() => consent(request))
+      .then(
+        // Only a real yes: anything else a host's function gives is a no (fail closed).
+        (allowed: unknown) => allowed === true,
+        () => {
+          answer = null;
+          return false;
+        },
+      ));
+}
+
 export function createBridge(options: BridgeOptions): HostFunctionBridge {
   const { config, display, handlers, onEvent } = options;
   const now = options.now ?? (() => Date.now());
@@ -191,7 +226,7 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
     async call<N extends CapabilityName>(
       capability: N,
       raw: unknown,
-      callOptions?: { readonly userActivated?: boolean },
+      callOptions?: CallOptions,
     ): Promise<CallOutcome<CapabilityResults[N]>> {
       type Result = CapabilityResults[N];
       if (config.capabilities[capability] === undefined) {
@@ -217,10 +252,30 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
           return refuse<Result>(capability, "no-user-activation");
         }
       }
+      if (gates.includes("consent")) {
+        if (options.consent === undefined) {
+          return refuse<Result>(capability, "no-consent");
+        }
+        let allowed = false;
+        try {
+          const answer: unknown = await options.consent({
+            capability,
+            args,
+            display,
+          } as ConfirmRequest);
+          allowed = answer === true;
+        } catch {
+          allowed = false;
+        }
+        if (!allowed) {
+          return refuse<Result>(capability, "denied");
+        }
+      }
       // The effect, run once: when the person's "yes" calls `proceed` (inside its own click, so an
       // effect that needs a gesture gets one), or after `confirm` resolves accepted.
       let effect: Promise<CallOutcome<Result>> | null = null;
-      const run = (): Promise<CallOutcome<Result>> => (effect ??= perform(capability, args));
+      const run = (): Promise<CallOutcome<Result>> =>
+        (effect ??= perform(capability, args, callOptions));
       if (confirms) {
         if (options.confirm === undefined) {
           return refuse<Result>(capability, "no-confirm");
@@ -255,6 +310,7 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
   async function perform<N extends CapabilityName>(
     capability: N,
     args: CapabilityArgs[N],
+    callOptions: CallOptions | undefined,
   ): Promise<CallOutcome<CapabilityResults[N]>> {
     type Result = CapabilityResults[N];
     {
@@ -273,13 +329,29 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
       if (handler === undefined) {
         return refuse<Result>(capability, "not-declared");
       }
+      const context = { displayId: display.id, title: display.title, capability };
+      // A read the content subscribes to may be answered from the host's cache, marked stale; the
+      // fresh one follows as an update (the adapter asks for it). A cache that fails is no answer.
+      if (capability === "readData" && callOptions?.stale === true && options.cached) {
+        try {
+          const cached = await options.cached(args as CapabilityArgs["readData"], context);
+          if (cached !== undefined) {
+            return { ok: true, value: cached as Result, stale: true };
+          }
+        } catch {
+          // Read it fresh instead.
+        }
+      }
+      const subscription = callOptions?.subscription;
+      if (capability === "subscribeData" && subscription === undefined) {
+        return refuse<Result>(capability, "invalid");
+      }
       try {
-        const value = await handler(args, {
-          displayId: display.id,
-          title: display.title,
-          capability,
-        });
-        return { ok: true, value };
+        const value = await (handler as (args: unknown, context: unknown) => unknown)(
+          args,
+          capability === "subscribeData" ? { ...context, ...subscription } : context,
+        );
+        return { ok: true, value: value as Result };
       } catch (error) {
         return refuse<Result>(
           capability,

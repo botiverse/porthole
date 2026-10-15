@@ -1,5 +1,6 @@
 import { CAPABILITIES, type CapabilityName, type Gate } from "../config/capabilities.ts";
 import type { PortholeConfig } from "../config/schema.ts";
+import { LIBRARY_PATH } from "../libraries/libraries.ts";
 
 /**
  * The frame's policies, derived from the config: its CSP (in the shell's `<meta>` for opaque
@@ -46,6 +47,16 @@ export function allEgressOrigins(config: PortholeConfig): string[] {
   return unique(kinds.flatMap((kind) => egressOrigins(config, kind)));
 }
 
+/**
+ * Where Porthole's vendored libraries load from (`egress.libraries`, P079): their path on the
+ * content origins, so the frame's own, path-limited (nothing else served there runs as a script).
+ */
+export function librarySources(config: PortholeConfig): string[] {
+  return config.egress.libraries === true && config.isolation === "domain"
+    ? config.contentOrigins.map((origin) => `${origin}${LIBRARY_PATH}`)
+    : [];
+}
+
 const list = (sources: readonly string[]): string[] =>
   sources.length === 0 ? ["'none'"] : [...sources];
 
@@ -65,7 +76,14 @@ export function frameCspDirectives(config: PortholeConfig): CspDirective[] {
   const https = (kind: "img" | "media" | "font") => (anyHttps(config, kind) ? ["https:"] : []);
   return [
     ["default-src", "'none'"],
-    ["script-src", "'unsafe-inline'", "'unsafe-eval'", "blob:", ...origins("script")],
+    [
+      "script-src",
+      "'unsafe-inline'",
+      "'unsafe-eval'",
+      "blob:",
+      ...origins("script"),
+      ...librarySources(config),
+    ],
     ["style-src", "'unsafe-inline'", ...origins("style")],
     ["font-src", "data:", ...https("font"), ...origins("font")],
     ["img-src", "data:", "blob:", ...https("img"), ...origins("img")],

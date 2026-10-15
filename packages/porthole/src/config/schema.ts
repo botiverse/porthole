@@ -67,6 +67,13 @@ export interface EgressConfig {
    * address and a visit signal reach any site, and data can leave in the URL.
    */
   readonly anyHttps?: readonly PassiveKind[];
+  /**
+   * Porthole's own copies of a few libraries (`VENDORED_LIBRARIES`: Chart.js, D3), served from the
+   * frame's own origin under `/__porthole/lib/` (P079): domain isolation only. They open no
+   * channel out: the requests reach the content server, which serves fixed files, so a display
+   * with no network of its own (`presets.liveWidget`) still draws charts.
+   */
+  readonly libraries?: boolean;
 }
 
 /** What `EgressConfig.anyHttps` may open: content that runs nothing (P059). */

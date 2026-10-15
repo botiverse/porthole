@@ -36,6 +36,7 @@ const PRESETS: Record<string, PortholeConfig> = {
   }),
   mcpApp: presets.mcpApp(),
   "mcpApp, every host function": presets.mcpApp({ capabilities: EVERY }),
+  "liveWidget, served": presets.liveWidget(SERVED),
 };
 
 const asDocument = (body: string) =>
@@ -57,6 +58,34 @@ for (const [preset, config] of Object.entries(PRESETS)) {
     }
   });
 }
+
+test("a live widget drawing the app's data with Porthole's Chart.js passes the check (P079)", async ({
+  browser,
+}) => {
+  test.setTimeout(60_000);
+  const report = await checkPage({
+    config: presets.liveWidget(SERVED),
+    content: `<div style="height: 160px"><canvas id="chart"></canvas></div>
+<p id="note"></p>
+<script src="/__porthole/lib/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+<script>
+  const chart = new Chart(document.getElementById("chart"), {
+    type: "bar",
+    data: { labels: ["open", "closed"], datasets: [{ data: [0, 0] }] },
+    options: { responsive: true, maintainAspectRatio: false, animation: false },
+  });
+  subscribeData("app://issues/counts", (counts) => {
+    chart.data.datasets[0].data = [counts.open, counts.closed];
+    chart.update();
+  }, () => { document.getElementById("note").textContent = "Not allowed to read the issues."; });
+</script>`,
+    driver: playwrightDriver(browser),
+    settleMs: 700,
+  });
+  expect(report.ok, report.text).toBe(true);
+  // The check is a viewer who said no: the call was made, and refused.
+  expect(report.runs[0]?.calls).toContainEqual({ capability: "subscribeData", outcome: "denied" });
+});
 
 const BROKEN = [
   "<style>.wide { width: 900px }</style><div class=wide>wide</div>",

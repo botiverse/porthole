@@ -51,7 +51,8 @@ compile/     compile.ts (config → CompiledConfig), policy.ts (CSP, sandbox, al
 shell/       runtime.ts (the in-frame script, a string), plan.ts (what it wires), document.ts
 guide/       guide.ts (manual + tool description), examples.ts
 theme/       variables.ts (the default vocabulary, resolveTheme)
-presets/     presets.ts (inlineWidget, artifact, mcpApp, url; LIBRARY_CDNS)
+presets/     presets.ts (inlineWidget, liveWidget, artifact, mcpApp, url; LIBRARY_CDNS)
+libraries/   libraries.ts (VENDORED_LIBRARIES), files.generated.ts (their bytes, P079)
 protocol/    adapter.ts (the adapter seam), mcp-apps.ts (method names, HostContext), jsonrpc.ts
 bridge/      types.ts (the host-function bridge)
 transport/   types.ts          platform/  types.ts          isolation/  types.ts
@@ -92,7 +93,7 @@ interface PortholeConfig {
   contentOrigins: string[];        // domain/external: where content is served from
   embedder: { frameSrc?: string[] };  // extra frames the embedding page shows
 }
-type Gate = "user-activation" | "confirm" | { rateLimit: { perMinute: number } };
+type Gate = "user-activation" | "confirm" | "consent" | { rateLimit: { perMinute: number } };
 ```
 
 `mode` and `isolation` select the mechanism; everything else is policy. There is
@@ -106,7 +107,8 @@ no `components` field (P015).
 | `openLink` | user-activation, confirm | handler | `openLink(url)` | `ui/open-link` (`app.openLink`) |
 | `downloadFile` | user-activation, confirm | handler | — | `ui/download-file` (`app.downloadFile`) |
 | `callTool` | confirm | handler | — | `tools/call` (`app.callServerTool`) |
-| `readData` | 120/min | handler | — | `resources/read` (`app.readServerResource`) |
+| `readData` | 120/min | handler | `readData(uri)` | `resources/read` (`app.readServerResource`) |
+| `subscribeData` | 60/min (needs `readData`) | handler (`changed`, `signal`) | `subscribeData(uri, onData, onError)` | `resources/subscribe`, `resources/unsubscribe`; the host's `notifications/resources/updated` (MCP's own; none in MCP Apps, P079) |
 | `setModelContext` | 30/min | handler | — | `ui/update-model-context` (`app.updateModelContext`) |
 | `reportError` | 10/min | event | (automatic) | `notifications/message`, level `error` |
 | `resize` | none | event | (automatic) | `ui/notifications/size-changed` |
@@ -117,7 +119,11 @@ Every preset declares only `resize` and `reportError` (they report to the host a
 carry nothing out); the host declares the rest. Gates are explained in P021: all
 must pass; `confirm` calls the host's `confirm` function and fails closed without
 one; `user-activation` is checked by the shell (advisory: it shares the content's
-realm) and by the host where the engine passes the gesture up.
+realm) and by the host where the engine passes the gesture up; `consent` asks the
+host's `consent` function once per display, before its first consent-gated call,
+and fails closed without one (P079). `presets.liveWidget` declares `readData` and
+`subscribeData` with `consent` and its rate, and keeps egress closed (no option opens
+it); served, it loads Porthole's libraries from its origin (`egress.libraries`).
 
 ## What the compiler derives
 
@@ -126,7 +132,8 @@ realm) and by the host where the engine passes the gesture up.
 - `csp` / `cspDirectives`: the frame's policy. `default-src 'none'`; scripts may be
   inline (agent content is inline), `'unsafe-eval'` (content is the agent's own script already,
   so eval adds no capability, and libraries content uses compile with it, WebAssembly too: P071),
-  plus `blob:` and the script origins; each other
+  plus `blob:` and the script origins (and, with `egress.libraries`, Porthole's library path on
+  the content origins, `<origin>/__porthole/lib/`, P079); each other
   kind opens only to its origins; `connect-src 'none'` unless something is
   declared; `frame-src`, `object-src`, `base-uri`, `form-action` all `'none'`;
   `webrtc 'block'`. Never `'self'` (P022). Empty in url mode.
@@ -724,6 +731,10 @@ absent.
 - **Inline widget** (`presets.inlineWidget`). The host has the HTML (the agent
   wrote it) and the shell draws it in an opaque frame, streamed as it is written.
   The phase-1 workhorse.
+- **Live widget** (`presets.liveWidget`, P079). An inline widget that shows the
+  host's data, current, as the viewer may see it: `readData` and `subscribeData`
+  behind the viewer's consent, no network of its own, and, served, Porthole's
+  Chart.js and D3 from its own origin.
 - **Artifact page** (`presets.artifact`). A whole document: written into an opaque
   frame by the shell where the host has it (the first host's "show an HTML file"),
   or served on its own origin (domain isolation), CSP in headers, versioned. It
@@ -786,7 +797,7 @@ closed like a strict host's (`leak/inherited-policy.spec.ts`).
 | 2 | images, CSS images, SVG `<image>`/`<use>`, media and posters, `input type=image`, stylesheets, `@import`, fonts, scripts, `import()`, workers, manifests, icons | CSP `img/media/font/style/script-src` = the allowlist only; `worker-src blob:` | `2.resources` (an allowed image as positive control) | — (the same CSP as item 1) |
 | 3 | WebRTC (ICE gathering reaches the network outside `connect-src`) | CSP `webrtc 'block'` **and** the shell removes every `RTC*`/`webkitRTC*` constructor, fixed in place, before content runs | `3.webrtc` (an unsandboxed peer connection as positive control: it sends STUN on both engines) | `webrtc` → `3.webrtc` (all three; Firefox's positive control needs `media.peerconnection.ice.loopback`, set in the suite's Firefox project, P035) |
 | 4 | a nested frame: a fresh realm where item 3's removal never happened | the shell drops frame-like elements (`iframe, frame, frameset, object, embed, portal, fencedframe`) synchronously wherever content connects a node (P030), and an observer removes any that arrive another way, in the document and every shadow root (`attachShadow` is wrapped so closed ones are reached too); documents are rendered inert and imported, never written; `document.open/write` throw; declarative shadow roots can't be built (P029); CSP `frame-src 'none'` | `4.light-dom`, `.sync-realm`, `.open-shadow`, `.closed-shadow`, `.shadow-nested`, `.declarative-shadow`, `.parse-html-unsafe`, `.domparser`, `.document-write`, `.plugins`, `.foreign-object`, `.template-clone`, `.static` (each: the child never runs, no STUN, no frame left) | `frame-guard,sync-guard` → light-dom, sync-realm, plugins, foreign-object, template-clone; `attach-shadow,sync-guard` → closed-shadow, shadow-nested; `declarative-shadow` → declarative-shadow; `parser-entry-points` → document-write (each on all three engines). Either guard alone is covered by the other. |
-| 5 | self-navigation out, with data in the URL (`location`, `replace`, `open(…, "_self")`, meta refresh, a link clicked past the shell, an SVG link), to the host's own origin, or to a `blob:`/`data:` document of its own (a fresh realm) | the **embedding page's** `frame-src` (`embedderCsp`: `'none'` for opaque content, P033; frames only, so the host's own workers are untouched, P038): a frame's own CSP cannot stop its own navigation; the shell sends link clicks out through `openLink` and drops refreshes (P030); a display whose frame navigates is started again, at most three times (P031) | `5.location`, `.replace`, `.open-self`, `.refresh`, `.anchor`, `.svg-link`, `.host-origin`, `.blob`, `.data` (no request reaches the canary or the host; a navigated document never runs: a witness origin hears nothing) | `embedder-csp` → location, replace, open-self, anchor, svg-link, blob, data, `6.remote-download` (all three; `.refresh` holds: the synchronous guard drops the refresh; Firefox also holds `.data` by itself, P035); `embedder-self` → `5.host-origin` |
+| 5 | self-navigation out, with data in the URL (`location`, `replace`, `open(…, "_self")`, meta refresh, a link clicked past the shell, an SVG link), to the host's own origin, or to a `blob:`/`data:` document of its own (a fresh realm) | the **embedding page's** `frame-src` (`embedderCsp`: `'none'` for opaque content, P033; frames only, so the host's own workers are untouched, P038): a frame's own CSP cannot stop its own navigation; the shell sends link clicks out through `openLink` and drops refreshes (P030); a display whose frame navigates is started again, at most three times (P031). A served frame's page must let it reach the content origins, so there the shell cancels every navigation the frame starts to another document (the Navigation API's `navigate` event; reloads and same-document ones go on, P079); an opaque frame gets no navigate events | `5.location`, `.replace`, `.open-self`, `.refresh`, `.anchor`, `.svg-link`, `.host-origin`, `.blob`, `.data` (no request reaches the canary or the host; a navigated document never runs: a witness origin hears nothing); served: `leak/served/live.spec.ts` (`location`, `replace`, `open(…, "_self")`, `navigation.navigate` to another content origin and to an outside site: no request reaches either, the document stays) | `embedder-csp` → location, replace, open-self, anchor, svg-link, blob, data, `6.remote-download` (all three; `.refresh` holds: the synchronous guard drops the refresh; Firefox also holds `.data` by itself, P035; the navigation guard has no events in these opaque frames); `embedder-self` → `5.host-origin`; `navigate-guard` → the four served navigation cases (each reaches another content origin) |
 | 6 | forms, popups, downloads, top and parent navigation | `sandbox="allow-scripts"` only; CSP `form-action 'none'` | `6.submit`, `.request-submit`, `.blank-form`, `.open`, `.blank-link`, `.download`, `.remote-download`, `.top`, `.top-link`, `.parent` | `sandbox` → open, blank-link, top, top-link, parent (all three), download (Chromium; WebKit and Firefox started no download either way). Form submits still fail: `form-action` is a second wall |
 | 7 | `<base>` hijack, plugins | CSP `base-uri 'none'`, `object-src 'none'`; plugins removed as frames | `7.base-plugins` | `base-uri` → `7.base-plugins` (all three); `frame-guard,sync-guard` too (plugins left in place) |
 | 8 | resource hints and speculation rules | CSP for those an engine governs (`prefetch`, `preload`, `modulepreload`); for the rest the shell drops `dns-prefetch`, `preconnect`, `prefetch`, `prerender` links, speculation rules, refreshes and `x-dns-prefetch-control` metas synchronously, and refuses changes that would make a connected link one (P030); `x-dns-prefetch-control: off` | `8.preconnect`, `.dns-prefetch`, `.prefetch`, `.prerender`, `.preload`, `.modulepreload`, `.speculation-rules` (each in markup, inserted, and switched on by attribute change; no request, no connection) | `sync-guard` → `8.preconnect` (WebKit: it preconnects synchronously, outside CSP). Measured: Chromium and Firefox opened no preconnect even unsandboxed. `dns-prefetch` has no out-of-band oracle here (DNS isn't observed); the element is refused before it connects |
@@ -808,6 +819,7 @@ official App SDK connects under the inline, artifact and MCP Apps presets
 | 11 | theming | `setTheme(scheme)`: the host sends the resolved variables (the host's live values over the defaults, P028), the shell sets them in place, with `data-theme` and `color-scheme`, then fires the config's theme event once, only when the scheme or a value changed (never at mount, never for a host re-sending what the content has, P061); the frame element's `color-scheme` follows | `11.theme-flip` (no event at mount or for the same scheme; in place: content state kept, the event fired once per flip, back and forth), `11.theme-host-values` (live values for standard and own names; undeclared names dropped) | — |
 | 11 | base styles | plain CSS at zero specificity (`:where`): native buttons, inputs, selects and text areas take the theme's borders, radius, colors and focus ring, 44 px tall (the manual's touch size); the manual says so for inline widgets | `11.base-styles` (themed; content's own CSS overrides them) | — |
 | 12 | `sendPrompt` | the shell refuses a call without a gesture; the host refuses one without its page's user activation, then asks `confirm` with the whole text; declines count toward a mute | `12.prompt-gesture-confirm` (a call on load is refused; a click asks; a no sends nothing; a yes reaches the handler), `12.raw-message` (a raw `ui/message` around the shell, no click: refused by the host), `12.mute`, `12.no-confirm` | `confirm-gate` → prompt-gesture-confirm, link, mute, no-confirm; `shell-gesture` → prompt-gesture-confirm, mute; `host-gesture` → raw-message |
+| 12 | live data (`readData`, `subscribeData`, P079) | MCP `resources/read`, `resources/subscribe`/`unsubscribe`, `notifications/resources/updated`; the `consent` gate asks the host once per display before the first data call (a no refuses them all; none refuses, fail closed), then the rate; a subscribed read may be answered from the host's cache, marked stale, the fresh one following as an update | `test/live-data.test.ts`; `leak/served/live.spec.ts` (read and followed, consent asked once; cached then fresh; a viewer's no refuses both, no handler runs) | — |
 | 12 | `openLink` | link clicks go out through `openLink`; the bridge takes http(s) only, without credentials in the URL; confirmed | `12.link` (a web link asks and opens; `javascript:` links and `openLink("javascript:…")` do nothing and are refused) | `link-scheme` → `12.link` |
 
 Measured: a click in the frame gives the host page user activation (it propagates to
@@ -822,6 +834,7 @@ for that to lapse and click with raw input.
 |------|-----------|-------|------------------|
 | The host's check (P050) | `authorize.check` after a ticket or cookie verifies, before anything is served; a deny is a 403 page saying `denied` and the host's code, and the display's `outcome` says so even after `loaded` | `leak/served/authorize.spec.ts`: a revoked subject's ticket (a page, an app); a framed app's next request and reload mid-session (Chromium, Firefox: WebKit keeps no framed cookie, P025); a framed page's next load; an app and a page in a tab | `authorize` → every case but WebKit's framed page (`session` either way) |
 | Url-mode delegation (P049) | `allow` from `permissions`, `""` by default | `leak/served/permissions.spec.ts`: full screen follows it on all three; clipboard writes on Chromium only (WebKit and Firefox let any frame write in a click) | `url-permissions` → the default case (all three) |
+| Porthole's libraries (P079) | `egress.libraries` (domain isolation; on in `presets.liveWidget`): `script-src <content origin>/__porthole/lib/`; `/server` serves Chart.js 4.5.1 and D3 7.9.0, npm's bytes, on every content origin, without a ticket, immutable | `test/libraries.test.ts` (npm's bytes, pinned, licenses; headers; nothing else under the path); `leak/served/live.spec.ts` (both load and draw in a live widget whose every other load and fetch reaches no oracle) | — (rows 1–2) |
 | Library CDNs for artifacts (P048, P078) | `egress: LIBRARY_CDNS` in the host's artifact config; closed by default (P022); Tailwind's, jQuery's and Plotly's own CDNs for scripts only | `leak/cdn.spec.ts`: opaque and served, a CDN library loads only when opened; another origin never; a stylesheet, an image and a fetch never reach the libraries' own CDNs | — (the CSP of rows 1–2) |
 | Workers (P044, P045) | no Node module in `/server`; D1 tickets taken by one `DELETE … RETURNING` | `test/workers.test.ts` (workerd, no `nodejs_compat`, real D1: once per ticket, a race, anonymous, a revocation, flat names, reserved namespaces) | — |
 

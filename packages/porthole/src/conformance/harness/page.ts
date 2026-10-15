@@ -84,6 +84,7 @@ function recorder(calls: RecordedCall[]): CapabilityHandlers {
     downloadFile: record("downloadFile", true),
     callTool: record("callTool", { content: [] }),
     readData: record("readData", { contents: [] }),
+    subscribeData: record("subscribeData", undefined),
     setModelContext: record("setModelContext", undefined),
     copyText: record("copyText", true),
   };

@@ -14,6 +14,7 @@ import {
   MCP_APPS_PROTOCOL_VERSION,
   type HostContext,
 } from "./mcp-apps.ts";
+import { liveData } from "./live-data.ts";
 
 /**
  * The core's adapter: the host side of the MCP Apps subset the shell speaks, which content using
@@ -56,7 +57,6 @@ const REQUESTS: Readonly<
     capability: "callTool",
     args: (params) => ({ name: params.name, arguments: params.arguments }),
   },
-  [M.readResource]: { capability: "readData", args: (params) => ({ uri: params.uri }) },
   [M.updateModelContext]: {
     capability: "setModelContext",
     args: (params) => ({ content: params.content, structuredContent: params.structuredContent }),
@@ -102,7 +102,8 @@ export function hostCapabilities(
     offered.serverTools = {};
   }
   if (declared("readData")) {
-    offered.serverResources = {};
+    // MCP's own flag for resources/subscribe (P079), in the field that mirrors MCP's capability.
+    offered.serverResources = declared("subscribeData") ? { subscribe: true } : {};
   }
   if (declared("setModelContext")) {
     offered.updateModelContext = { text: {} };
@@ -124,13 +125,15 @@ export const shellAdapter: ProtocolAdapter<ShellConnection> = {
     let sentWhole = false;
     let nextId = 1;
     const pending = new Map<JsonRpcId, (response: JsonRpcResponse) => void>();
-
     const respond = (
       id: JsonRpcId,
       body: { result: unknown } | { error: { code: number; message: string } },
     ) => transport.send({ jsonrpc: "2.0", id, ...body });
     const notify = (method: string, params: Record<string, unknown>) =>
       transport.send({ jsonrpc: "2.0", method, params });
+
+    // Live data (P079): reads, subscriptions and the host's updates, through the bridge.
+    const live = liveData(bridge, (uri) => notify(M.resourceUpdated, { uri }));
 
     const flush = () => {
       if (!initialized || closed || content === null || sentWhole) {
@@ -166,6 +169,34 @@ export const shellAdapter: ProtocolAdapter<ShellConnection> = {
       }
       if (request.method === M.requestDisplayMode) {
         respond(request.id, { result: { mode: "inline" } });
+        return;
+      }
+      if (request.method === M.readResource) {
+        const outcome = await live.read(params.uri);
+        if (!closed) {
+          respond(request.id, answer("readData", outcome));
+        }
+        return;
+      }
+      if (request.method === M.subscribeResource || request.method === M.unsubscribeResource) {
+        if (!bridge.declared("subscribeData")) {
+          respond(request.id, {
+            error: {
+              code: JSON_RPC_ERRORS.methodNotFound,
+              message: `${request.method} isn't offered here`,
+            },
+          });
+          return;
+        }
+        if (request.method === M.subscribeResource) {
+          const outcome = await live.subscribe(params.uri);
+          if (!closed) {
+            respond(request.id, outcome.ok ? { result: {} } : answer("subscribeData", outcome));
+          }
+        } else {
+          live.unsubscribe(params.uri);
+          respond(request.id, { result: {} });
+        }
         return;
       }
       const mapped = REQUESTS[request.method];
@@ -264,6 +295,7 @@ export const shellAdapter: ProtocolAdapter<ShellConnection> = {
         closed = true;
         stop();
         pending.clear();
+        live.close();
       },
     };
   },

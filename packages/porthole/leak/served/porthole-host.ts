@@ -27,10 +27,14 @@ interface PortholeHostPage {
   ): number;
 }
 
-/** What else a mount is given: content to send a shell, and whether the frame fills its box. */
+/**
+ * What else a mount is given: content to send a shell, whether the frame fills its box, and
+ * whether the host serves it live data (`window.liveData` on the host page, P079).
+ */
 export interface MountExtras {
   readonly content?: string;
   readonly fill?: boolean;
+  readonly live?: boolean;
 }
 
 export const app = (scope: string): InstanceRef => ({

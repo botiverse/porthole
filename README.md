@@ -18,7 +18,8 @@ config, so the sandbox, the shell and the manual never drift apart.
   the in-frame shell runtime, streaming render, auto-sizing, theming, the
   host-function bridge, and the guide generator.
 - **A preset policy layer** — ready-made, safe-by-default bundles a host picks up
-  with near-zero config: **inline widget**, **artifact** (a standalone page),
+  with near-zero config: **inline widget**, **live widget** (shows the host's data,
+  current, with no network of its own), **artifact** (a standalone page),
   **MCP Apps** (the standard protocol), and **URL** (a running app, such as a dev
   server's preview). Each preset fixes the CSP and allowed origins, which host
   functions are exposed and how they are gated, the theme vocabulary, and the
@@ -57,7 +58,8 @@ milestone (see DESIGN.md). Read, in order:
 
 Adopting it in an app: [docs/ADOPTING.md](docs/ADOPTING.md), and before you open anything to
 the network, [Choosing egress](docs/ADOPTING.md#choosing-egress): the three levels, what each
-opens and the risk it re-opens.
+opens and the risk it re-opens; for content that reads your data,
+[Live widgets](docs/ADOPTING.md#live-widgets-content-that-reads-your-data).
 
 See also [AGENTS.md](AGENTS.md) for how to work in this repo.
 

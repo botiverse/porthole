@@ -3,6 +3,7 @@ import {
   declaredCapabilities,
   egressOrigins,
   type EgressKind,
+  librarySources,
 } from "../compile/policy.ts";
 import type { PortholeConfig } from "../config/schema.ts";
 import { sizeWords } from "../guide/limits.ts";
@@ -217,7 +218,7 @@ export function lintContent(config: PortholeConfig, content: string): Finding[] 
         add(
           "egress",
           "warning",
-          `Nothing loads from ${origin} here (${kind}): ${kind === "script" || kind === "style" ? "write it inline, or use a library from an allowed CDN" : kind === "connect" ? "the content can't call it; work from data in the content" : "put it inline as a data: URL"}.`,
+          `Nothing loads from ${origin} here (${kind}): ${kind === "script" && librarySources(config).length > 0 ? "write it inline, or use one of the libraries served here (the manual's Libraries)" : kind === "script" || kind === "style" ? "write it inline, or use a library from an allowed CDN" : kind === "connect" && config.capabilities.readData !== undefined ? "the content can't call it; read the app's data with readData" : kind === "connect" ? "the content can't call it; work from data in the content" : "put it inline as a data: URL"}.`,
           match.index,
         );
       }

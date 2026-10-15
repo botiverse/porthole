@@ -55,9 +55,17 @@ export {
   LIBRARY_CDNS,
   presets,
   type PresetName,
+  type LiveWidgetOptions,
   type PresetOptions,
   type UrlPresetOptions,
 } from "./presets/presets.ts";
+export {
+  LIBRARY_PATH,
+  VENDORED_LIBRARIES,
+  libraryPath,
+  licensePath,
+  type VendoredLibrary,
+} from "./libraries/libraries.ts";
 
 // The compiler.
 export { compile, type CompiledConfig } from "./compile/compile.ts";
@@ -115,10 +123,12 @@ export {
   MCP_APPS_PROTOCOL_VERSION,
   MCP_APPS_STYLE_VARIABLES,
   PORTHOLE_STYLES,
+  STALE_META,
   type HostContext,
 } from "./protocol/mcp-apps.ts";
 export type {
   CallContext,
+  CallOptions,
   CallOutcome,
   CapabilityHandler,
   CapabilityHandlers,
@@ -126,9 +136,12 @@ export type {
   ConfirmAnswer,
   ConfirmDisplay,
   ConfirmRequest,
+  Consent,
+  DataCache,
   Proceed,
   HostFunctionBridge,
   Refusal,
+  SubscriptionContext,
 } from "./bridge/types.ts";
 export { createHost } from "./host/create-host.ts";
 // The client half of the host kit, and the display registry (P072).

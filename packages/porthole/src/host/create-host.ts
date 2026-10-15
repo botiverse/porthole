@@ -5,7 +5,7 @@ import {
   type AnnotationReport,
 } from "../annotate/types.ts";
 import { annotateMode, checkMarks, parseReport } from "../annotate/validate.ts";
-import { createBridge, type BridgeEvent } from "../bridge/bridge.ts";
+import { createBridge, onceConsent, type BridgeEvent } from "../bridge/bridge.ts";
 import type { HostFunctionBridge } from "../bridge/types.ts";
 import { compile } from "../compile/compile.ts";
 import { declaredCapabilities } from "../compile/policy.ts";
@@ -117,6 +117,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       let destroyed = false;
       let restarts = 0;
       let generation = 0;
+      // The viewer's answer for this display (P079): asked once, kept across its frames.
+      const consent = options.consent === undefined ? undefined : onceConsent(options.consent);
       let abort: AbortController | null = null;
       let outcomeWatch: OutcomeWatch | null = null;
       let themeFrame: number | null = null;
@@ -360,6 +362,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           },
           handlers,
           ...(options.confirm === undefined ? {} : { confirm: options.confirm }),
+          ...(consent === undefined ? {} : { consent }),
+          ...(options.cached === undefined ? {} : { cached: options.cached }),
           userActivation: () => created.userActivation(),
           onEvent: onBridge,
         });

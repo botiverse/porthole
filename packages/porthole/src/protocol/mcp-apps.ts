@@ -17,6 +17,10 @@ export const MCP_APPS_METHODS = {
   updateModelContext: "ui/update-model-context",
   callTool: "tools/call",
   readResource: "resources/read",
+  // MCP's own resource subscriptions (P079), which MCP Apps doesn't list: the view is the host's
+  // MCP client here, as for resources/read.
+  subscribeResource: "resources/subscribe",
+  unsubscribeResource: "resources/unsubscribe",
   // View → host notifications.
   initialized: "ui/notifications/initialized",
   sizeChanged: "ui/notifications/size-changed",
@@ -28,6 +32,7 @@ export const MCP_APPS_METHODS = {
   toolResult: "ui/notifications/tool-result",
   toolCancelled: "ui/notifications/tool-cancelled",
   hostContextChanged: "ui/notifications/host-context-changed",
+  resourceUpdated: "notifications/resources/updated",
   // Host → view requests.
   resourceTeardown: "ui/resource-teardown",
   // Sandbox proxy (a second origin that relays between host and view).
@@ -120,6 +125,13 @@ export const PORTHOLE_STYLES = "porthole/styles";
  * host copied it and `{ isError: true }` when it didn't. The standard has no clipboard request.
  */
 export const COPY_TEXT_METHOD = "porthole/copy-text";
+
+/**
+ * The `_meta` key that marks a `resources/read` result as the host's cached copy (P079): stale,
+ * with the fresh one to follow as `notifications/resources/updated`. Only for a resource the view
+ * subscribes to.
+ */
+export const STALE_META = "porthole/stale";
 
 /** The logger name the shell's error reports (`notifications/message`, level `error`) carry. */
 export const SHELL_LOGGER = "porthole";

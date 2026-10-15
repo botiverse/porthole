@@ -19,6 +19,14 @@ const BRIDGE = "src/bridge/bridge.ts";
 export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp" | "harness">> = {
   "frame-guard": [{ file: RUNTIME, find: "  guardRoot(document);\n", replace: "\n" }],
   webrtc: [{ file: RUNTIME, find: "      lock(window, name, undefined);", replace: "" }],
+  // The shell's navigation guard (P079): the frame's own navigations to another document go on.
+  "navigate-guard": [
+    {
+      file: RUNTIME,
+      find: '  if (navigationApi && typeof navigationApi.addEventListener === "function"',
+      replace: '  if (false && typeof navigationApi.addEventListener === "function"',
+    },
+  ],
   "attach-shadow": [
     {
       file: RUNTIME,
@@ -67,9 +75,8 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   self: [
     {
       file: POLICY,
-      find: '["script-src", "\'unsafe-inline\'", "\'unsafe-eval\'", "blob:", ...origins("script")],',
-      replace:
-        '["script-src", "\'self\'", "\'unsafe-inline\'", "\'unsafe-eval\'", "blob:", ...origins("script")],',
+      find: '      "script-src",\n      "\'unsafe-inline\'",',
+      replace: '      "script-src",\n      "\'self\'",\n      "\'unsafe-inline\'",',
     },
     {
       file: POLICY,
@@ -224,6 +231,25 @@ export function weaken(relative: string, text: string): string {
       if (!out.includes(edit.find)) {
         throw new Error(`Weakening ${name} no longer matches ${relative}`);
       }
+      out = out.replace(edit.find, edit.replace);
+    }
+  }
+  return out;
+}
+
+/**
+ * The weakenings the served harness also applies to the documents its content origins serve
+ * (their shell is made in the harness's own process, not loaded from the stripped sources): the
+ * navigation guard (P079), whose wall in a served frame is the shell alone for another content
+ * origin.
+ */
+const SERVED = ["navigate-guard"];
+
+export function weakenServed(html: string): string {
+  let out = html;
+  for (const name of weakened.filter((each) => SERVED.includes(each))) {
+    const weakening = WEAKENINGS[name];
+    for (const edit of typeof weakening === "object" ? weakening : []) {
       out = out.replace(edit.find, edit.replace);
     }
   }

@@ -35,6 +35,10 @@ entry), with a Node adapter (`/node`), a conformance runner an app points at its
 0.3 (P072, P073): `defineDisplays`, `content.routes` under `/porthole`, the client
 (`portholeClient`, `PortholeView`), the viewer handoff, the url-mode relay kit, and the
 agent's side: `lintContent`, `admitContent`, `checkPage` (`/check`), tool definitions.
+0.5 (P079): live widgets: `presets.liveWidget` (no network of its own), Porthole's vendored
+libraries on content origins (`egress.libraries`, `scripts/vendor-libraries.ts`), the `consent`
+gate, `subscribeData` (MCP resource subscriptions), the host's cache, and the shell's guard against
+a served frame navigating itself away.
 
 ## Setup
 

@@ -343,6 +343,48 @@ describe("requests go through the bridge", () => {
     expect(t.answerTo(4)?.result).toEqual({});
   });
 
+  it("carries MCP's resource subscriptions, and tells the view what changed (P079)", async () => {
+    const t = setup({
+      preset: { capabilities: { readData: {}, subscribeData: {} } },
+      outcome: (capability) =>
+        capability === "readData"
+          ? { ok: true, value: { contents: [{ uri: "app://n", text: "1" }] } }
+          : { ok: true, value: undefined },
+    });
+    await t.initialize();
+    expect(t.resultOf(1)).toMatchObject({
+      hostCapabilities: { serverResources: { subscribe: true } },
+    });
+    t.view({ id: 2, method: "resources/subscribe", params: { uri: "app://n" } });
+    await t.settle();
+    expect(t.answerTo(2)?.result).toEqual({});
+    const subscribed = t.calls.find((call) => call.capability === "subscribeData");
+    expect(subscribed?.args).toEqual({ uri: "app://n" });
+    const { subscription } = (subscribed?.options ?? {}) as {
+      subscription: { changed: (result?: unknown) => void; signal: AbortSignal };
+    };
+    subscription.changed();
+    await t.settle();
+    expect(
+      t.sent.filter((message) => message.method === "notifications/resources/updated"),
+    ).toEqual([
+      { jsonrpc: "2.0", method: "notifications/resources/updated", params: { uri: "app://n" } },
+    ]);
+    t.view({ id: 3, method: "resources/unsubscribe", params: { uri: "app://n" } });
+    await t.settle();
+    expect(t.answerTo(3)?.result).toEqual({});
+    expect(subscription.signal.aborted).toBe(true);
+  });
+
+  it("doesn't offer subscriptions where subscribeData isn't declared", async () => {
+    const t = setup({ preset: { capabilities: { readData: {} } } });
+    await t.initialize();
+    expect(t.resultOf(1)).toMatchObject({ hostCapabilities: { serverResources: {} } });
+    t.view({ id: 2, method: "resources/subscribe", params: { uri: "app://n" } });
+    await t.settle();
+    expect(t.errorCode(2)).toBe(-32601);
+  });
+
   it("refuses malformed params without asking the bridge", async () => {
     const t = setup();
     t.view({ id: 1, method: "ui/open-link", params: { url: 3 } });

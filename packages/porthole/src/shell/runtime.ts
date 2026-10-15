@@ -16,7 +16,11 @@
  *    shadow DOM through `setHTMLUnsafe`, `parseHTMLUnsafe`, `document.write`);
  * 5. keeps content off the clipboard: the async Clipboard API refuses, `execCommand` won't copy or
  *    cut, and copy and cut events never reach content, so what a person copies is what they
- *    selected (P051). Copy buttons go through the host (`copyText`, P052).
+ *    selected (P051). Copy buttons go through the host (`copyText`, P052);
+ * 6. cancels every navigation the frame starts to another document (P079), before it sends a
+ *    request: a navigation carries data out in its URL, and the embedding page's `frame-src`,
+ *    the wall for that, must let served frames reach their own content origins. (Opaque frames
+ *    get no navigate events: there `frame-src` is the wall.)
  * A whole document (an artifact page, an MCP Apps view) is never written in: it is parsed inert,
  * imported, and its scripts run in order, as a fragment's are.
  *
@@ -70,6 +74,35 @@ export const SHELL_RUNTIME = String.raw`(() => {
     if (/^(RTC|webkitRTC)/.test(name)) {
       lock(window, name, undefined);
     }
+  }
+
+  // No navigation to another document (P079): a frame that navigates itself carries data out in
+  // the URL, and the embedding page's frame-src, the other wall, lets served frames reach every
+  // content origin. (An opaque frame gets no navigate events, as the spec says for opaque
+  // origins, measured: there frame-src is the wall, P033.) The navigate event comes before any request for every
+  // navigation this document starts (location, a link, window.open(…, "_self"), a refresh), and
+  // cancelling it stops it. Ours is the first listener, and reads the event through the platform's
+  // own getters, kept now, so content can neither stop it nor lie to it. Same-document ones (an
+  // anchor) go on, and so do reloads: the same address, on the frame's own origin (or none, in a
+  // srcdoc frame), which history can change only within that origin. The host's own (a new
+  // frame) are none of this document's.
+  const navigationApi = window.navigation;
+  const getterOf = (proto, name) => {
+    const descriptor = proto ? Object.getOwnPropertyDescriptor(proto, name) : undefined;
+    return descriptor && typeof descriptor.get === "function" ? descriptor.get : null;
+  };
+  const navigateProto = typeof NavigateEvent === "function" ? NavigateEvent.prototype : null;
+  const destinationOf = getterOf(navigateProto, "destination");
+  const navigationTypeOf = getterOf(navigateProto, "navigationType");
+  const sameDocumentOf = getterOf(typeof NavigationDestination === "function" ? NavigationDestination.prototype : null, "sameDocument");
+  const preventNavigation = Event.prototype.preventDefault;
+  const applyOf = Reflect.apply;
+  if (navigationApi && typeof navigationApi.addEventListener === "function" && destinationOf !== null && sameDocumentOf !== null && navigationTypeOf !== null) {
+    navigationApi.addEventListener("navigate", (event) => {
+      if (!applyOf(sameDocumentOf, applyOf(destinationOf, event, []), []) && applyOf(navigationTypeOf, event, []) !== "reload") {
+        applyOf(preventNavigation, event, []);
+      }
+    }, true);
   }
 
   // No nested frames (each would be a fresh realm with WebRTC intact), no resource hints and no
@@ -710,6 +743,132 @@ export const SHELL_RUNTIME = String.raw`(() => {
     });
   }
 
+  // Data (P079): readData reads a resource the host names, subscribeData follows one, through
+  // MCP's resources/* requests, which the host gates (the viewer's consent, a rate). A value is the
+  // first content's: JSON parsed when it says it is JSON, else its text.
+  let resourceUpdated = (_uri) => {};
+  const valueOf = (result) => {
+    const first = result && Array.isArray(result.contents) ? result.contents[0] : undefined;
+    if (first === null || typeof first !== "object") {
+      return undefined;
+    }
+    if (typeof first.text === "string") {
+      if (/(^|[/+])json(\s*;|$)/i.test(String(first.mimeType || ""))) {
+        try {
+          return JSON.parse(first.text);
+        } catch (_) {}
+      }
+      return first.text;
+    }
+    return typeof first.blob === "string" ? first.blob : undefined;
+  };
+  const staleOf = (result) => Boolean(result && result._meta && result._meta["porthole/stale"] === true);
+  const later = (error) => setTimeout(() => {
+    throw error;
+  });
+  if (declared("readData")) {
+    lock(window, "readData", (uri) => request("resources/read", { uri: String(uri) }).then(valueOf));
+  }
+  if (declared("subscribeData")) {
+    // One subscription per URI, however many follow it; a read at a time, one more if it changed
+    // meanwhile; a late follower gets the last value at once.
+    const followed = new Map();
+    const tell = (entry, result) => {
+      entry.last = result;
+      const value = valueOf(result);
+      const info = { stale: staleOf(result), uri: entry.uri };
+      for (const listener of Array.from(entry.listeners)) {
+        try {
+          listener.onData(value, info);
+        } catch (error) {
+          later(error);
+        }
+      }
+    };
+    const fail = (entry, error) => {
+      for (const listener of Array.from(entry.listeners)) {
+        if (typeof listener.onError === "function") {
+          try {
+            listener.onError(error);
+          } catch (thrown) {
+            later(thrown);
+          }
+        }
+      }
+    };
+    const refresh = (entry) => {
+      if (entry.reading) {
+        entry.again = true;
+        return;
+      }
+      entry.reading = true;
+      request("resources/read", { uri: entry.uri })
+        .then((result) => {
+          if (followed.get(entry.uri) === entry) {
+            tell(entry, result);
+          }
+        }, (error) => fail(entry, error))
+        .then(() => {
+          entry.reading = false;
+          if (entry.again && followed.get(entry.uri) === entry) {
+            entry.again = false;
+            refresh(entry);
+          }
+        });
+    };
+    resourceUpdated = (uri) => {
+      const entry = followed.get(uri);
+      if (entry !== undefined) {
+        refresh(entry);
+      }
+    };
+    lock(window, "subscribeData", (uri, onData, onError) => {
+      if (typeof onData !== "function") {
+        throw new TypeError("subscribeData(uri, onData, onError): onData must be a function");
+      }
+      const key = String(uri);
+      const listener = { onData, onError };
+      let entry = followed.get(key);
+      if (entry === undefined) {
+        const made = { uri: key, listeners: new Set(), reading: false, again: false, last: undefined };
+        entry = made;
+        followed.set(key, made);
+        request("resources/subscribe", { uri: key }).then(() => {
+          if (followed.get(key) === made) {
+            refresh(made);
+          }
+        }, (error) => {
+          if (followed.get(key) === made) {
+            followed.delete(key);
+          }
+          fail(made, error);
+        });
+      } else if (entry.last !== undefined) {
+        const known = entry;
+        Promise.resolve().then(() => {
+          if (known.listeners.has(listener)) {
+            try {
+              onData(valueOf(known.last), { stale: staleOf(known.last), uri: key });
+            } catch (error) {
+              later(error);
+            }
+          }
+        });
+      }
+      entry.listeners.add(listener);
+      const mine = entry;
+      return () => {
+        if (!mine.listeners.delete(listener) || mine.listeners.size > 0) {
+          return;
+        }
+        if (followed.get(key) === mine) {
+          followed.delete(key);
+          request("resources/unsubscribe", { uri: key }).catch(() => {});
+        }
+      };
+    });
+  }
+
   window.addEventListener("error", (event) => {
     const error = event.error;
     const where = event.lineno ? " (line " + event.lineno + ")" : "";
@@ -878,6 +1037,11 @@ export const SHELL_RUNTIME = String.raw`(() => {
         break;
       case "ui/notifications/host-context-changed":
         applyTheme(params);
+        break;
+      case "notifications/resources/updated":
+        if (typeof params.uri === "string") {
+          resourceUpdated(params.uri);
+        }
         break;
       case "ui/resource-teardown":
       case "ping":

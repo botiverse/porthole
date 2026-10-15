@@ -35,6 +35,9 @@ const DECLINED: { readonly [N in HandledCapability]: () => unknown } = {
   readData: () => {
     throw new Error("The host declined the read");
   },
+  subscribeData: () => {
+    throw new Error("The host declined the subscription");
+  },
 };
 
 /**
@@ -166,6 +169,8 @@ const check = {
       handlers: declining(Object.keys(spec.config.capabilities), calls),
       platform: NOBODY,
       confirm: () => Promise.resolve("declined"),
+      // A viewer who doesn't allow a live widget their data (P079): its calls are refused.
+      consent: () => false,
       // A served config's instance, issued by the check's own server on this page's origin.
       locator: {
         locate: async (instance) =>

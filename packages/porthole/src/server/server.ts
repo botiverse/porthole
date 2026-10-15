@@ -12,6 +12,7 @@ import { base32, createKeys, newTicket, ticketId } from "./keys.ts";
 import { randomBytes } from "./crypto.ts";
 import { isHostLabel, reservedLabels } from "./naming.ts";
 import { enterPage, pageScript, SESSION_PATH, statusPage } from "./pages.ts";
+import { libraryFile } from "./libraries.ts";
 import type { FrameBlock } from "../host/types.ts";
 import { memoryTicketStore } from "./tickets.ts";
 import type {
@@ -1156,7 +1157,7 @@ export function createServer(options: ServerOptions): PortholeServer {
         if (url.pathname === ENTRY_PATH && authorizeUrl !== null) {
           return await redeem(request, url, label);
         }
-        const script = pageScript(url.pathname);
+        const script = pageScript(url.pathname) ?? libraryFile(url.pathname, method);
         if (script !== null) {
           return script;
         }

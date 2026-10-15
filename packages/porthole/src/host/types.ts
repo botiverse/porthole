@@ -1,5 +1,5 @@
 import type { AnnotateMode, AnnotationMark, AnnotationReport } from "../annotate/types.ts";
-import type { Confirm, CapabilityHandlers, Refusal } from "../bridge/types.ts";
+import type { Confirm, CapabilityHandlers, Consent, DataCache, Refusal } from "../bridge/types.ts";
 import type { CompiledConfig } from "../compile/compile.ts";
 import type { CapabilityName } from "../config/capabilities.ts";
 import type { ColorScheme } from "../config/schema.ts";
@@ -19,6 +19,17 @@ export interface HostOptions<C extends AdapterConnection = ShellConnection> {
   readonly handlers?: CapabilityHandlers;
   /** Who confirms `confirm`-gated calls. Absent: those calls are refused. */
   readonly confirm?: Confirm;
+  /**
+   * Whether a display may make its `consent`-gated calls (read the viewer's data, P079): asked
+   * once per display, before the first, and kept for the display's life (its reloads too).
+   * Absent: those calls are refused.
+   */
+  readonly consent?: Consent;
+  /**
+   * What the host last had for a resource (P079): a read of one the content subscribes to is
+   * answered with it at once, marked stale, then with the handler's fresh result.
+   */
+  readonly cached?: DataCache;
   /**
    * The host's live values for the config's theme variables, for `scheme` (read from its own
    * design tokens). A name it leaves out, or answers empty, gets the config's default.

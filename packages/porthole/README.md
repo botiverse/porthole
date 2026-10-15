@@ -88,4 +88,6 @@ width, light and dark, before anyone sees it, and tells the agent what broke in 
 
 `npx porthole secret` makes a secret; `npx porthole d1-schema` prints the D1 migration.
 
-Apache-2.0.
+Apache-2.0. `/server` also serves copies of [Chart.js](https://www.chartjs.org) 4.5.1 (MIT) and
+[D3](https://d3js.org) 7.9.0 (ISC) to live widgets (P079), each with its license beside it
+(`/__porthole/lib/<name>@<version>/`), from `src/libraries/files.generated.ts`.

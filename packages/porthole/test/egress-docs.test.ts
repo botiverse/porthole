@@ -26,6 +26,10 @@ const LEVELS: Readonly<Record<string, PortholeConfig>> = {
   "Passive from any https site": presets.artifact({
     egress: { ...LIBRARY_CDNS, anyHttps: ["img"] },
   }),
+  "Porthole's libraries": presets.liveWidget({
+    isolation: "domain",
+    contentOrigins: ["https://*.example-usercontent.com"],
+  }),
 };
 
 describe('ADOPTING.md § "Choosing egress"', () => {

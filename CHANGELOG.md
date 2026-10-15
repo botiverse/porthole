@@ -3,6 +3,46 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## 0.5.0
+
+Live widgets (P079): content that shows its host's data, current, read as the person viewing it,
+with no network of its own. Additive, but every shell now cancels its served frame's own
+navigations to another document (below).
+
+- **`presets.liveWidget(options)`**: an inline widget whose egress stays closed (its options have
+  no `egress`; passing one throws). It declares `readData` and `subscribeData`, each behind the
+  viewer's consent and a rate (120 and 60 a minute). Served (domain isolation), it loads
+  Porthole's own libraries from its origin. `defineDisplays` takes it as a preset.
+- **Porthole's libraries (`egress.libraries`)**: Chart.js 4.5.1 and D3 7.9.0 (`VENDORED_LIBRARIES`),
+  npm's files byte for byte with their licenses, served by `/server` on every content origin at
+  `/__porthole/lib/<name>@<version>/<file>` (no ticket, immutable). The frame's `script-src` gets
+  that path on the content origins, nothing else. Domain isolation only; the manual gives a
+  `<script>` line for each.
+- **The `consent` gate**: `HostOptions.consent` (React: `PortholeProvider`/`PortholeFrame`
+  `consent`) is asked once per display before its first consent-gated call; a no refuses them all
+  (`denied`), none refuses them (`no-consent`). Not a default gate of `readData` (hosts that declare
+  it keep working); the live widget preset has it.
+- **`subscribeData`** (a new capability, needs `readData`): MCP's `resources/subscribe` and
+  `resources/unsubscribe`, and `notifications/resources/updated` from the host, after which the
+  content reads again. Offered as `hostCapabilities.serverResources.subscribe`. The handler gets
+  `changed(result?)` and an `AbortSignal` (`SubscriptionContext`). Both adapters (the shell's and
+  `/mcp`'s) carry it.
+- **The host's cache** (`HostOptions.cached`, `DataCache`; React `cached`): a read of a subscribed
+  resource is answered from it at once, marked `_meta["porthole/stale"]` (`STALE_META`), and the
+  fresh read follows as an update.
+- **Shell globals**: `readData(uri)` (a promise of the value: JSON parsed, else text) and
+  `subscribeData(uri, onData, onError)` (onData(value, { stale, uri }) now and at every change;
+  returns a stop function). The manual teaches them, the consent and the libraries.
+- **No frame navigates itself away**: the shell cancels every navigation its frame starts to
+  another document (the Navigation API's `navigate` event), so a served frame can't carry data in a
+  URL to another content origin, which the page's `frame-src` must allow. Reloads and
+  same-document navigations go on. Opaque frames get no navigate events; their wall stays the
+  page's `frame-src`. Negative control `navigate-guard`.
+- A shell config that declares `readData` (inline, artifact) now gives content a `readData`
+  global, fixed in place like the others: content that defines its own `readData` must rename it.
+- `checkPage` answers consent-gated calls as a viewer who says no; `lintContent` points live
+  widgets at the libraries served here and at `readData`.
+
 ## 0.4.1
 
 - Annotation marks keep the words under them readable on a light page and a dark one: a lighter

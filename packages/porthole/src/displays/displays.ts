@@ -22,7 +22,7 @@ import { presets, type PresetOptions, type UrlPresetOptions } from "../presets/p
 
 export type DisplayKind =
   | {
-      readonly preset: "inlineWidget" | "artifact" | "mcpApp";
+      readonly preset: "inlineWidget" | "liveWidget" | "artifact" | "mcpApp";
       readonly options?: PresetOptions;
       /** Options added when served on content origins (domain isolation): storage, egress. */
       readonly served?: Omit<PresetOptions, "isolation" | "contentOrigins">;

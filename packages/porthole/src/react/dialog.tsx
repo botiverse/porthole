@@ -66,6 +66,8 @@ function words(request: ConfirmRequest): Words {
       return { heading: "Share this with the agent?", accept: "Share", detail: json(request.args) };
     case "readData":
       return { heading: "Let it read this?", accept: "Allow", detail: request.args.uri };
+    case "subscribeData":
+      return { heading: "Let it follow this?", accept: "Allow", detail: request.args.uri };
     case "copyText":
       return { heading: "Copy this text?", accept: "Copy", detail: request.args.text };
     default:

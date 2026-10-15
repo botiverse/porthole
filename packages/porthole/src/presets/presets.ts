@@ -14,7 +14,7 @@ import type {
   UrlPermission,
   UrlSandboxExtra,
 } from "../config/schema.ts";
-import { validateConfig } from "../config/validate.ts";
+import { ConfigError, validateConfig } from "../config/validate.ts";
 import { DEFAULT_THEME_EVENT, DEFAULT_THEME_VARIABLES } from "../theme/variables.ts";
 
 /**
@@ -51,6 +51,12 @@ export interface PresetOptions {
   /** Where the content's errors go (`PortholeConfig.errors`); `none` drops `reportError`. */
   readonly errors?: "agent" | "host" | "none";
 }
+
+/**
+ * The live widget's options (P079): a widget's, less egress, which stays closed (Porthole's own
+ * libraries come with domain isolation). A host adds capabilities, or changes the data ones' gates.
+ */
+export type LiveWidgetOptions = Omit<PresetOptions, "egress">;
 
 /** The url preset's options: where the app is served, and the embedding page's extra frames. */
 export interface UrlPresetOptions {
@@ -137,6 +143,9 @@ const mergeEgress = (base: EgressConfig, extra: EgressConfig | undefined): Egres
   if (passive.length > 0) {
     merged.anyHttps = passive;
   }
+  if (base.libraries === true || extra?.libraries === true) {
+    merged.libraries = true;
+  }
   return merged;
 };
 
@@ -157,11 +166,16 @@ function themeVariables(
 
 function build(
   mode: PortholeConfig["mode"],
-  defaults: { readonly limits?: Partial<Limits> },
+  defaults: {
+    readonly limits?: Partial<Limits>;
+    readonly capabilities?: CapabilityMap;
+    readonly egress?: EgressConfig;
+  },
   options: PresetOptions,
 ): PortholeConfig {
   const capabilities: { -readonly [N in CapabilityName]?: CapabilityConfig } = {
     ...BASE_CAPABILITIES,
+    ...defaults.capabilities,
   };
   if (options.errors === "none") {
     delete capabilities.reportError;
@@ -180,7 +194,7 @@ function build(
     mode,
     isolation: options.isolation ?? "opaque",
     capabilities,
-    egress: mergeEgress({}, options.egress),
+    egress: mergeEgress(defaults.egress ?? {}, options.egress),
     theme: {
       variables: themeVariables(options.theme?.variables),
       event: options.theme?.event ?? DEFAULT_THEME_EVENT,
@@ -202,6 +216,35 @@ export const presets = {
    * frame with the shell, streamed as it is written.
    */
   inlineWidget: (options: PresetOptions = {}): PortholeConfig => build("inline", {}, options),
+
+  /**
+   * A widget that shows its host's data, live, and has no network of its own (P079): an inline
+   * widget whose egress stays closed (no option opens it). It reads the host's data (`readData`,
+   * MCP `resources/read`) and subscribes to it (`subscribeData`, `resources/subscribe`), each
+   * behind the viewer's consent (the host's `consent`, asked once per display) and a rate. In
+   * domain isolation its scripts load from Porthole's own libraries on its origin
+   * (`egress.libraries`: Chart.js, D3), and nowhere else. A host adds what any widget may have (a
+   * link, a copy button), or changes the data capabilities' gates.
+   */
+  liveWidget: (options: LiveWidgetOptions = {}): PortholeConfig => {
+    if ((options as PresetOptions).egress !== undefined) {
+      throw new ConfigError(
+        "options.egress",
+        "a live widget has no network of its own: its egress stays closed (P079)",
+      );
+    }
+    return build(
+      "inline",
+      {
+        capabilities: {
+          readData: { gates: ["consent", { rateLimit: { perMinute: 120 } }] },
+          subscribeData: { gates: ["consent", { rateLimit: { perMinute: 60 } }] },
+        },
+        egress: options.isolation === "domain" ? { libraries: true } : {},
+      },
+      options,
+    );
+  },
 
   /**
    * A whole HTML page: written into an opaque frame by the shell where the host has the page, or

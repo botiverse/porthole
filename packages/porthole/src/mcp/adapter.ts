@@ -15,6 +15,7 @@ import {
   type HostContext,
 } from "../protocol/mcp-apps.ts";
 import { COPY_TEXT_METHOD, MCP_APPS_STYLE_VARIABLES } from "../protocol/mcp-apps.ts";
+import { liveData } from "../protocol/live-data.ts";
 
 /**
  * The MCP Apps adapter (P004, P007): the host side of the protocol for full MCP Apps views, written
@@ -131,6 +132,10 @@ function connect(session: AdapterSession, options: McpAppsAdapterOptions): McpAp
     }
   };
   const answer = (id: JsonRpcId, result: unknown): void => send({ jsonrpc: "2.0", id, result });
+  // Live data (P079): reads, subscriptions and the host's updates, through the bridge.
+  const live = liveData(bridge, (uri) => notify(MCP_APPS_METHODS.resourceUpdated, { uri }), {
+    userActivated: hostActivation,
+  });
   const refuse = (id: JsonRpcId, code: number, message: string): void =>
     send({ jsonrpc: "2.0", id, error: { code, message } });
 
@@ -150,7 +155,9 @@ function connect(session: AdapterSession, options: McpAppsAdapterOptions): McpAp
       ...(declared("openLink") ? { openLinks: {} } : {}),
       ...(declared("downloadFile") ? { downloadFile: {} } : {}),
       ...(declared("callTool") ? { serverTools: {} } : {}),
-      ...(declared("readData") ? { serverResources: {} } : {}),
+      ...(declared("readData")
+        ? { serverResources: declared("subscribeData") ? { subscribe: true } : {} }
+        : {}),
       ...(declared("sendPrompt") ? { message: { text: {} } } : {}),
       ...(declared("setModelContext")
         ? { updateModelContext: { text: {}, structuredContent: {} } }
@@ -183,6 +190,15 @@ function connect(session: AdapterSession, options: McpAppsAdapterOptions): McpAp
       refuse(request.id, JSON_RPC_ERRORS.internal, `${request.method} failed`);
       return;
     }
+    reply(request, outcome, result);
+  }
+
+  /** Answers a request with a capability's outcome. */
+  function reply(
+    request: JsonRpcRequest,
+    outcome: CallOutcome<unknown>,
+    result: (value: unknown) => unknown,
+  ): void {
     if (outcome.ok) {
       answer(request.id, result(outcome.value));
     } else if (outcome.refusal === "not-declared") {
@@ -259,9 +275,30 @@ function connect(session: AdapterSession, options: McpAppsAdapterOptions): McpAp
           invalid("needs a uri");
           return;
         }
-        await call(request, "readData", { uri: params.uri }, (value) =>
+        reply(request, await live.read(params.uri), (value) =>
           isRecord(value) ? value : { contents: [] },
         );
+        return;
+      case MCP_APPS_METHODS.subscribeResource:
+      case MCP_APPS_METHODS.unsubscribeResource:
+        if (!bridge.declared("subscribeData")) {
+          refuse(
+            request.id,
+            JSON_RPC_ERRORS.methodNotFound,
+            `${request.method} isn't offered here`,
+          );
+          return;
+        }
+        if (typeof params.uri !== "string") {
+          invalid("needs a uri");
+          return;
+        }
+        if (request.method === MCP_APPS_METHODS.unsubscribeResource) {
+          live.unsubscribe(params.uri);
+          answer(request.id, {});
+          return;
+        }
+        reply(request, await live.subscribe(params.uri), () => ({}));
         return;
       case MCP_APPS_METHODS.updateModelContext:
         if (
@@ -404,6 +441,7 @@ function connect(session: AdapterSession, options: McpAppsAdapterOptions): McpAp
     },
     close() {
       closed = true;
+      live.close();
       unlisten();
       queue = [];
       for (const waiting of pending.values()) {

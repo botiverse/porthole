@@ -258,12 +258,12 @@ function positive(value: unknown, path: string, max = Number.MAX_SAFE_INTEGER): 
 }
 
 function gate(value: unknown, path: string): asserts value is Gate {
-  if (value === "user-activation" || value === "confirm") {
+  if (value === "user-activation" || value === "confirm" || value === "consent") {
     return;
   }
   const limit = isObject(value) && isObject(value.rateLimit) ? value.rateLimit : null;
   if (limit === null || Object.keys(value as object).length !== 1) {
-    fail(path, 'must be "user-activation", "confirm" or { rateLimit: { perMinute } }');
+    fail(path, 'must be "user-activation", "confirm", "consent" or { rateLimit: { perMinute } }');
     return;
   }
   only(limit, ["perMinute"], `${path}.rateLimit`);
@@ -335,7 +335,7 @@ export function validateConfig(input: unknown): PortholeConfig {
 
   const egress = object(config.egress, "config.egress");
   const kinds = ["connect", "script", "style", "img", "font", "media"];
-  only(egress, [...kinds, "anyHttps"], "config.egress");
+  only(egress, [...kinds, "anyHttps", "libraries"], "config.egress");
   for (const kind of kinds) {
     sources(egress[kind], `config.egress.${kind}`);
   }
@@ -354,6 +354,24 @@ export function validateConfig(input: unknown): PortholeConfig {
     if (config.mode === "url") {
       fail("config.egress.anyHttps", "url mode has no egress control");
     }
+  }
+
+  if (egress.libraries !== undefined) {
+    if (typeof egress.libraries !== "boolean") {
+      fail("config.egress.libraries", "must be true or false");
+    }
+    if (egress.libraries && config.isolation !== "domain") {
+      fail(
+        "config.egress.libraries",
+        "Porthole's libraries are served from the frame's own origin: domain isolation only",
+      );
+    }
+  }
+  if (capabilities.subscribeData !== undefined && capabilities.readData === undefined) {
+    fail(
+      "config.capabilities.subscribeData",
+      "needs readData: content reads a resource again when it is told it changed",
+    );
   }
 
   const theme = object(config.theme, "config.theme");

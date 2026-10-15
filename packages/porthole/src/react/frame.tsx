@@ -22,6 +22,8 @@ import type {
   Confirm,
   ConfirmAnswer,
   ConfirmRequest,
+  Consent,
+  DataCache,
   Proceed,
   Refusal,
 } from "../bridge/types.ts";
@@ -61,6 +63,9 @@ interface PageState {
   /** Heights displays reported, by display id: a frame mounting again starts at its last. */
   readonly heights: Map<string, number>;
   readonly confirm?: Confirm;
+  /** The provider's consent and cache (P079), read when a frame asks. */
+  readonly consent?: Consent;
+  readonly cached?: DataCache;
   readonly hostInfo?: { readonly name: string; readonly version: string };
   readonly nonce?: string;
   /** The provider's locator, read when a frame locates (so an inline one restarts nothing). */
@@ -120,6 +125,13 @@ export interface PortholeProviderProps {
    * Pass your own function to replace it.
    */
   readonly confirm?: Confirm;
+  /**
+   * Whether a frame below may make its `consent`-gated calls (read the viewer's data, P079):
+   * asked once per display, before the first. Omitted: those calls are refused.
+   */
+  readonly consent?: Consent;
+  /** What the host last had for a resource, answered stale first (P079). */
+  readonly cached?: DataCache;
   /** How the host names itself in the handshake. */
   readonly hostInfo?: { readonly name: string; readonly version: string };
   /** Where domain and external frames load from (see `InstanceLocator`). */
@@ -185,6 +197,17 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
           ),
     [],
   );
+  // The host's consent and cache as of the last render (P079), read when a frame asks.
+  const ownConsent = useRef(props.consent);
+  const ownCached = useRef(props.cached);
+  useLayoutEffect(() => {
+    ownConsent.current = props.consent;
+    ownCached.current = props.cached;
+  });
+  const consent = useCallback<Consent>((request) => ownConsent.current?.(request) ?? false, []);
+  const cached = useCallback<DataCache>((args, context) => ownCached.current?.(args, context), []);
+  const consents = props.consent !== undefined;
+  const caches = props.cached !== undefined;
   // The default copyText: the host's page writes the clipboard (in the frame's click, which
   // activated this page too) and shows the person what went on it, or offers to copy it.
   const [notice, setNotice] = useState<CopyNotice | null>(null);
@@ -260,6 +283,8 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
       heights,
       confirm,
       copyText,
+      ...(consents ? { consent } : {}),
+      ...(caches ? { cached } : {}),
       ...(hostInfo === undefined ? {} : { hostInfo }),
       ...(locates ? { locate } : {}),
       ...(nonce === undefined ? {} : { nonce }),
@@ -274,6 +299,10 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
       heights,
       confirm,
       copyText,
+      consents,
+      consent,
+      caches,
+      cached,
       hostInfo,
       locates,
       locate,
@@ -372,6 +401,10 @@ export interface PortholeFrameProps {
   readonly handlers?: CapabilityHandlers;
   /** Who confirms this frame's gated calls, over the provider's. */
   readonly confirm?: Confirm;
+  /** Whether this frame may make its `consent`-gated calls, over the provider's (P079). */
+  readonly consent?: Consent;
+  /** This frame's data cache, over the provider's (P079). */
+  readonly cached?: DataCache;
   /** Bump to run the content again from the start. */
   readonly generation?: number;
   /** Run at once, without waiting to near the screen (it still counts toward the page's most). */
@@ -620,6 +653,8 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
     handlers: pageHandlers,
     copyText: pageCopyText,
     confirm: pageConfirm,
+    consent: pageConsent,
+    cached: pageCached,
     hostInfo,
     locate,
     nonce,
@@ -710,6 +745,8 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
       }
     }
     const asks = first.confirm !== undefined || pageConfirm !== undefined;
+    const asksConsent = first.consent !== undefined || pageConsent !== undefined;
+    const caches = first.cached !== undefined || pageCached !== undefined;
     let display: DisplayHandle;
     try {
       display = createHost(config, {
@@ -728,6 +765,21 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
                   },
                   proceed,
                 ),
+            }
+          : {}),
+        ...(asksConsent
+          ? {
+              consent: (request: ConfirmRequest) =>
+                (latest().consent ?? pageConsent ?? (() => false))({
+                  ...request,
+                  display: { ...request.display, id: latest().displayId, title: latest().title },
+                }),
+            }
+          : {}),
+        ...(caches
+          ? {
+              cached: (args: { readonly uri: string }, context: CallContext) =>
+                (latest().cached ?? pageCached)?.(args, named(context)),
             }
           : {}),
         theme: (each) => (latest().theme ?? latestPage().theme)?.(each) ?? {},
@@ -785,6 +837,8 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
     pageHandlers,
     pageCopyText,
     pageConfirm,
+    pageConsent,
+    pageCached,
     hostInfo,
     locate,
     nonce,
