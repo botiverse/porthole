@@ -1,6 +1,8 @@
 import { hostOriginProblem } from "../isolation/served.ts";
 import { ANNOTATE_RUNTIME } from "./annotate.ts";
+import { LEGACY_GLOBALS_RUNTIME } from "./legacy.ts";
 import { SHELL_RUNTIME } from "./runtime.ts";
+import { USE_RUNTIME } from "./use.ts";
 import type { ShellPlan } from "./plan.ts";
 
 export interface ShellDocumentOptions {
@@ -123,6 +125,19 @@ body {
  * The frame's document: its policy first, then the base styles, an empty root, and the runtime.
  * A given `document` travels in the runtime's plan, as data.
  */
+/**
+ * The shell's runtime for a plan, before its plan goes in: annotations where declared, 0.6's
+ * globals (the legacy path, P085) for what the config declares, and the capability runtime where
+ * the config has one.
+ */
+export function composedRuntime(plan: ShellPlan): string {
+  return SHELL_RUNTIME.replace("__ANNOTATE__", () =>
+    plan.capabilities.annotate === undefined ? "" : ANNOTATE_RUNTIME,
+  )
+    .replace("__LEGACY__", () => LEGACY_GLOBALS_RUNTIME)
+    .replace("__RUNTIME__", () => (plan.runtime === undefined ? "" : USE_RUNTIME));
+}
+
 export function shellDocument(plan: ShellPlan, csp: string, options: ShellDocumentOptions): string {
   for (const origin of options.origins) {
     const problem = hostOriginProblem(origin);
@@ -145,9 +160,7 @@ export function shellDocument(plan: ShellPlan, csp: string, options: ShellDocume
   const nonce = options.nonce === undefined ? "" : ` nonce="${options.nonce}"`;
   // The annotation runtime only where it is declared; spliced in before the plan, which may carry
   // any text (a document) and must not be searched.
-  const runtime = SHELL_RUNTIME.replace("__ANNOTATE__", () =>
-    plan.capabilities.annotate === undefined ? "" : ANNOTATE_RUNTIME,
-  ).replace("__PLAN__", () =>
+  const runtime = composedRuntime(plan).replace("__PLAN__", () =>
     scriptJson({
       ...plan,
       origins: options.origins,

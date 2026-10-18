@@ -11,6 +11,27 @@ import type { PortholeConfig } from "../config/schema.ts";
 import { effectiveGates } from "../compile/policy.ts";
 import { blockedNavigationMessage, withoutSealedAddresses } from "./navigation.ts";
 import {
+  RUNTIME_HOST_FUNCTIONS,
+  familyOf,
+  methodLevel,
+  methodOf,
+  rosterOf,
+  runtimeCapability,
+  type RuntimeCapabilityName,
+} from "../runtime/contract.ts";
+import {
+  declaredMatch,
+  type DeclaredCapability,
+  type PageDeclaration,
+} from "../runtime/declaration.ts";
+import { dbAccess, parseDbRequest, type DbRequest } from "../runtime/db.ts";
+import { atLeast, type ViewerInfo } from "../runtime/levels.ts";
+import {
+  parseArtifactRequest,
+  parseAssetRequest,
+  parseCommentRequest,
+} from "../runtime/requests.ts";
+import {
   defaultReason,
   isRefused,
   pendingReason,
@@ -67,6 +88,17 @@ export interface BridgeOptions {
   readonly onEvent: (event: BridgeEvent) => void;
   /** The clock, in milliseconds (tests pass their own). */
   readonly now?: () => number;
+  /**
+   * Who is viewing (P087), as the host said: each runtime method's level is checked against it,
+   * and the runtime's own host functions need it. Absent: 0.6's functions run unchecked, as before.
+   */
+  readonly viewer?: ViewerInfo;
+  /**
+   * What the display's page declared (P086), checked against the config (`checkDeclaration`).
+   * Absent: a page without one (0.6's): built-ins only through the runtime, and 0.6's globals and
+   * requests as before.
+   */
+  readonly declaration?: PageDeclaration;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -101,10 +133,11 @@ function resourceUri(args: unknown): { uri: string } | null {
   return typeof uri === "string" && uri !== "" && uri.length <= MAX_URL ? { uri } : null;
 }
 
+/** A call's arguments checked: the capability's, or null (malformed), or "too_large". */
 type Validator<N extends CapabilityName> = (
   args: unknown,
   config: PortholeConfig,
-) => CapabilityArgs[N] | null;
+) => CapabilityArgs[N] | "too_large" | null;
 
 const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
   sendPrompt: (args, config) => {
@@ -179,6 +212,12 @@ const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
       : null;
   },
   annotate: (args) => parseReport(args),
+  // The runtime's own (P088-P090): their shapes and limits, before any gate.
+  user: (args) => (args === undefined || isRecord(args) ? {} : null),
+  comments: (args) => parseCommentRequest(args),
+  artifact: (args, config) => parseArtifactRequest(args, config.limits),
+  assets: (args, config) => parseAssetRequest(args, config.limits),
+  db: (args) => parseDbRequest(args),
   resize: (args) => {
     if (
       !isRecord(args) ||
@@ -225,6 +264,19 @@ export function onceConsent(consent: Consent): Consent {
   };
 }
 
+/** What the page declared for one runtime capability, if it declared it. */
+function declaredOf(
+  declaration: PageDeclaration | undefined,
+  family: RuntimeCapabilityName,
+): DeclaredCapability | undefined {
+  const capabilities = declaration?.capabilities as
+    | Readonly<Record<string, DeclaredCapability>>
+    | undefined;
+  return capabilities !== undefined && Object.hasOwn(capabilities, family)
+    ? capabilities[family]
+    : undefined;
+}
+
 export function createBridge(options: BridgeOptions): HostFunctionBridge {
   const { config, display, handlers, onEvent } = options;
   const now = options.now ?? (() => Date.now());
@@ -259,8 +311,56 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
     return true;
   };
 
+  /**
+   * Whether this viewer may make this call (P087), and the call as the handler gets it: the
+   * method's level (the contract's, the host's, the page's), the resources and tools a page's
+   * `data` names, and a `db` call's paths (another person's data refused, `me` resolved, the
+   * page's rules). 0.6's functions without a viewer run as before; the runtime's own need one.
+   */
+  function checkAudience<N extends CapabilityName>(
+    capability: N,
+    family: RuntimeCapabilityName,
+    args: CapabilityArgs[N],
+  ): CapabilityArgs[N] | "undeclared" | "level" {
+    const { viewer, declaration } = options;
+    const declared = declaredOf(declaration, family);
+    const method = methodOf(capability, args);
+    if (method === null) {
+      return args;
+    }
+    if (viewer === undefined) {
+      return RUNTIME_HOST_FUNCTIONS.includes(capability) ? "level" : args;
+    }
+    const needed = methodLevel(config, family, method, declared);
+    if (needed !== null && !atLeast(viewer.level, needed)) {
+      return "level";
+    }
+    if (family === "data" && declaration !== undefined) {
+      const data = declaration.capabilities.data;
+      const named =
+        capability === "callTool"
+          ? declaredMatch(data?.tools, (args as CapabilityArgs["callTool"]).name)
+          : declaredMatch(data?.resources, (args as CapabilityArgs["readData"]).uri);
+      if (!named) {
+        return "undeclared";
+      }
+    }
+    if (capability === "db") {
+      const rules = declaration?.capabilities.db?.rules;
+      const access = dbAccess(args as DbRequest, viewer, rules);
+      return access.ok ? (access.request as CapabilityArgs[N]) : "level";
+    }
+    return args;
+  }
+
   return {
     declared: (capability) => config.capabilities[capability] !== undefined,
+
+    roster: () =>
+      rosterOf(
+        config,
+        options.declaration === undefined ? [] : Object.keys(options.declaration.capabilities),
+      ),
 
     async call<N extends CapabilityName>(
       capability: N,
@@ -271,9 +371,34 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
       if (config.capabilities[capability] === undefined) {
         return refuse<Result>(capability, "not-declared");
       }
-      const args = (VALIDATORS[capability] as Validator<N>)(raw, config);
-      if (args === null) {
+      // The page's declaration (P086): a built-in needs none; any other runtime capability only
+      // a page that declared it reaches; a page with no declaration, none of the runtime's own.
+      const family = familyOf(capability);
+      const declaration = options.declaration;
+      if (
+        family !== null &&
+        !runtimeCapability(family.name).builtIn &&
+        (declaration === undefined
+          ? RUNTIME_HOST_FUNCTIONS.includes(capability)
+          : !Object.hasOwn(declaration.capabilities, family.name))
+      ) {
+        return refuse<Result>(capability, "undeclared");
+      }
+      const parsed = (VALIDATORS[capability] as Validator<N>)(raw, config);
+      if (parsed === null) {
         return refuse<Result>(capability, "invalid");
+      }
+      if (parsed === "too_large") {
+        return refuse<Result>(capability, "too-large");
+      }
+      let args: CapabilityArgs[N] = parsed;
+      // Who may (P087): the method's level against the viewer's, the page's own narrowing.
+      if (family !== null) {
+        const audience = checkAudience(capability, family.name, args);
+        if (audience === "undeclared" || audience === "level") {
+          return refuse<Result>(capability, audience as Refusal);
+        }
+        args = audience;
       }
       const gates = effectiveGates(config, capability);
       const confirms = gates.includes("confirm");
@@ -374,11 +499,35 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
         }
         return { ok: true, value: undefined as Result };
       }
+      if (capabilitySpec(capability).served === "viewer") {
+        // `user` (P087): the viewer the host gave the display, and nothing else.
+        const viewer = options.viewer;
+        if (viewer === undefined) {
+          return refuse<Result>(capability, "level");
+        }
+        return {
+          ok: true,
+          value: {
+            id: viewer.id ?? null,
+            name: viewer.name ?? null,
+            level: viewer.level,
+          } as Result,
+        };
+      }
       const handler = (handlers as Record<string, CapabilityHandler<N> | undefined>)[capability];
       if (handler === undefined) {
         return refuse<Result>(capability, "not-declared");
       }
-      const context = { displayId: display.id, title: display.title, capability };
+      const family = familyOf(capability);
+      const declared = family === null ? undefined : declaredOf(options.declaration, family.name);
+      const context = {
+        displayId: display.id,
+        title: display.title,
+        capability,
+        ...(display.instance === undefined ? {} : { instance: display.instance }),
+        ...(options.viewer === undefined ? {} : { viewer: options.viewer }),
+        ...(declared === undefined ? {} : { declared }),
+      };
       // A read the content subscribes to may be answered from the host's cache, marked stale; the
       // fresh one follows as an update (the adapter asks for it). A cache that fails is no answer.
       if (capability === "readData" && callOptions?.stale === true && options.cached) {
@@ -392,14 +541,23 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
         }
       }
       const subscription = callOptions?.subscription;
-      if (capability === "subscribeData" && subscription === undefined) {
+      // A subscription (`subscribeData`, a `db` watch) needs its channel back.
+      const watches =
+        capability === "subscribeData" ||
+        (capability === "db" && (args as CapabilityArgs["db"]).op === "watch");
+      if (watches && subscription === undefined) {
         return refuse<Result>(capability, "invalid");
       }
       try {
         const value = await (handler as (args: unknown, context: unknown) => unknown)(
           args,
-          capability === "subscribeData" ? { ...context, ...subscription } : context,
+          watches ? { ...context, ...subscription } : context,
         );
+        // Comments are write-only (P090): content hears whether the composer opened, never what
+        // the host answered beyond that (a thread, its text).
+        if (capability === "comments") {
+          return { ok: true, value: (value === true) as Result };
+        }
         return { ok: true, value: value as Result };
       } catch (error) {
         // A host's Refused tells content its reason (P080); any other error stays the host's.

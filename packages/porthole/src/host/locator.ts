@@ -1,3 +1,4 @@
+import { parseViewer } from "../runtime/levels.ts";
 import type { PortholeConfig } from "../config/schema.ts";
 import type { FrameLocation, InstanceLocator } from "../isolation/types.ts";
 
@@ -77,10 +78,13 @@ export function httpLocator(url: string, options: HttpLocatorOptions = {}): Inst
           "bad-location",
         );
       }
+      // Who is viewing, as the app's access decided (P087); one that doesn't parse is none.
+      const viewer = data.viewer === undefined ? null : parseViewer(data.viewer);
       return {
         url: data.url,
         origin: data.origin,
         ...(typeof data.reports === "boolean" ? { reports: data.reports } : {}),
+        ...(viewer === null ? {} : { viewer }),
       } satisfies FrameLocation;
     },
   };

@@ -50,6 +50,83 @@ export {
 export { hostOriginProblem, isHostOrigin } from "./isolation/served.ts";
 export { FRAME_STATUS_METHOD } from "./isolation/types.ts";
 
+// The capability runtime (P085-P090): its contract, levels, a page's declaration, its services'
+// shapes. Hosts implement the services; Porthole carries, checks and gates the calls.
+export {
+  RUNTIME_CALL_METHOD,
+  RUNTIME_CAPABILITIES,
+  RUNTIME_CAPABILITY_NAMES,
+  RUNTIME_EVENT_METHOD,
+  RUNTIME_EXPERIMENTAL_KEY,
+  RUNTIME_GLOBAL,
+  RUNTIME_HOST_FUNCTIONS,
+  RUNTIME_UNWATCH_METHOD,
+  RUNTIME_VERSION,
+  RUNTIME_VERSIONS,
+  familyOf,
+  isRuntimeCapabilityName,
+  isRuntimeVersion,
+  methodLevel,
+  offeredCapabilities,
+  rosterOf,
+  type RuntimeCapability,
+  type RuntimeCapabilityName,
+  type RuntimeMethod,
+  type RuntimeVersion,
+} from "./runtime/contract.ts";
+export {
+  VIEWER_LEVELS,
+  atLeast,
+  isViewerLevel,
+  parseViewer,
+  type ViewerInfo,
+  type ViewerLevel,
+} from "./runtime/levels.ts";
+export {
+  checkDeclaration,
+  declarationProblems,
+  declareCapabilities,
+  type CapabilityDeclaration,
+  type DeclarationProblem,
+  type DeclaredCapability,
+  type DeclaredData,
+  type DeclaredDb,
+  type PageDeclaration,
+} from "./runtime/declaration.ts";
+export {
+  DB_LIMITS,
+  DB_USERS_PREFIX,
+  dbAccess,
+  dbRulesProblem,
+  parseDbRequest,
+  type DbData,
+  type DbRequest,
+  type DbResult,
+  type DbRules,
+  type DbSnapshot,
+  type DbValue,
+  type DbWhere,
+  type DbWrite,
+} from "./runtime/db.ts";
+export {
+  ASSET_ID,
+  ASSET_PATH,
+  MAX_PUBLISH_FILES,
+  assetNameProblem,
+  assetUrl,
+  type ArtifactInfo,
+  type ArtifactRequest,
+  type AssetInfo,
+  type AssetRequest,
+  type CommentAnchor,
+  type CommentRequest,
+  type DownloadedFile,
+  type PublishedFile,
+  type PublishedVersion,
+  type UserInfo,
+} from "./runtime/requests.ts";
+export { RUNTIME_TYPES } from "./runtime/types.generated.ts";
+
 // Presets.
 export {
   LIBRARY_CDNS,
@@ -101,6 +178,10 @@ export {
   egressOrigins,
   embedderCsp,
   embedderFrameSourcesOf,
+  ASSET_CODE_DIRECTIVES,
+  ASSET_DIRECTIVES,
+  assetCodeRuns,
+  assetCspDirectives,
   FILE_SET_DIRECTIVES,
   fileSetCspDirectives,
   INERT_FILE_CSP,
@@ -179,6 +260,7 @@ export type {
   HostFunctionBridge,
   Refusal,
   SubscriptionContext,
+  DbContext,
 } from "./bridge/types.ts";
 export { createHost } from "./host/create-host.ts";
 // The client half of the host kit, and the display registry (P072).

@@ -1,9 +1,14 @@
 import type { CompiledConfig } from "../compile/compile.ts";
-import { fileSetCspDirectives, INERT_FILE_CSP, serializeCsp } from "../compile/policy.ts";
+import {
+  assetCspDirectives,
+  fileSetCspDirectives,
+  INERT_FILE_CSP,
+  serializeCsp,
+} from "../compile/policy.ts";
 import { DEFAULT_ENTRY, lookupFile, requestFilePath, type FileLookup } from "../files/paths.ts";
 import { fileTypeOf } from "../files/types.ts";
 import { sha256, utf8 } from "./crypto.ts";
-import type { FileBody, StoredFiles } from "./types.ts";
+import type { FileBody, StoredAsset, StoredFiles } from "./types.ts";
 
 /**
  * Serving a version made of files (P081, P082): each path looked up in its manifest only, each
@@ -216,8 +221,13 @@ export async function serveFile(serving: FileServing): Promise<Response> {
     return nothing(serving, 404, method);
   }
   const { type, role } = fileTypeOf(found.path);
+  // Its version's files (P082), and its artifact's assets where the config serves them (P089).
   const frameCsp = serializeCsp(
-    fileSetCspDirectives(serving.compiled.cspDirectives, serving.source),
+    assetCspDirectives(
+      serving.compiled.config,
+      fileSetCspDirectives(serving.compiled.cspDirectives, serving.source),
+      serving.origin,
+    ),
   );
   const headers = new Headers({
     "content-type": type,
@@ -309,4 +319,90 @@ export async function serveFile(serving: FileServing): Promise<Response> {
     await body.cancel();
   }
   return new Response(method === "HEAD" ? null : asBody(body), { status: found.status, headers });
+}
+
+/**
+ * An asset of an artifact's library (P089), at `/_blob/<id>`: typed by Porthole's table by its
+ * name, never as a page (one named so goes as a download), inert opened on its own (an SVG runs
+ * nothing), `nosniff`, loaded only by its own origin's pages (CORP), immutable (an id never names
+ * other bytes), its sha256 the ETag, ranges for media.
+ */
+export async function serveAsset(serving: {
+  readonly request: Request;
+  readonly asset: StoredAsset;
+  readonly frameAncestors: string;
+}): Promise<Response> {
+  const { request, asset } = serving;
+  const method = request.method.toUpperCase();
+  const plain = (status: 404 | 405) =>
+    new Response(method === "HEAD" ? null : status === 404 ? "Not found" : "Only read", {
+      status,
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+        "content-security-policy": `${INERT_FILE_CSP}; frame-ancestors ${serving.frameAncestors}`,
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        ...(status === 405 ? { allow: "GET, HEAD" } : {}),
+      },
+    });
+  if (method !== "GET" && method !== "HEAD") {
+    return plain(405);
+  }
+  const body = await asset.read();
+  if (body === null) {
+    return plain(404);
+  }
+  const typed = fileTypeOf(asset.name);
+  // Never a page: an asset is the library's, outside the shell (P089).
+  const type = typed.role === "page" ? "application/octet-stream" : typed.type;
+  const headers = new Headers({
+    "content-type": type,
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+    "x-robots-tag": "noindex, nofollow",
+    "content-security-policy": `${INERT_FILE_CSP}; frame-ancestors ${serving.frameAncestors}`,
+    "cache-control": `private, max-age=${YEAR}, immutable`,
+    "cross-origin-resource-policy": "same-origin",
+    "accept-ranges": "bytes",
+  });
+  if (type === "application/octet-stream") {
+    headers.set("content-disposition", "attachment");
+  }
+  const etag = HEX.test(asset.sha256) ? `"${asset.sha256}"` : null;
+  if (etag !== null) {
+    headers.set("etag", etag);
+    if (notModified(request, etag)) {
+      if (!(body instanceof Uint8Array)) {
+        await body.cancel();
+      }
+      return new Response(null, { status: 304, headers });
+    }
+  }
+  const size = body instanceof Uint8Array ? body.byteLength : asset.size;
+  const range = rangeOf(request.headers.get("range"), size);
+  if (range === "unsatisfiable") {
+    if (!(body instanceof Uint8Array)) {
+      await body.cancel();
+    }
+    headers.set("content-range", `bytes */${size}`);
+    return new Response(null, { status: 416, headers });
+  }
+  if (range !== null) {
+    headers.set("content-range", `bytes ${range.start}-${range.end}/${size}`);
+    headers.set("content-length", String(range.end - range.start + 1));
+    if (method === "HEAD" && !(body instanceof Uint8Array)) {
+      await body.cancel();
+    }
+    return new Response(method === "HEAD" ? null : asBody(slice(body, range.start, range.end)), {
+      status: 206,
+      headers,
+    });
+  }
+  if (body instanceof Uint8Array || method === "HEAD") {
+    headers.set("content-length", String(size));
+  }
+  if (method === "HEAD" && !(body instanceof Uint8Array)) {
+    await body.cancel();
+  }
+  return new Response(method === "HEAD" ? null : asBody(body), { status: 200, headers });
 }

@@ -1,4 +1,18 @@
-import { CAPABILITY_NAMES, isCapabilityName, type Gate } from "./capabilities.ts";
+import {
+  CAPABILITY_NAMES,
+  isCapabilityName,
+  type CapabilityName,
+  type Gate,
+} from "./capabilities.ts";
+import {
+  RUNTIME_HOST_FUNCTIONS,
+  RUNTIME_VERSIONS,
+  familyOf,
+  isRuntimeVersion,
+  runtimeCapability,
+  type RuntimeMethod,
+} from "../runtime/contract.ts";
+import { atLeast, isViewerLevel } from "../runtime/levels.ts";
 import {
   PASSIVE_KINDS,
   URL_PERMISSIONS,
@@ -24,7 +38,7 @@ export class ConfigError extends Error {
 }
 
 /** The built-in manual topics; a host's own topics may not reuse these names. */
-export const BUILT_IN_TOPICS = ["widget", "chart", "interactive"] as const;
+export const BUILT_IN_TOPICS = ["widget", "chart", "interactive", "capabilities"] as const;
 
 const LOOPBACK = /^(localhost|127\.0\.0\.1|\[::1\])$|\.localhost$/u;
 
@@ -293,6 +307,7 @@ export function validateConfig(input: unknown): PortholeConfig {
       "permissions",
       "storage",
       "errors",
+      "runtime",
     ],
     "config",
   );
@@ -314,7 +329,34 @@ export function validateConfig(input: unknown): PortholeConfig {
       fail(path, `is not a capability (${CAPABILITY_NAMES.join(", ")})`);
     }
     const capability = object(value, path);
-    only(capability, ["gates", "connect", "resource", "guide"], path);
+    only(capability, ["gates", "connect", "resource", "guide", "levels"], path);
+    if (capability.levels !== undefined) {
+      const levels = object(capability.levels, `${path}.levels`);
+      const family = familyOf(name as CapabilityName);
+      for (const [method, level] of Object.entries(levels)) {
+        const methods: Readonly<Record<string, RuntimeMethod>> | undefined =
+          family === null ? undefined : runtimeCapability(family.name).methods;
+        const spec =
+          methods !== undefined && Object.hasOwn(methods, method) ? methods[method] : undefined;
+        if (family === null || spec === undefined || spec.serves !== name) {
+          fail(
+            `${path}.levels.${method}`,
+            family === null
+              ? `${name} serves no runtime method: it has no levels`
+              : `is not a method ${name} serves (${family.methods.join(", ")})`,
+          );
+        }
+        if (!isViewerLevel(level)) {
+          fail(`${path}.levels.${method}`, "must be view, interact, admin or owner");
+        }
+        if (spec !== undefined && !atLeast(level as never, spec.floor)) {
+          fail(
+            `${path}.levels.${method}`,
+            `can't be below ${spec.floor} (${family?.name}.${method}'s floor, P087)`,
+          );
+        }
+      }
+    }
     if (capability.gates !== undefined) {
       if (!Array.isArray(capability.gates)) {
         fail(`${path}.gates`, "must be an array");
@@ -331,6 +373,35 @@ export function validateConfig(input: unknown): PortholeConfig {
   }
   if (config.mode === "url" && Object.keys(capabilities).length > 0) {
     fail("config.capabilities", "url mode has no shell, so it can declare no capabilities");
+  }
+  // The capability runtime (P085): its global and its own host functions.
+  if (config.runtime !== undefined) {
+    if (!isRuntimeVersion(config.runtime)) {
+      fail("config.runtime", `must be a runtime contract version: ${RUNTIME_VERSIONS.join(", ")}`);
+    }
+    if (config.mode !== "inline" && config.mode !== "artifact") {
+      fail("config.runtime", "the runtime is the shell's: inline widgets and artifact pages only");
+    }
+  }
+  for (const name of RUNTIME_HOST_FUNCTIONS) {
+    if (capabilities[name] === undefined) {
+      continue;
+    }
+    if (config.runtime === undefined) {
+      fail(
+        `config.capabilities.${name}`,
+        "is the capability runtime's: set config.runtime (content reaches it through porthole.use)",
+      );
+    }
+    if ((name === "artifact" || name === "assets") && config.mode !== "artifact") {
+      fail(`config.capabilities.${name}`, "is an artifact page's: artifact mode only");
+    }
+  }
+  if (capabilities.assets !== undefined && config.isolation !== "domain") {
+    fail(
+      "config.capabilities.assets",
+      "assets are served from the page's own origin (/_blob/): domain isolation only",
+    );
   }
 
   const egress = object(config.egress, "config.egress");

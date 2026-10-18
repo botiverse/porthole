@@ -97,6 +97,8 @@ export { fileTypeOf, type FileRole, type FileType } from "../files/types.ts";
 export type {
   Access,
   ArtifactStore,
+  AssetStore,
+  StoredAsset,
   FileBody,
   StoredFile,
   StoredFiles,

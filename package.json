@@ -4,7 +4,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "typecheck": "tsc -p packages/porthole --noEmit && tsc -p packages/porthole/tsconfig.build.json --noEmit",
+    "typecheck": "tsc -p packages/porthole --noEmit && tsc -p packages/porthole/tsconfig.build.json --noEmit && tsc -p packages/porthole/types/runtime/v1",
     "lint": "oxlint --type-aware",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",

@@ -1,5 +1,6 @@
 import type { PortholeConfig } from "../config/schema.ts";
 import type { FrameLocation, InstanceRef } from "../isolation/types.ts";
+import type { ViewerLevel } from "../runtime/levels.ts";
 import type { Naming } from "./naming.ts";
 
 export interface ContentDomain {
@@ -62,6 +63,19 @@ export type Grant = (
    * url-mode app's every request, rides on.
    */
   readonly sessionSeconds?: number;
+  /**
+   * The viewer's level on this instance (P087), as the host decided it now: carried in the
+   * issue's answer (`FrameLocation.viewer`) to the display's bridge, which checks each runtime
+   * method's level against it. Never in the ticket or the cookie, never shown to content but by
+   * the `user` capability.
+   */
+  readonly level?: ViewerLevel;
+  /**
+   * Who the viewer is to pages that declare `user` (P087): the host's public id for them (whose
+   * per-user data, `data/users/<id>`, the page reaches) and a name. Never `viewer`, unless the
+   * host means it to be seen. Only with `level`.
+   */
+  readonly user?: { readonly id: string; readonly name?: string };
 };
 
 export interface TicketRecord {
@@ -131,6 +145,31 @@ export interface StoredFiles {
 
 /** A stored version: one page (`{ html }`, as in 0.5), or a set of files (P081). */
 export type StoredVersion = { readonly html: string } | StoredFiles;
+
+/**
+ * One asset of an artifact's library (P089), as the host stored it: served at `/_blob/<id>` on
+ * the origin of `scope`, and nowhere else. Its type is Porthole's for `name`'s extension, never
+ * the uploader's; it is never served as a page.
+ */
+export interface StoredAsset {
+  /** The storage scope whose origin serves it (the artifact's). */
+  readonly scope: string;
+  /** Its file name (its extension types it). */
+  readonly name: string;
+  readonly size: number;
+  /** The SHA-256 of its bytes, lowercase hex: its strong ETag. */
+  readonly sha256: string;
+  read(): Promise<FileBody | null>;
+}
+
+/**
+ * Where an artifact's assets are kept (P089): the host's library, by id. Ids are the host's, 32
+ * lowercase hex characters made at random (`ASSET_ID`): an asset's address is known only to those
+ * shown it; Porthole serves one only on its own scope's origin.
+ */
+export interface AssetStore {
+  get(id: string): Promise<StoredAsset | null>;
+}
 
 /** Stored pages (artifact mode). Versions are immutable: a new page is a new version. */
 export interface ArtifactStore {
@@ -204,6 +243,12 @@ export interface ServerOptions {
    */
   readonly configs: Readonly<Record<string, PortholeConfig>>;
   readonly artifacts?: ArtifactStore;
+  /**
+   * Artifacts' asset libraries (P089): `/_blob/<id>` on each content origin, for a page that
+   * loads it (its own origin's request) or a tab with a session for an artifact of that origin.
+   * Absent: `/_blob/` names nothing.
+   */
+  readonly assets?: AssetStore;
   readonly tickets?: TicketStore;
   /** Url mode: where an external instance's requests go once let in. Absent: nothing serves them. */
   readonly upstream?: Upstream;

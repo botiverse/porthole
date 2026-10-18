@@ -1,3 +1,5 @@
+import type { RuntimeVersion } from "../runtime/contract.ts";
+import type { ViewerLevel } from "../runtime/levels.ts";
 import type { CapabilityName, Gate } from "./capabilities.ts";
 
 /**
@@ -44,6 +46,14 @@ export interface CapabilityConfig {
   readonly resource?: readonly string[];
   /** Replaces the generated manual entry for this capability. */
   readonly guide?: string;
+  /**
+   * The least viewer level that may call each of the runtime methods it serves (P087), by method
+   * name (`db: { levels: { set: "admin" } }`, `sendPrompt: { levels: { send: "admin" } }`): over
+   * the contract's own, never below a method's floor (`RUNTIME_CAPABILITIES`). For
+   * `assets.upload`, `admin` or above also lets the page run what was uploaded as scripts and
+   * styles (P089); `interact` doesn't.
+   */
+  readonly levels?: Readonly<Record<string, ViewerLevel>>;
 }
 
 /** The declared capabilities. Absent: not available, not wired, not in the CSP, not in the manual. */
@@ -223,6 +233,14 @@ export interface PortholeConfig {
    * declares no `reportError`). Absent: the manual says they are reported to the app.
    */
   readonly errors?: "agent" | "host" | "none";
+  /**
+   * The capability runtime (P085): content reaches capabilities through one global,
+   * `porthole.use(name)`, under this contract version, and the manual teaches it (with declaring
+   * them, `capabilities: { name: config }`, for pages that are published). Only with it may the
+   * config declare the runtime's own host functions (`user`, `comments`, `artifact`, `assets`,
+   * `db`). Absent: 0.6's frames, globals and manual, exactly.
+   */
+  readonly runtime?: RuntimeVersion;
 }
 
 export interface StorageConfig {

@@ -8,6 +8,8 @@ import type { InstanceLocator, InstanceRef } from "../isolation/types.ts";
 import type { PlatformHost } from "../platform/types.ts";
 import type { AdapterConnection, ProtocolAdapter, ShellConnection } from "../protocol/adapter.ts";
 import type { HostContext } from "../protocol/mcp-apps.ts";
+import type { PageDeclaration } from "../runtime/declaration.ts";
+import type { ViewerInfo } from "../runtime/levels.ts";
 
 /**
  * The host-side API (framework-agnostic; the web platform by default). A host compiles a config
@@ -75,6 +77,20 @@ export interface MountOptions {
   readonly document?: string;
   /** The height to start at, before the content reports its own. */
   readonly initialHeightPx?: number;
+  /**
+   * What the page declared (P086), as the host stored it with the artifact at publish
+   * (`declareCapabilities`): its capabilities, and the runtime contract it is pinned to. The
+   * bridge holds the page to it; a page reaches only the built-ins and what it declared. Absent: a
+   * page without a declaration (0.6's): built-ins only through `porthole.use`, and 0.6's globals as
+   * before. Checked against the config at mount (a `TypeError` for one that doesn't fit).
+   */
+  readonly declaration?: PageDeclaration;
+  /**
+   * Who is viewing (P087): their level, and for `user` their public id and name. A served
+   * display's issue answer (`FrameLocation.viewer`, from the host's access) takes precedence.
+   * Absent everywhere: 0.6's functions run as before; the runtime's own are refused.
+   */
+  readonly viewer?: ViewerInfo;
   /**
    * Fill the container (give it a height) instead of taking the content's height.
    *

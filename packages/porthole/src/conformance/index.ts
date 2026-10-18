@@ -120,6 +120,13 @@ export {
 // Redirect entry's cases (P068).
 export { entryTests, type EntryConformanceHost, type EntrySuiteOptions } from "./entry.ts";
 
+// The capability runtime's cases an app runs against its own handlers (P085-P090): no browser.
+export {
+  defineRuntimeConformance,
+  type RuntimeCase,
+  type RuntimeConformanceOptions,
+} from "./runtime.ts";
+
 // The runner an app points at its real page and issue endpoint (P066).
 export {
   conformancePage,

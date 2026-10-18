@@ -119,6 +119,10 @@ describe("Refused (P080)", () => {
       "rate_limited",
       "not_allowed",
       "failed",
+      // The capability runtime's (P087, P088).
+      "forbidden",
+      "conflict",
+      "too_large",
     ]);
     const own = new Refused("not_allowed", "Live data shows on Today.");
     expect(own).toBeInstanceOf(Error);

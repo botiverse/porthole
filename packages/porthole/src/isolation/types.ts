@@ -12,6 +12,7 @@
  * one host app.
  */
 import type { EgressConfig } from "../config/schema.ts";
+import type { ViewerInfo } from "../runtime/levels.ts";
 
 /**
  * Which document a served frame loads. `preset` names the config it is served under (the server's
@@ -63,6 +64,11 @@ export interface FrameLocation {
    * one that loaded. A host's own gateway may send the same message without this.
    */
   readonly reports?: boolean;
+  /**
+   * Who is viewing, as the host's access decided at issue (P087: `Grant.level`, `Grant.user`):
+   * the display's bridge checks each runtime method's level against it.
+   */
+  readonly viewer?: ViewerInfo;
 }
 
 /** The message a served page sends its host about loading (own-prefixed, P040). */
@@ -88,4 +94,6 @@ export type FrameSource =
       readonly url: string;
       readonly origin: string;
       readonly reports?: boolean;
+      /** The issue's viewer (`FrameLocation.viewer`), for the display's bridge. */
+      readonly viewer?: ViewerInfo;
     };

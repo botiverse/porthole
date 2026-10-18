@@ -39,6 +39,16 @@ const DECLINED: { readonly [N in HandledCapability]: () => unknown } = {
   subscribeData: () => {
     throw new Error("The host declined the subscription");
   },
+  comments: () => false,
+  artifact: () => {
+    throw new Error("The host declined the artifact call");
+  },
+  assets: () => {
+    throw new Error("The host declined the asset call");
+  },
+  db: () => {
+    throw new Error("The host declined the db call");
+  },
 };
 
 /**

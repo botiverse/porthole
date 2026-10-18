@@ -5,6 +5,9 @@ import type {
   HandledCapability,
 } from "../config/capabilities.ts";
 import type { InstanceRef } from "../isolation/types.ts";
+import type { RuntimeCapabilityName } from "../runtime/contract.ts";
+import type { DeclaredData, DeclaredDb } from "../runtime/declaration.ts";
+import type { ViewerInfo } from "../runtime/levels.ts";
 import type { RefusalReason } from "./refusal.ts";
 
 /**
@@ -20,16 +23,33 @@ export interface CallContext {
   /** The display's title, as the host gave it (never the content's words). */
   readonly title: string;
   readonly capability: CapabilityName;
+  /** The instance the host gave the display (which artifact, which version), if any. */
+  readonly instance?: InstanceRef;
+  /**
+   * Who is viewing, as the host said (P087): the bridge already checked the method's level
+   * against it. A host's own API checks again: it is its data's wall.
+   */
+  readonly viewer?: ViewerInfo;
+  /**
+   * The page's declaration for this capability (P086): its levels, `data`'s resources and tools,
+   * `db`'s rules (the fields of the one it is).
+   */
+  readonly declared?: DeclaredData & DeclaredDb;
 }
 
 export type CapabilityHandler<N extends CapabilityName> = (
   args: CapabilityArgs[N],
-  context: N extends "subscribeData" ? SubscriptionContext : CallContext,
+  context: N extends "subscribeData"
+    ? SubscriptionContext
+    : N extends "db"
+      ? DbContext
+      : CallContext,
 ) => CapabilityResults[N] | Promise<CapabilityResults[N]>;
 
 /**
- * A subscription's context (`subscribeData`, P079): how the host tells the content its resource
- * changed, and when to stop.
+ * A subscription's context (`subscribeData`, P079; a `db` watch, P088): how the host tells the
+ * content its resource changed, and when to stop. A `db` watch's `changed` takes the new state
+ * (a snapshot, or a collection's `{ docs }`), which goes to the content as it is.
  */
 export interface SubscriptionContext extends CallContext {
   /**
@@ -41,6 +61,9 @@ export interface SubscriptionContext extends CallContext {
   /** Aborted when the content unsubscribes, its frame stops, or the display is destroyed. */
   readonly signal: AbortSignal;
 }
+
+/** A `db` call's context: a watch's (`op: "watch"`) carries its channel back and its end. */
+export type DbContext = CallContext & Partial<Pick<SubscriptionContext, "changed" | "signal">>;
 
 /** The host's handlers: one for each declared capability served by a handler. */
 export type CapabilityHandlers = { readonly [N in HandledCapability]?: CapabilityHandler<N> };
@@ -125,7 +148,20 @@ export type Refusal =
   | "denied"
   | "rate-limited"
   /** The host's handler threw or rejected. */
-  | "failed";
+  | "failed"
+  /**
+   * The display's page declared capabilities and not this one (P086): a built-in needs none, any
+   * other is reachable only by a page that declared it (and only the resources and tools it named).
+   */
+  | "undeclared"
+  /**
+   * The viewer's level doesn't reach the method's (P087), or the call reaches data that isn't
+   * theirs (another person's `data/users/<id>`); or the host gave the display no viewer, which a
+   * runtime capability needs.
+   */
+  | "level"
+  /** Past a limit: a document, a batch, an upload, a publish (P088). */
+  | "too-large";
 
 export type CallOutcome<T> =
   /** `stale`: a `readData` answered from the host's cache (`DataCache`). */
@@ -157,4 +193,10 @@ export interface HostFunctionBridge {
     options?: CallOptions,
   ): Promise<CallOutcome<CapabilityResults[N]>>;
   declared(capability: CapabilityName): boolean;
+  /**
+   * What the runtime offers this display (P085): each runtime capability it may `use`, with its
+   * methods. Empty without `config.runtime`. The same whatever the viewer's level: levels refuse
+   * at call time.
+   */
+  roster(): Readonly<Partial<Record<RuntimeCapabilityName, readonly string[]>>>;
 }

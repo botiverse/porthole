@@ -45,6 +45,7 @@ function setup(
   const calls: { capability: CapabilityName; args: unknown; options: unknown }[] = [];
   const events: AdapterEvent[] = [];
   const bridge: HostFunctionBridge = {
+    roster: () => ({}),
     declared: (name) => config.capabilities[name] !== undefined,
     call: async (capability, args, callOptions) => {
       calls.push({ capability, args, options: callOptions });

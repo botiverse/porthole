@@ -18,7 +18,11 @@ import {
   type CompiledConfig,
   type PortholeConfig,
 } from "../src/index.ts";
-import { SHELL_RUNTIME } from "../src/shell/runtime.ts";
+import { composedRuntime } from "../src/shell/document.ts";
+import { runtimeEntryPrefix } from "../src/guide/runtime.ts";
+import { assetCspDirectives } from "../src/compile/policy.ts";
+import { RUNTIME_TYPES } from "../src/runtime/types.generated.ts";
+import { offeredCapabilities } from "../src/runtime/contract.ts";
 import { sizeWords } from "../src/guide/limits.ts";
 import { librarySources } from "../src/compile/policy.ts";
 
@@ -107,6 +111,34 @@ const CASES: Record<string, PortholeConfig> = {
     capabilities: { openLink: {}, copyText: {} },
   }),
   "live widget, opaque: no libraries": presets.liveWidget(),
+  "artifact page, served, the capability runtime with everything (P085)": presets.artifact({
+    isolation: "domain",
+    contentOrigins: ["https://*.example-usercontent.com"],
+    runtime: "1",
+    capabilities: {
+      ...ALL_HANDLED,
+      copyText: {},
+      user: {},
+      comments: {},
+      artifact: {},
+      assets: {},
+      db: {},
+    },
+  }),
+  "artifact page, runtime, uploads open to people who interact (P089)": presets.artifact({
+    isolation: "domain",
+    contentOrigins: ["https://*.example-usercontent.com"],
+    runtime: "1",
+    capabilities: {
+      assets: { levels: { upload: "interact" } },
+      db: { levels: { set: "admin" } },
+      sendPrompt: { levels: { send: "view" }, gates: ["confirm"] },
+    },
+  }),
+  "inline widget, the capability runtime, a db and a copy button": presets.inlineWidget({
+    runtime: "1",
+    capabilities: { copyText: {}, db: {}, user: {} },
+  }),
   "MCP Apps view": presets.mcpApp({
     capabilities: { ...ALL_HANDLED, copyText: {}, annotate: {} },
     egress: { connect: ["https://api.example.com"], img: ["https://images.example.com"] },
@@ -148,7 +180,11 @@ const cspOrigins = (compiled: CompiledConfig): Set<string> =>
   );
 
 /** How each capability's entry in the manual starts (with the shell's global, or without). */
-const ENTRY_PREFIXES: { readonly [N in Exclude<CapabilityName, "resize">]: readonly string[] } = {
+const ENTRY_PREFIXES: {
+  readonly [
+    N in Exclude<CapabilityName, "resize" | "user" | "comments" | "artifact" | "assets" | "db">
+  ]: readonly string[];
+} = {
   sendPrompt: ["- sendPrompt(", "- Messages:"],
   openLink: ["- openLink(", "- Links:"],
   downloadFile: ["- Downloads:"],
@@ -161,10 +197,25 @@ const ENTRY_PREFIXES: { readonly [N in Exclude<CapabilityName, "resize">]: reado
   annotate: ["- Comments:"],
 };
 
-const GLOBALS = CAPABILITY_NAMES.flatMap((name) => {
-  const spec = capabilitySpec(name);
-  return spec.global === undefined ? [] : [spec.global];
-});
+const GLOBALS = [
+  ...CAPABILITY_NAMES.flatMap((name) => {
+    const spec = capabilitySpec(name);
+    return spec.global === undefined ? [] : [spec.global];
+  }),
+  "porthole.use",
+];
+
+/** How a capability's entry starts: under the runtime, as porthole.use's methods (P085). */
+const prefixesOf = (config: PortholeConfig, name: CapabilityName): readonly string[] => {
+  const runtime = runtimeEntryPrefix(name);
+  if (config.runtime !== undefined && runtime !== null) {
+    return [runtime];
+  }
+  return (ENTRY_PREFIXES as Readonly<Record<string, readonly string[]>>)[name] ?? [];
+};
+
+/** The codes a data read is taught (P080), and under the runtime every one (P087). */
+const DATA_CODES = ["consent_required", "denied", "rate_limited", "not_allowed", "failed"];
 
 describe.each(Object.entries(CASES))("%s", (_name, config) => {
   const compiled = compile(config);
@@ -189,16 +240,22 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
   });
 
   test("the manual names exactly the globals the shell defines", () => {
+    const defined = (plan?.globals ?? []).map((global) =>
+      global === "porthole" ? "porthole.use" : global,
+    );
     for (const global of GLOBALS) {
       const taught = text.includes(`${global}(`);
-      expect(taught, `${global}: taught ${taught}, defined ${plan?.globals.includes(global)}`).toBe(
-        plan?.globals.includes(global) ?? false,
+      expect(taught, `${global}: taught ${taught}, defined ${defined.includes(global)}`).toBe(
+        defined.includes(global),
       );
     }
-    // And the runtime really defines each global it is told to, from the plan.
-    for (const global of plan?.globals ?? []) {
-      expect(SHELL_RUNTIME).toContain(`lock(window, "${global}", `);
+    // And the runtime really defines each global it is told to, from the plan: under the
+    // capability runtime, 0.6's too (the legacy path, P085), which the manual no longer teaches.
+    const runtime = plan === null ? "" : composedRuntime(plan);
+    for (const global of [...(plan?.globals ?? []), ...(plan?.legacyGlobals ?? [])]) {
+      expect(runtime).toContain(`lock(window, "${global}", `);
     }
+    expect(plan?.legacyGlobals.length === 0 || plan?.runtime !== undefined).toBe(true);
   });
 
   test("the shell wires exactly the declared capabilities, with the gates the manual describes", () => {
@@ -214,7 +271,7 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
         continue;
       }
       const entry = interactive.find((line) =>
-        ENTRY_PREFIXES[name].some((prefix) => line.startsWith(prefix)),
+        prefixesOf(config, name).some((prefix) => line.startsWith(prefix)),
       );
       expect(entry, `the manual has no entry for ${name}`).toBeDefined();
       if (name === "annotate") {
@@ -233,7 +290,7 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
       );
       if (name === "readData") {
         // Every reason a refusal can give content, taught where content reads data (P080).
-        for (const code of REFUSAL_CODES) {
+        for (const code of config.runtime === undefined ? DATA_CODES : REFUSAL_CODES) {
           expect(entry, `readData: refusal ${code}`).toContain(code);
         }
       }
@@ -247,8 +304,36 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
     }
   });
 
-  test("the manual teaches refusal codes exactly where content reads data (P080)", () => {
-    expect(text.includes("consent_required")).toBe(config.capabilities.readData !== undefined);
+  test("the manual teaches the capability runtime exactly where the shell has it (P085)", () => {
+    const offered = offeredCapabilities(config);
+    expect(text.includes("porthole.use(")).toBe(plan?.runtime !== undefined);
+    expect(compiled.guide().includes("# Capabilities")).toBe(plan?.runtime !== undefined);
+    if (plan?.runtime === undefined) {
+      return;
+    }
+    const topic = compiled.guide(["capabilities"]);
+    // Each offered capability's types, as the package ships them, and nothing else's.
+    for (const [name, types] of Object.entries(RUNTIME_TYPES[plan.runtime] ?? {})) {
+      expect(topic.includes(types.trim()), `${name}'s types`).toBe(
+        name === "porthole" || (offered as readonly string[]).includes(name),
+      );
+    }
+    // Declared assets: scripts from the library taught exactly where the CSP runs them (P089).
+    if (config.capabilities.assets !== undefined) {
+      const origin = "https://a-x.example-usercontent.com";
+      const csp = assetCspDirectives(config, compiled.cspDirectives, origin);
+      const runs = csp.some(
+        ([name, ...sources]) => name === "script-src" && sources.includes(`${origin}/_blob/`),
+      );
+      expect(text.includes("and scripts and stylesheets")).toBe(runs);
+      expect(text.includes("scripts and stylesheets from it never run")).toBe(!runs);
+    }
+  });
+
+  test("the manual teaches refusal codes exactly where content reads data (P080), or the runtime calls (P085)", () => {
+    expect(text.includes("consent_required")).toBe(
+      config.capabilities.readData !== undefined || plan?.runtime !== undefined,
+    );
   });
 
   test("the manual names exactly the origins the CSP allows", () => {

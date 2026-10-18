@@ -20,6 +20,8 @@ import { shellPlan } from "../shell/plan.ts";
 import { themeDefault } from "../theme/variables.ts";
 import { GUIDE_EXAMPLES } from "./examples.ts";
 import { manualLimits, sizeWords } from "./limits.ts";
+import { gateWords } from "./gates.ts";
+import { capabilitiesTopic, runtimeEntries, runtimeToolWords } from "./runtime.ts";
 
 /**
  * The agent manual and the tool description, generated from the config (PRINCIPLE 3, 10): the
@@ -397,30 +399,6 @@ function chart(c: Context): string {
   );
 }
 
-/** How a capability's gates read to the author: one sentence each. */
-function gateWords(gates: readonly Gate[], effect: string): string {
-  const sentences: string[] = [];
-  if (gates.includes("consent")) {
-    sentences.push(
-      "The first data call asks the person to allow it; if they don't, every one fails with code denied (show that the data isn't allowed, not an error).",
-    );
-  }
-  if (gates.includes("confirm")) {
-    sentences.push(
-      `The app shows the person ${effect} first, and nothing happens unless they confirm.`,
-    );
-  }
-  if (gates.includes("user-activation")) {
-    sentences.push("Call it from a click (it needs one).");
-  }
-  for (const gate of gates) {
-    if (typeof gate === "object") {
-      sentences.push(`At most ${gate.rateLimit.perMinute} a minute.`);
-    }
-  }
-  return sentences.join(" ");
-}
-
 /**
  * What a data refusal tells content (P080): the codes and the sentence, for the author to draw. With
  * the shell's globals they are the error's own fields; without, the JSON-RPC error's data.
@@ -468,16 +446,33 @@ const ENTRIES: { readonly [N in CapabilityName]: (c: Context, gates: readonly Ga
     reportError: (c) =>
       `- ${manualLimits(c.config, "").find((limit) => limit.id === "errors")?.text ?? ""}`,
     resize: () => "",
+    // The runtime's own: taught as porthole.use's methods (runtimeEntries), never alone.
+    user: () => "",
+    comments: () => "",
+    artifact: () => "",
+    assets: () => "",
+    db: () => "",
   };
+
+/** The shell's own capabilities, which content never calls by name: taught as they are. */
+const SHELL_OWN: readonly CapabilityName[] = ["annotate", "reportError", "resize"];
 
 function interactive(c: Context): string {
   const { config, noun } = c;
-  const entries = declaredCapabilities(config)
-    .map((name) => {
-      const own = config.capabilities[name]?.guide;
-      return own === undefined ? ENTRIES[name](c, effectiveGates(config, name)) : `- ${own}`;
-    })
-    .filter((entry) => entry !== "");
+  // Under the capability runtime (P085), what content calls is porthole.use's methods.
+  const runtime = config.runtime !== undefined;
+  const entries = [
+    ...(runtime ? runtimeEntries(config) : []),
+    ...declaredCapabilities(config)
+      .filter(
+        (name) =>
+          !runtime || SHELL_OWN.includes(name) || config.capabilities[name]?.guide !== undefined,
+      )
+      .map((name) => {
+        const own = config.capabilities[name]?.guide;
+        return own === undefined ? ENTRIES[name](c, effectiveGates(config, name)) : `- ${own}`;
+      }),
+  ].filter((entry) => entry !== "");
   const stated = manualLimits(config, "");
   const stored = stated.find((limit) => limit.id === "storage");
   const state = stored === undefined ? null : `- ${stored.text}`;
@@ -496,13 +491,21 @@ const TOPICS: Readonly<Record<BuiltInTopic, (c: Context) => string>> = {
   widget,
   chart,
   interactive,
+  capabilities: (c) => capabilitiesTopic(c.config, c.noun),
 };
+
+/** The built-in topics a config has: the capabilities topic only with a runtime (P085). */
+export function builtInTopics(config: PortholeConfig): readonly BuiltInTopic[] {
+  return BUILT_IN_TOPICS.filter(
+    (topic) => topic !== "capabilities" || config.runtime !== undefined,
+  );
+}
 
 /** The manual for `topics`, in the order asked (all built-in topics by default). */
 export function generateGuide(config: PortholeConfig, topics?: readonly GuideTopic[]): string {
   const c = context(config);
   const own = config.guide.topics ?? {};
-  return (topics ?? BUILT_IN_TOPICS)
+  return (topics ?? builtInTopics(config))
     .map((topic) => {
       if (Object.hasOwn(TOPICS, topic)) {
         return TOPICS[topic as BuiltInTopic](c);
@@ -545,24 +548,26 @@ export function generateToolDescription(config: PortholeConfig): string {
       : origins.length === 0
         ? `loading only ${fromAnywhere}`
         : `loading only from ${origins.join(", ")}${fromAnywhere === "" ? "" : `, and ${fromAnywhere}`}`;
-  const globals = declaredCapabilities(config).flatMap((name) => {
-    const spec = capabilitySpec(name);
-    if (spec.global === undefined || !c.global(spec.global)) {
+  const globals = (config.runtime === undefined ? declaredCapabilities(config) : []).flatMap(
+    (name) => {
+      const spec = capabilitySpec(name);
+      if (spec.global === undefined || !c.global(spec.global)) {
+        return [];
+      }
+      if (spec.global === "sendPrompt") {
+        return ["sendPrompt(text) asks the person to send text to you as their message."];
+      }
+      if (spec.global === "openLink") {
+        return ["openLink(url) asks the person to open a link."];
+      }
+      if (spec.global === "readData") {
+        return [
+          `readData(uri)${c.global("subscribeData") ? " and subscribeData(uri, onData)" : ""} read the app's data, as the person viewing it may see it.`,
+        ];
+      }
       return [];
-    }
-    if (spec.global === "sendPrompt") {
-      return ["sendPrompt(text) asks the person to send text to you as their message."];
-    }
-    if (spec.global === "openLink") {
-      return ["openLink(url) asks the person to open a link."];
-    }
-    if (spec.global === "readData") {
-      return [
-        `readData(uri)${c.global("subscribeData") ? " and subscribeData(uri, onData)" : ""} read the app's data, as the person viewing it may see it.`,
-      ];
-    }
-    return [];
-  });
+    },
+  );
   const read =
     config.guide.guideToolName === undefined
       ? ""
@@ -575,7 +580,7 @@ export function generateToolDescription(config: PortholeConfig): string {
     config.theme.documents === "never"
       ? "always in light (the app doesn't theme it)"
       : "in the person's light or dark theme through CSS variables";
-  return `${what} ${where}, ${theme}, ${net}. ${globals.join(" ")}${read} Each time it is shown it runs again from this code.`.replace(
+  return `${what} ${where}, ${theme}, ${net}. ${globals.join(" ")} ${runtimeToolWords(config)}${read} Each time it is shown it runs again from this code.`.replace(
     / {2,}/gu,
     " ",
   );

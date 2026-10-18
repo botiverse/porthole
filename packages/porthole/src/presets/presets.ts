@@ -1,3 +1,4 @@
+import type { RuntimeVersion } from "../runtime/contract.ts";
 import type { CapabilityName } from "../config/capabilities.ts";
 import type {
   CapabilityConfig,
@@ -50,6 +51,11 @@ export interface PresetOptions {
   readonly storage?: StorageConfig;
   /** Where the content's errors go (`PortholeConfig.errors`); `none` drops `reportError`. */
   readonly errors?: "agent" | "host" | "none";
+  /**
+   * The capability runtime (P085): content reaches capabilities through `porthole.use`, and may
+   * be offered the runtime's own (`user`, `comments`, `artifact`, `assets`, `db`).
+   */
+  readonly runtime?: RuntimeVersion;
 }
 
 /**
@@ -207,6 +213,7 @@ function build(
     embedder: options.embedder ?? {},
     ...(options.storage === undefined ? {} : { storage: options.storage }),
     ...(options.errors === undefined ? {} : { errors: options.errors }),
+    ...(options.runtime === undefined ? {} : { runtime: options.runtime }),
   });
 }
 

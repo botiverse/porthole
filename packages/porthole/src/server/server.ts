@@ -13,8 +13,10 @@ import { randomBytes } from "./crypto.ts";
 import { isHostLabel, reservedLabels } from "./naming.ts";
 import { enterPage, pageScript, SESSION_PATH, statusPage } from "./pages.ts";
 import { libraryFile } from "./libraries.ts";
-import { ownLoad, serveFile } from "./files.ts";
-import { INERT_FILE_CSP } from "../compile/policy.ts";
+import { ownLoad, serveAsset, serveFile } from "./files.ts";
+import { assetCspDirectives, INERT_FILE_CSP, serializeCsp } from "../compile/policy.ts";
+import { ASSET_ID, ASSET_PATH } from "../runtime/requests.ts";
+import { parseViewer, type ViewerInfo } from "../runtime/levels.ts";
 import type { FrameBlock } from "../host/types.ts";
 import { memoryTicketStore } from "./tickets.ts";
 import type {
@@ -238,6 +240,26 @@ function cookiesOf(request: Request): [string, string][] {
  * fetch-style handler a host's backend mounts in front of its own routes, plus `issue`, which the
  * host's authenticated API calls once it has decided a viewer may see an instance.
  */
+/** A grant's viewer for the display's bridge (P087), checked; null without a level. */
+function viewerOfGrant(grant: Grant): ViewerInfo | null {
+  if (grant.level === undefined) {
+    if (grant.user !== undefined) {
+      throw new TypeError("A grant's user comes with its level");
+    }
+    return null;
+  }
+  const viewer = parseViewer({
+    level: grant.level,
+    ...(grant.user === undefined ? {} : { id: grant.user.id, name: grant.user.name }),
+  });
+  if (viewer === null) {
+    throw new TypeError(
+      "A grant's level is view, interact, admin or owner; its user's id and name 1 to 256 characters",
+    );
+  }
+  return viewer;
+}
+
 export function createServer(options: ServerOptions): PortholeServer {
   const { content } = options;
   const domain = content.domain;
@@ -476,7 +498,7 @@ export function createServer(options: ServerOptions): PortholeServer {
   async function documentOf(
     instance: InstanceRef,
   ): Promise<
-    | { readonly html: string; readonly csp: string }
+    | { readonly html: string; readonly csp: string; readonly compiled?: CompiledConfig }
     | { readonly files: StoredFiles; readonly compiled: CompiledConfig }
     | null
   > {
@@ -504,6 +526,7 @@ export function createServer(options: ServerOptions): PortholeServer {
         return {
           html: config.shellDocument({ origins, document: stored.html, cspMeta: false }),
           csp: config.csp,
+          compiled: config,
         };
       }
       case "mcp-proxy":
@@ -941,11 +964,98 @@ export function createServer(options: ServerOptions): PortholeServer {
     if (at !== undefined && at.rest !== "") {
       return page(404, "Not found", "This page, or this version of it, doesn't exist.", method);
     }
-    const headers = documentHeaders(served.csp);
+    // A page that may use its artifact's assets loads them from its own origin (P089).
+    const headers = documentHeaders(
+      served.compiled === undefined
+        ? served.csp
+        : serializeCsp(
+            assetCspDirectives(
+              served.compiled.config,
+              served.compiled.cspDirectives,
+              access.origin,
+            ),
+          ),
+    );
     if (cookie !== null) {
       headers.set("set-cookie", cookie);
     }
     return new Response(method === "HEAD" ? null : served.html, { status: 200, headers });
+  }
+
+  /**
+   * An asset at `/_blob/<id>` (P089): for a page of its own origin loading it (`Sec-Fetch-Site:
+   * same-origin`, not a navigation: the page was let in to be there), or a request whose cookie
+   * holds a session for an artifact of this origin, which the host's check then decides. Never
+   * an entry: an asset is not an address to sign in for. Only on its own scope's origin.
+   */
+  async function serveAssetAt(request: Request, url: URL, label: string): Promise<Response> {
+    const method = request.method.toUpperCase();
+    const id = url.pathname.slice(ASSET_PATH.length);
+    const store = options.assets;
+    if (store === undefined || !ASSET_ID.test(id)) {
+      return page(404, "Not found", "This address names no content.", method);
+    }
+    if (!ownLoad(request)) {
+      const access = artifactAccessOf(request, label);
+      if (access === null) {
+        return new Response(null, { status: 401, headers: { "cache-control": "no-store" } });
+      }
+      const refusal = await denied(request, access);
+      if (refusal !== null) {
+        return refusal;
+      }
+    }
+    const asset = await store.get(id);
+    let named: string | null = null;
+    try {
+      named = asset === null ? null : nameOf(asset.scope);
+    } catch {
+      named = null;
+    }
+    if (asset === null || named !== label) {
+      return page(404, "Not found", "This address names no content.", method);
+    }
+    return serveAsset({ request, asset, frameAncestors });
+  }
+
+  /** The access a request's cookies give to any artifact of `label`'s origin, or null. */
+  function artifactAccessOf(request: Request, label: string): Access | null {
+    let best: Access | null = null;
+    for (const [name, value] of cookiesOf(request)) {
+      if (!ourCookie(name)) {
+        continue;
+      }
+      const session = keys.verify(value);
+      if (
+        !isRecord(session) ||
+        typeof session.w !== "string" ||
+        typeof session.x !== "number" ||
+        session.x <= Date.now() ||
+        (session.s !== undefined && typeof session.s !== "string")
+      ) {
+        continue;
+      }
+      let instance: InstanceRef;
+      try {
+        instance = cleanInstance(session.i);
+        if (instance.document.kind !== "artifact" || nameOf(instance.scope) !== label) {
+          continue;
+        }
+      } catch {
+        continue;
+      }
+      if (best === null || session.x > best.expiresAt) {
+        best = {
+          instance,
+          viewer: session.w,
+          origin: originOfLabel(label),
+          expiresAt: session.x,
+          ...(session.a === 1 ? { anonymous: true } : {}),
+          ...(typeof session.s === "string" ? { subject: session.s } : {}),
+        };
+      }
+    }
+    return best;
   }
 
   /**
@@ -1344,7 +1454,9 @@ export function createServer(options: ServerOptions): PortholeServer {
         clean.document.kind === "external"
           ? `${ENTER_PATH}?ticket=${ticket}`
           : `${PREFIX}d/${key}?ticket=${ticket}`;
-      return { url: `${origin}${path}`, origin, reports: true };
+      // The viewer's level, as the host's access decided it now (P087): for the display's bridge.
+      const viewer = viewerOfGrant(grant);
+      return { url: `${origin}${path}`, origin, reports: true, ...(viewer ? { viewer } : {}) };
     },
 
     forget(filter = {}) {
@@ -1486,6 +1598,10 @@ export function createServer(options: ServerOptions): PortholeServer {
           const status =
             access === null ? 401 : (await denied(request, access)) === null ? 204 : 403;
           return new Response(null, { status, headers: { "cache-control": "no-store" } });
+        }
+        // An artifact's asset library (P089), outside every version.
+        if (options.assets !== undefined && url.pathname.startsWith(ASSET_PATH)) {
+          return await serveAssetAt(request, url, label);
         }
         const document = DOCUMENT_PATH.exec(url.pathname);
         if (document?.[1] !== undefined) {

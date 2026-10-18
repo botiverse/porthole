@@ -1,6 +1,5 @@
 import type { PortholeConfig } from "../config/schema.ts";
-import { BUILT_IN_TOPICS } from "../config/validate.ts";
-import { generateGuide, generateToolDescription } from "../guide/guide.ts";
+import { builtInTopics, generateGuide, generateToolDescription } from "../guide/guide.ts";
 import { fragmentOf, lintContent, type Finding } from "./lint.ts";
 import { lintFiles, whereOf, type FileContents, type FileFinding } from "./files.ts";
 
@@ -29,7 +28,7 @@ const guideName = (config: PortholeConfig) => config.guide.guideToolName ?? `${n
 
 /** The topics the manual has: the built-in ones and the config's own. */
 export function guideTopics(config: PortholeConfig): string[] {
-  return [...BUILT_IN_TOPICS, ...Object.keys(config.guide.topics ?? {})];
+  return [...builtInTopics(config), ...Object.keys(config.guide.topics ?? {})];
 }
 
 /** The tool that shows content: `{ title, html }`. */

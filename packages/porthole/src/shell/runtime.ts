@@ -799,41 +799,6 @@ export const SHELL_RUNTIME = String.raw`(() => {
     return !(capability && capability.userActivation) || !activation || activation.isActive;
   };
   const refuse = (message) => Promise.reject(new Error(message));
-  if (declared("sendPrompt")) {
-    lock(window, "sendPrompt", (text) => {
-      if (!gestured("sendPrompt")) {
-        return refuse("sendPrompt needs a click: call it from a button's handler");
-      }
-      const words = String(text);
-      if (words.trim() === "" || words.length > plan.maxPromptChars) {
-        return refuse("sendPrompt takes 1 to " + plan.maxPromptChars + " characters");
-      }
-      return request("ui/message", { role: "user", content: [{ type: "text", text: words }] }).then(
-        (result) => !(result && result.isError),
-      );
-    });
-  }
-  if (declared("copyText")) {
-    lock(window, "copyText", (text) => {
-      if (!gestured("copyText")) {
-        return refuse("copyText needs a click: call it from a button's handler");
-      }
-      const words = String(text);
-      if (words === "" || words.length > plan.maxCopyChars) {
-        return refuse("copyText takes 1 to " + plan.maxCopyChars + " characters");
-      }
-      return request("porthole/copy-text", { text: words }).then((result) => !(result && result.isError));
-    });
-  }
-  if (declared("openLink")) {
-    lock(window, "openLink", (url) => {
-      if (!gestured("openLink")) {
-        return refuse("openLink needs a click: call it from a link's or button's handler");
-      }
-      return request("ui/open-link", { url: String(url) }).then((result) => !(result && result.isError));
-    });
-  }
-
   // Data (P079): readData reads a resource the host names, subscribeData follows one, through
   // MCP's resources/* requests, which the host gates (the viewer's consent, a rate). A value is the
   // first content's: JSON parsed when it says it is JSON, else its text.
@@ -857,9 +822,10 @@ export const SHELL_RUNTIME = String.raw`(() => {
   const later = (error) => setTimeout(() => {
     throw error;
   });
-  if (declared("readData")) {
-    lock(window, "readData", (uri) => request("resources/read", { uri: String(uri) }).then(valueOf));
-  }
+  // Reads a resource (readData, the runtime's data.read).
+  const readValue = (uri) => request("resources/read", { uri: String(uri) }).then(valueOf);
+  // Follows one (subscribeData, the runtime's data.subscribe), where the config declares it.
+  let follow = null;
   if (declared("subscribeData")) {
     // One subscription per URI, however many follow it; a read at a time, one more if it changed
     // meanwhile; a late follower gets the last value at once.
@@ -913,7 +879,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
         refresh(entry);
       }
     };
-    lock(window, "subscribeData", (uri, onData, onError) => {
+    follow = (uri, onData, onError) => {
       if (typeof onData !== "function") {
         throw new TypeError("subscribeData(uri, onData, onError): onData must be a function");
       }
@@ -957,8 +923,18 @@ export const SHELL_RUNTIME = String.raw`(() => {
           request("resources/unsubscribe", { uri: key }).catch(() => {});
         }
       };
-    });
+    };
   }
+
+
+  // The capability runtime's hooks (P085): the host's offer from the handshake (null: no host
+  // answered), and a watch's updates. The runtime, where the config has one, takes them.
+  let runtimeOffer = (_offer) => {};
+  let runtimeEvent = (_params) => {};
+
+  __LEGACY__
+
+  __RUNTIME__
 
   window.addEventListener("error", (event) => {
     const error = event.error;
@@ -1150,6 +1126,9 @@ export const SHELL_RUNTIME = String.raw`(() => {
           resourceUpdated(params.uri);
         }
         break;
+      case "porthole/event":
+        runtimeEvent(params);
+        break;
       case "ui/resource-teardown":
       case "ping":
         if (data.id !== undefined) {
@@ -1177,7 +1156,12 @@ export const SHELL_RUNTIME = String.raw`(() => {
   let initialized = false;
   let tries = 0;
   const initialize = () => {
-    if (initialized || tries >= 40) {
+    if (initialized) {
+      return;
+    }
+    if (tries >= 40) {
+      // No host answered: the runtime has nothing to offer.
+      runtimeOffer(null);
       return;
     }
     tries += 1;
@@ -1190,6 +1174,9 @@ export const SHELL_RUNTIME = String.raw`(() => {
         return;
       }
       initialized = true;
+      const capabilities = result && result.hostCapabilities;
+      const experimental = capabilities && capabilities.experimental;
+      runtimeOffer(experimental && typeof experimental === "object" ? experimental["porthole/runtime"] : null);
       applyTheme(result && result.hostContext);
       notify("ui/notifications/initialized", {});
       schedule();

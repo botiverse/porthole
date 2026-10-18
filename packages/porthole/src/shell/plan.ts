@@ -2,6 +2,7 @@ import { MAX_COPY_CHARS, capabilitySpec, type CapabilityName } from "../config/c
 import type { PortholeConfig } from "../config/schema.ts";
 import { declaredCapabilities, effectiveGates } from "../compile/policy.ts";
 import { MCP_APPS_PROTOCOL_VERSION } from "../protocol/mcp-apps.ts";
+import { RUNTIME_GLOBAL, type RuntimeVersion } from "../runtime/contract.ts";
 
 /**
  * What the shell wires, derived from the config: the JSON the shell's runtime is given. The
@@ -19,8 +20,18 @@ export interface ShellPlan {
   readonly content: "fragment" | "document";
   /** Each declared capability, and whether the shell refuses a call made without a gesture. */
   readonly capabilities: { readonly [N in CapabilityName]?: { readonly userActivation: boolean } };
-  /** The globals the shell defines on `window` (sugar over the protocol's requests). */
+  /**
+   * The globals the shell defines on `window` and the manual teaches: `porthole` where the config
+   * has the capability runtime (P085), else 0.6's (sugar over the protocol's requests).
+   */
   readonly globals: readonly string[];
+  /**
+   * 0.6's globals the shell still defines under the runtime, for pages written before it (the
+   * legacy path, `shell/legacy.ts`), which the manual no longer teaches. Empty without a runtime.
+   */
+  readonly legacyGlobals: readonly string[];
+  /** The capability runtime's contract version, where the config has one (`porthole.use`). */
+  readonly runtime?: RuntimeVersion;
   /** The theme variables the shell applies; it drops any other name the host sends. */
   readonly themeVariables: readonly string[];
   /** The window event fired after a theme change. */
@@ -48,18 +59,21 @@ export function shellPlan(config: PortholeConfig): ShellPlan | null {
       userActivation: effectiveGates(config, name).includes("user-activation"),
     };
   }
-  const globals =
+  const legacy =
     protocol === "shell"
       ? declared.flatMap((name) => {
           const spec = capabilitySpec(name);
           return spec.global === undefined ? [] : [spec.global];
         })
       : [];
+  const runtime = protocol === "shell" ? config.runtime : undefined;
   return {
     protocol,
     content: config.mode === "artifact" ? "document" : "fragment",
     capabilities,
-    globals,
+    globals: runtime === undefined ? legacy : [RUNTIME_GLOBAL],
+    legacyGlobals: runtime === undefined ? [] : legacy,
+    ...(runtime === undefined ? {} : { runtime }),
     themeVariables: Object.keys(config.theme.variables),
     themeEvent: config.theme.event,
     themeDocuments: config.theme.documents ?? "declared",

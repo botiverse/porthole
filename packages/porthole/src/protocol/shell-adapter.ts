@@ -18,6 +18,12 @@ import {
   type HostContext,
 } from "./mcp-apps.ts";
 import { liveData } from "./live-data.ts";
+import { runtimeCalls } from "./runtime-calls.ts";
+import {
+  RUNTIME_CALL_METHOD,
+  RUNTIME_EXPERIMENTAL_KEY,
+  RUNTIME_UNWATCH_METHOD,
+} from "../runtime/contract.ts";
 
 /**
  * The core's adapter: the host side of the MCP Apps subset the shell speaks, which content using
@@ -144,6 +150,9 @@ export const shellAdapter: ProtocolAdapter<ShellConnection> = {
 
     // Live data (P079): reads, subscriptions and the host's updates, through the bridge.
     const live = liveData(bridge, (uri) => notify(M.resourceUpdated, { uri }));
+    // The capability runtime (P085), where the config has one: its calls and watches.
+    const runtime = session.compiled.config.runtime;
+    const calls = runtimeCalls(bridge, notify);
 
     const flush = () => {
       if (!initialized || closed || content === null || sentWhole) {
@@ -167,7 +176,20 @@ export const shellAdapter: ProtocolAdapter<ShellConnection> = {
           result: {
             protocolVersion: MCP_APPS_PROTOCOL_VERSION,
             hostInfo: session.hostInfo,
-            hostCapabilities: hostCapabilities((name) => bridge.declared(name)),
+            hostCapabilities: {
+              ...hostCapabilities((name) => bridge.declared(name)),
+              // What this display's page may `use`, in MCP Apps' extension point (P085).
+              ...(runtime === undefined
+                ? {}
+                : {
+                    experimental: {
+                      [RUNTIME_EXPERIMENTAL_KEY]: {
+                        version: runtime,
+                        capabilities: bridge.roster(),
+                      },
+                    },
+                  }),
+            },
             hostContext: session.hostContext(),
           },
         });
@@ -206,6 +228,13 @@ export const shellAdapter: ProtocolAdapter<ShellConnection> = {
         } else {
           live.unsubscribe(params.uri);
           respond(request.id, { result: {} });
+        }
+        return;
+      }
+      if (request.method === RUNTIME_CALL_METHOD && runtime !== undefined) {
+        const answered = await calls.call(params);
+        if (!closed) {
+          respond(request.id, answered);
         }
         return;
       }
@@ -249,6 +278,9 @@ export const shellAdapter: ProtocolAdapter<ShellConnection> = {
         case NAVIGATION_BLOCKED_METHOD:
           // The shell stopped a navigation (P080): an error report, with its address.
           void bridge.call("reportError", { navigationBlocked: params.url });
+          return;
+        case RUNTIME_UNWATCH_METHOD:
+          calls.unwatch(params);
           return;
         case NAVIGATING_METHOD:
           // Another page of the set opens in the frame (P084): its next load is that page.
@@ -314,6 +346,7 @@ export const shellAdapter: ProtocolAdapter<ShellConnection> = {
         stop();
         pending.clear();
         live.close();
+        calls.close();
       },
     };
   },

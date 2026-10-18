@@ -9,6 +9,7 @@
   "files": [
     "src",
     "dist",
+    "types/runtime/**/*.d.ts",
     "docs",
     "examples",
     "README.md"

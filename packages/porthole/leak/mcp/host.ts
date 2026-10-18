@@ -117,6 +117,7 @@ const mcpHost = {
     };
     const bridge: HostFunctionBridge = {
       declared: (name) => config.capabilities[name] !== undefined,
+      roster: () => ({}),
       async call(capability, args, options) {
         display.calls.push({ capability, args, userActivated: options?.userActivated });
         if (config.capabilities[capability] === undefined) {

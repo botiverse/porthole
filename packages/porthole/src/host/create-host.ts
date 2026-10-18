@@ -26,6 +26,8 @@ import {
 } from "../protocol/mcp-apps.ts";
 import { shellAdapter } from "../protocol/shell-adapter.ts";
 import { resolveTheme } from "../theme/variables.ts";
+import { checkDeclaration } from "../runtime/declaration.ts";
+import { parseViewer } from "../runtime/levels.ts";
 import type {
   AnnotationControls,
   HostErrorKind,
@@ -97,6 +99,15 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       }
       if (config.isolation !== "opaque" && mount.instance === undefined) {
         throw new TypeError(`${config.isolation} isolation needs MountOptions.instance`);
+      }
+      // The page's declaration and the viewer (P086, P087): the host's records, checked once.
+      const declaration =
+        mount.declaration === undefined ? undefined : checkDeclaration(mount.declaration, config);
+      const mountViewer = mount.viewer === undefined ? null : parseViewer(mount.viewer);
+      if (mount.viewer !== undefined && mountViewer === null) {
+        throw new TypeError(
+          "MountOptions.viewer is { level: view | interact | admin | owner, id?, name? }",
+        );
       }
 
       const listeners = new Map<keyof DisplayEvents, Set<(detail: never) => void>>();
@@ -371,6 +382,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           });
           return;
         }
+        // The host's access at issue says who is viewing (P087); else the mount's word.
+        const viewer =
+          (source.kind === "url" ? source.viewer : undefined) ?? mountViewer ?? undefined;
         const bridge = createBridge({
           config,
           display: {
@@ -384,6 +398,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           ...(options.cached === undefined ? {} : { cached: options.cached }),
           userActivation: () => created.userActivation(),
           onEvent: onBridge,
+          ...(declaration === undefined ? {} : { declaration }),
+          ...(viewer === undefined ? {} : { viewer }),
         });
         if (annotates) {
           created.transport.listen((raw) => onAnnotation(raw, bridge));

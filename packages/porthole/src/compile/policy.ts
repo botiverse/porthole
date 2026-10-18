@@ -1,6 +1,9 @@
 import { CAPABILITIES, type CapabilityName, type Gate } from "../config/capabilities.ts";
 import type { PortholeConfig } from "../config/schema.ts";
 import { LIBRARY_PATH } from "../libraries/libraries.ts";
+import { methodLevel } from "../runtime/contract.ts";
+import { atLeast } from "../runtime/levels.ts";
+import { ASSET_PATH } from "../runtime/requests.ts";
 
 /**
  * The frame's policies, derived from the config: its CSP (in the shell's `<meta>` for opaque
@@ -124,6 +127,46 @@ export function fileSetCspDirectives(
   source: string,
 ): CspDirective[] {
   const opened = new Set<string>(FILE_SET_DIRECTIVES);
+  return directives.map(([name, ...sources]) => {
+    if (!opened.has(name)) {
+      return [name, ...sources];
+    }
+    const kept = sources.filter((each) => each !== "'none'");
+    return [name, ...kept, source];
+  });
+}
+
+/**
+ * The directives a page opens its artifact's asset library to (P089), at `/_blob/` on its own
+ * origin: what loads without running, always; what runs (scripts, styles) only where uploads are
+ * the admins' alone, who publish the page's code anyway.
+ */
+export const ASSET_DIRECTIVES = ["img-src", "media-src", "font-src", "connect-src"] as const;
+export const ASSET_CODE_DIRECTIVES = ["script-src", "style-src"] as const;
+
+/** Whether a config's asset uploads are its admins' alone (`assets.upload` at admin or above). */
+export function assetCodeRuns(config: PortholeConfig): boolean {
+  const level = methodLevel(config, "assets", "upload");
+  return level !== null && atLeast(level, "admin");
+}
+
+/**
+ * A served page's CSP with its asset library opened (P089), on `origin` (the page's own, exact:
+ * never a sibling's): only where the config declares `assets`. Never `'self'`.
+ */
+export function assetCspDirectives(
+  config: PortholeConfig,
+  directives: readonly CspDirective[],
+  origin: string,
+): CspDirective[] {
+  if (config.capabilities.assets === undefined || config.isolation !== "domain") {
+    return [...directives];
+  }
+  const source = `${origin}${ASSET_PATH}`;
+  const opened = new Set<string>([
+    ...ASSET_DIRECTIVES,
+    ...(assetCodeRuns(config) ? ASSET_CODE_DIRECTIVES : []),
+  ]);
   return directives.map(([name, ...sources]) => {
     if (!opened.has(name)) {
       return [name, ...sources];

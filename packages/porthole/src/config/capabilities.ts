@@ -1,4 +1,14 @@
 import type { AnnotationReport } from "../annotate/types.ts";
+import type { DbRequest, DbResult } from "../runtime/db.ts";
+import type {
+  ArtifactInfo,
+  ArtifactRequest,
+  AssetInfo,
+  AssetRequest,
+  CommentRequest,
+  PublishedVersion,
+  UserInfo,
+} from "../runtime/requests.ts";
 
 /**
  * The capability vocabulary (PRINCIPLE 4): every power content has beyond drawing is one of these
@@ -22,6 +32,12 @@ export const CAPABILITY_NAMES = [
   "resize",
   "copyText",
   "annotate",
+  // The capability runtime's own (P085, `config.runtime`): reached through `porthole.use`.
+  "user",
+  "comments",
+  "artifact",
+  "assets",
+  "db",
 ] as const;
 
 export type CapabilityName = (typeof CAPABILITY_NAMES)[number];
@@ -49,8 +65,11 @@ export type Gate =
 export interface CapabilitySpec {
   /** The gates a declared capability gets when its config names none. */
   readonly defaultGates: readonly Gate[];
-  /** `handler`: the host passes a function that performs it. `event`: the framework emits it. */
-  readonly served: "handler" | "event";
+  /**
+   * `handler`: the host passes a function that performs it. `event`: the framework emits it.
+   * `viewer`: the framework answers it from the viewer the host gave the display (`user`).
+   */
+  readonly served: "handler" | "event" | "viewer";
   /** The global the shell defines for it (sugar over the protocol message), if any. */
   readonly global?: string;
   /**
@@ -129,6 +148,20 @@ export const CAPABILITIES = {
    * (it shares the realm): UI hints for the host, never permissions.
    */
   annotate: { defaultGates: [rate(120)], served: "event" },
+  /** Who is viewing (P087): answered from the viewer the host gave the display. */
+  user: { defaultGates: [rate(60)], served: "viewer", request: { method: "porthole/call" } },
+  /** Opens the host's comment composer at the page's anchor (P090): write-only. */
+  comments: {
+    defaultGates: ["user-activation", rate(30)],
+    served: "handler",
+    request: { method: "porthole/call" },
+  },
+  /** This artifact's current version, and a new version of it, base-checked (P088). */
+  artifact: { defaultGates: [rate(10)], served: "handler", request: { method: "porthole/call" } },
+  /** The artifact's asset library, served at `/_blob/<id>` (P089). */
+  assets: { defaultGates: [rate(30)], served: "handler", request: { method: "porthole/call" } },
+  /** The artifact's shared document store (P088). */
+  db: { defaultGates: [rate(600)], served: "handler", request: { method: "porthole/call" } },
 } as const satisfies { readonly [N in CapabilityName]: CapabilitySpec };
 
 /** The arguments a call carries, once the adapter has validated them. */
@@ -156,6 +189,12 @@ export interface CapabilityArgs {
   readonly copyText: { readonly text: string };
   /** What the frame reported, once checked (`AnnotationReport`). */
   readonly annotate: AnnotationReport;
+  readonly user: Readonly<Record<string, never>>;
+  readonly comments: CommentRequest;
+  readonly artifact: ArtifactRequest;
+  readonly assets: AssetRequest;
+  /** Paths checked, `me` resolved, the viewer's own data only (P088). */
+  readonly db: DbRequest;
 }
 
 /** What a call resolves to. Protocol-shaped results (a tool's result) stay opaque to the core. */
@@ -176,6 +215,14 @@ export interface CapabilityResults {
   /** Whether the text was copied. */
   readonly copyText: boolean;
   readonly annotate: undefined;
+  readonly user: UserInfo;
+  /** Whether the composer opened. Never a thread: content doesn't read comments (P090). */
+  readonly comments: boolean;
+  /** `get`: the current version; `publish`: the new one. */
+  readonly artifact: ArtifactInfo | PublishedVersion;
+  /** `list`: the library; `upload`: the new asset; `delete`: whether it was removed. */
+  readonly assets: AssetInfo | readonly AssetInfo[] | boolean;
+  readonly db: DbResult;
 }
 
 /** The capabilities a host serves with a handler. */

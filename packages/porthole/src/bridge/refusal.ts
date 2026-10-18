@@ -12,6 +12,10 @@ import type { Refusal } from "./types.ts";
  * - `not_allowed`: the host doesn't let this content have it, here or at all (a URI it doesn't
  *   serve, a page where data never runs).
  * - `failed`: the host tried and couldn't.
+ * - `forbidden` (P087): the person viewing it may see the content but not do this (their level).
+ * - `conflict` (P088): what it changes moved since it was read (a document's version, the
+ *   artifact's base): read it again, then write.
+ * - `too_large` (P088): more than a limit (a document, a batch, an upload, a publish).
  */
 export const REFUSAL_CODES = [
   "consent_required",
@@ -19,6 +23,9 @@ export const REFUSAL_CODES = [
   "rate_limited",
   "not_allowed",
   "failed",
+  "forbidden",
+  "conflict",
+  "too_large",
 ] as const;
 
 export type RefusalCode = (typeof REFUSAL_CODES)[number];
@@ -89,6 +96,9 @@ const DEFAULT_MESSAGES: { readonly [Code in RefusalCode]: string } = {
   rate_limited: "Too many requests: try again in a minute.",
   not_allowed: "This isn't available here.",
   failed: "The app couldn't do this.",
+  forbidden: "You don't have permission to do this here.",
+  conflict: "This changed since it was read: read it again, then try again.",
+  too_large: "This is too large.",
 };
 
 /** Where a data capability's words differ: they name the data. */
@@ -98,6 +108,9 @@ const DATA_MESSAGES: { readonly [Code in RefusalCode]: string } = {
   rate_limited: "Too many data requests: try again in a minute.",
   not_allowed: "This data isn't available here.",
   failed: "The app couldn't get this data.",
+  forbidden: "You don't have permission to read this data.",
+  conflict: DEFAULT_MESSAGES.conflict,
+  too_large: DEFAULT_MESSAGES.too_large,
 };
 
 /** Each refusal's code, as content is told it. */
@@ -113,6 +126,9 @@ const CODES: { readonly [R in Refusal]: RefusalCode } = {
   denied: "denied",
   "rate-limited": "rate_limited",
   failed: "failed",
+  undeclared: "not_allowed",
+  level: "forbidden",
+  "too-large": "too_large",
 };
 
 /** Refusals whose own words say more than their code's. */
