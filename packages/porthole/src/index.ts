@@ -67,6 +67,30 @@ export {
   type VendoredLibrary,
 } from "./libraries/libraries.ts";
 
+// A version made of files (P081): the rules its paths follow, its limits and its types.
+export {
+  checkFileSet,
+  DEFAULT_ENTRY,
+  DEFAULT_MAX_FILE_BYTES,
+  DEFAULT_MAX_FILES,
+  DEFAULT_MAX_VERSION_BYTES,
+  fileLimits,
+  filePathProblem,
+  lookupFile,
+  requestFilePath,
+  servesFiles,
+  type FileLimits,
+  type FileLookup,
+  type FileSetProblem,
+} from "./files/paths.ts";
+export {
+  fileTypeOf,
+  KNOWN_EXTENSIONS,
+  UNKNOWN_TYPE,
+  type FileRole,
+  type FileType,
+} from "./files/types.ts";
+
 // The compiler.
 export { compile, type CompiledConfig } from "./compile/compile.ts";
 export {
@@ -77,6 +101,9 @@ export {
   egressOrigins,
   embedderCsp,
   embedderFrameSourcesOf,
+  FILE_SET_DIRECTIVES,
+  fileSetCspDirectives,
+  INERT_FILE_CSP,
   type CspDirective,
   type EgressKind,
 } from "./compile/policy.ts";
@@ -122,6 +149,7 @@ export {
   MCP_APPS_METHODS,
   MCP_APPS_PROTOCOL_VERSION,
   MCP_APPS_STYLE_VARIABLES,
+  NAVIGATING_METHOD,
   NAVIGATION_BLOCKED_METHOD,
   PORTHOLE_STYLES,
   STALE_META,
@@ -166,8 +194,12 @@ export {
 export { defineDisplays, type DisplayKind, type Displays } from "./displays/displays.ts";
 // The agent's side: what content can be told without running it, and its tools (P073).
 export { fragmentOf, lintContent, type Finding, type LintRule } from "./check/lint.ts";
+// A page that comes with files (P081): its lint, without running it.
+export { lintFiles, type FileContents, type FileFinding } from "./check/files.ts";
 export {
   admitContent,
+  admitFiles,
+  type AdmitFilesResult,
   answerGuide,
   checkTool,
   guideChanges,

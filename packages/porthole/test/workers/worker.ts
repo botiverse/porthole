@@ -22,6 +22,38 @@ interface Env {
 const CONTENT = "usercontent.test";
 const HOST = "https://artifacts.example";
 
+/** A version made of files (P081), its bytes streamed as a store (R2) streams them. */
+function site(version: string) {
+  const files: Record<string, Uint8Array> = {
+    "index.html": new TextEncoder().encode(
+      `<!doctype html><link rel="stylesheet" href="./style.css"><h1 id="v">site ${version}</h1>`,
+    ),
+    "style.css": new TextEncoder().encode("h1 { color: red; }"),
+    "clip.mp4": new Uint8Array(Array.from({ length: 256 }, (_, index) => index)),
+  };
+  return {
+    files: Object.fromEntries(
+      Object.entries(files).map(([path, bytes]) => [
+        path,
+        { size: bytes.byteLength, sha256: "0".repeat(64) },
+      ]),
+    ),
+    read: async (path: string) => {
+      const bytes = files[path];
+      return bytes === undefined
+        ? null
+        : new ReadableStream<Uint8Array>({
+            start(controller) {
+              for (let at = 0; at < bytes.byteLength; at += 64) {
+                controller.enqueue(bytes.slice(at, at + 64));
+              }
+              controller.close();
+            },
+          });
+    },
+  };
+}
+
 /** Revoked subjects, as a host's database would hold them. */
 const revoked = new Set<string>();
 
@@ -46,7 +78,9 @@ function porthole(env: Env) {
       get: async (id, version) =>
         id === "page"
           ? { html: `<!doctype html><html><body><h1 id="v">${version}</h1></body></html>` }
-          : null,
+          : id === "site"
+            ? site(version)
+            : null,
     },
     tickets: d1TicketStore(env.DB),
     authorize: {
@@ -126,7 +160,7 @@ export default {
         scope: id,
         document: {
           kind: "artifact" as const,
-          id: "page",
+          id: url.searchParams.get("doc") ?? "page",
           version: url.searchParams.get("v") ?? "1",
         },
       };

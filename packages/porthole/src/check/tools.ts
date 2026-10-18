@@ -2,6 +2,7 @@ import type { PortholeConfig } from "../config/schema.ts";
 import { BUILT_IN_TOPICS } from "../config/validate.ts";
 import { generateGuide, generateToolDescription } from "../guide/guide.ts";
 import { fragmentOf, lintContent, type Finding } from "./lint.ts";
+import { lintFiles, whereOf, type FileContents, type FileFinding } from "./files.ts";
 
 /**
  * The agent's tools, as a tool list names them (P073): a name, a description and a JSON Schema
@@ -186,6 +187,55 @@ export function admitContent(
       findings.length === 0
         ? null
         : `Shown. Fix these next time:\n${findings.map((each) => `- ${said(each)}`).join("\n")}`,
+  };
+}
+
+export type AdmitFilesResult =
+  | {
+      readonly ok: true;
+      /** Warnings (and errors, with `refuseOn: "never"`), for the tool's answer. */
+      readonly findings: readonly FileFinding[];
+      /** One line for the agent, or null when there's nothing to say. */
+      readonly note: string | null;
+    }
+  | {
+      readonly ok: false;
+      readonly findings: readonly FileFinding[];
+      /** What to tell the agent: what to change, and to call the tool again. */
+      readonly refusal: string;
+    };
+
+/**
+ * A publish tool's check before it takes a page with files (P081): refuses only what certainly
+ * fails (a path or limit the server won't take, no entry, a page `admitContent` would refuse, a
+ * page's reference that starts with /); the rest, references to files that aren't in the set
+ * among them, are warnings. `refuseOn: "never"` refuses nothing.
+ */
+export function admitFiles(
+  config: PortholeConfig,
+  files: FileContents,
+  options: { readonly entry?: string; readonly refuseOn?: "error" | "never" } = {},
+): AdmitFilesResult {
+  const findings = lintFiles(
+    config,
+    files,
+    options.entry === undefined ? {} : { entry: options.entry },
+  );
+  const errors = findings.filter((each) => each.severity === "error");
+  if (errors.length > 0 && (options.refuseOn ?? "error") === "error") {
+    return {
+      ok: false,
+      findings,
+      refusal: `Not published. Change this, then publish again:\n${errors.map((each) => `- ${whereOf(each)}${each.message}`).join("\n")}`,
+    };
+  }
+  return {
+    ok: true,
+    findings,
+    note:
+      findings.length === 0
+        ? null
+        : `Published. Fix these next time:\n${findings.map((each) => `- ${whereOf(each)}${each.message}`).join("\n")}`,
   };
 }
 

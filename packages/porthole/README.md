@@ -52,6 +52,31 @@ display.setContent("<p>Hello from an agent</p>");
 In React: `<PortholeProvider>` around `<PortholeFrame config displayId title scheme content />` from
 `@botiverse/porthole/react`.
 
+## Pages made of many files
+
+A served page may come with files of its own: a build's output, a report with its images, a
+dashboard that reads its data (0.6). The store answers a manifest and the bytes by path, and the
+page's relative addresses are its own version's:
+
+```js
+source: async (id, version) => ({
+  files: { "index.html": { size: 397, sha256: "…" }, "assets/app.js": { size: 142870, sha256: "…" } },
+  read: (path) => myStore.bytes(id, version, path),        // Uint8Array or a stream, whole
+}),
+entry: {
+  // "/v/3/<file>" is version 3, any other path the latest's: answer with the version's own address.
+  at: async (scope, path) => {
+    const at = versionedAddress(path), version = at?.version ?? (await latestOf(scope));
+    return at && { instance: pageOf(scope, version), base: versionBase(version), file: at.file };
+  },
+},
+```
+
+Each file is served from the manifest only, typed by Porthole's own table, `nosniff`, with a CSP
+that opens that version's path and nothing else of its origin; `checkFileSet` checks a version's
+paths and limits when it is published, `lintFiles` and `checkPage({ files })` are the agent's
+side. docs/ADOPTING.md § Pages made of many files.
+
 ## What the agent gets
 
 ```js

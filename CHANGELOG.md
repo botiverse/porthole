@@ -3,6 +3,45 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## 0.6.0
+
+A served page may be many files (P081–P084): a build's output, a report with its images, a
+dashboard that reads its data, published as it was made. Additive: a store that answers `{ html }`
+is served as in 0.5, and so is everything else.
+
+- **The store** (`ArtifactStore.get`, the kit's `source`) may answer a `StoredFiles`: `files`
+  (`path → { size, sha256, type? }`), `entry` (default `index.html`), `spa`, and `read(path)` (a
+  `Uint8Array` or a `ReadableStream`, whole). The published type is never served.
+- **Paths and limits** (`@botiverse/porthole`, `/server`): `checkFileSet(files, { entry, limits })`
+  for a host to call when a version is published (canonical, case-sensitive, no `..`/`.`/empty
+  segments, no leading `/`, no `\ % ? #` or control characters, NFC, length caps, no case-fold
+  collisions, no file that is also a directory, the entry present), `filePathProblem`,
+  `fileLimits(config.limits)`; the config's `limits.maxFiles`, `maxFileBytes`, `maxVersionBytes`
+  (1,000, 25 MiB, 100 MiB by default). `requestFilePath`, `lookupFile`, `fileTypeOf`.
+- **Serving** (P081): every file from the manifest only (decoded once; `dir/` its `index.html`,
+  `name` its `name.html`, the nearest `404.html`, the entry for a single-page app's navigations),
+  typed by Porthole's table (unknown: `application/octet-stream`, a download), `nosniff`, a CSP
+  header on every answer (anything but a page or a script: `default-src 'none'; sandbox`), files
+  `private, max-age=31536000, immutable` with their sha256 as ETag, pages revalidated with an
+  ETag, 304s, `Range` (206, 416), `Cross-Origin-Resource-Policy: same-origin`, service workers
+  refused. Every page of a set is in the shell.
+- **Addresses.** On a tab, `entry.at` answers a `FileAddress` (`{ instance, base, file }`) and the
+  latest's address (`/`, `/style.css`) is redeemed to the version's own (`/v/3/`, `/v/3/style.css`),
+  so a page never loads a newer version's file published while it loads; `versionedAddress(path)`
+  and `versionBase(n)` read the usual convention. In a frame, the ticket's answer is the entry,
+  whose files are at `/__porthole/f/<sealed access>/` (AES-GCM, so WebKit, which keeps no cookie
+  in frames, loads them too: P083).
+- **The CSP** of a page with files opens its version's own path for scripts, styles, fonts, images,
+  media, fetches and workers, never `'self'` (P082, amending P022). Opaque frames and single pages
+  are unchanged.
+- **A set's pages open each other in the frame** (P084): the shell lets a navigation to a page of
+  its set go on and tells the host first (`porthole/navigating`, `NAVIGATING_METHOD`); the display
+  goes on. Anything else is still stopped (P079).
+- **The agent's side:** `lintFiles(config, files)` (each page linted, every relative reference
+  looked up in the set, a page's `/`-rooted reference an error), `admitFiles`, `checkPage({ files
+  })` (the whole set served, its entry run), and the manual's Files section where a kind serves
+  files. Tool schemas are unchanged.
+
 ## 0.5.1
 
 From Ferry's adoption of 0.5.0's live widgets (P080). Additive, except that a refused data call's

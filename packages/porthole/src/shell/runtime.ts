@@ -20,7 +20,8 @@
  * 6. cancels every navigation the frame starts to another document (P079), before it sends a
  *    request: a navigation carries data out in its URL, and the embedding page's `frame-src`,
  *    the wall for that, must let served frames reach their own content origins. (Opaque frames
- *    get no navigate events: there `frame-src` is the wall.)
+ *    get no navigate events: there `frame-src` is the wall.) A page that comes with files may
+ *    open its set's other pages, under its version's own address, and nothing else (P084).
  * A whole document (an artifact page, an MCP Apps view) is never written in: it is parsed inert,
  * imported, and its scripts run in order, as a fragment's are.
  *
@@ -35,6 +36,13 @@
 export const SHELL_RUNTIME = String.raw`(() => {
   "use strict";
   const plan = __PLAN__;
+  // A page that came with files, answered at its ticket's address (P083): its own address first,
+  // before anything loads, so its relative addresses are its files' (and the ticket leaves).
+  if (plan.files && typeof plan.files.address === "string" && location.href !== plan.files.address) {
+    try {
+      history.replaceState(null, "", plan.files.address);
+    } catch (_) {}
+  }
   // The embedding page's nonce, where it gave one (a srcdoc frame inherits its policy): every
   // script the shell runs for the content carries it.
   const nonce = document.currentScript && document.currentScript.nonce ? document.currentScript.nonce : "";
@@ -88,6 +96,20 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // frame) are none of this document's. Each one stopped is told to the host (P080), as an error
   // report: below, once the shell can speak.
   let navigationBlocked = (_url) => {};
+  // A page that comes with files (P084): another page of its own set, under the version's own
+  // address, is a page of the same content and opens in the frame (the host is told first, so it
+  // takes the next load for that page, not for content that left). Anything else stays stopped:
+  // another path of the origin, a file that isn't a page, another origin.
+  let navigating = (_url) => {};
+  const filesBase = plan.files && typeof plan.files.base === "string" ? plan.files.base : null;
+  const ownPage = (url) => {
+    if (filesBase === null || typeof url !== "string" || url.indexOf(filesBase) !== 0) {
+      return false;
+    }
+    const path = url.slice(filesBase.length).split("#")[0].split("?")[0];
+    const last = path.slice(path.lastIndexOf("/") + 1);
+    return last === "" || last.indexOf(".") < 0 || /\.html?$/i.test(last);
+  };
   const navigationApi = window.navigation;
   const getterOf = (proto, name) => {
     const descriptor = proto ? Object.getOwnPropertyDescriptor(proto, name) : undefined;
@@ -105,8 +127,13 @@ export const SHELL_RUNTIME = String.raw`(() => {
     navigationApi.addEventListener("navigate", (event) => {
       const destination = applyOf(destinationOf, event, []);
       if (!applyOf(sameDocumentOf, destination, []) && applyOf(navigationTypeOf, event, []) !== "reload") {
+        const url = urlOf === null ? "" : String(applyOf(urlOf, destination, []));
+        if (ownPage(url)) {
+          navigating(url);
+          return;
+        }
         applyOf(preventNavigation, event, []);
-        navigationBlocked(urlOf === null ? "" : String(applyOf(urlOf, destination, [])));
+        navigationBlocked(url);
       }
     }, true);
   }
@@ -501,6 +528,10 @@ export const SHELL_RUNTIME = String.raw`(() => {
     }
     reported += 1;
     post({ method: "porthole/navigation-blocked", params: { url: url.slice(0, 4096) } });
+  };
+  // Another page of the set opening in the frame (P084): the host takes the next load for it.
+  navigating = (url) => {
+    post({ method: "porthole/navigating", params: { url: url.slice(0, 4096) } });
   };
 
   // A parsed tree's scripts are held (each replaced by a numbered marker) and run later, in order,
@@ -923,6 +954,16 @@ export const SHELL_RUNTIME = String.raw`(() => {
       try {
         url = new URL(href, document.baseURI).href;
       } catch (_) {}
+      // A page of the set opens in the frame, whatever its target (P084); any other file of the
+      // set never opens: its address carries the frame's access.
+      if (ownPage(url)) {
+        location.assign(url);
+        return;
+      }
+      if (filesBase !== null && url.indexOf(filesBase) === 0) {
+        navigationBlocked(url);
+        return;
+      }
       if (/^https?:/i.test(url) && typeof window.openLink === "function") {
         window.openLink(url).catch(() => {});
       }

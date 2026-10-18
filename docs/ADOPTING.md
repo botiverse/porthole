@@ -50,10 +50,10 @@ data (fetch, WebSocket). Every preset starts closed, and a kind opens more only 
 
 | Level | Config (`options`) | What it opens | The risk it re-opens | Typical host | The agent's manual says | Why | Tested by |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **Closed** (the default) | nothing to write | Nothing from outside the frame: content runs on what it carries (inline code, `data:` and `blob:` URLs). | None. | Widgets that draw their own SVG and CSS; any host that hasn't decided yet. | `Network: none. Nothing loads from outside` (and `write everything inline`) | [P006](DECISIONS.md#p006--2026-10-11--egress-is-closed-by-default-including-channels-a-frame-csp-doesnt-cover--accepted), [P022](DECISIONS.md#p022--2026-10-11--every-preset-starts-with-egress-closed-library-cdns-are-a-one-line-opt-in--accepted) | probes `1.connect`, `2.resources`, `3.webrtc`, `4.*` (nested frames), `5.*` (navigating out), `8.*` (resource hints), `10.self`; served `served.domain.egress` |
-| **Library CDNs** (`LIBRARY_CDNS`, plus script hosts of your own) | `egress: LIBRARY_CDNS`; more script hosts: `egress: { ...LIBRARY_CDNS, script: [...LIBRARY_CDNS.script, "https://cdn.example.com"] }` | Scripts, styles, fonts, images and data from cdnjs, jsDelivr, unpkg and esm.sh; Google Fonts; scripts only from three libraries' own CDNs (Tailwind's Play CDN, jQuery, Plotly). Nothing else. | Code you don't control runs in the frame (a compromised or look-alike package), still inside the sandbox and egress; and a path requested from a CDN is a narrow channel out, read by the CDN's operator. The manual tells agents to pin versions. | Ferry's widgets, Raft Artifacts' pages: agents load Chart.js, ECharts, d3, Mermaid, Tailwind, jQuery, Plotly. | `scripts, styles, fonts, images and data (fetch, WebSocket) from https://cdnjs.cloudflare.com` …, `scripts from https://cdn.tailwindcss.com, https://code.jquery.com, https://cdn.plot.ly` and `pin an exact version` | [P078](DECISIONS.md#p078--2026-10-13--library_cdns-adds-tailwinds-jquerys-and-plotlys-own-cdns-for-scripts-only--accepted), [P022](DECISIONS.md#p022--2026-10-11--every-preset-starts-with-egress-closed-library-cdns-are-a-one-line-opt-in--accepted), [P048](DECISIONS.md#p048--2026-10-11--artifact-pages-reach-library-cdns-only-by-the-hosts-config--accepted) | `leak/cdn.spec.ts` (a CDN library loads only when the config opens it, opaque and served; another origin never; the libraries' own CDNs serve scripts and nothing else); probes `1.connect`, `2.resources` (an allowed origin loads, no other does) |
+| **Closed** (the default) | nothing to write | Nothing from outside the frame: content runs on what it carries (inline code, `data:` and `blob:` URLs). | None. | Widgets that draw their own SVG and CSS; any host that hasn't decided yet. | `Network: none. Nothing loads from outside` (and `write everything inline`) | [P006](DECISIONS.md#p006--2026-10-11--egress-is-closed-by-default-including-channels-a-frame-csp-doesnt-cover--accepted), [P022](DECISIONS.md#p022--2026-10-11--every-preset-starts-with-egress-closed-library-cdns-are-a-one-line-opt-in--accepted-amended-by-p082) | probes `1.connect`, `2.resources`, `3.webrtc`, `4.*` (nested frames), `5.*` (navigating out), `8.*` (resource hints), `10.self`; served `served.domain.egress` |
+| **Library CDNs** (`LIBRARY_CDNS`, plus script hosts of your own) | `egress: LIBRARY_CDNS`; more script hosts: `egress: { ...LIBRARY_CDNS, script: [...LIBRARY_CDNS.script, "https://cdn.example.com"] }` | Scripts, styles, fonts, images and data from cdnjs, jsDelivr, unpkg and esm.sh; Google Fonts; scripts only from three libraries' own CDNs (Tailwind's Play CDN, jQuery, Plotly). Nothing else. | Code you don't control runs in the frame (a compromised or look-alike package), still inside the sandbox and egress; and a path requested from a CDN is a narrow channel out, read by the CDN's operator. The manual tells agents to pin versions. | Ferry's widgets, Raft Artifacts' pages: agents load Chart.js, ECharts, d3, Mermaid, Tailwind, jQuery, Plotly. | `scripts, styles, fonts, images and data (fetch, WebSocket) from https://cdnjs.cloudflare.com` …, `scripts from https://cdn.tailwindcss.com, https://code.jquery.com, https://cdn.plot.ly` and `pin an exact version` | [P078](DECISIONS.md#p078--2026-10-13--library_cdns-adds-tailwinds-jquerys-and-plotlys-own-cdns-for-scripts-only--accepted), [P022](DECISIONS.md#p022--2026-10-11--every-preset-starts-with-egress-closed-library-cdns-are-a-one-line-opt-in--accepted-amended-by-p082), [P048](DECISIONS.md#p048--2026-10-11--artifact-pages-reach-library-cdns-only-by-the-hosts-config--accepted) | `leak/cdn.spec.ts` (a CDN library loads only when the config opens it, opaque and served; another origin never; the libraries' own CDNs serve scripts and nothing else); probes `1.connect`, `2.resources` (an allowed origin loads, no other does) |
 | **Passive from any https site** (`anyHttps`, on top of either) | `egress: { ...LIBRARY_CDNS, anyHttps: ["img"] }`; closed but for them: `egress: { anyHttps: ["img"] }` | The passive kinds you name (`img`, `media`, `font`) from any https site. Never scripts, styles, data, workers or frames, and never `http:`: a config naming another kind is refused. | Any site an image names learns that someone viewed the content, and from which address; content can send data out in an image URL to a server of its choosing (the channel P006 closes); whoever owns an image controls what it shows, inside the frame. | A host showing content that already exists, with hotlinked media: Raft's HTML attachment previews, reports whose `<img>` point at other sites (the case P059 was written for). | `images from any https site` (`fonts, images, audio and video from any https site` for all three) | [P059](DECISIONS.md#p059--2026-10-11--passive-content-may-load-from-any-https-site-by-the-hosts-explicit-choice--accepted), [P062](DECISIONS.md#p062--2026-10-11--serveddomainegress-holds-a-host-to-its-own-configs-egress--accepted) | `leak/cdn.spec.ts` (a hotlinked image loads; a script, a stylesheet and a fetch to the same site never reach it; without the flag, nothing does); served `served.domain.egress` (the image must reach an https canary; scripts, styles, fetches and frames never), `leak/served/any-https.spec.ts` |
-| **Porthole's libraries** (`egress.libraries`, served kinds only; on in `presets.liveWidget`) | `egress: { libraries: true }` with `isolation: "domain"` | Chart.js 4.5.1 and D3 7.9.0 as scripts, from the frame's own origin (`/__porthole/lib/…`, served by `/server` on every content origin). Nothing from outside. | None from outside: the requests reach your content server, which serves fixed, pinned files. | Live widgets, which read your data and must have no network of their own (P079). | `Libraries, served from this frame's own address` with a `<script>` line for each | [P079](DECISIONS.md#p079--2026-10-15--live-widgets-no-network-of-their-own-portholes-libraries-on-their-origin-the-hosts-data-behind-the-viewers-consent-and-frames-that-never-navigate-away--accepted) | `test/libraries.test.ts`; `leak/served/live.spec.ts` (they load and draw; an external script, a stylesheet, an image and every fetch reach no oracle) |
+| **Porthole's libraries** (`egress.libraries`, served kinds only; on in `presets.liveWidget`) | `egress: { libraries: true }` with `isolation: "domain"` | Chart.js 4.5.1 and D3 7.9.0 as scripts, from the frame's own origin (`/__porthole/lib/…`, served by `/server` on every content origin). Nothing from outside. | None from outside: the requests reach your content server, which serves fixed, pinned files. | Live widgets, which read your data and must have no network of their own (P079). | `Libraries, served from this frame's own address` with a `<script>` line for each | [P079](DECISIONS.md#p079--2026-10-15--live-widgets-no-network-of-their-own-portholes-libraries-on-their-origin-the-hosts-data-behind-the-viewers-consent-and-frames-that-never-navigate-away--accepted-amended-by-p084) | `test/libraries.test.ts`; `leak/served/live.spec.ts` (they load and draw; an external script, a stylesheet, an image and every fetch reach no oracle) |
 
 How to decide: **start closed; add `LIBRARY_CDNS` if agents use libraries; add passive `anyHttps`
 only for existing content with hotlinks**, and only the kinds it hotlinks (usually `img`). An
@@ -89,7 +89,7 @@ export const displays = defineDisplays({
 ### Live widgets: content that reads your data
 
 A live widget shows your data, current, read as the person viewing it, with no network of its own
-([P079](DECISIONS.md#p079--2026-10-15--live-widgets-no-network-of-their-own-portholes-libraries-on-their-origin-the-hosts-data-behind-the-viewers-consent-and-frames-that-never-navigate-away--accepted)).
+([P079](DECISIONS.md#p079--2026-10-15--live-widgets-no-network-of-their-own-portholes-libraries-on-their-origin-the-hosts-data-behind-the-viewers-consent-and-frames-that-never-navigate-away--accepted-amended-by-p084)).
 Its only way out is your host: `readData` (MCP `resources/read`) and `subscribeData` (MCP
 `resources/subscribe`, `resources/unsubscribe`, `notifications/resources/updated`).
 
@@ -271,6 +271,55 @@ nodeServer({ content, app: async (request) => (await routes(request)) ?? app(req
   `content.start()` once it listens and `content.close()` when it stops.
 - **Health:** `health: { probe: nodeProbe(), onServedChange: (served) => … }` checks the content
   domain over the real network and falls back to opaque frames while it doesn't answer.
+
+### Pages made of many files
+
+A stored version may be a set of files (a build's output, a report with its images; P081). The
+store answers a manifest and the bytes by path; `{ html }` stays one page:
+
+```js
+import { checkFileSet, fileLimits, versionBase, versionedAddress } from "@botiverse/porthole/server";
+
+// When a version is published: every path canonical, within your page kind's limits.
+const problems = checkFileSet(manifest, { limits: fileLimits(pageConfig.limits) });  // [] to take it
+
+source: async (id, version) => {
+  const stored = await myStore.version(id, version);   // { files: { path: { size, sha256 } }, entry? }
+  return stored.html !== undefined
+    ? { html: stored.html }
+    : { files: stored.files, entry: stored.entry, spa: stored.spa, read: (path) => myStore.bytes(stored.files[path].sha256) };
+},
+entry: {
+  // "/" and "/<file>" are the latest, "/v/<n>/<file>" version n: answer the version's own address.
+  at: async (scope, path) => {
+    const at = versionedAddress(path);
+    const version = at === null ? null : (at.version ?? (await latestOf(scope)));
+    return version === null ? null : { instance: pageOf(scope, version), base: versionBase(version), file: at.file };
+  },
+  pathOf: (instance) => versionBase(instance.document.version),
+},
+```
+
+- **Each file is served from the manifest only**, typed by its extension (Porthole's table, never
+  the type it was published with), `nosniff`, with a CSP that opens the version's own path and
+  nothing else of the origin (P082). Files are immutable at a version's address; pages revalidate
+  (the host's check runs on every load). `read` returns the whole file (`Uint8Array` or a
+  stream); Porthole cuts ranges.
+- **A page never mixes versions.** The latest's address (`/`, `/style.css`) goes to the version's
+  own (`/v/3/`, `/v/3/style.css`) before the page loads anything, so a version published while it
+  loads never reaches it. Answer `entry.at` with the version's `base`: a plain instance is served
+  at a frame's address instead.
+- **Each version is a directory of its origin** (`/v/<n>/`). Keep `/_blob/` (`ASSET_LIBRARY_PATH`)
+  free: it is reserved for an asset library across versions (not built yet); `versionedAddress`
+  names nothing there.
+- **In a frame**, the files' address carries the frame's access (WebKit keeps no cookie there,
+  P083): the frame's URL is `/__porthole/f/<sealed>/`, good for the session. A host's
+  `issue` and its locator don't change.
+- **Every page of the set is in the shell**, and a set's pages open each other in the frame (P084).
+  Service workers never register.
+- **The agent's side:** `lintFiles` and `admitFiles` before you take a version, `checkPage({ files
+  })` to run it, and the manual's Files section where a kind serves files. Show a set served: an
+  opaque frame has no origin to serve its files from.
 
 ### The page
 

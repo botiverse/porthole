@@ -8,6 +8,7 @@ import {
   declaredCapabilities,
   effectiveGates,
   egressOrigins,
+  fileLimits,
   LIBRARY_PATH,
   VENDORED_LIBRARIES,
   libraryPath,
@@ -89,6 +90,12 @@ const CASES: Record<string, PortholeConfig> = {
     contentOrigins: ["https://*.example-usercontent.com"],
     storage: { shared: "conversation" },
     capabilities: { copyText: {} },
+  }),
+  "artifact page, served, its files limited (P081)": presets.artifact({
+    isolation: "domain",
+    contentOrigins: ["https://*.example-usercontent.com"],
+    capabilities: { downloadFile: {} },
+    limits: { maxFiles: 50, maxFileBytes: 2_000_000, maxVersionBytes: 30_000_000 },
   }),
   "artifact page, served on its own domain": presets.artifact({
     isolation: "domain",
@@ -292,6 +299,21 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
       expect(text.includes(`<script src="${libraryPath(library)}">`), library.name).toBe(served);
     }
     expect(text.includes(LIBRARY_PATH)).toBe(served);
+  });
+
+  test("the manual teaches a page's own files exactly where they are served, with their limits (P081)", () => {
+    // `/server` serves a version's files only for an artifact under a served config.
+    const served = config.mode === "artifact" && config.isolation === "domain";
+    expect(text.includes("Files: a page may come with files of its own")).toBe(served);
+    if (served) {
+      const limits = fileLimits(config.limits);
+      expect(text).toContain(
+        `At most ${limits.maxFiles.toLocaleString("en-US")} files, ${sizeWords(limits.maxFileBytes)} each (a page under ${sizeWords(config.limits.maxBytes)}) and ${sizeWords(limits.maxVersionBytes)} in all.`,
+      );
+      expect(text.includes("offer a file with downloadFile")).toBe(
+        config.capabilities.downloadFile !== undefined,
+      );
+    }
   });
 
   test("the manual states the config's limits and theme event", () => {

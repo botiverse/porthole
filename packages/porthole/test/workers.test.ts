@@ -104,6 +104,30 @@ describe("/server on Workers", () => {
     expect((await fetchAt(location.url.replace(/\?ticket=.*/u, ""), { cookie })).status).toBe(200);
   });
 
+  test("a version made of files on workerd: the entry in the ticket's answer, its files by their sealed path, streamed and ranged (P081, P083)", async () => {
+    const location = await issue("id=301&doc=site&v=2");
+    const first = await fetchAt(location.url);
+    expect(first.status).toBe(200);
+    const html = await first.text();
+    expect(html).toContain("site 2");
+    const address = /"address":"([^"]+)"/u.exec(html)?.[1] ?? "";
+    expect(address).toMatch(/^https:\/\/a-301\.usercontent\.test\/__porthole\/f\/[\w-]+\/$/u);
+    const css = await fetchAt(`${address}style.css`, { "sec-fetch-dest": "style" });
+    expect(css.status).toBe(200);
+    expect(css.headers.get("content-type")).toBe("text/css; charset=utf-8");
+    expect(await css.text()).toBe("h1 { color: red; }");
+    const part = await fetchAt(`${address}clip.mp4`, {
+      "sec-fetch-dest": "video",
+      range: "bytes=60-69",
+    });
+    expect(part.status).toBe(206);
+    expect([...new Uint8Array(await part.arrayBuffer())]).toEqual([
+      60, 61, 62, 63, 64, 65, 66, 67, 68, 69,
+    ]);
+    const elsewhere = address.replace("a-301", "a-302");
+    expect((await fetchAt(`${elsewhere}style.css`)).status).toBe(401);
+  });
+
   test("a ticket raced from two requests opens once", async () => {
     const location = await issue("id=102");
     const [a, b] = await Promise.all([fetchAt(location.url), fetchAt(location.url)]);

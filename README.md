@@ -46,7 +46,9 @@ that proves the isolation holds.
 **Private. Phase 1 in progress.** One package, `@botiverse/porthole`, with
 `/react`, `/mcp`, `/conformance`, `/server` and `/node` subpaths. Since 0.2.0 the host kit
 (`createContentHost`) is the whole host side an app needs around served content: it writes its
-policy (DESIGN.md § The host kit). The config, compiler,
+policy (DESIGN.md § The host kit). Since 0.6.0 a served page may be many files (a build's
+output, a report with its images), each served from its version's manifest under that version's
+own address (P081–P084). The config, compiler,
 presets and public interfaces are in; the runtime pieces land milestone by
 milestone (see DESIGN.md). Read, in order:
 

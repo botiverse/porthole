@@ -78,7 +78,12 @@ export interface TicketRecord {
    * An entry code's (P068): the clean path it returns to, and the nonce of the browser that asked
    * (its cookie must come with the code). A ticket from `issue` has none.
    */
-  readonly entry?: { readonly path: string; readonly nonce: string };
+  readonly entry?: {
+    readonly path: string;
+    readonly nonce: string;
+    /** A file set's version's own address (P081): the session serves every path under it. */
+    readonly base?: string;
+  };
 }
 
 /** Where tickets live between `issue` and their one use. Default: in memory (one process). */
@@ -88,9 +93,46 @@ export interface TicketStore {
   take(id: string): Promise<TicketRecord | null>;
 }
 
+/** One file of a version (P081), as the host stored it when the version was published. */
+export interface StoredFile {
+  /** Its length, bytes. */
+  readonly size: number;
+  /** The SHA-256 of its bytes, lowercase hex: its strong ETag. */
+  readonly sha256: string;
+  /**
+   * The type it was published with, for the host's own use (a file list): never served. A file
+   * is served with the type Porthole's table gives its extension (`fileTypeOf`), never sniffed.
+   */
+  readonly type?: string;
+}
+
+/** A file's bytes, whole: `/server` cuts the range a request asks for. */
+export type FileBody = Uint8Array | ReadableStream<Uint8Array>;
+
+/**
+ * A version made of files (P081): a manifest, and the bytes of each file by its path. Paths
+ * follow `checkFileSet`'s rules (check them when the version is published); a request is looked
+ * up in `files` only, and `read` is asked only for a path in it.
+ */
+export interface StoredFiles {
+  readonly files: Readonly<Record<string, StoredFile>>;
+  /** The page the version opens at: one of `files` (default `index.html`). */
+  readonly entry?: string;
+  /**
+   * A single-page app's routes: a navigation whose path finds no file answers the entry, where
+   * it would get the nearest `404.html` (default false). Subresources still 404.
+   */
+  readonly spa?: boolean;
+  /** The bytes of a file in `files`; null if they are gone (a 404). */
+  read(path: string): Promise<FileBody | null>;
+}
+
+/** A stored version: one page (`{ html }`, as in 0.5), or a set of files (P081). */
+export type StoredVersion = { readonly html: string } | StoredFiles;
+
 /** Stored pages (artifact mode). Versions are immutable: a new page is a new version. */
 export interface ArtifactStore {
-  get(id: string, version: string): Promise<{ readonly html: string } | null>;
+  get(id: string, version: string): Promise<StoredVersion | null>;
 }
 
 /** What a request's cookie lets in: one instance, for one viewer, on one origin, until a time. */
@@ -227,7 +269,15 @@ export interface PortholeServer {
   entryState(token: string): EntryState | null;
   /**
    * Once the host decided (its authorize route): a one-time code for `instance`, which must be
-   * served on the state's label, and the URL that redeems it there (`/__porthole/entry`).
+   * served on the state's label, and the URL that redeems it there (`/__porthole/entry`). With an
+   * `address` (a file set's, P081: `entry.at`'s `base` and `file`), the session it buys serves
+   * every path under `base`, and the redeem goes to `base` + `file` when the state's path isn't
+   * under it (a "latest" address goes to the version's own).
    */
-  enterBy(state: EntryState, instance: InstanceRef, grant: Grant): Promise<string>;
+  enterBy(
+    state: EntryState,
+    instance: InstanceRef,
+    grant: Grant,
+    address?: { readonly base: string; readonly file?: string },
+  ): Promise<string>;
 }

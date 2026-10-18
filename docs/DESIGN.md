@@ -184,6 +184,7 @@ functions not built yet throw `NotBuiltYet` naming their milestone.
 | React: `PortholeProvider`, `PortholeFrame`, `ConfirmDialog`, `admitFrame` | `src/react/` | core (M4, built) | first host |
 | Conformance: `ConformanceHost`, `LaunchSpec`, `LaunchedDisplay`, `defineLeakSuite`, `PROBES`, the oracles; `defineServedSuite`, `ServedConformanceHost` | `src/conformance/` | core (M2, built); served modes (done) | any host |
 | Server: `createServer`, `PortholeServer`, `TicketStore`, `ArtifactStore`, `ContentDomain`, `Grant`, `Access`, `Upstream`, `proxyTo`, `memoryTicketStore` | `src/server/` | served modes (done) | host backends |
+| Files (P081): `checkFileSet`, `filePathProblem`, `fileLimits`, `requestFilePath`, `lookupFile`, `fileTypeOf`, `servesFiles`; `StoredFiles`, `FileAddress`, `versionedAddress`; `lintFiles`, `admitFiles` | `src/files/`, `src/server/files.ts`, `src/check/files.ts` | 0.6 (done) | host backends, publish tools |
 
 ### Host API
 
@@ -241,6 +242,20 @@ and calls `PortholeServer.issue`.
 - **What a served frame loads** is a `ServedDocument`: the shell (content then
   arrives over the transport, as for opaque frames), a stored artifact version, the
   MCP Apps sandbox proxy, or an external app (url mode).
+- **A version made of files** (P081–P084). The store answers a manifest (`files`: path →
+  `{ size, sha256, type? }`, an `entry`, `spa`) and `read(path)`; `{ html }` stays one page. Every
+  file is looked up in the manifest only, by the path below the version's base, decoded once
+  (`requestFilePath`, `lookupFile`: `dir/` is its `index.html`, `name` is `name.html`, the nearest
+  `404.html`, the entry for a single-page app's navigations). Its answer is typed by Porthole's
+  table (`fileTypeOf`; unknown: a download), `nosniff`, with its CSP (a page's and a script's: the
+  frame's plus the version's own path, P082; anything else `default-src 'none'; sandbox`), a
+  strong ETag and 304, ranges, `Cross-Origin-Resource-Policy: same-origin` (files), and the cache
+  rule of its address (files immutable, pages revalidated); a service worker's script is refused.
+  Every page is in the shell. Its address: in a frame, `/__porthole/f/<sealed access>/<path>` (the
+  ticket's answer is the entry, whose shell moves to that address first, P083); on a tab, the
+  version's own clean address, `entry.at`'s `base` (`/v/3/`), where an address that means the
+  latest (`/`, `/style.css`) is redeemed (P081). So a page never mixes versions: its relative
+  addresses are its version's. A set's pages open each other in the frame (P084).
 - **Tickets** are minted by `issue` (one-time, short-lived, bound to an instance and
   a viewer, stored as their hash), carried once in the frame's URL, and taken by the
   content origin. A served document (at `/__porthole/d/<instance key>`) comes back in
@@ -363,8 +378,9 @@ with redirect entry):
 - `instance`: the instance an issue request proposes, as the app means it;
 - `access`: may this viewer see it, and with what grant;
 - `authorize`: may this cookie still see it, on each request (P050);
-- `source`: a stored page by id and version;
-- `entry.at`: the instance a clean address's path names (redirect entry).
+- `source`: a stored version by id and version: one page (`{ html }`), or a set of files (P081);
+- `entry.at`: the instance a clean address's path names (redirect entry), or, for a set of files,
+  the instance with its version's own address (`{ instance, base, file }`, P081).
 
 **An adopter's whole wiring** (the package's `examples/app.mjs` is this, runnable on Node and
 Workers; docs/ADOPTING.md walks through it):
@@ -381,7 +397,7 @@ const content = createContentHost<Viewer>({
   access: async (instance, viewer) =>
     viewer !== null && (await canSee(viewer, instance)) ? { viewer: viewer.id, subject: viewer.id } : null,
   authorize: ({ subject }) => (revoked(subject) ? { allow: false, code: "revoked" } : { allow: true }),
-  source: (id, version) => store.page(id, version),             // { html } | null
+  source: (id, version) => store.page(id, version),             // { html } | { files, read } | null
   entry: {
     authorizeUrl: `${env.APP_ORIGIN}/porthole/authorize`,
     at: (scope, path) => pageAt(scope, path),                   // "/" → latest, "/v/3" → version 3
@@ -577,6 +593,14 @@ What both adopters still wrote after 0.2 moves into Porthole (ADOPTING.md is the
 - **`admitContent(config, content, { refuseOn })`**: the show tool's gate. It refuses errors by
   default with a text that says what to change; otherwise it shows the content (a widget's
   document taken as its body) and returns the warnings as a note.
+- **A page with files** (P081): `lintFiles(config, files)` lints each page as `lintContent` does
+  (findings name their `path`), holds the set to `checkFileSet`'s rules and the config's limits,
+  and looks each relative reference up in the set (markup, CSS, module imports, workers,
+  fetches): a page's reference that starts with `/` is an error (it names the address's root, not
+  the version: a Vite build without `base: "./"`), one that isn't in the set a warning.
+  `admitFiles` is the publish tool's gate, as `admitContent` is the show tool's. `checkPage({
+  config, files, driver })` serves the whole set and runs its entry (a served artifact config and
+  a driver that serves).
 - **`checkPage({ config, content, driver })`** (`/check`): the content in the real sandbox at each
   width and scheme (defaults: the manual's phone and desktop widths, light and dark unless
   unthemed). The check page (`src/check/page.ts`, bundled and shipped as `/check/page`, a module
@@ -841,6 +865,10 @@ for that to lapse and click with raw input.
 | Url-mode delegation (P049) | `allow` from `permissions`, `""` by default | `leak/served/permissions.spec.ts`: full screen follows it on all three; clipboard writes on Chromium only (WebKit and Firefox let any frame write in a click) | `url-permissions` → the default case (all three) |
 | Porthole's libraries (P079) | `egress.libraries` (domain isolation; on in `presets.liveWidget`): `script-src <content origin>/__porthole/lib/`; `/server` serves Chart.js 4.5.1 and D3 7.9.0, npm's bytes, on every content origin, without a ticket, immutable | `test/libraries.test.ts` (npm's bytes, pinned, licenses; headers; nothing else under the path); `leak/served/live.spec.ts` (both load and draw in a live widget whose every other load and fetch reaches no oracle) | — (rows 1–2) |
 | Library CDNs for artifacts (P048, P078) | `egress: LIBRARY_CDNS` in the host's artifact config; closed by default (P022); Tailwind's, jQuery's and Plotly's own CDNs for scripts only | `leak/cdn.spec.ts`: opaque and served, a CDN library loads only when opened; another origin never; a stylesheet, an image and a fetch never reach the libraries' own CDNs | — (the CSP of rows 1–2) |
+| Files: serving (P081) | `StoredFiles`; the manifest only, decoded once; Porthole's type table, `nosniff`, a CSP on every answer, ETag/304, ranges, CORP `same-origin`, service workers refused; every page in the shell | `test/files.test.ts`; `leak/served/files.spec.ts`: many files by relative path (framed, on a tab), the Vite + React build, a newer version never reaches a running page, traversal 404s, `.html` as `.txt` is text, another origin reads nothing, no service worker | `service-worker` → "no service worker ever registers" (all three); `file-corp` → "another origin reads none of the files" (a page elsewhere runs the script, all three) |
+| Files: the version's own path in the CSP (P082) | `fileSetCspDirectives`: `<origin><base>` (tab) or `<origin>/__porthole/f/` (frame) in the seven loading directives; never `'self'` | `leak/served/files.spec.ts`: a page loads no other version's files; a way out past the base is blocked | `file-self` → those two cases (another version's data and module load; `%2e%2e` past the base reaches the server; all three) |
+| Files in a frame: access in the path (P083) | the ticket's answer is the entry; `/__porthole/f/<AES-GCM sealed session>/`; `history.replaceState` before anything loads; the host's check per file | `test/files.test.ts` (sealed: no viewer or subject in it; another origin, a tampered or ended one: 401; revoked: 403); `test/workers.test.ts` (workerd); every framed case of `leak/served/files.spec.ts` on WebKit (no cookie in frames) | — |
+| Files: pages navigate within the set (P084) | the guard lets a navigation to a page under `files.base` go, after `porthole/navigating`; the host takes the next load as that page | `leak/served/files.spec.ts`: a link opens another page in the frame, the display goes on; a non-page file, `/`, `/__porthole/d/…` never open | `navigate-guard` → both cases (all three) |
 | Workers (P044, P045) | no Node module in `/server`; D1 tickets taken by one `DELETE … RETURNING` | `test/workers.test.ts` (workerd, no `nodejs_compat`, real D1: once per ticket, a race, anonymous, a revocation, flat names, reserved namespaces) | — |
 
 ### The clipboard, and copy buttons

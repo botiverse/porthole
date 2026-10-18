@@ -1,0 +1,1 @@
+import{t as e}from"./index-Dc-CZvvv.js";var t=e();function n(){return(0,t.jsx)(`p`,{id:`details`,children:`details loaded`})}export{n as default};

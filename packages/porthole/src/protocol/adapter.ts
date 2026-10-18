@@ -40,7 +40,9 @@ export type AdapterEvent =
   /** The view finished its handshake; content may be sent. */
   | { readonly type: "initialized" }
   /** The view asked to be closed. */
-  | { readonly type: "teardown-requested" };
+  | { readonly type: "teardown-requested" }
+  /** A page that came with files is opening another page of its set in the frame (P084). */
+  | { readonly type: "navigating" };
 
 /** What the framework drives on every adapter. Adapters add their protocol's own operations. */
 export interface AdapterConnection {

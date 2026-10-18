@@ -40,7 +40,9 @@ libraries on content origins (`egress.libraries`, `scripts/vendor-libraries.ts`)
 gate, `subscribeData` (MCP resource subscriptions), the host's cache, and the shell's guard against
 a served frame navigating itself away. 0.5.1 (P080): the host hears a navigation the guard stopped
 (`navigationBlocked`), a `Refused` as `consent` refuses all data without handlers, and refusals
-tell content why (`data: { code, message }`).
+tell content why (`data: { code, message }`). 0.6 (P081–P084): a served page may be many files
+(`StoredFiles`), each served from its version's manifest under that version's own address, its CSP
+opening that path only; `checkFileSet`, `lintFiles`, `checkPage({ files })`.
 
 ## Setup
 

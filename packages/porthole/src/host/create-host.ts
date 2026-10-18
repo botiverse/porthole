@@ -121,6 +121,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       let connection: C | null = null;
       let destroyed = false;
       let restarts = 0;
+      // The frame's content said its next load is another page of its own set (P084).
+      let pageOfSet = false;
       let generation = 0;
       // The viewer's answer for this display (P079): asked once, kept across its frames; or the
       // host's refusal of them all (P080).
@@ -320,6 +322,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
 
       const stop = () => {
         handshaken = false;
+        pageOfSet = false;
         abort?.abort();
         abort = null;
         outcomeWatch?.stop();
@@ -390,6 +393,10 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           hostInfo,
           hostContext,
           emit: (event) => {
+            if (event.type === "navigating") {
+              pageOfSet = true;
+              return;
+            }
             if (event.type === "initialized") {
               watch.initialized();
               if (!handshaken) {
@@ -406,6 +413,12 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           (opened as unknown as Record<string, (...each: unknown[]) => unknown>)[name]?.(...args);
         }
         created.onNavigated(() => {
+          // Another page of the content's own set (P084): the same content, still connected (the
+          // new page's shell says hello again on the same transport). Not a restart.
+          if (pageOfSet) {
+            pageOfSet = false;
+            return;
+          }
           emit("navigated", undefined);
           if (restarts < MAX_RESTARTS) {
             restarts += 1;

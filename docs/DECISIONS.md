@@ -353,7 +353,7 @@ wall.
 **Revisit when** a gate needs to depend on the call's arguments (then the host's
 `confirm` decides, as it does for tool calls today).
 
-## P022 · 2026-10-11 · Every preset starts with egress closed; library CDNs are a one-line opt-in · Accepted
+## P022 · 2026-10-11 · Every preset starts with egress closed; library CDNs are a one-line opt-in · Accepted; amended by P082
 
 **Decision.** Every preset's base egress is empty: nothing loads from outside and
 every fetch fails. `LIBRARY_CDNS` (cdnjs, jsDelivr, unpkg, esm.sh for scripts,
@@ -397,7 +397,7 @@ agreement test keeps the shell and the manual on the same name.
 **Revisit when** MCP Apps standardizes error reporting or theme-change events for
 views.
 
-## P025 · 2026-10-11 · A served document comes with its ticket's answer; the cookie serves what follows · Accepted
+## P025 · 2026-10-11 · A served document comes with its ticket's answer; the cookie serves what follows · Accepted; amended by P083
 
 **Decision.** Refines P016's ticket flow. `/server` names each storage scope's origin
 `<label>.<content domain>` (24 base32 characters of an HMAC of the scope, keyed from the
@@ -568,7 +568,7 @@ Chromium measured no preconnect from a frame here, but harden for the weakest en
 **Revisit when** WebKit applies the CSP to preconnect (then the observer suffices), or a
 DOM insertion API is added (wrap it, and add its probe).
 
-## P031 · 2026-10-11 · A display whose content navigates its frame is started again, at most three times · Accepted
+## P031 · 2026-10-11 · A display whose content navigates its frame is started again, at most three times · Accepted; amended by P084
 
 **Decision.** The web platform counts its frame's loads; any after the first means the
 content navigated the frame. The display is started again from its content (an event
@@ -2213,7 +2213,7 @@ refused, and reported as a problem, on every engine (`leak/check.spec.ts`).
 loads (its follow-up) proposes more hosts, such as mirrors reachable from mainland China.
 
 
-## P079 · 2026-10-15 · Live widgets: no network of their own, Porthole's libraries on their origin, the host's data behind the viewer's consent, and frames that never navigate away · Accepted
+## P079 · 2026-10-15 · Live widgets: no network of their own, Porthole's libraries on their origin, the host's data behind the viewer's consent, and frames that never navigate away · Accepted; amended by P084
 
 **Decision.** Content that shows its host's data, current, read as the person viewing it (a
 dashboard tile, a kept widget) gets a preset of its own and the mechanisms it needs. 0.5.0.
@@ -2433,3 +2433,242 @@ told why, nothing started again on re-render); `leak/check.spec.ts` (a served wi
 navigates is told so, without the query). On Chromium, WebKit and Firefox.
 **Revisit when** MCP or MCP Apps standardizes error data for refused requests (follow it), or a
 host needs the navigation without `reportError`.
+
+## P081 · 2026-10-18 · A version may be many files: the store's contract, addresses that pin a version, and how each file is served · Accepted
+
+Task #124: an artifact is what an agent made, as it made it, and that is often a directory (a
+build's output, a report with its images, a dashboard that reads its data). 0.6.0, additive: a
+0.5 host's store, `{ html }`, is served as before.
+
+**Decision.**
+- **The store.** `ArtifactStore.get(id, version)` answers `{ html }` (one page, as in 0.5) or a
+  `StoredFiles`: `files` (`path → { size, sha256, type? }`), `entry` (default `index.html`), `spa`
+  (default false) and `read(path)` (a `Uint8Array` or a `ReadableStream`, whole; Porthole cuts the
+  range a request asks for). The type a file was published with is the host's to keep (a file list),
+  never served.
+- **Paths, when a version is published** (`filePathProblem`, `checkFileSet`, a host calls them):
+  relative, `/`-separated, case-sensitive; no empty, `.` or `..` segment; none of `\ % ? #` or a
+  control character; Unicode NFC; no segment that starts or ends with a space; at most 512
+  characters and 255 a segment; not under `__porthole/`; no two paths that differ only in case, no
+  path that is both a file and a directory; the entry one of them.
+- **Paths, when a file is asked for** (`requestFilePath`, `lookupFile`): the path below the
+  version's base, decoded once; a segment that decodes to a separator, an escape, a control
+  character or a dot segment names nothing (the URL parser has resolved the dot segments it
+  sees). Looked up in the manifest only, never a filesystem: `""` is the entry (an entry in a
+  directory: there); `dir/` is `dir/index.html`; `name` is `name`, else `name.html`, else `name/`
+  (307) when `name/index.html` exists. What finds nothing: for a navigation, the entry when the
+  version is a single-page app (`spa`), else the nearest `404.html` (status 404); else a plain 404.
+- **Limits**, the config's (`limits.maxFiles`, `maxFileBytes`, `maxVersionBytes`; 1,000, 25 MiB,
+  100 MiB by default): the manual states them, and `checkFileSet` and `lintFiles` hold a version
+  to them. The server serves what the host stored.
+- **Addresses on a tab** (P068). `entry.at` may answer a `FileAddress`, `{ instance, base, file }`:
+  the version's own address (`/v/3/`) and the file the address asks for below it. The session the
+  entry buys serves every path under `base`, and an address that isn't under it (`/`,
+  `/style.css`: the latest) is redeemed to `base` + `file`. `versionedAddress(path)` reads the
+  convention both first hosts use (`/v/<n>/<file>` pinned, any other path the latest's), and
+  `versionBase(n)` is `/v/<n>/`. Each version is a directory of its origin, as Claude's content
+  origin does it (`/_f/<version id>/`, measured on claude.ai 2026-10-18). `/_blob/`
+  (`ASSET_LIBRARY_PATH`) is kept free outside every version for an asset library that lives
+  across versions (task #124 phase 4, not built): `versionedAddress` names nothing there; it will
+  need a CSP source and an access of its own, decided then. A file set's page answered as a plain
+  instance is served as a frame's is (P083).
+- **Answers.** Each file is typed by Porthole's table by its extension (`fileTypeOf`); one it
+  doesn't know is `application/octet-stream` with `content-disposition: attachment`; every answer
+  is `nosniff`. Every answer carries its CSP: a page and a script (a worker's policy is its
+  script's) the page's (P082), any other file `default-src 'none'; sandbox` (an SVG or XML file
+  opened on its own runs nothing). A page is `private, no-cache` with an ETag of the bytes served
+  (so the host's check runs on every navigation, P050); any other file `private,
+  max-age=31536000, immutable` with its `sha256` as a strong ETag; `If-None-Match` gets a 304; one
+  `bytes=` range a 206 (a range past the end a 416; several ranges the whole file). Files (not
+  pages) are `Cross-Origin-Resource-Policy: same-origin`. A service worker's script request
+  (`Service-Worker`, `Sec-Fetch-Dest: serviceworker`) is refused.
+- **Every page of a set is in the shell**, fetched or opened: its hardening, its host functions,
+  its theme (P029: parsed inert, its scripts replayed, a module's relative `src` resolving from
+  the page's address). Each page still writes its own skeleton (`<!doctype html>`, its head), as
+  on Claude, where only the main page is wrapped in a skeleton at publish time: a skeleton is
+  markup, Porthole's shell is the frame's hardening, which a page can't go without.
+- **The agent's side.** `lintFiles(config, files)` lints each page as `lintContent` does, holds the
+  set to the path rules and limits, and looks every relative reference up in the set (markup,
+  CSS `url()` and `@import`, module imports, `new URL(…, import.meta.url)`, workers, fetches);
+  `admitFiles` refuses what certainly fails (a path or limit the server won't take, no entry, a
+  page `admitContent` would refuse, a page's reference that starts with `/`) and warns on the
+  rest. `checkPage({ files })` serves the whole set from the check's own server and runs its
+  entry; files are named by their path in its report. The manual's widget topic gets a Files
+  section where a config serves them (`servesFiles`: an artifact with domain isolation).
+
+**Why.**
+- Packing a directory into one page costs a third more bytes in base64, the agent's tokens to
+  write it, and a whole re-upload for one changed line. Every static host serves a set of files
+  (Netlify, Cloudflare, Vercel, Firebase, GitHub Pages), and so does Claude's own content origin
+  ("fetch() of files published alongside the page works with relative URLs").
+- The serving rules are theirs (task124-industry-practice.md, items 7–11): Cloudflare's slash
+  policy and 404 rules, a server-side type table with `nosniff` (MDN, Go's `ServeContent`), pinned
+  addresses immutable, an ETag on the hash (web.dev's HTTP cache guide).
+- A page loaded as the latest must not load a newer version's file published while it loads (the
+  chunk-load errors SPAs hit after a deploy; Vercel's Skew Protection exists for them). The
+  address that pins it must be the page's own, not the browser's: a cookie is shared by every tab
+  and replaced when the next version is entered, so the redeem goes to the version's own address
+  before the page loads anything.
+- Every page in the shell: a page opened without it would run without its in-frame defenses (a
+  nested frame's fresh realm, WebRTC where `webrtc 'block'` isn't honored), and without its host.
+- `same-origin` resource policy: without the public suffix list (P047, P066) sibling content
+  origins are one site, so on a tab another artifact's page could embed this one's script with the
+  viewer's `Lax` cookie; nothing but the version's own pages needs to load its files (the app
+  frames the page, never a file).
+
+**Rejected.**
+- A `<base>` the shell sets on the latest address (`/`, base `/v/3/`): every `#anchor` link then
+  resolves to `/v/3/#anchor`, another document, and `base-uri 'none'` would have to open.
+- Serving the latest's files at the latest address by the session (`/style.css` from the version the
+  cookie entered): two tabs, or a newer version entered while a page loads, mix versions.
+- `Cross-Origin-Resource-Policy: cross-origin` for media (task #124's plan): it would let any page
+  embed a version's media, siblings with the viewer's cookie; nothing needs it.
+- Only the entry in the shell, the other pages as they are (Claude's way): a page the frame opens
+  would run without the frame guard (a nested frame's fresh realm, P006), WebRTC's removal (where
+  `webrtc 'block'` isn't honored), the navigate guard (P079), `document.write`'s and declarative
+  shadow roots' closing (P029) and the clipboard walls (P051), none of which a CSP gives; and
+  without its host functions and theme. Raw HTML to a fetch (`Sec-Fetch-Dest: empty`): a page
+  served without its shell could be replayed as a document (a prefetch cache, a worker's answer).
+  HTML in a set is a page; data that is HTML goes as another type.
+- `max-age=0` for the latest's files: the latest's address never serves a file, it goes to the
+  version's own.
+- The uploader's type, or sniffing (a `.txt` holding HTML would run).
+- Ranges read by the host (`read(path, range)`): one whole-body contract first.
+- Service workers: one answers its origin's requests with documents it makes, outside the shell
+  and the CSP, and outlives the page.
+
+**Measured** (Playwright 1.63: Chromium, WebKit, Firefox; `leak/served/files.spec.ts`): a page of
+many files loads its stylesheet, a classic script, a module and its import, an image, a fetch and
+a worker (whose own fetch resolves from it) by relative path, framed and on a tab; the committed
+Vite + React build (`leak/fixtures/vite-react/out`, 143 KB: React 18.3.1, Vite 8.3.4, `base:
+"./"`) runs as built, its lazy chunk included; a page keeps its own version's data and lazy module
+when a newer version is published while it runs (framed, and on a tab opened at the latest's
+address); every spelling of a way out (`..%2f`, `%252e%252e`, `%5c`, `%2f`, a backslash, `%2e%2e`
+past the base) is a 404 or blocked; an `.html` published as `.txt` is `text/plain`, `nosniff`, and
+runs nothing opened on its own; another artifact's page loads none of the files (its CSP stops
+them before any request) and a page elsewhere can't read or run them (no CORS; CORP); no service
+worker registers. Negative controls (P032): `service-worker` (the harness passes a worker's script
+request on as a script's) → a service worker registers on a tab on all three engines;
+`file-corp` (no resource policy) → a page elsewhere runs the set's script on all three.
+
+**Tested.** `test/files.test.ts` (the path rules, `checkFileSet`, decoding, lookup; the type table;
+the CSP; framed: the ticket's answer, headers per type, ETag and 304, ranges from bytes and
+streams, 404s and `404.html`, traversal, service workers, a version's access serves that version,
+an access is its origin's and ends, the host's check per file, `spa`, a 0.5 page unchanged; on a
+tab: the latest goes to the version's own, a newer version doesn't reach a page, `versionedAddress`;
+`lintFiles` and `admitFiles`, the Vite build lints clean); `test/workers.test.ts` (on workerd:
+the entry, a streamed file, a range); `test/agreement.test.ts` (the Files section exactly where
+files are served, with the config's limits); `leak/served/files.spec.ts`; `leak/check.spec.ts`
+(a set checked whole; a missing script told by its path).
+**Revisit when** a host stores large media where ranged reads pay (R2: `read(path, range)`),
+content needs offline (a service worker of Porthole's own making), the conformance runner
+(`defineHostConformance`) is pointed at an app with file sets (add these cases to it), or the
+content domain joins the public suffix list (then siblings are other sites, and CORP is defense in
+depth only).
+
+## P082 · 2026-10-18 · A served page with files loads its own version's files, by their path; never `'self'` · Accepted
+
+**Decision.** Amends P022 for served pages with files. Their pages and scripts get the frame's CSP
+with one source added to `script-src`, `style-src`, `font-src`, `img-src`, `media-src`,
+`connect-src` and `worker-src` (`fileSetCspDirectives`, `FILE_SET_DIRECTIVES`; `'none'` dropped
+where it was the only source): the version's own files' path on its origin, `<origin>/v/3/` on a
+tab (the session's base), `<origin>/__porthole/f/` in a frame (the prefix every sealed path of the
+scope shares, P083). Nothing else changes: `default-src`, `frame-src`, `object-src`, `base-uri` and
+`form-action` stay `'none'`, the config's own CSP (`compile(config).csp`) has no such source, and
+an opaque frame or a page without files keeps P022 whole: never `'self'`.
+**Threat it re-opens.** Content may now make requests to its own origin, under its version's path:
+- its requests' paths and queries reach the host's own content server (its logs), which already
+  sees every request the frame makes; nothing reaches another origin;
+- any file of the version runs as a script or a worker: they are the same author's;
+- in a frame, a page could load another live sealed path of its scope, if it knew one: it knows
+  only its own, and same-origin frames on one page are one trust domain already (one scope, one
+  storage, each other's DOM through `parent.frames`).
+Bounded: another version's path, Porthole's own paths (`/__porthole/d/`, `/__porthole/session`)
+and a url-mode app's stay closed; the `file-self` control (the harness puts `'self'` where the CSP
+names the version's path) makes a page on a tab load another version's data and module, and a
+frame's `%2e%2e` past its base reach the server, on all three engines.
+**Why.** Relative files are the point of a set, and they live on the page's own origin; the
+industry's own content origins open it: claudeusercontent.com sends `default-src
+https://www.claudeusercontent.com` (its own origin, observed), MCP Apps' baseline is `script-src
+'self'`. Porthole opens less, its version's path: on a tab another version is another path.
+P022's reason for never `'self'` (an opaque frame's `'self'` may be the embedding page's origin)
+doesn't hold on an origin of the scope's own, and stays for opaque frames.
+- Live widgets (P079) are shells, not artifacts: no files, unchanged. Porthole's libraries keep
+  their own source, `<origin>/__porthole/lib/`, under no base. Per-scope labels (P047): the source is
+  the scope's origin, so another scope's files never match.
+- A CSP ignores a source's path after a redirect: Porthole's redirects under a base stay under it
+  (`dir` → `dir/`), and every other answer on the origin that redirects goes to the app's origin
+  (redirect entry), which no file directive allows.
+**Rejected.** `'self'` (every version, every Porthole path of the origin); the exact sealed path in
+a frame's CSP (its length, up to kilobytes with a long scope or subject, in each of seven
+directives).
+**Revisit when** content needs to load other versions' files (a diff view: through the host), or a
+browser keeps path matching across redirects.
+
+## P083 · 2026-10-18 · A page with files in a frame carries its access in its files' path, sealed · Accepted
+
+**Decision.** Amends P025 for served pages with files. The ticket's answer is the version's entry
+page, in the shell, `no-store`, with no cookie; its plan carries the address of its files,
+`/__porthole/f/<sealed>/`, and the shell puts it in the frame's history (`history.replaceState`)
+before anything loads, so the page's relative addresses resolve there and the spent ticket leaves
+the address. `<sealed>` is the session (the instance, the viewer, the end, the host's subject)
+sealed with AES-256-GCM (Web Crypto) under a key derived from the server's secret
+(`porthole/files`), bound to that use; it opens only on the instance's own origin and until its
+end (`sessionSeconds`, an hour by default), and the host's check runs on every file (P050). A
+reload loads the files' address itself.
+**Threat it re-opens.** P025 rejected "a token in the document's path (a credential in every URL
+the content can read and log)". The sealed path is such a credential: whoever has it loads that
+version's files as that viewer until it ends. Bounded:
+- it opens one version's files on one origin: not its document path, not `/__porthole/session`,
+  not a url-mode app, not another version;
+- it is made in the browser's own request, never in the app's API answers or logs (as the
+  ticket's URL is), and every answer sends `Referrer-Policy: no-referrer`;
+- content that would leak it could send the files' bytes by the same ways; and another page can't
+  embed them with it (`Cross-Origin-Resource-Policy: same-origin`, P081);
+- the host's check still decides each request, and a revocation ends it (`test/files.test.ts`).
+**Why.** WebKit keeps no cookie in a cross-site frame (P025, measured): a page whose files needed
+the cookie would show its entry there and nothing it loads. In the path, every engine loads them.
+Sealed, not signed: content reads its own address, and a grant's viewer and subject are the host's
+(never shown to content). In the ticket's own answer rather than behind a redirect: P025's own
+reason (the document comes with its ticket's answer), one round trip fewer, and Playwright's WebKit
+can't fulfill a routed redirect ("Cannot fulfill with redirect status: 303", measured with
+`checkPage`'s driver).
+**Rejected.** The cookie for files (WebKit); a service worker that adds the access (P025's reasons;
+and P081 refuses them); a signed token (the viewer and subject readable); a store of sessions (the
+ticket store takes once, and a new store is a new table for every D1 host); a ticket per file.
+**Cost.** A frame's file addresses are new each session (each seal has a fresh IV), so the browser's
+cache serves a version's files within a session (its reloads and pages), not across sessions.
+**Revisit when** WebKit keeps partitioned cookies in frames (then the cookie, stable addresses and
+the shared cache), or hosts need a version's files cached across sessions (a seal per day).
+
+## P084 · 2026-10-18 · A served page with files opens its set's other pages in its frame · Accepted
+
+**Decision.** Amends P079 (no navigation to another document) and P031 (a navigated frame is
+started again) for served pages with files. The shell's plan names the version's files' address
+(`files.base`); its navigate guard lets a navigation go on when its destination is under it and
+names a page (no extension, `.html`, `.htm`, or a directory), and tells the host first: Porthole's
+own `porthole/navigating` (`NAVIGATING_METHOD`), which the shell adapter turns into its session's
+`navigating` event. The host takes the frame's next load as that page: no restart, no `navigated`;
+the new page's shell says hello again on the same transport. A link to such a page opens it in
+the frame, whatever its target; a link to another file of the set doesn't open, and is reported as
+a blocked navigation (P080). Every other navigation is stopped, as before.
+**Threat it re-opens.** A frame that navigates itself carries data out in its URL (P079's reason).
+Now it may, to its own version's pages, on its own origin: the host's own content server sees the
+address, as it sees a fetch there (P082). Not to another origin, not to another path of its origin,
+not to a file that isn't a page (which wouldn't come in the shell). The announcement is the
+content's word: it only spares a restart, which P031 says is not a wall.
+**Why.** A set's other pages (Claude's contract names "further HTML pages") are links between
+pages; a guard that stops them, or a host that starts the display again at its entry on each,
+breaks every multi-page artifact.
+**Measured.** Under `navigate-guard` (P079's control), the cases "a link to another page opens it
+in the frame" (no announcement, so the display starts again) and "a page opens nothing else" (a
+file that isn't a page, `/`, `/__porthole/d/…` reach the server) fail on Chromium, WebKit and
+Firefox.
+**Rejected.** The host opening the page (`openLink`, or a restart at the new address): the frame's
+history goes, and the sealed address would land in a tab. A new bridge for each page: the host's
+gates, rates and consent are the display's, across its pages.
+**Residual.** The host gives annotations (P053) to the display's first page only; live
+subscriptions a page left keep running until the display ends.
+**Revisit when** hosts annotate multi-page artifacts (give the marks to each page), or an engine
+Porthole supports lacks the Navigation API (then `frame-src` is the wall, and a set's pages restart
+the display).

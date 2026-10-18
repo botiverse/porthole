@@ -29,5 +29,5 @@
       "rules": { "no-console": "off" }
     }
   ],
-  "ignorePatterns": ["**/dist/**", "**/.dev/**", "**/*.generated.ts"]
+  "ignorePatterns": ["**/dist/**", "**/.dev/**", "**/*.generated.ts", "**/leak/fixtures/**"]
 }

@@ -84,7 +84,10 @@ Pure mechanism, no product policy, no host or vendor types.
   comes from the theme variables, never from a component vocabulary (P015).
 - **Serving.** For served modes, a request handler a host's backend mounts: it
   serves documents on their own origins with their CSP in headers, and turns a
-  one-time ticket the host minted into a cookie of that origin only.
+  one-time ticket the host minted into a cookie of that origin only. A stored
+  version may be one page or a set of files: each file is looked up in the
+  version's manifest only, typed by Porthole's own table, and served under that
+  version's own address, so a page's relative addresses are its version's.
 
 ### Preset policy layer
 
@@ -179,6 +182,10 @@ transparent to the view and the host.
 The content is served as a real document at a URL on a separate registrable
 domain with its CSP in HTTP headers; the host embeds that URL in a frame whose
 `frame-ancestors` names the host. No code injection, and the shell is optional.
+A page may come with files of its own (stylesheets, scripts, data, images, other
+pages): they are served beside it, under its version's own address, and its CSP
+opens that path and nothing else of its origin; every page of the set gets the
+shell.
 Access is gated by a one-time ticket exchanged for a scoped cookie. Where the host
 holds the page and needs no stable origin, the shell writes it into an opaque
 frame instead.
@@ -208,7 +215,9 @@ only the declared content origins.
    says so.
 
 2. **Content ↔ the outside network.** Closed by default and opened only to the
-   origins the config's capabilities declare. Two kinds of attacker matter:
+   origins the config's capabilities declare (and, for a served page with files,
+   its own version's path on its own origin: the host's own server, P082). Two
+   kinds of attacker matter:
    - *Attacking the host* (steal credentials, read other data, escape the
      sandbox): stopped by origin isolation — the content is a stranger to the
      host origin.
@@ -259,7 +268,8 @@ only the declared content origins.
 - **Served content.** A host plugs its own policy and infrastructure into `/server`:
   who may see what (`authorize`), where tickets live (`TicketStore`: memory, D1),
   how origins are named (`content.name`, other servers' `reserved` namespaces),
-  and where apps and artifact versions come from (`upstream`, `artifacts`). It runs
+  and where apps and artifact versions come from (`upstream`, `artifacts`: a page, or a
+  manifest of files and their bytes), and which address means which version (`entry.at`). It runs
   on any runtime with web-standard `Request`/`Response` (Node, Workers).
 
 ## How a new protocol or platform plugs in

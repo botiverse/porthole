@@ -44,6 +44,11 @@ export {
   type ContentLogger,
   type EntryContext,
   type EntryOptions,
+  ASSET_LIBRARY_PATH,
+  type FileAddress,
+  isFileAddress,
+  versionBase,
+  versionedAddress,
   type ContentMeta,
   type HealthOptions,
   type HealthProbe,
@@ -79,9 +84,23 @@ export {
 } from "./proxy.ts";
 export { statusPageOf as statusPage } from "./pages.ts";
 export { contentHostFor, type ContentHostFor } from "./bootstrap.ts";
+// A version made of files (P081): the rules its paths follow, its limits and its types.
+export {
+  checkFileSet,
+  DEFAULT_ENTRY,
+  fileLimits,
+  filePathProblem,
+  type FileLimits,
+  type FileSetProblem,
+} from "../files/paths.ts";
+export { fileTypeOf, type FileRole, type FileType } from "../files/types.ts";
 export type {
   Access,
   ArtifactStore,
+  FileBody,
+  StoredFile,
+  StoredFiles,
+  StoredVersion,
   AuthorizeAnswer,
   AuthorizeRequest,
   Authorizer,

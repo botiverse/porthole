@@ -3,7 +3,11 @@ import type { InstanceRef } from "../isolation/types.ts";
 import { presets } from "../presets/presets.ts";
 import { createServer } from "../server/server.ts";
 import { CHECK_CONTENT_DOMAIN, CHECK_ORIGIN } from "./drivers.ts";
-import { lintContent, type Finding } from "./lint.ts";
+import { lintContent } from "./lint.ts";
+import { lintFiles, whereOf, type FileContents, type FileFinding } from "./files.ts";
+import { DEFAULT_ENTRY, servesFiles } from "../files/paths.ts";
+import { sha256 } from "../server/crypto.ts";
+import type { StoredFiles } from "../server/types.ts";
 // The check page's script, imported as a module so a bundler takes it in (P075): no file is
 // looked up beside this one at run time.
 import PAGE_SCRIPT from "./page-source.ts";
@@ -55,7 +59,15 @@ export interface CheckDriver {
 export interface CheckOptions {
   readonly config: PortholeConfig;
   /** The content as the agent would send it: a fragment, or a whole document. */
-  readonly content: string;
+  readonly content?: string;
+  /**
+   * A page that comes with files (P081), in place of `content`: every file by its path. The whole
+   * set is served, as people's browsers get it, and its entry is run and measured. Needs a served
+   * artifact config and a driver that serves (`playwrightDriver`).
+   */
+  readonly files?: FileContents;
+  /** The page a set opens at (default `index.html`). */
+  readonly entry?: string;
   readonly driver: CheckDriver;
   /** Widths, px. Default: the manual's phone and desktop widths (`config.layout`). */
   readonly widths?: readonly number[];
@@ -106,7 +118,8 @@ export interface CheckReport {
    * refuses, overflow or cut, no lint error.
    */
   readonly ok: boolean;
-  readonly lint: readonly Finding[];
+  /** What the lint found (for a page with files, each finding names its file, `path`). */
+  readonly lint: readonly FileFinding[];
   readonly runs: readonly CheckRun[];
   /** One short summary for the agent: each problem once, with where it happened. */
   readonly text: string;
@@ -130,9 +143,53 @@ function checkedAs(config: PortholeConfig): PortholeConfig {
 
 const escapeScript = (code: string) => code.replace(/<\/script/giu, "<\\/script");
 
+/** A set's own files named by their path, as the agent wrote them, not the frame's address. */
+const ownPaths = (text: string): string =>
+  text.replace(/https:\/\/[a-z0-9.-]+\/__porthole\/f\/[\w-]+\//gu, "");
+
+const hex = (bytes: Uint8Array): string =>
+  Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+
+/** A set's files as the check's server stores them, its entry instrumented (P081). */
+function checkedFiles(files: FileContents, entry: string, page: string): StoredFiles {
+  const bytes = (body: string | Uint8Array): Uint8Array =>
+    typeof body === "string" ? new TextEncoder().encode(body) : body;
+  const served = new Map<string, Uint8Array>(
+    Object.entries(files).map(([path, body]) => [path, path === entry ? bytes(page) : bytes(body)]),
+  );
+  return {
+    files: Object.fromEntries(
+      [...served].map(([path, body]) => [
+        path,
+        { size: body.byteLength, sha256: hex(sha256(body)) },
+      ]),
+    ),
+    entry,
+    read: (path) => Promise.resolve(served.get(path) ?? null),
+  };
+}
+
 export async function checkPage(options: CheckOptions): Promise<CheckReport> {
   const { config } = options;
-  const lint = lintContent(config, options.content);
+  const entry = options.entry ?? DEFAULT_ENTRY;
+  const files = options.files;
+  if ((files === undefined) === (options.content === undefined)) {
+    throw new TypeError("checkPage takes content, or files: one of them");
+  }
+  if (files !== undefined && !servesFiles(config)) {
+    throw new TypeError("A page with files is checked under a served artifact config");
+  }
+  const entryText = (): string => {
+    const body = files?.[entry];
+    return body === undefined
+      ? ""
+      : typeof body === "string"
+        ? body
+        : new TextDecoder().decode(body);
+  };
+  const written = files === undefined ? (options.content ?? "") : entryText();
+  const lint: FileFinding[] =
+    files === undefined ? lintContent(config, written) : lintFiles(config, files, { entry });
   if (config.mode === "url") {
     return {
       ok: true,
@@ -149,9 +206,13 @@ export async function checkPage(options: CheckOptions): Promise<CheckReport> {
   const script = options.page ?? PAGE_SCRIPT;
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Porthole check</title><style>body{margin:0;padding:8px}section{margin-bottom:16px}</style></head><body><script>${escapeScript(script)}</script></body></html>`;
   // Its inline scripts named, so an error says the line in the content as written (P074).
-  const { content, scriptLines } = namedScripts(options.content);
+  const { content, scriptLines } = namedScripts(written);
 
   const session = await options.driver.open();
+  if (files !== undefined && session.serve === undefined) {
+    await session.close();
+    throw new TypeError("A page with files is checked served: this driver can't serve (no serve)");
+  }
   // A served config runs served, on a content origin the driver answers, under Porthole's own
   // server: its CSP in headers, its shell, its storage and cookies (P074). Else opaque.
   const servedHere =
@@ -163,7 +224,14 @@ export async function checkPage(options: CheckOptions): Promise<CheckReport> {
         secret: crypto.getRandomValues(new Uint8Array(32)),
         hostOrigins: [CHECK_ORIGIN],
         configs: { check: servedConfig },
-        artifacts: { get: () => Promise.resolve({ html: instrumented(content) }) },
+        artifacts: {
+          get: () =>
+            Promise.resolve(
+              files === undefined
+                ? { html: instrumented(content) }
+                : checkedFiles(files, entry, instrumented(content)),
+            ),
+        },
       })
     : null;
   const handler = async (request: Request): Promise<Response> => {
@@ -240,10 +308,19 @@ export async function checkPage(options: CheckOptions): Promise<CheckReport> {
             data?.scrollWidth !== undefined &&
             data.clientWidth !== null &&
             data.scrollWidth > data.clientWidth + 1,
-          errors: unique(data?.errors ?? []),
-          blocked: uniqueBy(data?.blocked ?? [], (each) => `${each.url} ${each.directive}`),
-          failedLoads: uniqueBy(data?.failedLoads ?? [], (each) => each.url),
-          console: uniqueBy(data?.console ?? [], (each) => `${each.level} ${each.text}`),
+          errors: unique((data?.errors ?? []).map(ownPaths)),
+          blocked: uniqueBy(
+            (data?.blocked ?? []).map((each) => ({ ...each, url: ownPaths(each.url) })),
+            (each) => `${each.url} ${each.directive}`,
+          ),
+          failedLoads: uniqueBy(
+            (data?.failedLoads ?? []).map((each) => ({ ...each, url: ownPaths(each.url) })),
+            (each) => each.url,
+          ),
+          console: uniqueBy(
+            (data?.console ?? []).map((each) => ({ ...each, text: ownPaths(each.text) })),
+            (each) => `${each.level} ${each.text}`,
+          ),
           calls: uniqueBy(data?.calls ?? [], (each) => `${each.capability} ${each.outcome}`),
           ...(screenshot === undefined ? {} : { screenshot }),
         });
@@ -297,7 +374,7 @@ const clip = (text: string, most = 200) =>
  */
 function summary(
   config: PortholeConfig,
-  lint: readonly Finding[],
+  lint: readonly FileFinding[],
   runs: readonly CheckRun[],
   most: number,
 ): string {
@@ -348,9 +425,10 @@ function summary(
     }
   }
   const lines = [
-    ...lint.map(
-      (each) =>
-        `${each.severity === "error" ? "Error" : "Warning"}${each.line === undefined ? "" : ` (line ${each.line})`}: ${each.message}`,
+    ...lint.map((each) =>
+      each.path === undefined
+        ? `${each.severity === "error" ? "Error" : "Warning"}${each.line === undefined ? "" : ` (line ${each.line})`}: ${each.message}`
+        : `${each.severity === "error" ? "Error" : "Warning"} (${whereOf(each).replace(/: $/u, "")}): ${each.message}`,
     ),
     ...[...where].map(
       ([problem, at]) =>

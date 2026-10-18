@@ -11,6 +11,7 @@ import {
 import { reasonFor, type RefusalReason } from "../bridge/refusal.ts";
 import {
   COPY_TEXT_METHOD,
+  NAVIGATING_METHOD,
   NAVIGATION_BLOCKED_METHOD,
   MCP_APPS_METHODS as M,
   MCP_APPS_PROTOCOL_VERSION,
@@ -248,6 +249,10 @@ export const shellAdapter: ProtocolAdapter<ShellConnection> = {
         case NAVIGATION_BLOCKED_METHOD:
           // The shell stopped a navigation (P080): an error report, with its address.
           void bridge.call("reportError", { navigationBlocked: params.url });
+          return;
+        case NAVIGATING_METHOD:
+          // Another page of the set opens in the frame (P084): its next load is that page.
+          session.emit({ type: "navigating" });
           return;
         case M.requestTeardown:
           session.emit({ type: "teardown-requested" });

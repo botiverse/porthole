@@ -1,1 +1,2 @@
 packages/porthole/src/libraries/files.generated.ts linguist-generated=true -diff
+packages/porthole/leak/fixtures/*/out/** linguist-generated=true -diff

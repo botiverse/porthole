@@ -428,12 +428,19 @@ export function validateConfig(input: unknown): PortholeConfig {
     "maxPromptChars",
     "maxErrorReports",
   ];
-  only(limits, [...limitNames, "loadTimeoutMs"], "config.limits");
+  const fileLimitNames = ["maxFiles", "maxFileBytes", "maxVersionBytes"];
+  only(limits, [...limitNames, "loadTimeoutMs", ...fileLimitNames], "config.limits");
   for (const name of limitNames) {
     positive(limits[name], `config.limits.${name}`);
   }
   if (limits.loadTimeoutMs !== undefined) {
     positive(limits.loadTimeoutMs, "config.limits.loadTimeoutMs", 600_000);
+  }
+  // A served page's files (P081): optional, with fileLimits' defaults.
+  for (const name of fileLimitNames) {
+    if (limits[name] !== undefined) {
+      positive(limits[name], `config.limits.${name}`);
+    }
   }
   if ((limits.minHeightPx as number) > (limits.maxHeightPx as number)) {
     fail("config.limits.minHeightPx", "must not exceed maxHeightPx");

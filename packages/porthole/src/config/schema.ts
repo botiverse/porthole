@@ -120,6 +120,14 @@ export interface Limits {
    * when absent.
    */
   readonly loadTimeoutMs?: number;
+  /**
+   * A served page's files (P081): the most a version holds (default 1000), the largest one,
+   * bytes (default 25 MiB), and all of them together, bytes (default 100 MiB: a host sets its
+   * own). The manual states them; `checkFileSet` and `lintFiles` hold a version to them.
+   */
+  readonly maxFiles?: number;
+  readonly maxFileBytes?: number;
+  readonly maxVersionBytes?: number;
 }
 
 /**

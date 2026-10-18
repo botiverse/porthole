@@ -59,7 +59,18 @@ export interface Keys {
   sign(value: unknown): string;
   /** The signed value, or null when the signature doesn't hold. */
   verify(token: string): unknown;
+  /**
+   * `value` sealed (AES-256-GCM, Web Crypto): unreadable and unforgeable without the secret,
+   * base64url. A file set's access in a frame's path (P083), which content can read: the viewer
+   * and the host's subject inside it stay the host's.
+   */
+  seal(value: unknown): Promise<string>;
+  /** The sealed value, or null when it doesn't open. */
+  unseal(token: string): Promise<unknown>;
 }
+
+/** What a sealed value is bound to, so it can never be taken for anything else sealed. */
+const SEAL_CONTEXT = utf8("porthole/files");
 
 export function createKeys(secret: Uint8Array): Keys {
   if (secret.byteLength < 32) {
@@ -69,6 +80,13 @@ export function createKeys(secret: Uint8Array): Keys {
   const labelKey = derive("label");
   const instanceKey = derive("instance");
   const signKey = derive("session");
+  const sealKey = derive("files");
+  let sealing: Promise<CryptoKey> | null = null;
+  const sealingKey = (): Promise<CryptoKey> =>
+    (sealing ??= crypto.subtle.importKey("raw", new Uint8Array(sealKey), "AES-GCM", false, [
+      "encrypt",
+      "decrypt",
+    ]));
   const mac = (key: Uint8Array, text: string): Uint8Array => hmacSha256(key, utf8(text));
 
   return {
@@ -94,6 +112,41 @@ export function createKeys(secret: Uint8Array): Keys {
       }
       try {
         return JSON.parse(fromUtf8(bytes)) as unknown;
+      } catch {
+        return null;
+      }
+    },
+    seal: async (value) => {
+      const iv = randomBytes(12);
+      const sealed = new Uint8Array(
+        await crypto.subtle.encrypt(
+          { name: "AES-GCM", iv: new Uint8Array(iv), additionalData: new Uint8Array(SEAL_CONTEXT) },
+          await sealingKey(),
+          new Uint8Array(utf8(JSON.stringify(value))),
+        ),
+      );
+      const token = new Uint8Array(iv.length + sealed.length);
+      token.set(iv);
+      token.set(sealed, iv.length);
+      return base64url(token);
+    },
+    unseal: async (token) => {
+      const bytes = token.length > 8_192 ? null : fromBase64url(token);
+      // 12 bytes of IV and 16 of tag at least.
+      if (bytes === null || bytes.length < 29) {
+        return null;
+      }
+      try {
+        const opened = await crypto.subtle.decrypt(
+          {
+            name: "AES-GCM",
+            iv: new Uint8Array(bytes.subarray(0, 12)),
+            additionalData: new Uint8Array(SEAL_CONTEXT),
+          },
+          await sealingKey(),
+          new Uint8Array(bytes.subarray(12)),
+        );
+        return JSON.parse(fromUtf8(new Uint8Array(opened))) as unknown;
       } catch {
         return null;
       }

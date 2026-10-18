@@ -14,6 +14,7 @@ import {
   librarySources,
   type EgressKind,
 } from "../compile/policy.ts";
+import { fileLimits, servesFiles } from "../files/paths.ts";
 import { VENDORED_LIBRARIES, libraryPath } from "../libraries/libraries.ts";
 import { shellPlan } from "../shell/plan.ts";
 import { themeDefault } from "../theme/variables.ts";
@@ -107,6 +108,23 @@ const sourcesFor = (config: PortholeConfig, kind: EgressKind): string[] => [
 
 /** Whether Porthole's own libraries load in the frame (`egress.libraries`, served, P079). */
 const servesLibraries = (config: PortholeConfig): boolean => librarySources(config).length > 0;
+
+/** The manual's lines on a page's own files (P081-P084), where it may have them. */
+function files(config: PortholeConfig): string | null {
+  if (!servesFiles(config)) {
+    return null;
+  }
+  const limits = fileLimits(config.limits);
+  const downloads = config.capabilities.downloadFile !== undefined;
+  return lines(
+    "Files: a page may come with files of its own (stylesheets, scripts and modules, images, fonts, data, workers, other pages), published beside it, with index.html the page it opens at.",
+    '- Name them by relative path (./style.css, assets/app.js, data.json), never with a leading / or a full address: a page loads only its own version\'s files. fetch("./data.json") works; a module\'s imports and a worker\'s script resolve from the module (new Worker(new URL("./worker.js", import.meta.url))).',
+    `- A link to another of your pages (about.html, or about; docs/ for docs/index.html) opens it in place. A link to any other file doesn't open: show an image with <img>${downloads ? ", offer a file with downloadFile" : ""}. A missing path shows your 404.html, if you publish one.`,
+    "- Paths are case-sensitive, relative, with no .., //, \\, %, ? or #. Each file is served as its extension says (.html a page, .js and .mjs scripts, .css, .json, .txt, .svg, .png, .woff2, .mp4, …), never as what it holds; an extension the server doesn't know is a download.",
+    '- A build tool\'s output works when it writes relative paths (Vite: base: "./"). No service workers.',
+    `- At most ${limits.maxFiles.toLocaleString("en-US")} files, ${sizeWords(limits.maxFileBytes)} each (a page under ${sizeWords(config.limits.maxBytes)}) and ${sizeWords(limits.maxVersionBytes)} in all.`,
+  );
+}
 
 /** What content may load, in prose, from the same origins the CSP lists. */
 function network(config: PortholeConfig): string {
@@ -242,6 +260,8 @@ function widget(c: Context): string {
     "The sandbox:",
     ...stated.filter((limit) => limit.topic === "sandbox").map((limit) => `- ${limit.text}`),
     `Keep it under ${sizeWords(limits.maxBytes)}.`,
+    servesFiles(config) ? "" : null,
+    files(config),
     loadsScripts(config)
       ? "\nLibraries: pin an exact version at least two weeks old (chart.js@4.4.1 in its URL), never @latest or a range, so the code can't be swapped under you and draws the same every time."
       : null,

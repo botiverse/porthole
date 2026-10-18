@@ -13,15 +13,17 @@ import { randomBytes } from "./crypto.ts";
 import { isHostLabel, reservedLabels } from "./naming.ts";
 import { enterPage, pageScript, SESSION_PATH, statusPage } from "./pages.ts";
 import { libraryFile } from "./libraries.ts";
+import { serveFile } from "./files.ts";
 import type { FrameBlock } from "../host/types.ts";
 import { memoryTicketStore } from "./tickets.ts";
 import type {
   Access,
   AuthorizeAnswer,
-  EntryState,
   Grant,
   PortholeServer,
   ServerOptions,
+  StoredFiles,
+  StoredVersion,
   TicketRecord,
   TicketStore,
 } from "./types.ts";
@@ -33,6 +35,14 @@ import type {
 const PREFIX = "/__porthole/";
 /** A served document (shell, artifact page, sandbox proxy), by its instance's key. */
 const DOCUMENT_PATH = /^\/__porthole\/d\/([a-z2-7]{16})$/u;
+/**
+ * A file set's files in a frame (P083): `/__porthole/f/<sealed access>/<path>`. The access is
+ * in the path, so a frame whose engine keeps no cookie (WebKit, P025) loads them too.
+ */
+const FILES_PATH = /^\/__porthole\/f\/([A-Za-z0-9_-]{40,4096})(\/.*)?$/u;
+const FILES_PREFIX = "/__porthole/f/";
+/** A clean address's base (P081): a path ending in `/`, not Porthole's own. */
+const BASE = /^\/(?:[^/?#\\]+\/)*$/u;
 /** Where a url-mode app's ticket is taken, before the app's own landing path. */
 const ENTER_PATH = "/__porthole/enter";
 /** Where a redirect entry's code is redeemed, before its clean address (P068). */
@@ -83,10 +93,29 @@ interface Session {
   readonly s?: string;
   /** The clean path a document was entered at (P068): it is served there by this cookie. */
   readonly p?: string;
+  /** A file set's base (P081): every path under it is served by this cookie. */
+  readonly b?: string;
+  /** Whether the base is the version's own address (the app said so): its files are immutable. */
+  readonly k?: 1;
+}
+
+/** Where a request falls under a file set's base: the base, and the path below it. */
+interface FilesAt {
+  readonly base: string;
+  readonly rest: string;
+  readonly search: string;
+  readonly pinned: boolean;
+  /** The CSP source the version's files load from (P082). */
+  readonly source: string;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
+
+const isStoredFiles = (stored: StoredVersion): stored is StoredFiles =>
+  isRecord(stored) &&
+  isRecord((stored as Partial<StoredFiles>).files) &&
+  typeof (stored as Partial<StoredFiles>).read === "function";
 
 /** Which configs a kind of served document may be served under. */
 const MODES: Readonly<Record<Exclude<ServedDocument["kind"], "external">, readonly DisplayMode[]>> =
@@ -438,7 +467,11 @@ export function createServer(options: ServerOptions): PortholeServer {
 
   async function documentOf(
     instance: InstanceRef,
-  ): Promise<{ readonly html: string; readonly csp: string } | null> {
+  ): Promise<
+    | { readonly html: string; readonly csp: string }
+    | { readonly files: StoredFiles; readonly compiled: CompiledConfig }
+    | null
+  > {
     const { document } = instance;
     const config = compiledFor(instance);
     if (config === null) {
@@ -450,7 +483,14 @@ export function createServer(options: ServerOptions): PortholeServer {
         return { html: config.shellDocument({ origins, cspMeta: false }), csp: config.csp };
       case "artifact": {
         const stored = await options.artifacts?.get(document.id, document.version);
-        if (stored === null || stored === undefined || typeof stored.html !== "string") {
+        if (stored === null || stored === undefined) {
+          return null;
+        }
+        // A version made of files (P081): served file by file under its base.
+        if (isStoredFiles(stored)) {
+          return { files: stored, compiled: config };
+        }
+        if (typeof stored.html !== "string") {
           return null;
         }
         return {
@@ -476,7 +516,11 @@ export function createServer(options: ServerOptions): PortholeServer {
    * page that frames it; on a tab of its own, `Lax`. (Engines that keep no cookie in a cross-site
    * frame, measured: WebKit, still get the document, which comes with the ticket's answer.)
    */
-  function sessionCookie(request: Request, record: TicketRecord, path?: string): string {
+  function sessionCookie(
+    request: Request,
+    record: TicketRecord,
+    at: { readonly p?: string; readonly b?: string; readonly k?: 1 } = {},
+  ): string {
     const sessionSeconds = record.sessionSeconds ?? DEFAULT_SESSION_SECONDS;
     const session: Session = {
       i: record.instance,
@@ -484,7 +528,9 @@ export function createServer(options: ServerOptions): PortholeServer {
       x: Date.now() + sessionSeconds * 1_000,
       ...(record.anonymous === true ? { a: 1 as const } : {}),
       ...(record.subject === undefined ? {} : { s: record.subject }),
-      ...(path === undefined ? {} : { p: path }),
+      ...(at.p === undefined ? {} : { p: at.p }),
+      ...(at.b === undefined ? {} : { b: at.b }),
+      ...(at.k === undefined ? {} : { k: at.k }),
     };
     return [
       `${cookieName(keys.instanceKey(record.instance))}=${keys.sign(session)}`,
@@ -557,17 +603,35 @@ export function createServer(options: ServerOptions): PortholeServer {
     return best;
   }
 
-  /** The access a request's cookies give to the document entered at `pathname` (P068). */
-  function accessAtPath(request: Request, label: string, pathname: string): Access | null {
-    let best: Access | null = null;
+  /**
+   * The access a request's cookies give to the document entered at `pathname` (P068), or to a
+   * file set's path under the base it was entered at (P081): with where the path falls under the
+   * base, or the base itself to go to (`/v/3` → `/v/3/`).
+   */
+  function accessAtPath(
+    request: Request,
+    label: string,
+    url: URL,
+  ): {
+    readonly access: Access;
+    readonly at?: FilesAt;
+    readonly redirect?: string;
+  } | null {
+    const { pathname } = url;
+    let best: { access: Access; at?: FilesAt; redirect?: string } | null = null;
     for (const [name, value] of cookiesOf(request)) {
       if (!ourCookie(name)) {
         continue;
       }
       const session = keys.verify(value);
+      if (!isRecord(session)) {
+        continue;
+      }
+      const base = typeof session.b === "string" && BASE.test(session.b) ? session.b : null;
+      const under = base !== null && pathname.startsWith(base);
+      const atBase = base !== null && `${pathname}/` === base;
       if (
-        !isRecord(session) ||
-        session.p !== pathname ||
+        (session.p !== pathname && !under && !atBase) ||
         typeof session.w !== "string" ||
         typeof session.x !== "number" ||
         session.x <= Date.now() ||
@@ -584,14 +648,31 @@ export function createServer(options: ServerOptions): PortholeServer {
       } catch {
         continue;
       }
-      if (best === null || session.x > best.expiresAt) {
+      if (best === null || session.x > best.access.expiresAt) {
+        const origin = originOfLabel(label);
         best = {
-          instance,
-          viewer: session.w,
-          origin: originOfLabel(label),
-          expiresAt: session.x,
-          ...(session.a === 1 ? { anonymous: true } : {}),
-          ...(typeof session.s === "string" ? { subject: session.s } : {}),
+          access: {
+            instance,
+            viewer: session.w,
+            origin,
+            expiresAt: session.x,
+            ...(session.a === 1 ? { anonymous: true } : {}),
+            ...(typeof session.s === "string" ? { subject: session.s } : {}),
+          },
+          ...(base !== null && under
+            ? {
+                at: {
+                  base,
+                  rest: pathname.slice(base.length),
+                  search: url.search,
+                  pinned: session.k === 1,
+                  source: new URL(base, origin).href,
+                },
+              }
+            : {}),
+          ...(base !== null && atBase && session.p !== pathname
+            ? { redirect: `${origin}${base}${url.search}` }
+            : {}),
         };
       }
     }
@@ -623,6 +704,71 @@ export function createServer(options: ServerOptions): PortholeServer {
       "referrer-policy": "no-referrer",
       "x-content-type-options": "nosniff",
       "x-robots-tag": "noindex, nofollow",
+    });
+  }
+
+  /**
+   * A file set's file in a frame (P083): the sealed access in its path opens it, once it holds
+   * for this origin and the host's check lets it in; every path under it is the same version's.
+   */
+  async function serveSealed(
+    request: Request,
+    url: URL,
+    label: string,
+    token: string,
+    rest: string | undefined,
+  ): Promise<Response> {
+    const method = request.method.toUpperCase();
+    const origin = originOfLabel(label);
+    const base = `${FILES_PREFIX}${token}/`;
+    if (rest === undefined) {
+      return new Response(null, {
+        status: 307,
+        headers: { location: `${origin}${base}${url.search}`, "cache-control": "no-store" },
+      });
+    }
+    const session = await keys.unseal(token);
+    let instance: InstanceRef | null = null;
+    if (
+      isRecord(session) &&
+      typeof session.w === "string" &&
+      typeof session.x === "number" &&
+      session.x > Date.now() &&
+      (session.s === undefined || typeof session.s === "string")
+    ) {
+      try {
+        const clean = cleanInstance(session.i);
+        instance =
+          clean.document.kind === "artifact" && nameOf(clean.scope) === label ? clean : null;
+      } catch {
+        instance = null;
+      }
+    }
+    if (instance === null || !isRecord(session)) {
+      return page(
+        401,
+        "This has ended",
+        "Content here opens for a while. Open it again from the app that showed it.",
+        method,
+        "session",
+      );
+    }
+    const access: Access = {
+      instance,
+      viewer: session.w as string,
+      origin,
+      expiresAt: session.x as number,
+      ...(session.a === 1 ? { anonymous: true } : {}),
+      ...(typeof session.s === "string" ? { subject: session.s } : {}),
+    };
+    return serveAccess(request, access, null, {
+      base,
+      rest: rest.slice(1),
+      search: url.search,
+      pinned: true,
+      // Every frame's files on this origin share the prefix (the scope's, P082): a page knows
+      // only its own access.
+      source: `${origin}${FILES_PREFIX}`,
     });
   }
 
@@ -669,11 +815,15 @@ export function createServer(options: ServerOptions): PortholeServer {
     return serveAccess(request, access, cookie);
   }
 
-  /** The document an access opens, once the host's check lets it in. */
+  /**
+   * The document an access opens, once the host's check lets it in: at its document's path, or
+   * (`at`) a path under a file set's base (P081).
+   */
   async function serveAccess(
     request: Request,
     access: Access,
     cookie: string | null,
+    at?: FilesAt,
   ): Promise<Response> {
     const method = request.method.toUpperCase();
     const refusal = await denied(request, access);
@@ -682,6 +832,51 @@ export function createServer(options: ServerOptions): PortholeServer {
     }
     const served = await documentOf(access.instance);
     if (served === null) {
+      return page(404, "Not found", "This page, or this version of it, doesn't exist.", method);
+    }
+    if ("files" in served) {
+      if (at !== undefined) {
+        return serveFile({
+          request,
+          set: served.files,
+          rest: at.rest,
+          search: at.search,
+          base: at.base,
+          origin: access.origin,
+          pinned: at.pinned,
+          source: at.source,
+          compiled: served.compiled,
+          hostOrigins: options.hostOrigins,
+          frameAncestors,
+        });
+      }
+      // A frame's document (a ticket's): its files carry its access in their path (P083). The
+      // entry comes in the ticket's own answer (P025), its shell moving the frame to its address
+      // there before anything loads.
+      const token = await keys.seal({
+        i: access.instance,
+        w: access.viewer,
+        x: access.expiresAt,
+        ...(access.anonymous === true ? { a: 1 } : {}),
+        ...(access.subject === undefined ? {} : { s: access.subject }),
+      } satisfies Session);
+      return serveFile({
+        request,
+        set: served.files,
+        rest: "",
+        search: "",
+        base: `${FILES_PREFIX}${token}/`,
+        origin: access.origin,
+        pinned: true,
+        source: `${access.origin}${FILES_PREFIX}`,
+        compiled: served.compiled,
+        hostOrigins: options.hostOrigins,
+        frameAncestors,
+        ticket: true,
+      });
+    }
+    // One page at a file set's base (P081): its base is the page, nothing under it is.
+    if (at !== undefined && at.rest !== "") {
       return page(404, "Not found", "This page, or this version of it, doesn't exist.", method);
     }
     const headers = documentHeaders(served.csp);
@@ -780,7 +975,7 @@ export function createServer(options: ServerOptions): PortholeServer {
         "session",
       );
     }
-    const { nonce, path } = record.entry;
+    const { nonce, path, base } = record.entry;
     const named = nonceCookie(nonce);
     if (!cookiesOf(request).some(([name, value]) => name === named && value === "1")) {
       return page(
@@ -812,9 +1007,15 @@ export function createServer(options: ServerOptions): PortholeServer {
       "referrer-policy": "no-referrer",
       "x-robots-tag": "noindex, nofollow",
     });
+    // A file set's address (P081): the session serves every path under its base, the version's
+    // own address. Else the path it was entered at, alone (P068).
     headers.append(
       "set-cookie",
-      sessionCookie(request, record, external ? undefined : target.pathname),
+      sessionCookie(
+        request,
+        record,
+        external ? {} : base !== undefined ? { b: base, k: 1 } : { p: target.pathname },
+      ),
     );
     headers.append(
       "set-cookie",
@@ -982,6 +1183,7 @@ export function createServer(options: ServerOptions): PortholeServer {
       ...(anonymous ? { a: 1 } : {}),
       ...(grant.subject === undefined ? {} : { s: grant.subject }),
       ...(entry === undefined ? {} : { p: entry.path }),
+      ...(entry?.base === undefined ? {} : { b: entry.base, k: 1 }),
     });
     if (cookieName(key).length + probe.length + 120 > MAX_COOKIE_BYTES) {
       throw new TypeError("This instance is too large to carry in a cookie (fewer origins?)");
@@ -1104,7 +1306,7 @@ export function createServer(options: ServerOptions): PortholeServer {
       };
     },
 
-    async enterBy(state: EntryState, instance: InstanceRef, grant: Grant): Promise<string> {
+    async enterBy(state, instance, grant, address): Promise<string> {
       if (state.expired) {
         throw new TypeError("This entry's state has expired: start again from the clean address");
       }
@@ -1112,12 +1314,36 @@ export function createServer(options: ServerOptions): PortholeServer {
       if (nameOf(clean.scope) !== state.label) {
         throw new TypeError("The instance isn't served on the address the entry began at");
       }
+      let path = state.path;
+      if (address !== undefined) {
+        // A file set's own address (P081): a path ending in /, not Porthole's own. An address
+        // that isn't under it (the latest's) goes to the same file under it.
+        const { base, file = "" } = address;
+        if (
+          typeof base !== "string" ||
+          base.length > MAX_PATH ||
+          !BASE.test(base) ||
+          base.startsWith(PREFIX) ||
+          typeof file !== "string" ||
+          file.startsWith("/") ||
+          /[?#]/u.test(file)
+        ) {
+          throw new TypeError(
+            "An entry's base is a path ending in / (not Porthole's own), its file a relative path",
+          );
+        }
+        const asked = new URL(state.path, "https://x.invalid");
+        if (!asked.pathname.startsWith(base)) {
+          path = `${base}${file}${asked.search}`;
+        }
+      }
       const { ticket } = await mint(
         clean,
         { ...grant, ttlSeconds: ENTRY_CODE_SECONDS },
         {
-          path: state.path,
+          path,
           nonce: state.nonce,
+          ...(address === undefined ? {} : { base: address.base }),
         },
       );
       return `${originOfLabel(state.label)}${ENTRY_PATH}?code=${ticket}`;
@@ -1172,14 +1398,24 @@ export function createServer(options: ServerOptions): PortholeServer {
         if (document?.[1] !== undefined) {
           return await serveDocument(request, url, label, document[1]);
         }
+        const sealed = FILES_PATH.exec(url.pathname);
+        if (sealed?.[1] !== undefined) {
+          return await serveSealed(request, url, label, sealed[1], sealed[2]);
+        }
         if (url.pathname.startsWith(PREFIX)) {
           return page(404, "Nothing here", "This address names no content.", method);
         }
         // A clean address (P068): the document entered here, else the app, else entry.
         if (authorizeUrl !== null) {
-          const entered = accessAtPath(request, label, url.pathname);
+          const entered = accessAtPath(request, label, url);
+          if (entered?.redirect !== undefined) {
+            return new Response(null, {
+              status: 307,
+              headers: { location: entered.redirect, "cache-control": "no-store" },
+            });
+          }
           if (entered !== null) {
-            return await serveAccess(request, entered, null);
+            return await serveAccess(request, entered.access, null, entered.at);
           }
           if (options.upstream === undefined || accessOf(request, label, null) === null) {
             return await beginEntry(request, url, label, authorizeUrl);

@@ -305,3 +305,50 @@ test("the CDP driver checks a served config served too", async ({ browser, brows
     await page.close();
   }
 });
+
+test("a page with files is checked whole: every file served, its entry run; a missing one is told (P081)", async ({
+  browser,
+}) => {
+  const served = presets.artifact({
+    isolation: "domain",
+    contentOrigins: ["https://*.example-usercontent.com"],
+  });
+  const files = {
+    "index.html": `<!doctype html><html><head><link rel="stylesheet" href="./style.css"></head><body>
+<main id="main">loading</main><script type="module" src="./app.mjs"></script></body></html>`,
+    "style.css": "main { color: rgb(1, 2, 3); }",
+    "app.mjs": `import { word } from "./lib.mjs";
+const data = await (await fetch("./data.json")).json();
+document.getElementById("main").textContent = word + " " + data.message;`,
+    "lib.mjs": 'export const word = "files";',
+    "data.json": '{ "message": "loaded" }',
+  };
+  const report = await checkPage({
+    config: served,
+    files,
+    driver: playwrightDriver(browser),
+    settleMs: 800,
+    widths: [400],
+    schemes: ["light"],
+  });
+  expect(report.text).toMatch(/^OK: the page ran/u);
+  expect(report.ok).toBe(true);
+
+  const broken = await checkPage({
+    config: served,
+    files: {
+      ...files,
+      "index.html": files["index.html"].replace(
+        "</main>",
+        '</main><script src="./missing.js"></script>',
+      ),
+    },
+    driver: playwrightDriver(browser),
+    settleMs: 800,
+    widths: [400],
+    schemes: ["light"],
+  });
+  expect(broken.ok).toBe(false);
+  expect(broken.text).toContain("Warning (index.html line 2): ./missing.js names missing.js");
+  expect(broken.text).toContain("- Failed to load missing.js (<script>)");
+});

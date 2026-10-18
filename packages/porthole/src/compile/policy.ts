@@ -101,6 +101,44 @@ export function frameCspDirectives(config: PortholeConfig): CspDirective[] {
   ];
 }
 
+/** The directives a page of a file set loads its own files under (P082): everything that loads. */
+export const FILE_SET_DIRECTIVES = [
+  "script-src",
+  "style-src",
+  "font-src",
+  "img-src",
+  "media-src",
+  "connect-src",
+  "worker-src",
+] as const;
+
+/**
+ * A served page's CSP when it comes with files (P082): the frame's, with its version's own files
+ * opened for each kind that loads (`FILE_SET_DIRECTIVES`), by `source`, the files' path on the
+ * content origin (`https://a-x.example-usercontent.com/v/3/`). Never `'self'`: the origin's other
+ * paths (other versions, Porthole's own) stay closed, and frames, plugins, forms and `<base>` stay
+ * `'none'`. Opaque frames have no files, and keep P022's rule whole.
+ */
+export function fileSetCspDirectives(
+  directives: readonly CspDirective[],
+  source: string,
+): CspDirective[] {
+  const opened = new Set<string>(FILE_SET_DIRECTIVES);
+  return directives.map(([name, ...sources]) => {
+    if (!opened.has(name)) {
+      return [name, ...sources];
+    }
+    const kept = sources.filter((each) => each !== "'none'");
+    return [name, ...kept, source];
+  });
+}
+
+/**
+ * The CSP of a file of a set that is neither a page nor a script (P081): nothing loads from it,
+ * and opened as a document (an SVG, an XML file) it runs nothing, on an opaque origin.
+ */
+export const INERT_FILE_CSP = "default-src 'none'; sandbox";
+
 export function serializeCsp(directives: readonly CspDirective[]): string {
   return directives.map((directive) => directive.join(" ")).join("; ");
 }

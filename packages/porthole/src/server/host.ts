@@ -199,7 +199,7 @@ export interface EntryOptions<V> {
     path: string,
     viewer: V | null,
     request: Request,
-  ) => Awaitable<InstanceRef | null | undefined>;
+  ) => Awaitable<InstanceRef | FileAddress | null | undefined>;
   /**
    * The app's own sign-in, which comes back to `returnTo` (the authorize URL, as `authorizeUrl`
    * names the app, with the entry's state) once signed in.
@@ -243,6 +243,51 @@ export interface EntryOptions<V> {
     entry: EntryContext,
   ) => Awaitable<Response | null | undefined>;
 }
+
+/**
+ * What a clean address means when its instance is a version made of files (P081): the instance,
+ * the version's own address (`base`, a path ending in `/`: `/v/3/`), and the file the address
+ * asks for below it (`""`: the version's entry). The session the entry buys serves every path
+ * under `base`, so the page's relative addresses are its own version's. An address that isn't
+ * under `base` (`/`, `/style.css`: the latest) goes to `base` + `file`, so a page never mixes
+ * versions when a new one is published while it loads. `versionedAddress` reads the usual
+ * convention (`/v/<n>/<file>`, else the latest).
+ */
+export interface FileAddress {
+  readonly instance: InstanceRef;
+  readonly base: string;
+  readonly file?: string;
+}
+
+/** Whether `entry.at`'s answer is a file set's address rather than an instance. */
+export const isFileAddress = (value: InstanceRef | FileAddress): value is FileAddress =>
+  "base" in value && "instance" in value;
+
+/** Kept free on every content origin for an asset library across versions (P081): not built. */
+export const ASSET_LIBRARY_PATH = "/_blob/";
+
+/**
+ * The convention for a versioned scope's clean addresses (P081): `/v/<version>/<file>` is that
+ * version, pinned; any other path is the latest's `<file>` (`version` null). Null for a
+ * `/v/<version>` whose version isn't a name (`A-Z a-z 0-9 . _ : -`), and under `/_blob/`, kept for
+ * an asset library outside every version. `versionBase(version)` is the base to answer with.
+ */
+export function versionedAddress(
+  path: string,
+): { readonly version: string | null; readonly file: string } | null {
+  if (path.startsWith(ASSET_LIBRARY_PATH)) {
+    return null;
+  }
+  const pinned = /^\/v\/([^/]*)(?:\/(.*))?$/u.exec(path);
+  if (pinned === null) {
+    return { version: null, file: path.replace(/^\//u, "") };
+  }
+  const [, version = "", file = ""] = pinned;
+  return /^[A-Za-z0-9._:-]{1,200}$/u.test(version) ? { version, file } : null;
+}
+
+/** A version's own address in `versionedAddress`'s convention: `/v/<version>/`. */
+export const versionBase = (version: string): string => `/v/${version}/`;
 
 /** The clean address a redirect entry is opening, as its authorize route decoded it (P070). */
 export interface EntryContext {
@@ -1036,7 +1081,7 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
           );
         }
         try {
-          const instance =
+          const answer =
             scope === null
               ? null
               : ((await entry.at(
@@ -1045,6 +1090,9 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
                   viewer,
                   request,
                 )) ?? null);
+          // A file set's address (P081) names its instance and where its version lives.
+          const address = answer !== null && isFileAddress(answer) ? answer : null;
+          const instance = address === null ? (answer as InstanceRef | null) : address.instance;
           const grant = instance === null ? null : await options.access(instance, viewer, request);
           // The address being opened, decoded, for the app's sign-in and refusal pages.
           const context: EntryContext = {
@@ -1091,7 +1139,17 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
           }
           let location: string;
           try {
-            location = await server.enterBy(state, instance, grant);
+            location = await server.enterBy(
+              state,
+              instance,
+              grant,
+              address === null
+                ? undefined
+                : {
+                    base: address.base,
+                    ...(address.file === undefined ? {} : { file: address.file }),
+                  },
+            );
           } catch {
             return appPage(
               409,

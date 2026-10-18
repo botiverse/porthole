@@ -20,8 +20,14 @@ import {
 import type { ServedConformanceHost, ServedDisplay } from "../../src/conformance/served.ts";
 import { checkFrameLocation } from "../../src/isolation/served.ts";
 import type { FrameLocation, InstanceRef } from "../../src/isolation/types.ts";
-import { createServer, proxyTo, type PortholeServer } from "../../src/server/index.ts";
+import {
+  createServer,
+  proxyTo,
+  type PortholeServer,
+  type StoredFiles,
+} from "../../src/server/index.ts";
 import { weaken, weakenServed, weakened } from "../weakenings.ts";
+import { asServiceWorkerAllowed, withoutResourcePolicy, withSelfForFiles } from "./files.ts";
 
 /**
  * Porthole's reference serving for the served-mode cases, started in each test worker on ports of
@@ -46,6 +52,8 @@ export interface Harness {
   readonly hits: Map<string, number>;
   /** Artifact pages by `id@version`. */
   readonly pages: Map<string, string>;
+  /** Artifact versions made of files by `id@version` (P081): a case publishes into it. */
+  readonly fileSets: Map<string, StoredFiles>;
   /** Subjects the host has revoked: their tickets and cookies are denied from the next request. */
   readonly revoked: Set<string>;
   /** Every URL the main server (host page and content origins) was asked for, in order. */
@@ -286,6 +294,7 @@ async function start(): Promise<Harness> {
   );
   const revoked = new Set<string>();
   const requests: string[] = [];
+  const fileSets = new Map<string, StoredFiles>();
 
   const app = createHttpServer((request, response) => {
     const pathname = new URL(request.url ?? "/", "http://app").pathname;
@@ -372,6 +381,10 @@ async function start(): Promise<Harness> {
     configs,
     artifacts: {
       get: async (id, version) => {
+        const files = fileSets.get(`${id}@${version}`);
+        if (files !== undefined) {
+          return files;
+        }
         const page = pages.get(`${id}@${version}`);
         return page === undefined ? null : { html: page };
       },
@@ -396,8 +409,16 @@ async function start(): Promise<Harness> {
     if (new URL(request.url).pathname === "/__hang") {
       return new Promise<Response>(() => {});
     }
-    const served = await porthole.handle(request);
+    const served = await porthole.handle(
+      weakened.includes("service-worker") ? asServiceWorkerAllowed(request) : request,
+    );
     if (served !== null) {
+      if (weakened.includes("file-self")) {
+        return withSelfForFiles(served);
+      }
+      if (weakened.includes("file-corp")) {
+        return withoutResourcePolicy(served);
+      }
       // A negative control on the shell's navigation guard reaches served shells too (P079).
       return weakened.includes("navigate-guard") &&
         (served.headers.get("content-type") ?? "").startsWith("text/html")
@@ -428,6 +449,7 @@ async function start(): Promise<Harness> {
     configs,
     hits,
     pages,
+    fileSets,
     revoked,
     requests,
   };

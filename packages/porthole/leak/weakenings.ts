@@ -169,6 +169,14 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   ],
   // The served harness's server without the host's per-request check (P050).
   authorize: "harness",
+  // A file set's server without its refusal of service workers (P081): the harness passes a
+  // worker's script request on as a plain script's.
+  "service-worker": "harness",
+  // A file set's page with 'self' where its CSP names its version's own path (P082): the harness
+  // rewrites the header.
+  "file-self": "harness",
+  // A file set's files without their resource policy (P081): another origin may embed them.
+  "file-corp": "harness",
   // The host's checks on annotation reports (P053): taken only while asked for, within limits.
   "annotation-checks": [
     {

@@ -7,6 +7,7 @@
     "pnpm-lock.yaml",
     "docs/**/*.md",
     "*.md",
-    "**/*.generated.ts"
+    "**/*.generated.ts",
+    "**/leak/fixtures/**"
   ]
 }

@@ -31,6 +31,36 @@ export interface ShellDocumentOptions {
    * every script the shell runs for the content. The frame can read it.
    */
   readonly nonce?: string;
+  /**
+   * A page that comes with files (P081, P084): the absolute URL its version's files are under
+   * (`https://a-x.example-usercontent.com/v/3/`). The shell lets the frame navigate to the set's
+   * other pages there, and to nothing else.
+   */
+  readonly files?: {
+    readonly base: string;
+    /**
+     * The page's own address under `base`, where the request's isn't it (a ticket's answer, P083):
+     * the shell puts it in the frame's history first, before anything loads, so the page's
+     * relative addresses are its files' and the spent ticket leaves the address.
+     */
+    readonly address?: string;
+  };
+}
+
+/** A file set's base: an absolute http(s) URL that ends in `/`, no query or fragment. */
+function filesBaseOk(base: string): boolean {
+  try {
+    const url = new URL(base);
+    return (
+      (url.protocol === "https:" || url.protocol === "http:") &&
+      url.href === base &&
+      base.endsWith("/") &&
+      url.search === "" &&
+      url.hash === ""
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** A CSP nonce: base64 or base64url characters, 8 to 256 of them. */
@@ -98,6 +128,15 @@ export function shellDocument(plan: ShellPlan, csp: string, options: ShellDocume
   if (options.nonce !== undefined && !NONCE.test(options.nonce)) {
     throw new TypeError("shellDocument: a nonce is 8 to 256 base64 characters");
   }
+  if (options.files !== undefined && !filesBaseOk(options.files.base)) {
+    throw new TypeError("shellDocument: files.base is an http(s) URL ending in /, with no query");
+  }
+  if (
+    options.files?.address !== undefined &&
+    (!options.files.address.startsWith(options.files.base) || /[?#]/u.test(options.files.address))
+  ) {
+    throw new TypeError("shellDocument: files.address is under files.base, with no query");
+  }
   const nonce = options.nonce === undefined ? "" : ` nonce="${options.nonce}"`;
   // The annotation runtime only where it is declared; spliced in before the plan, which may carry
   // any text (a document) and must not be searched.
@@ -108,6 +147,14 @@ export function shellDocument(plan: ShellPlan, csp: string, options: ShellDocume
       ...plan,
       origins: options.origins,
       ...(options.document === undefined ? {} : { document: options.document }),
+      ...(options.files === undefined
+        ? {}
+        : {
+            files: {
+              base: options.files.base,
+              ...(options.files.address === undefined ? {} : { address: options.files.address }),
+            },
+          }),
     }),
   );
   const head = [

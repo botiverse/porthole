@@ -140,6 +140,13 @@ export const STALE_META = "porthole/stale";
  */
 export const NAVIGATION_BLOCKED_METHOD = "porthole/navigation-blocked";
 
+/**
+ * Porthole's own notification from the shell (P084): a page that came with files is opening
+ * another page of its set, `{ url }`, in the frame. The host takes the frame's next load for that
+ * page rather than for content that left (P031). The content's word: it only spares a restart.
+ */
+export const NAVIGATING_METHOD = "porthole/navigating";
+
 /** The logger name the shell's error reports (`notifications/message`, level `error`) carry. */
 export const SHELL_LOGGER = "porthole";
 
