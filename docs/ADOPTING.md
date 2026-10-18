@@ -294,7 +294,7 @@ entry: {
   at: async (scope, path) => {
     const at = versionedAddress(path);
     const version = at === null ? null : (at.version ?? (await latestOf(scope)));
-    return version === null ? null : { instance: pageOf(scope, version), base: versionBase(version), file: at.file };
+    return version === null ? null : { instance: pageOf(scope, version), base: versionBase(version), file: at.file, pinned: true };
   },
   pathOf: (instance) => versionBase(instance.document.version),
 },
@@ -307,8 +307,11 @@ entry: {
   stream); Porthole cuts ranges.
 - **A page never mixes versions.** The latest's address (`/`, `/style.css`) goes to the version's
   own (`/v/3/`, `/v/3/style.css`) before the page loads anything, so a version published while it
-  loads never reaches it. Answer `entry.at` with the version's `base`: a plain instance is served
-  at a frame's address instead.
+  loads never reaches it. Answer `entry.at` with the version's `base`, and `pinned: true` when that
+  base names one version only (its files are then immutable); a plain instance is served at a
+  frame's address instead. A base's segments are letters, digits and `. _ : ~ -`.
+- **An artifact's versions share an origin**, so they are one trust domain (P082): give versions
+  that must stay apart scopes of their own.
 - **Each version is a directory of its origin** (`/v/<n>/`). Keep `/_blob/` (`ASSET_LIBRARY_PATH`)
   free: it is reserved for an asset library across versions (not built yet); `versionedAddress`
   names nothing there.

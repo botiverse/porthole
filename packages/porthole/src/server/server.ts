@@ -13,7 +13,8 @@ import { randomBytes } from "./crypto.ts";
 import { isHostLabel, reservedLabels } from "./naming.ts";
 import { enterPage, pageScript, SESSION_PATH, statusPage } from "./pages.ts";
 import { libraryFile } from "./libraries.ts";
-import { serveFile } from "./files.ts";
+import { ownLoad, serveFile } from "./files.ts";
+import { INERT_FILE_CSP } from "../compile/policy.ts";
 import type { FrameBlock } from "../host/types.ts";
 import { memoryTicketStore } from "./tickets.ts";
 import type {
@@ -41,8 +42,15 @@ const DOCUMENT_PATH = /^\/__porthole\/d\/([a-z2-7]{16})$/u;
  */
 const FILES_PATH = /^\/__porthole\/f\/([A-Za-z0-9_-]{40,4096})(\/.*)?$/u;
 const FILES_PREFIX = "/__porthole/f/";
-/** A clean address's base (P081): a path ending in `/`, not Porthole's own. */
-const BASE = /^\/(?:[^/?#\\]+\/)*$/u;
+/** How long a sealed files' address opens a page's files on its own (P083); the shell renews it. */
+const FILES_ADDRESS_MS = 3_600_000;
+/** Below a sealed address: where the page's shell renews it (no file has a `__porthole/` path). */
+const RENEW_PATH = "/__porthole/renew";
+/**
+ * A clean address's base (P081): a path ending in `/`, each segment of letters, digits and
+ * `. _ : ~ -` (nothing a CSP source or a header would read otherwise), never `.` or `..`.
+ */
+const BASE = /^\/(?:(?!\.{1,2}\/)[A-Za-z0-9._:~-]{1,200}\/){0,16}$/u;
 /** Where a url-mode app's ticket is taken, before the app's own landing path. */
 const ENTER_PATH = "/__porthole/enter";
 /** Where a redirect entry's code is redeemed, before its clean address (P068). */
@@ -618,7 +626,7 @@ export function createServer(options: ServerOptions): PortholeServer {
     readonly redirect?: string;
   } | null {
     const { pathname } = url;
-    let best: { access: Access; at?: FilesAt; redirect?: string } | null = null;
+    let best: { rank: number; access: Access; at?: FilesAt; redirect?: string } | null = null;
     for (const [name, value] of cookiesOf(request)) {
       if (!ourCookie(name)) {
         continue;
@@ -648,9 +656,17 @@ export function createServer(options: ServerOptions): PortholeServer {
       } catch {
         continue;
       }
-      if (best === null || session.x > best.access.expiresAt) {
+      // The most specific first: the path entered itself, then the longest base, then the
+      // latest to end.
+      const rank = session.p === pathname ? Number.MAX_SAFE_INTEGER : (base?.length ?? 0);
+      if (
+        best === null ||
+        rank > best.rank ||
+        (rank === best.rank && session.x > best.access.expiresAt)
+      ) {
         const origin = originOfLabel(label);
         best = {
+          rank,
           access: {
             instance,
             viewer: session.w,
@@ -711,6 +727,29 @@ export function createServer(options: ServerOptions): PortholeServer {
    * A file set's file in a frame (P083): the sealed access in its path opens it, once it holds
    * for this origin and the host's check lets it in; every path under it is the same version's.
    */
+  /** A files' address for an access (P083): sealed, its own end within the session's. */
+  async function sealFiles(
+    access: Access,
+  ): Promise<{ readonly base: string; readonly expires: number }> {
+    const expires = Math.min(access.expiresAt, Date.now() + FILES_ADDRESS_MS);
+    const token = await keys.seal({
+      i: access.instance,
+      w: access.viewer,
+      x: expires,
+      e: access.expiresAt,
+      ...(access.anonymous === true ? { a: 1 } : {}),
+      ...(access.subject === undefined ? {} : { s: access.subject }),
+    });
+    return { base: `${FILES_PREFIX}${token}/`, expires };
+  }
+
+  /**
+   * A file set's file in a frame (P083): the sealed access in its path opens it, once it holds
+   * for this origin and the host's check lets it in; every path under it is the same version's.
+   * The address opens on its own for an hour (its `x`); after that, until the session's end (its
+   * `e`), only the running page's own loads (same-origin, not a navigation), from addresses it
+   * already holds, while its shell renews the address (`__porthole/renew`).
+   */
   async function serveSealed(
     request: Request,
     url: URL,
@@ -728,18 +767,24 @@ export function createServer(options: ServerOptions): PortholeServer {
       });
     }
     const session = await keys.unseal(token);
+    const now = Date.now();
     let instance: InstanceRef | null = null;
+    let end = 0;
     if (
       isRecord(session) &&
       typeof session.w === "string" &&
       typeof session.x === "number" &&
-      session.x > Date.now() &&
+      typeof session.e === "number" &&
       (session.s === undefined || typeof session.s === "string")
     ) {
+      end = session.e;
+      const open = session.x > now || (session.e > now && ownLoad(request));
       try {
         const clean = cleanInstance(session.i);
         instance =
-          clean.document.kind === "artifact" && nameOf(clean.scope) === label ? clean : null;
+          open && clean.document.kind === "artifact" && nameOf(clean.scope) === label
+            ? clean
+            : null;
       } catch {
         instance = null;
       }
@@ -757,10 +802,33 @@ export function createServer(options: ServerOptions): PortholeServer {
       instance,
       viewer: session.w as string,
       origin,
-      expiresAt: session.x as number,
+      expiresAt: end,
       ...(session.a === 1 ? { anonymous: true } : {}),
       ...(typeof session.s === "string" ? { subject: session.s } : {}),
     };
+    if (rest === RENEW_PATH) {
+      // Only the page itself renews its address, while its session lasts and the host lets it.
+      if (method !== "GET" || !ownLoad(request)) {
+        return page(403, "Not allowed", "Only the page renews its own address.", method);
+      }
+      const refusal = await denied(request, access);
+      if (refusal !== null) {
+        return refusal;
+      }
+      const renewed = await sealFiles(access);
+      return Response.json(
+        { base: `${origin}${renewed.base}`, expires: renewed.expires },
+        {
+          headers: {
+            "cache-control": "no-store",
+            "x-content-type-options": "nosniff",
+            "cross-origin-resource-policy": "same-origin",
+            "content-security-policy": `${INERT_FILE_CSP}; frame-ancestors ${frameAncestors}`,
+            "referrer-policy": "no-referrer",
+          },
+        },
+      );
+    }
     return serveAccess(request, access, null, {
       base,
       rest: rest.slice(1),
@@ -852,27 +920,21 @@ export function createServer(options: ServerOptions): PortholeServer {
       }
       // A frame's document (a ticket's): its files carry its access in their path (P083). The
       // entry comes in the ticket's own answer (P025), its shell moving the frame to its address
-      // there before anything loads.
-      const token = await keys.seal({
-        i: access.instance,
-        w: access.viewer,
-        x: access.expiresAt,
-        ...(access.anonymous === true ? { a: 1 } : {}),
-        ...(access.subject === undefined ? {} : { s: access.subject }),
-      } satisfies Session);
+      // there before anything loads, and renewing it before it ends.
+      const sealed = await sealFiles(access);
       return serveFile({
         request,
         set: served.files,
         rest: "",
         search: "",
-        base: `${FILES_PREFIX}${token}/`,
+        base: sealed.base,
         origin: access.origin,
         pinned: true,
         source: `${access.origin}${FILES_PREFIX}`,
         compiled: served.compiled,
         hostOrigins: options.hostOrigins,
         frameAncestors,
-        ticket: true,
+        ticket: { expires: sealed.expires },
       });
     }
     // One page at a file set's base (P081): its base is the page, nothing under it is.
@@ -901,6 +963,22 @@ export function createServer(options: ServerOptions): PortholeServer {
       (named !== undefined && !(await named(label, url.pathname, request)))
     ) {
       return page(404, "Nothing here", "This address names no content.", method);
+    }
+    // Only a page opening is sent to sign in (a browser's navigation; a client that sends no fetch
+    // metadata may be one): a browser's subresource without a session is refused here, with no
+    // state of its own (no nonce cookie, nothing cached).
+    const mode = request.headers.get("sec-fetch-mode");
+    const dest = request.headers.get("sec-fetch-dest") ?? "";
+    if (mode !== null && mode !== "navigate" && !["document", "iframe", "frame"].includes(dest)) {
+      return new Response(method === "HEAD" ? null : "Open this address in a browser.", {
+        status: 401,
+        headers: {
+          "content-type": "text/plain; charset=utf-8",
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "x-robots-tag": "noindex, nofollow",
+        },
+      });
     }
     if (method !== "GET" && method !== "HEAD") {
       return page(
@@ -975,7 +1053,7 @@ export function createServer(options: ServerOptions): PortholeServer {
         "session",
       );
     }
-    const { nonce, path, base } = record.entry;
+    const { nonce, path, base, pinned } = record.entry;
     const named = nonceCookie(nonce);
     if (!cookiesOf(request).some(([name, value]) => name === named && value === "1")) {
       return page(
@@ -1014,7 +1092,11 @@ export function createServer(options: ServerOptions): PortholeServer {
       sessionCookie(
         request,
         record,
-        external ? {} : base !== undefined ? { b: base, k: 1 } : { p: target.pathname },
+        external
+          ? {}
+          : base !== undefined
+            ? { b: base, ...(pinned === true ? { k: 1 as const } : {}) }
+            : { p: target.pathname },
       ),
     );
     headers.append(
@@ -1183,7 +1265,9 @@ export function createServer(options: ServerOptions): PortholeServer {
       ...(anonymous ? { a: 1 } : {}),
       ...(grant.subject === undefined ? {} : { s: grant.subject }),
       ...(entry === undefined ? {} : { p: entry.path }),
-      ...(entry?.base === undefined ? {} : { b: entry.base, k: 1 }),
+      ...(entry?.base === undefined
+        ? {}
+        : { b: entry.base, ...(entry.pinned === true ? { k: 1 } : {}) }),
     });
     if (cookieName(key).length + probe.length + 120 > MAX_COOKIE_BYTES) {
       throw new TypeError("This instance is too large to carry in a cookie (fewer origins?)");
@@ -1317,24 +1401,31 @@ export function createServer(options: ServerOptions): PortholeServer {
       let path = state.path;
       if (address !== undefined) {
         // A file set's own address (P081): a path ending in /, not Porthole's own. An address
-        // that isn't under it (the latest's) goes to the same file under it.
+        // that isn't under it (the latest's) goes to the same file under it, which must stay
+        // under it: no dot segment, no backslash, nothing the URL parser would resolve away.
         const { base, file = "" } = address;
+        const segments = typeof file === "string" ? file.split("/") : [];
         if (
           typeof base !== "string" ||
-          base.length > MAX_PATH ||
           !BASE.test(base) ||
           base.startsWith(PREFIX) ||
           typeof file !== "string" ||
+          file.length > MAX_PATH ||
           file.startsWith("/") ||
-          /[?#]/u.test(file)
+          // oxlint-disable-next-line no-control-regex -- control characters are what it refuses
+          /[?#\\\u0000-\u001f\u007f]/u.test(file) ||
+          segments.some((each) => /^(?:\.|%2e){1,2}$/iu.test(each))
         ) {
           throw new TypeError(
-            "An entry's base is a path ending in / (not Porthole's own), its file a relative path",
+            "An entry's base is a path ending in / (not Porthole's own), its file a relative path below it",
           );
         }
         const asked = new URL(state.path, "https://x.invalid");
         if (!asked.pathname.startsWith(base)) {
           path = `${base}${file}${asked.search}`;
+        }
+        if (!new URL(path, "https://x.invalid").pathname.startsWith(base)) {
+          throw new TypeError("An entry's file must stay below its base");
         }
       }
       const { ticket } = await mint(
@@ -1343,7 +1434,9 @@ export function createServer(options: ServerOptions): PortholeServer {
         {
           path,
           nonce: state.nonce,
-          ...(address === undefined ? {} : { base: address.base }),
+          ...(address === undefined
+            ? {}
+            : { base: address.base, ...(address.pinned === true ? { pinned: true } : {}) }),
         },
       );
       return `${originOfLabel(state.label)}${ENTRY_PATH}?code=${ticket}`;

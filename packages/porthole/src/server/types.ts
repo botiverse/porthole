@@ -83,6 +83,8 @@ export interface TicketRecord {
     readonly nonce: string;
     /** A file set's version's own address (P081): the session serves every path under it. */
     readonly base?: string;
+    /** Whether that address names this version and no other: its files are immutable there. */
+    readonly pinned?: boolean;
   };
 }
 
@@ -278,6 +280,6 @@ export interface PortholeServer {
     state: EntryState,
     instance: InstanceRef,
     grant: Grant,
-    address?: { readonly base: string; readonly file?: string },
+    address?: { readonly base: string; readonly file?: string; readonly pinned?: boolean },
   ): Promise<string>;
 }

@@ -160,7 +160,12 @@ async function start(): Promise<TabHost> {
         const version = at === null ? null : (at.version ?? latest.get(scope) ?? null);
         return at === null || version === null || versions.get(scope)?.get(version) === undefined
           ? null
-          : { instance: instance(scope, version), base: versionBase(version), file: at.file };
+          : {
+              instance: instance(scope, version),
+              base: versionBase(version),
+              file: at.file,
+              pinned: true,
+            };
       },
     },
   });

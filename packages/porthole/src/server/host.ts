@@ -255,8 +255,15 @@ export interface EntryOptions<V> {
  */
 export interface FileAddress {
   readonly instance: InstanceRef;
+  /** A path ending in `/`, each segment of `A-Z a-z 0-9 . _ : ~ -`, no `.` or `..` segment. */
   readonly base: string;
   readonly file?: string;
+  /**
+   * Whether `base` names this version and no other (`/v/3/`, never `/` or `/latest/`): its files
+   * are then immutable there. Default false: revalidated, as an address that may mean another
+   * version later.
+   */
+  readonly pinned?: boolean;
 }
 
 /** Whether `entry.at`'s answer is a file set's address rather than an instance. */
@@ -283,7 +290,10 @@ export function versionedAddress(
     return { version: null, file: path.replace(/^\//u, "") };
   }
   const [, version = "", file = ""] = pinned;
-  return /^[A-Za-z0-9._:-]{1,200}$/u.test(version) ? { version, file } : null;
+  // A version is a name, never a dot segment.
+  return /^[A-Za-z0-9._:-]{1,200}$/u.test(version) && !/^\.{1,2}$/u.test(version)
+    ? { version, file }
+    : null;
 }
 
 /** A version's own address in `versionedAddress`'s convention: `/v/<version>/`. */
@@ -1148,6 +1158,7 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
                 : {
                     base: address.base,
                     ...(address.file === undefined ? {} : { file: address.file }),
+                    ...(address.pinned === true ? { pinned: true } : {}),
                   },
             );
           } catch {

@@ -44,6 +44,11 @@ export interface ShellDocumentOptions {
      * relative addresses are its files' and the spent ticket leaves the address.
      */
     readonly address?: string;
+    /**
+     * When a sealed address stops opening the page's files on its own (epoch ms, P083): the shell
+     * renews it before then, at `<base>__porthole/renew`, and moves the page there.
+     */
+    readonly expires?: number;
   };
 }
 
@@ -153,6 +158,7 @@ export function shellDocument(plan: ShellPlan, csp: string, options: ShellDocume
             files: {
               base: options.files.base,
               ...(options.files.address === undefined ? {} : { address: options.files.address }),
+              ...(options.files.expires === undefined ? {} : { expires: options.files.expires }),
             },
           }),
     }),

@@ -8,6 +8,7 @@ import { annotateMode, checkMarks, parseReport } from "../annotate/validate.ts";
 import { createBridge, onceConsent, type BridgeEvent } from "../bridge/bridge.ts";
 import type { HostFunctionBridge } from "../bridge/types.ts";
 import { compile } from "../compile/compile.ts";
+import { servesFiles } from "../files/paths.ts";
 import { declaredCapabilities, effectiveGates } from "../compile/policy.ts";
 import { isRefused } from "../bridge/refusal.ts";
 import { capabilitySpec } from "../config/capabilities.ts";
@@ -38,6 +39,8 @@ import type {
 /** How long a display may take to load before its outcome is a timeout, by default. */
 const DEFAULT_LOAD_TIMEOUT_MS = 15_000;
 
+/** How long a set's page said its next load is another of its pages (P084), ms. */
+const PAGE_OF_SET_MS = 10_000;
 /** How many times a display is started again after its content navigated its frame away. */
 const MAX_RESTARTS = 3;
 
@@ -121,8 +124,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       let connection: C | null = null;
       let destroyed = false;
       let restarts = 0;
-      // The frame's content said its next load is another page of its own set (P084).
-      let pageOfSet = false;
+      // Until when the frame's next load is another page of its own set, as its content said (P084).
+      let pageOfSetUntil = 0;
       let generation = 0;
       // The viewer's answer for this display (P079): asked once, kept across its frames; or the
       // host's refusal of them all (P080).
@@ -322,7 +325,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
 
       const stop = () => {
         handshaken = false;
-        pageOfSet = false;
+        pageOfSetUntil = 0;
         abort?.abort();
         abort = null;
         outcomeWatch?.stop();
@@ -394,7 +397,11 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           hostContext,
           emit: (event) => {
             if (event.type === "navigating") {
-              pageOfSet = true;
+              // Only a display whose pages may come with files (P084), for the next load only, and
+              // only soon: content can't bank it to skip a restart later (P031).
+              if (servesFiles(config)) {
+                pageOfSetUntil = Date.now() + PAGE_OF_SET_MS;
+              }
               return;
             }
             if (event.type === "initialized") {
@@ -415,8 +422,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         created.onNavigated(() => {
           // Another page of the content's own set (P084): the same content, still connected (the
           // new page's shell says hello again on the same transport). Not a restart.
-          if (pageOfSet) {
-            pageOfSet = false;
+          const ofSet = pageOfSetUntil > Date.now();
+          pageOfSetUntil = 0;
+          if (ofSet) {
             return;
           }
           emit("navigated", undefined);

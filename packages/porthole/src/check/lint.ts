@@ -63,22 +63,41 @@ export function fragmentOf(content: string): string | null {
   return body.trim() === "" ? null : `${kept}${kept === "" ? "" : "\n"}${body.trim()}`;
 }
 
-/** Where content reaches out, by the kind of egress each would need. */
+/**
+ * Where content reaches out, by the kind of egress each would need. Each pattern is bounded and
+ * never runs past its own delimiters (a tag's `<`, a string's quote), so a text is read in linear
+ * time however it was written.
+ */
 const REACHES: readonly { readonly kind: EgressKind; readonly pattern: RegExp }[] = [
-  { kind: "script", pattern: /<script\b[^>]*\bsrc\s*=\s*["']?(https?:\/\/[^"'\s>]+)/giu },
-  { kind: "script", pattern: /\bimport\s*(?:[\w{}\s*,]+from\s*)?\(?\s*["'](https?:\/\/[^"']+)/gu },
-  { kind: "style", pattern: /<link\b[^>]*\bhref\s*=\s*["']?(https?:\/\/[^"'\s>]+)/giu },
-  { kind: "style", pattern: /@import\s+(?:url\()?["']?(https?:\/\/[^"')\s]+)/giu },
-  { kind: "img", pattern: /<img\b[^>]*\bsrc\s*=\s*["']?(https?:\/\/[^"'\s>]+)/giu },
-  { kind: "img", pattern: /url\(\s*["']?(https?:\/\/[^"')\s]+)/giu },
+  {
+    kind: "script",
+    pattern: /<script\b[^<>]{0,8192}?\bsrc\s{0,64}=\s{0,64}["']?(https?:\/\/[^"'\s<>]{1,2048})/giu,
+  },
+  { kind: "script", pattern: /\bfrom\s{0,64}["'](https?:\/\/[^"'\n]{1,2048})/gu },
+  { kind: "script", pattern: /\bimport\s{0,64}\(?\s{0,64}["'](https?:\/\/[^"'\n]{1,2048})/gu },
+  {
+    kind: "style",
+    pattern: /<link\b[^<>]{0,8192}?\bhref\s{0,64}=\s{0,64}["']?(https?:\/\/[^"'\s<>]{1,2048})/giu,
+  },
+  {
+    kind: "style",
+    pattern: /@import\s{1,64}(?:url\()?["']?(https?:\/\/[^"')\s]{1,2048})/giu,
+  },
+  {
+    kind: "img",
+    pattern: /<img\b[^<>]{0,8192}?\bsrc\s{0,64}=\s{0,64}["']?(https?:\/\/[^"'\s<>]{1,2048})/giu,
+  },
+  { kind: "img", pattern: /url\(\s{0,64}["']?(https?:\/\/[^"')\s]{1,2048})/giu },
   {
     kind: "media",
-    pattern: /<(?:video|audio|source)\b[^>]*\bsrc\s*=\s*["']?(https?:\/\/[^"'\s>]+)/giu,
+    pattern:
+      /<(?:video|audio|source)\b[^<>]{0,8192}?\bsrc\s{0,64}=\s{0,64}["']?(https?:\/\/[^"'\s<>]{1,2048})/giu,
   },
-  { kind: "connect", pattern: /\bfetch\s*\(\s*["'`](https?:\/\/[^"'`]+)/gu },
+  { kind: "connect", pattern: /\bfetch\s{0,64}\(\s{0,64}["'`](https?:\/\/[^"'`\n]{1,2048})/gu },
   {
     kind: "connect",
-    pattern: /\bnew\s+(?:WebSocket|EventSource)\s*\(\s*["'`]((?:https?|wss?):\/\/[^"'`]+)/gu,
+    pattern:
+      /\bnew\s{1,64}(?:WebSocket|EventSource)\s{0,64}\(\s{0,64}["'`]((?:https?|wss?):\/\/[^"'`\n]{1,2048})/gu,
   },
 ];
 

@@ -13,6 +13,10 @@ import {
   requestFilePath,
 } from "../src/index.ts";
 import { compile } from "../src/compile/compile.ts";
+import { addressWithoutQuery, withoutSealedAddresses } from "../src/bridge/navigation.ts";
+import { createHost } from "../src/host/create-host.ts";
+import type { PlatformHost } from "../src/platform/types.ts";
+import type { PortholeConfig } from "../src/config/schema.ts";
 import type { InstanceRef } from "../src/isolation/types.ts";
 import {
   createContentHost,
@@ -128,7 +132,8 @@ async function framed(
   }
   // The entry comes in the ticket's answer; its shell moves the frame to its files' address.
   const html = await answer.clone().text();
-  const base = /"files":\{"base":"([^"]+)","address":"([^"]+)"\}/u.exec(html)?.[2] ?? "";
+  const base =
+    /"files":\{"base":"[^"]+","address":"([^"]+)","expires":\d+\}/u.exec(html)?.[1] ?? "";
   return { location, answer, base, html };
 }
 
@@ -371,7 +376,7 @@ describe("a file set in a frame (P083)", () => {
       `connect-src ${location.origin}/__porthole/f/`,
     );
     expect(first).toContain("version 1");
-    expect(first).toContain(`"files":{"base":"${base}","address":"${base}"}`);
+    expect(first).toContain(`"files":{"base":"${base}","address":"${base}","expires":`);
     expect(base.startsWith(`${location.origin}/__porthole/f/`)).toBe(true);
     expect(base.endsWith("/")).toBe(true);
     // The access is sealed: neither the viewer nor the host's subject is in it.
@@ -682,7 +687,12 @@ function tabs() {
         const version = at === null ? null : (at.version ?? latest.get(scope) ?? null);
         return at === null || version === null
           ? null
-          : { instance: instance(scope, version), base: versionBase(version), file: at.file };
+          : {
+              instance: instance(scope, version),
+              base: versionBase(version),
+              file: at.file,
+              pinned: true,
+            };
       },
     },
   });
@@ -763,8 +773,9 @@ describe("a file set on a tab (P081)", () => {
         headers: other.headers(subresource("empty")),
       }),
     );
-    expect(crossed?.status).toBe(302);
-    expect(crossed?.headers.get("location")?.startsWith(AUTHORIZE)).toBe(true);
+    // A subresource without a session for its address is refused, never sent to sign in (P081).
+    expect(crossed?.status).toBe(401);
+    expect(crossed?.headers.get("set-cookie")).toBeNull();
   });
 
   it("versionedAddress reads the usual convention", () => {
@@ -870,5 +881,377 @@ describe("the agent's side: a page with files, linted and admitted (P081)", () =
       admitFiles(served, { "index.html": '<script src="/x.js"></script>' }, { refuseOn: "never" })
         .ok,
     ).toBe(true);
+  });
+});
+
+describe("after the security review of 0.6.0's first cut", () => {
+  it("publish refuses Unicode format characters: an override, a zero-width space, a BOM (Cf)", () => {
+    for (const path of ["a‮gnp.js", "a​b.html", "﻿index.html", "soft­hyphen.css"]) {
+      expect(filePathProblem(path), JSON.stringify(path)).toContain("format character");
+    }
+    expect(requestFilePath("a%E2%80%AEb.js")).toBeNull();
+  });
+
+  it("traversal: the inputs do traverse under a weaker decoder, never under requestFilePath, and read is asked only for manifest paths", async () => {
+    const adversarial = [
+      "%252e%252e/secret.txt",
+      "..%2fsecret.txt",
+      "%2e%2e%2fsecret.txt",
+      "sub%5c..%5c..%5csecret.txt",
+      "sub%2f..%2f..%2fsecret.txt",
+    ];
+    // The control: decoding twice (or once, then normalizing) would reach above the version.
+    const weaker = (raw: string) =>
+      decodeURIComponent(decodeURIComponent(raw)).replaceAll("\\", "/");
+    for (const raw of adversarial) {
+      expect(weaker(raw).split("/"), raw).toContain("..");
+      expect(requestFilePath(raw), raw).toBeNull();
+    }
+    // A store that would answer anything it is asked (a filesystem's way): Porthole asks only
+    // for the manifest's own paths.
+    const asked: string[] = [];
+    const app = frames({
+      reads: asked,
+      get: () =>
+        Promise.resolve({
+          files: {
+            "index.html": { size: 3, sha256: sha("<p>") },
+            "sub/a.js": { size: 1, sha256: sha("1") },
+          },
+          read: (path: string) => {
+            asked.push(path);
+            return Promise.resolve(
+              new TextEncoder().encode(path === "index.html" ? "<p>" : `secret ${path}`),
+            );
+          },
+        }),
+    });
+    const { base } = await framed(app, site("1"));
+    for (const raw of adversarial) {
+      const answer = await fetchAt(app, `${base}${raw}`, subresource("script"));
+      expect(answer.status, raw).toBe(404);
+      expect(await answer.text()).not.toContain("secret");
+    }
+    expect(
+      asked.every((each) => each === "index.html" || each === "sub/a.js"),
+      asked.join(),
+    ).toBe(true);
+  });
+
+  it("lint reads 1 MB of adversarial text in well under 200 ms, and nothing past a limit", () => {
+    const served = presets.artifact({ isolation: "domain", contentOrigins: [CONTENT] });
+    const mb = 1024 * 1024;
+    for (const unit of [
+      "import a ",
+      "<img ",
+      "<script ",
+      '<img src="',
+      "url(",
+      "fetch('",
+      "from './",
+      "import('./",
+      "new URL('",
+      "new Worker('",
+      "@import '",
+      "a\n",
+    ]) {
+      const big = unit.repeat(Math.ceil(mb / unit.length));
+      const page = unit.repeat(Math.floor(190_000 / unit.length));
+      for (const files of [
+        { "index.html": "<p>x</p>", "a.js": big },
+        { "index.html": "<p>x</p>", "a.css": big },
+        { "index.html": page, "a.mjs": big },
+      ]) {
+        const started = performance.now();
+        admitFiles(served, files);
+        const took = performance.now() - started;
+        expect(
+          took,
+          `${JSON.stringify(unit)} ${Object.keys(files).join(" ")}: ${Math.round(took)} ms`,
+        ).toBeLessThan(200);
+      }
+    }
+    // Over a limit: only the set's problem, nothing read.
+    const limited = presets.artifact({
+      isolation: "domain",
+      contentOrigins: [CONTENT],
+      limits: { maxFileBytes: 1_000 },
+    });
+    const findings = lintFiles(limited, {
+      "index.html": "<p>x</p>",
+      "a.js": "import a ".repeat(200),
+    });
+    expect(findings.map((each) => each.rule)).toEqual(["files"]);
+    // A page over its own limit is said so, and not read.
+    const oversize = lintFiles(served, {
+      "index.html": `<p>${"x".repeat(250_000)}<iframe></iframe>`,
+    });
+    expect(oversize.map((each) => each.rule)).toEqual(["size"]);
+  });
+
+  it("a sealed address opens on its own for an hour; then only the running page's own loads, while its session lasts; its shell renews it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const app = frames();
+    const location = await app.server.issue(site("1"), {
+      viewer: "ada",
+      subject: "share-1",
+      sessionSeconds: 4 * 3_600,
+    });
+    const answer = await app.server.handle(req(location.url, navigate));
+    const html = (await answer?.text()) ?? "";
+    const base = /"address":"([^"]+)"/u.exec(html)?.[1] ?? "";
+    const expires = Number(/"expires":(\d+)/u.exec(html)?.[1]);
+    expect(expires - Date.now()).toBeGreaterThan(3_590_000);
+    expect(expires - Date.now()).toBeLessThanOrEqual(3_600_000);
+    const own = {
+      "sec-fetch-site": "same-origin",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-dest": "empty",
+    };
+    // Only the page itself renews its address: never a navigation, never another site.
+    expect((await fetchAt(app, `${base}__porthole/renew`, navigate)).status).toBe(403);
+    expect(
+      (await fetchAt(app, `${base}__porthole/renew`, { ...own, "sec-fetch-site": "cross-site" }))
+        .status,
+    ).toBe(403);
+    vi.setSystemTime(Date.now() + 3_700_000);
+    // Opened on its own (a tab, a history entry): ended.
+    expect((await fetchAt(app, base, navigate)).status).toBe(401);
+    expect((await fetchAt(app, `${base}data.json`, { "sec-fetch-site": "none" })).status).toBe(401);
+    // The running page's own loads, from the address it holds: until the session ends.
+    expect((await fetchAt(app, `${base}data.json`, own)).status).toBe(200);
+    // Its shell renews the address, from the address it holds; opened on its own, it has ended.
+    expect((await fetchAt(app, `${base}__porthole/renew`, navigate)).status).toBe(401);
+    const renewed = (await (await fetchAt(app, `${base}__porthole/renew`, own)).json()) as {
+      base: string;
+      expires: number;
+    };
+    expect(renewed.base).not.toBe(base);
+    expect(renewed.base.startsWith(`${location.origin}/__porthole/f/`)).toBe(true);
+    expect((await fetchAt(app, renewed.base, navigate)).status).toBe(200);
+    // The host's check still decides, and the session's end is the end.
+    app.revoked.add("share-1");
+    expect((await fetchAt(app, `${base}data.json`, own)).status).toBe(403);
+    app.revoked.delete("share-1");
+    vi.setSystemTime(Date.now() + 4 * 3_600_000);
+    expect((await fetchAt(app, `${base}data.json`, own)).status).toBe(401);
+    expect((await fetchAt(app, `${renewed.base}data.json`, own)).status).toBe(401);
+  });
+
+  it("a tab: a subresource without a session is refused with no state; only a page opening begins an entry", async () => {
+    const app = tabs();
+    for (const mode of ["cors", "no-cors", "same-origin"]) {
+      const answer = await app.content.fetch(
+        new Request(`${origin("abc")}/v/1/data.json`, {
+          headers: { "sec-fetch-mode": mode, "sec-fetch-dest": "empty" },
+        }),
+      );
+      expect(answer?.status, mode).toBe(401);
+      expect(answer?.headers.get("set-cookie"), mode).toBeNull();
+      expect(answer?.headers.get("cache-control"), mode).toBe("no-store");
+    }
+    const page = await app.content.fetch(
+      new Request(`${origin("abc")}/v/1/`, {
+        headers: { "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" },
+      }),
+    );
+    expect(page?.status).toBe(302);
+    expect(page?.headers.get("set-cookie")).toContain("porthole-n-");
+  });
+
+  it("a tab: files are immutable only where the app says the base is pinned; the most specific base serves", async () => {
+    const instance = (version: string): InstanceRef => ({
+      scope: "abc",
+      document: { kind: "artifact", id: "abc", version },
+    });
+    const store = fileStore({ "abc@1": SET("1"), "abc@2": SET("2") });
+    const content = createContentHost<{ id: string }>({
+      domain: "usercontent.example.net",
+      appOrigins: [APP],
+      secret: "a test secret that is at least thirty-two bytes long",
+      configs: (source) => ({
+        artifact: presets.artifact({ isolation: "domain", contentOrigins: [source] }),
+      }),
+      name: prefixedName("a-"),
+      instance: () => null,
+      access: (_instance, viewer) => (viewer === null ? null : { viewer: viewer.id }),
+      source: store.get,
+      entry: {
+        authorizeUrl: AUTHORIZE,
+        // "/latest/…" is the latest, not pinned; "/v/1/…" version 1, pinned.
+        at: (_scope, path) =>
+          path.startsWith("/latest/")
+            ? { instance: instance("2"), base: "/latest/" }
+            : path.startsWith("/v/1/")
+              ? { instance: instance("1"), base: "/v/1/", pinned: true }
+              : null,
+      },
+    });
+    const authorize = content.authorize(() => ({ id: "ada" }));
+    const browser = new Browser();
+    const open = async (url: string, extra: Record<string, string> = {}) => {
+      let at = url;
+      for (;;) {
+        const request = new Request(at, { headers: browser.headers(extra) });
+        const answer = at.startsWith(APP) ? await authorize(request) : await content.fetch(request);
+        browser.keep(answer as Response);
+        if (![302, 303, 307].includes(answer?.status ?? 0)) {
+          return answer as Response;
+        }
+        at = new URL(answer?.headers.get("location") ?? "", at).href;
+      }
+    };
+    await open(`${origin("abc")}/latest/`);
+    const latest = await open(`${origin("abc")}/latest/style.css`, subresource("style"));
+    expect(latest.headers.get("cache-control")).toBe("private, no-cache");
+    await open(`${origin("abc")}/v/1/`);
+    const pinned = await open(`${origin("abc")}/v/1/style.css`, subresource("style"));
+    expect(pinned.headers.get("cache-control")).toBe("private, max-age=31536000, immutable");
+    expect(await pinned.text()).toContain("rgb(1, 0, 0)");
+  });
+
+  it("an entry's base and file stay what they say: no dot segment, no odd character, nothing past the base", async () => {
+    const server = createServer({
+      content: { domain: DOMAIN, scheme: "https", name: prefixedName("a-") },
+      secret,
+      hostOrigins: [HOST],
+      configs: { artifact: presets.artifact({ isolation: "domain", contentOrigins: [CONTENT] }) },
+      artifacts: fileStore({ "site@1": SET("1") }),
+      entry: { authorizeUrl: `${HOST}/porthole/authorize` },
+    });
+    const begun = await server.handle(
+      new Request(`https://a-x.${DOMAIN}/`, {
+        headers: { "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" },
+      }),
+    );
+    const state = server.entryState(
+      new URL(begun?.headers.get("location") ?? "").searchParams.get("state") ?? "",
+    );
+    expect(state).not.toBeNull();
+    const instance: InstanceRef = {
+      scope: "x",
+      document: { kind: "artifact", id: "site", version: "1" },
+    };
+    for (const address of [
+      { base: "/v/../" },
+      { base: "/v/./" },
+      { base: "/a;b/" },
+      { base: "/a,b/" },
+      { base: "/a'b/" },
+      { base: "/a b/" },
+      { base: "/v/1" },
+      { base: "/__porthole/x/" },
+      { base: "/v/1/", file: "../2/index.html" },
+      { base: "/v/1/", file: "a/%2e%2e/%2E%2e/x" },
+      { base: "/v/1/", file: "a\\..\\x" },
+      { base: "/v/1/", file: "/x" },
+      { base: "/v/1/", file: "a?b" },
+    ]) {
+      await expect(
+        server.enterBy(state as NonNullable<typeof state>, instance, { viewer: "ada" }, address),
+        JSON.stringify(address),
+      ).rejects.toThrow(TypeError);
+    }
+    await expect(
+      server.enterBy(
+        state as NonNullable<typeof state>,
+        instance,
+        { viewer: "ada" },
+        { base: "/v/1.2/", file: "a b.png", pinned: true },
+      ),
+    ).resolves.toContain("/__porthole/entry?code=");
+    expect(versionedAddress("/v/./x")).toBeNull();
+    expect(versionedAddress("/v/../x")).toBeNull();
+  });
+
+  it("the host is never told a sealed address: a report's, a blocked navigation's (P083)", () => {
+    const token = "A".repeat(60);
+    const sealed = `https://a-x.${DOMAIN}/__porthole/f/${token}/`;
+    expect(withoutSealedAddresses(`TypeError: x at ${sealed}assets/app.js:1:2`)).toBe(
+      "TypeError: x at ./assets/app.js:1:2",
+    );
+    expect(withoutSealedAddresses(`/__porthole/f/${token}/notes.txt`)).toBe("./notes.txt");
+    expect(addressWithoutQuery("./notes.txt?secret=1")).toBe("./notes.txt?…");
+  });
+
+  it("the host takes `porthole/navigating` only from a display whose pages may come with files, for one load, soon (P084)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const run = async (config: PortholeConfig) => {
+      const navigated: (() => void)[] = [];
+      const listeners: ((message: unknown) => void)[] = [];
+      let surfaces = 0;
+      const platform: PlatformHost = {
+        name: "stand-in",
+        createSurface: () => {
+          surfaces += 1;
+          return {
+            transport: {
+              send: () => {},
+              listen: (listener) => {
+                listeners.push(listener);
+                return () => {};
+              },
+              close: () => {},
+            },
+            element: null,
+            setHeight: () => {},
+            setColorScheme: () => {},
+            userActivation: () => undefined,
+            onNavigated: (listener) => {
+              navigated.push(listener);
+              return () => {};
+            },
+            onLoad: () => () => {},
+            destroy: () => {},
+          };
+        },
+      };
+      const container = {
+        ownerDocument: {
+          defaultView: { location: { origin: HOST }, navigator: { language: "en" } },
+        },
+        getBoundingClientRect: () => ({ width: 600 }),
+      } as unknown as HTMLElement;
+      const locator = {
+        locate: () =>
+          Promise.resolve({
+            url: `https://abc.${DOMAIN}/__porthole/d/x`,
+            origin: `https://abc.${DOMAIN}`,
+            reports: true,
+          }),
+      };
+      const display = createHost(config, { platform, locator }).mount(container, {
+        displayId: "d1",
+        title: "Page",
+        scheme: "light",
+        instance: site("1", "abc"),
+      });
+      const events: string[] = [];
+      display.on("navigated", () => events.push("navigated"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const say = () => {
+        for (const listener of listeners) {
+          listener({ jsonrpc: "2.0", method: "porthole/navigating", params: { url: "./about" } });
+        }
+      };
+      const load = () => navigated.at(-1)?.();
+      say();
+      load();
+      const first = [...events];
+      // Banked: said, then a load much later.
+      say();
+      vi.setSystemTime(Date.now() + 11_000);
+      load();
+      const banked = [...events];
+      display.destroy();
+      return { first, banked, surfaces };
+    };
+    const files = await run(presets.artifact({ isolation: "domain", contentOrigins: [CONTENT] }));
+    expect(files.first).toEqual([]);
+    expect(files.banked).toEqual(["navigated"]);
+    const widget = await run(
+      presets.inlineWidget({ isolation: "domain", contentOrigins: [CONTENT] }),
+    );
+    expect(widget.first).toEqual(["navigated"]);
   });
 });

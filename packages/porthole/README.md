@@ -67,7 +67,7 @@ entry: {
   // "/v/3/<file>" is version 3, any other path the latest's: answer with the version's own address.
   at: async (scope, path) => {
     const at = versionedAddress(path), version = at?.version ?? (await latestOf(scope));
-    return at && { instance: pageOf(scope, version), base: versionBase(version), file: at.file };
+    return at && { instance: pageOf(scope, version), base: versionBase(version), file: at.file, pinned: true };
   },
 },
 ```

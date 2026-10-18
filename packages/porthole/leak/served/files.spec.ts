@@ -322,6 +322,69 @@ s.onerror = () => { document.documentElement.dataset.script = "refused"; }; docu
   });
 });
 
+test.describe("in a frame, what the host hears", () => {
+  test("no report, content error or blocked navigation names the frame's sealed address (P083)", async ({
+    page,
+  }) => {
+    const id = unique("reports");
+    await publish(id, "1", {
+      "index.html": `<!doctype html><title>Reports</title><main id="here">here</main>
+<a id="file" href="notes.txt">notes</a><button id="away" type="button">away</button>
+<script src="./missing.js"></script>
+<script type="module" src="./boom.mjs"></script>
+<script>
+document.getElementById("away").addEventListener("click", () => { location.href = "./data.json?x=1"; });
+setTimeout(() => Promise.reject(new Error("at " + location.href)), 50);
+</script>`,
+      "boom.mjs": 'throw new Error("boom from " + import.meta.url);',
+      "notes.txt": "notes",
+      "data.json": "{}",
+    });
+    const { frame, shown } = await showFiles(page, id, "1");
+    await frame.locator("#file").click();
+    await frame.locator("#away").click();
+    await expect
+      .poll(async () => {
+        const record = await shown.read();
+        return record.errors.length + record.navigationsBlocked.length;
+      })
+      .toBeGreaterThanOrEqual(5);
+    await frame.waitForTimeout(500);
+    const record = await shown.read();
+    const said = [...record.errors, ...record.contentErrors, ...record.navigationsBlocked];
+    expect(said.filter((each) => each.includes("/__porthole/f/"))).toEqual([]);
+    // What it says names the page's own files as ./ instead.
+    expect(record.navigationsBlocked).toEqual(
+      expect.arrayContaining(["./notes.txt", "./data.json?x=1"]),
+    );
+    expect(said.some((each) => each.includes("./missing.js"))).toBe(true);
+    expect(said.some((each) => each.includes("boom from ./boom.mjs"))).toBe(true);
+    expect(said.some((each) => each.includes("at ./"))).toBe(true);
+  });
+
+  test("the shell renews its sealed address before it ends, in place; the page goes on loading its files", async ({
+    page,
+    context,
+  }) => {
+    await context.clock.install();
+    const id = unique("renew");
+    await publish(id, "1", {
+      "index.html": `<!doctype html><title>Renew</title><button id="go" type="button">go</button><script>
+document.getElementById("go").addEventListener("click", async () => {
+  document.documentElement.dataset.seen = (await (await fetch("./data.json")).json()).v;
+});</script>`,
+      "data.json": '{ "v": "fresh" }',
+    });
+    const { frame } = await showFiles(page, id, "1");
+    const first = frame.url();
+    await context.clock.fastForward("56:00");
+    await expect.poll(() => frame.url(), { timeout: 10_000 }).not.toBe(first);
+    expect(new URL(frame.url()).pathname).toMatch(/^\/__porthole\/f\/[\w-]+\/$/u);
+    await frame.locator("#go").click();
+    await expect.poll(() => flag(frame, "seen")).toBe("fresh");
+  });
+});
+
 test.describe("on a tab", () => {
   const LATEST = (version: string) => ({
     ...MANY,

@@ -101,7 +101,18 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // takes the next load for that page, not for content that left). Anything else stays stopped:
   // another path of the origin, a file that isn't a page, another origin.
   let navigating = (_url) => {};
-  const filesBase = plan.files && typeof plan.files.base === "string" ? plan.files.base : null;
+  let filesBase = plan.files && typeof plan.files.base === "string" ? plan.files.base : null;
+  // Every address the page's files had (P083: a sealed one is renewed): what reports say as "./".
+  const filesBases = filesBase === null ? [] : [filesBase];
+  // A frame's sealed files' address is its access: nothing the shell reports names it (P083).
+  const SEALED = /(?:https?:\/\/[^\s"'<>\/]+)?\/__porthole\/f\/[A-Za-z0-9_-]{20,}\//g;
+  const ownAddresses = (text) => {
+    let out = String(text);
+    for (const base of filesBases) {
+      out = out.split(base).join("./");
+    }
+    return out.replace(SEALED, "./");
+  };
   const ownPage = (url) => {
     if (filesBase === null || typeof url !== "string" || url.indexOf(filesBase) !== 0) {
       return false;
@@ -506,7 +517,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
       return;
     }
     reported += 1;
-    send({ method: "notifications/message", params: { level: "error", logger: "porthole", data: String(message).slice(0, 2000) } });
+    send({ method: "notifications/message", params: { level: "error", logger: "porthole", data: ownAddresses(message).slice(0, 2000) } });
   };
   // Nothing secret is ever said from here, so any parent may hear it; what it hears is the
   // content's word, which the host gates before it acts on it.
@@ -527,12 +538,41 @@ export const SHELL_RUNTIME = String.raw`(() => {
       return;
     }
     reported += 1;
-    post({ method: "porthole/navigation-blocked", params: { url: url.slice(0, 4096) } });
+    post({ method: "porthole/navigation-blocked", params: { url: ownAddresses(url).slice(0, 4096) } });
   };
   // Another page of the set opening in the frame (P084): the host takes the next load for it.
   navigating = (url) => {
-    post({ method: "porthole/navigating", params: { url: url.slice(0, 4096) } });
+    post({ method: "porthole/navigating", params: { url: ownAddresses(url).slice(0, 4096) } });
   };
+  // A sealed files' address opens the page's files on its own for a while (P083): renewed before
+  // it ends, the page moved to the new one in place (the same page, the same history entry). Its
+  // modules keep the address they loaded from; the server serves their own loads till the session
+  // ends.
+  if (filesBase !== null && typeof plan.files.expires === "number") {
+    const nativeFetch = window.fetch.bind(window);
+    const replace = History.prototype.replaceState;
+    const renewIn = (expires) => Math.max(30000, expires - Date.now() - 300000);
+    const renew = () => {
+      nativeFetch(filesBase + "__porthole/renew", { credentials: "omit", cache: "no-store" })
+        .then((answer) => (answer.ok ? answer.json() : null))
+        .then((renewed) => {
+          if (!renewed || typeof renewed.base !== "string" || typeof renewed.expires !== "number" || renewed.base.indexOf(location.origin + "/__porthole/f/") !== 0 || renewed.base.slice(-1) !== "/") {
+            return;
+          }
+          const here = location.href;
+          if (here.indexOf(filesBase) === 0) {
+            try {
+              applyOf(replace, history, [history.state, "", renewed.base + here.slice(filesBase.length)]);
+            } catch (_) {}
+          }
+          filesBase = renewed.base;
+          filesBases.push(renewed.base);
+          setTimeout(renew, renewIn(renewed.expires));
+        })
+        .catch(() => setTimeout(renew, 60000));
+    };
+    setTimeout(renew, renewIn(plan.files.expires));
+  }
 
   // A parsed tree's scripts are held (each replaced by a numbered marker) and run later, in order,
   // as the page's parser would run them: each made again, live, in its marker's place, and each

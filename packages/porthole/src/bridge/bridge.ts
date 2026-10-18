@@ -9,7 +9,7 @@ import type { AnnotationReport } from "../annotate/types.ts";
 import { parseReport } from "../annotate/validate.ts";
 import type { PortholeConfig } from "../config/schema.ts";
 import { effectiveGates } from "../compile/policy.ts";
-import { blockedNavigationMessage } from "./navigation.ts";
+import { blockedNavigationMessage, withoutSealedAddresses } from "./navigation.ts";
 import {
   defaultReason,
   isRefused,
@@ -158,15 +158,18 @@ const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
   reportError: (args, config) => {
     // A navigation the shell cancelled (P080): Porthole words it, naming the address without its
     // query; the address itself goes to the host whole.
+    // A frame's sealed files' address never reaches the host from here (P083): `./` instead.
     const blocked = isRecord(args) ? args.navigationBlocked : undefined;
     if (blocked !== undefined) {
-      return typeof blocked === "string" && blocked !== "" && blocked.length <= MAX_URL
-        ? { message: blockedNavigationMessage(blocked, config), navigationBlocked: blocked }
-        : null;
+      if (typeof blocked !== "string" || blocked === "" || blocked.length > MAX_URL) {
+        return null;
+      }
+      const url = withoutSealedAddresses(blocked);
+      return { message: blockedNavigationMessage(url, config), navigationBlocked: url };
     }
     const message = isRecord(args) ? args.message : undefined;
     return typeof message === "string" && message !== ""
-      ? { message: message.slice(0, 2_000) }
+      ? { message: withoutSealedAddresses(message).slice(0, 2_000) }
       : null;
   },
   copyText: (args) => {

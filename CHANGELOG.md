@@ -14,7 +14,7 @@ is served as in 0.5, and so is everything else.
   `Uint8Array` or a `ReadableStream`, whole). The published type is never served.
 - **Paths and limits** (`@botiverse/porthole`, `/server`): `checkFileSet(files, { entry, limits })`
   for a host to call when a version is published (canonical, case-sensitive, no `..`/`.`/empty
-  segments, no leading `/`, no `\ % ? #` or control characters, NFC, length caps, no case-fold
+  segments, no leading `/`, no `\ % ? #`, control or format characters, NFC, length caps, no case-fold
   collisions, no file that is also a directory, the entry present), `filePathProblem`,
   `fileLimits(config.limits)`; the config's `limits.maxFiles`, `maxFileBytes`, `maxVersionBytes`
   (1,000, 25 MiB, 100 MiB by default). `requestFilePath`, `lookupFile`, `fileTypeOf`.
@@ -27,10 +27,12 @@ is served as in 0.5, and so is everything else.
   refused. Every page of a set is in the shell.
 - **Addresses.** On a tab, `entry.at` answers a `FileAddress` (`{ instance, base, file }`) and the
   latest's address (`/`, `/style.css`) is redeemed to the version's own (`/v/3/`, `/v/3/style.css`),
-  so a page never loads a newer version's file published while it loads; `versionedAddress(path)`
-  and `versionBase(n)` read the usual convention. In a frame, the ticket's answer is the entry,
+  so a page never loads a newer version's file published while it loads; `pinned: true` makes its
+  files immutable there (only then); `versionedAddress(path)` and `versionBase(n)` read the usual
+  convention. A subresource on a clean address with no session gets a 401 (no entry, no cookie). In a frame, the ticket's answer is the entry,
   whose files are at `/__porthole/f/<sealed access>/` (AES-GCM, so WebKit, which keeps no cookie
-  in frames, loads them too: P083).
+  in frames, loads them too: P083). The address opens on its own for an hour, renewed by the shell;
+  reports name it `./`.
 - **The CSP** of a page with files opens its version's own path for scripts, styles, fonts, images,
   media, fetches and workers, never `'self'` (P082, amending P022). Opaque frames and single pages
   are unchanged.

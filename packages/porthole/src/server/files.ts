@@ -33,9 +33,10 @@ export interface FileServing {
   readonly frameAncestors: string;
   /**
    * A ticket's answer (P083): the entry, served at the ticket's address, never stored; its shell
-   * moves the frame to the entry's own address under `base` before anything loads.
+   * moves the frame to the entry's own address under `base` before anything loads, and renews
+   * that address before it ends (`expires`, epoch ms).
    */
-  readonly ticket?: boolean;
+  readonly ticket?: { readonly expires: number };
 }
 
 const HEX = /^[0-9a-f]{64}$/u;
@@ -52,7 +53,7 @@ const encodePath = (path: string): string =>
     .join("/");
 
 /** Whether the request is a page loading (a navigation), not a subresource. */
-function isNavigation(request: Request): boolean {
+export function isNavigation(request: Request): boolean {
   const mode = request.headers.get("sec-fetch-mode");
   const dest = request.headers.get("sec-fetch-dest");
   if (mode !== null || dest !== null) {
@@ -60,6 +61,13 @@ function isNavigation(request: Request): boolean {
   }
   return (request.headers.get("accept") ?? "").includes("text/html");
 }
+
+/**
+ * Whether the request is a running page's own load: from its own origin (`Sec-Fetch-Site`, which
+ * only a browser sets and no page can change), and not a navigation.
+ */
+export const ownLoad = (request: Request): boolean =>
+  request.headers.get("sec-fetch-site") === "same-origin" && !isNavigation(request);
 
 /** Whether `If-None-Match` names this ETag. */
 function notModified(request: Request, etag: string): boolean {
@@ -177,7 +185,7 @@ export async function serveFile(serving: FileServing): Promise<Response> {
   const has = (each: string): boolean => Object.hasOwn(set.files, each);
   const entryPath = set.entry ?? DEFAULT_ENTRY;
   const found: FileLookup =
-    serving.ticket === true
+    serving.ticket !== undefined
       ? has(entryPath)
         ? { kind: "file", path: entryPath, status: 200 }
         : { kind: "none" }
@@ -230,12 +238,15 @@ export async function serveFile(serving: FileServing): Promise<Response> {
       files: {
         base,
         // At a ticket's address: the entry's own (its directory's, for an entry in one).
-        ...(serving.ticket === true
-          ? { address: `${base}${found.path.includes("/") ? encodePath(found.path) : ""}` }
-          : {}),
+        ...(serving.ticket === undefined
+          ? {}
+          : {
+              address: `${base}${found.path.includes("/") ? encodePath(found.path) : ""}`,
+              expires: serving.ticket.expires,
+            }),
       },
     });
-    if (serving.ticket === true) {
+    if (serving.ticket !== undefined) {
       headers.set("cache-control", "no-store");
       return new Response(method === "HEAD" ? null : html, { status: 200, headers });
     }

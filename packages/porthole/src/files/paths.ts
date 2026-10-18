@@ -41,9 +41,13 @@ export function fileLimits(limits?: Partial<Limits> | null): FileLimits {
   };
 }
 
-/** What a request's path can never hold once decoded, and a published path never holds. */
+/**
+ * What a request's path can never hold once decoded, and a published path never holds: control
+ * and format characters (`Cc`, `Cf`: a right-to-left override, a zero-width space, a BOM would make
+ * a path read as another), and `\ % ? #`.
+ */
 // oxlint-disable-next-line no-control-regex -- control characters are what it refuses
-const FORBIDDEN = /[\u0000-\u001f\u007f-\u009f\\%?#]/u;
+const FORBIDDEN = /[\p{Cc}\p{Cf}\\%?#]/u;
 
 /**
  * What is wrong with a published path, or null: relative (no leading `/`), `/`-separated, no
@@ -67,7 +71,7 @@ export function filePathProblem(path: unknown): string | null {
   const forbidden = FORBIDDEN.exec(path);
   if (forbidden !== null) {
     const char = forbidden[0];
-    return `a path holds no ${char === "\\" || char === "%" || char === "?" || char === "#" ? char : "control character"}`;
+    return `a path holds no ${char === "\\" || char === "%" || char === "?" || char === "#" ? char : "control or format character"}`;
   }
   if (path.normalize("NFC") !== path) {
     return "a path is in Unicode NFC";
