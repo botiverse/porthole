@@ -22,7 +22,7 @@ import { composedRuntime } from "../src/shell/document.ts";
 import { runtimeEntryPrefix } from "../src/guide/runtime.ts";
 import { assetCspDirectives } from "../src/compile/policy.ts";
 import { RUNTIME_TYPES } from "../src/runtime/types.generated.ts";
-import { offeredCapabilities } from "../src/runtime/contract.ts";
+import { familyOf, methodGates, offeredCapabilities } from "../src/runtime/contract.ts";
 import { sizeWords } from "../src/guide/limits.ts";
 import { librarySources } from "../src/compile/policy.ts";
 
@@ -278,7 +278,14 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
         // The person comments; the content calls nothing: its gates bound the frame's reports.
         continue;
       }
-      const gates = effectiveGates(config, name);
+      // A host function's gates, and under the runtime its methods' own (after the review).
+      const family = familyOf(name);
+      const gates = [
+        ...effectiveGates(config, name),
+        ...(config.runtime === undefined || family === null
+          ? []
+          : family.methods.flatMap((method) => methodGates(config, family.name, method))),
+      ];
       expect(entry?.includes("unless they confirm"), `${name}: confirm`).toBe(
         gates.includes("confirm"),
       );
@@ -325,8 +332,8 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
       const runs = csp.some(
         ([name, ...sources]) => name === "script-src" && sources.includes(`${origin}/_blob/`),
       );
-      expect(text.includes("and scripts and stylesheets")).toBe(runs);
-      expect(text.includes("scripts and stylesheets from it never run")).toBe(!runs);
+      expect(text.includes("and scripts and stylesheets an admin uploaded")).toBe(runs);
+      expect(text.includes("the library holds no scripts or stylesheets here")).toBe(!runs);
     }
   });
 

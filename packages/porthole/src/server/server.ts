@@ -14,8 +14,12 @@ import { isHostLabel, reservedLabels } from "./naming.ts";
 import { enterPage, pageScript, SESSION_PATH, statusPage } from "./pages.ts";
 import { libraryFile } from "./libraries.ts";
 import { ownLoad, serveAsset, serveFile } from "./files.ts";
-import { assetCspDirectives, INERT_FILE_CSP, serializeCsp } from "../compile/policy.ts";
-import { ASSET_ID, ASSET_PATH } from "../runtime/requests.ts";
+import {
+  assetCodeRuns,
+  assetCspDirectives,
+  INERT_FILE_CSP,
+  serializeCsp,
+} from "../compile/policy.ts";
 import { parseViewer, type ViewerInfo } from "../runtime/levels.ts";
 import type { FrameBlock } from "../host/types.ts";
 import { memoryTicketStore } from "./tickets.ts";
@@ -23,6 +27,7 @@ import type {
   Access,
   AuthorizeAnswer,
   Grant,
+  StoredAsset,
   PortholeServer,
   ServerOptions,
   StoredFiles,
@@ -44,6 +49,10 @@ const DOCUMENT_PATH = /^\/__porthole\/d\/([a-z2-7]{16})$/u;
  */
 const FILES_PATH = /^\/__porthole\/f\/([A-Za-z0-9_-]{40,4096})(\/.*)?$/u;
 const FILES_PREFIX = "/__porthole/f/";
+/** An asset's address (P089): `/_blob/` and 32 lowercase hex characters (`ASSET_ID`). */
+const ASSET_ROUTE = /^\/_blob\/([0-9a-f]{32})$/u;
+/** The same, under a frame's sealed files' address (P091): `<base>__porthole/blob/<id>`. */
+const SEALED_ASSET = /^\/__porthole\/blob\/([0-9a-f]{32})$/u;
 /** How long a sealed files' address opens a page's files on its own (P083); the shell renews it. */
 const FILES_ADDRESS_MS = 3_600_000;
 /** Below a sealed address: where the page's shell renews it (no file has a `__porthole/` path). */
@@ -747,6 +756,46 @@ export function createServer(options: ServerOptions): PortholeServer {
   }
 
   /**
+   * The access a sealed files' address carries (P083), if it holds for this origin now: on its own
+   * for its hour (`x`), then only for the running page's own loads until the session ends (`e`).
+   */
+  async function sealedAccess(
+    request: Request,
+    label: string,
+    token: string,
+  ): Promise<Access | null> {
+    const session = await keys.unseal(token);
+    const now = Date.now();
+    if (
+      !isRecord(session) ||
+      typeof session.w !== "string" ||
+      typeof session.x !== "number" ||
+      typeof session.e !== "number" ||
+      (session.s !== undefined && typeof session.s !== "string")
+    ) {
+      return null;
+    }
+    const open = session.x > now || (session.e > now && ownLoad(request));
+    let instance: InstanceRef;
+    try {
+      instance = cleanInstance(session.i);
+    } catch {
+      return null;
+    }
+    if (!open || instance.document.kind !== "artifact" || nameOf(instance.scope) !== label) {
+      return null;
+    }
+    return {
+      instance,
+      viewer: session.w,
+      origin: originOfLabel(label),
+      expiresAt: session.e,
+      ...(session.a === 1 ? { anonymous: true } : {}),
+      ...(typeof session.s === "string" ? { subject: session.s } : {}),
+    };
+  }
+
+  /**
    * A file set's file in a frame (P083): the sealed access in its path opens it, once it holds
    * for this origin and the host's check lets it in; every path under it is the same version's.
    */
@@ -789,30 +838,8 @@ export function createServer(options: ServerOptions): PortholeServer {
         headers: { location: `${origin}${base}${url.search}`, "cache-control": "no-store" },
       });
     }
-    const session = await keys.unseal(token);
-    const now = Date.now();
-    let instance: InstanceRef | null = null;
-    let end = 0;
-    if (
-      isRecord(session) &&
-      typeof session.w === "string" &&
-      typeof session.x === "number" &&
-      typeof session.e === "number" &&
-      (session.s === undefined || typeof session.s === "string")
-    ) {
-      end = session.e;
-      const open = session.x > now || (session.e > now && ownLoad(request));
-      try {
-        const clean = cleanInstance(session.i);
-        instance =
-          open && clean.document.kind === "artifact" && nameOf(clean.scope) === label
-            ? clean
-            : null;
-      } catch {
-        instance = null;
-      }
-    }
-    if (instance === null || !isRecord(session)) {
+    const access = await sealedAccess(request, label, token);
+    if (access === null) {
       return page(
         401,
         "This has ended",
@@ -821,14 +848,18 @@ export function createServer(options: ServerOptions): PortholeServer {
         "session",
       );
     }
-    const access: Access = {
-      instance,
-      viewer: session.w as string,
-      origin,
-      expiresAt: end,
-      ...(session.a === 1 ? { anonymous: true } : {}),
-      ...(typeof session.s === "string" ? { subject: session.s } : {}),
-    };
+    // An asset of this artifact's library, at the frame's own sealed address (P091): every engine
+    // sends a frame's path, where some send no Referer that names it.
+    const blob = SEALED_ASSET.exec(rest)?.[1];
+    if (blob !== undefined) {
+      if (options.assets === undefined) {
+        return page(404, "Not found", "This address names no content.", method);
+      }
+      return (
+        (await assetFor(request, label, access, blob)) ??
+        page(404, "Not found", "This address names no content.", method)
+      );
+    }
     if (rest === RENEW_PATH) {
       // Only the page itself renews its address, while its session lasts and the host lets it.
       if (method !== "GET" || !ownLoad(request)) {
@@ -983,44 +1014,107 @@ export function createServer(options: ServerOptions): PortholeServer {
   }
 
   /**
-   * An asset at `/_blob/<id>` (P089): for a page of its own origin loading it (`Sec-Fetch-Site:
-   * same-origin`, not a navigation: the page was let in to be there), or a request whose cookie
-   * holds a session for an artifact of this origin, which the host's check then decides. Never
-   * an entry: an asset is not an address to sign in for. Only on its own scope's origin.
+   * An asset at `/_blob/<id>` (P089, after the review): a request carrying an access to an
+   * artifact of this origin (its page's sealed files' address, as its `Referer` says, P091; or a
+   * session cookie), then the host's check for that access, then the host's store asked with it;
+   * served only when the asset is that artifact's, on its scope's origin. Never an entry. By id
+   * alone only where the host opted into it (`assets.bearer`).
    */
-  async function serveAssetAt(request: Request, url: URL, label: string): Promise<Response> {
+  async function serveAssetAt(request: Request, label: string, id: string): Promise<Response> {
     const method = request.method.toUpperCase();
-    const id = url.pathname.slice(ASSET_PATH.length);
     const store = options.assets;
-    if (store === undefined || !ASSET_ID.test(id)) {
-      return page(404, "Not found", "This address names no content.", method);
+    const none = () => page(404, "Not found", "This address names no content.", method);
+    if (store === undefined) {
+      return none();
     }
-    if (!ownLoad(request)) {
-      const access = artifactAccessOf(request, label);
-      if (access === null) {
-        return new Response(null, { status: 401, headers: { "cache-control": "no-store" } });
+    const scoped = (asset: StoredAsset | null): asset is StoredAsset => {
+      try {
+        return asset !== null && nameOf(asset.scope) === label;
+      } catch {
+        return false;
       }
-      const refusal = await denied(request, access);
-      if (refusal !== null) {
-        return refusal;
+    };
+    if (store.bearer === true) {
+      const asset = await store.get(id, null);
+      return scoped(asset)
+        ? serveAsset({ request, asset, frameAncestors, code: asset.trusted === true })
+        : none();
+    }
+    const accesses = await assetAccessesOf(request, label);
+    if (accesses.length === 0) {
+      return new Response(null, { status: 401, headers: { "cache-control": "no-store" } });
+    }
+    for (const access of accesses) {
+      const answer = await assetFor(request, label, access, id);
+      if (answer !== null) {
+        return answer;
       }
     }
-    const asset = await store.get(id);
+    return none();
+  }
+
+  /**
+   * An asset for one access (P089, P091): the store asked with it, served only when the asset is
+   * its artifact's on its scope's origin, after the host's check; its code only where it was
+   * trusted and the artifact's config still lets uploaded code run. Null: not this access's.
+   */
+  async function assetFor(
+    request: Request,
+    label: string,
+    access: Access,
+    id: string,
+  ): Promise<Response | null> {
+    const store = options.assets;
+    if (store === undefined || access.instance.document.kind !== "artifact") {
+      return null;
+    }
+    const asset = await store.get(id, access);
     let named: string | null = null;
     try {
       named = asset === null ? null : nameOf(asset.scope);
     } catch {
       named = null;
     }
-    if (asset === null || named !== label) {
-      return page(404, "Not found", "This address names no content.", method);
+    if (asset === null || named !== label || asset.artifact !== access.instance.document.id) {
+      return null;
     }
-    return serveAsset({ request, asset, frameAncestors });
+    const refusal = await denied(request, access);
+    if (refusal !== null) {
+      return refusal;
+    }
+    const config = compiledFor(access.instance)?.config;
+    const code = asset.trusted === true && config !== undefined && assetCodeRuns(config);
+    return serveAsset({ request, asset, frameAncestors, code });
   }
 
-  /** The access a request's cookies give to any artifact of `label`'s origin, or null. */
-  function artifactAccessOf(request: Request, label: string): Access | null {
-    let best: Access | null = null;
+  /**
+   * The accesses a request carries to artifacts of `label`'s origin, most specific first: the
+   * sealed files' address its page is at (a frame's, which keeps no cookie, P083), as its
+   * same-origin `Referer` names it; then its session cookies.
+   */
+  async function assetAccessesOf(request: Request, label: string): Promise<Access[]> {
+    const found: Access[] = [];
+    const referer = request.headers.get("referer");
+    if (referer !== null) {
+      try {
+        const from = new URL(referer);
+        const token = FILES_PATH.exec(from.pathname)?.[1];
+        if (from.origin === originOfLabel(label) && token !== undefined) {
+          const sealed = await sealedAccess(request, label, token);
+          if (sealed !== null) {
+            found.push(sealed);
+          }
+        }
+      } catch {
+        // Not an address: no access from it.
+      }
+    }
+    return [...found, ...artifactAccessesOf(request, label)];
+  }
+
+  /** The accesses a request's cookies give to artifacts of `label`'s origin, latest first. */
+  function artifactAccessesOf(request: Request, label: string): Access[] {
+    const found: Access[] = [];
     for (const [name, value] of cookiesOf(request)) {
       if (!ourCookie(name)) {
         continue;
@@ -1044,18 +1138,16 @@ export function createServer(options: ServerOptions): PortholeServer {
       } catch {
         continue;
       }
-      if (best === null || session.x > best.expiresAt) {
-        best = {
-          instance,
-          viewer: session.w,
-          origin: originOfLabel(label),
-          expiresAt: session.x,
-          ...(session.a === 1 ? { anonymous: true } : {}),
-          ...(typeof session.s === "string" ? { subject: session.s } : {}),
-        };
-      }
+      found.push({
+        instance,
+        viewer: session.w,
+        origin: originOfLabel(label),
+        expiresAt: session.x,
+        ...(session.a === 1 ? { anonymous: true } : {}),
+        ...(typeof session.s === "string" ? { subject: session.s } : {}),
+      });
     }
-    return best;
+    return found.sort((a, b) => b.expiresAt - a.expiresAt);
   }
 
   /**
@@ -1599,9 +1691,11 @@ export function createServer(options: ServerOptions): PortholeServer {
             access === null ? 401 : (await denied(request, access)) === null ? 204 : 403;
           return new Response(null, { status, headers: { "cache-control": "no-store" } });
         }
-        // An artifact's asset library (P089), outside every version.
-        if (options.assets !== undefined && url.pathname.startsWith(ASSET_PATH)) {
-          return await serveAssetAt(request, url, label);
+        // An artifact's asset library (P089), outside every version: `/_blob/<id>` only; any
+        // other path there is a clean address as before (after the review).
+        const asset = options.assets === undefined ? null : ASSET_ROUTE.exec(url.pathname);
+        if (asset?.[1] !== undefined) {
+          return await serveAssetAt(request, label, asset[1]);
         }
         const document = DOCUMENT_PATH.exec(url.pathname);
         if (document?.[1] !== undefined) {

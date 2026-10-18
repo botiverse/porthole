@@ -1,3 +1,5 @@
+import { isDbSegment } from "./segments.ts";
+
 /**
  * Viewer levels (P087): who the person viewing a display is to it, in the host's words, which
  * decides each capability method's audience. Ordered: `view` (see it, comment) < `interact` (use
@@ -33,6 +35,11 @@ export function higher(a: ViewerLevel, b: ViewerLevel): ViewerLevel {
  */
 export interface ViewerInfo {
   readonly level: ViewerLevel;
+  /**
+   * One path segment (`A-Z a-z 0-9 _ . ~ : @ + -`, at most 128, never `me`): the host's public id
+   * for the person, or a pseudonym per artifact (`pseudonymFor`, P087), never their account id
+   * where pages shouldn't link people across artifacts.
+   */
   readonly id?: string;
   readonly name?: string;
 }
@@ -50,12 +57,13 @@ export function parseViewer(value: unknown): ViewerInfo | null {
   }
   const text = (each: unknown) =>
     typeof each === "string" && each !== "" && each.length <= MAX_ID && !/[\p{Cc}]/u.test(each);
-  if ((id !== undefined && !text(id)) || (name !== undefined && !text(name))) {
+  // An id names the person's own data (`data/users/<id>`): one path segment, never `me`.
+  if ((id !== undefined && !isDbSegment(id)) || (name !== undefined && !text(name))) {
     return null;
   }
   return {
     level,
-    ...(id === undefined ? {} : { id: id as string }),
+    ...(id === undefined ? {} : { id }),
     ...(name === undefined ? {} : { name: name as string }),
   };
 }

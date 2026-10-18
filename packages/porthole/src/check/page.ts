@@ -194,6 +194,10 @@ const check = {
       title: "Check",
       scheme: spec.scheme,
       ...(spec.instance === undefined ? {} : { instance: spec.instance }),
+      // Under a runtime: the page's declaration (none by default), a viewer who only views.
+      ...(spec.config.runtime === undefined
+        ? {}
+        : { declaration: spec.declaration ?? null, viewer: { level: "view" as const } }),
     });
     const run: Run = {
       display,

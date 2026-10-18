@@ -354,8 +354,10 @@ handlers: {
   assets: (args, { viewer, instance }) => myApi.assets(instance, viewer, args),
   comments: ({ anchor }) => composer.open(anchor),                                     // true if it opened
 },
-// 5. The mount: the artifact's stored declaration.
-<PortholeView display="page" instance={instance} declaration={artifact.declaration} />
+// 5. The mount: what this version declared, within what the artifact declares now; null for a
+//    page published before 0.7 (required under a runtime).
+<PortholeView display="page" instance={instance}
+  declaration={version.declaration ? intersectDeclarations(version.declaration, artifact.declaration) : null} />
 ```
 
 - **Built-ins** (`clipboard`, `links`, `downloads`, `comments`) reach every page whose kind offers
@@ -368,19 +370,36 @@ handlers: {
   the library never run: P089). Raise any method in its config's `levels`. Without a viewer the
   runtime's own are refused.
 - **Your API is the wall.** The bridge refuses early, in your page; your handlers call your API as
-  the viewer, and it must check again: `dbAccess(request, viewer, rules)` is the db rule set
-  (another person's `data/users/<id>` refused, `me` resolved), `atLeast(level, "admin")` for a
-  publish. Check every write's `ifVersion` and refuse a moved base or version with
-  `new Refused("conflict")`; admit a published version as any (`admitFiles`).
-- **Assets**: `createContentHost({ assets: (id) => myStore.asset(id) })` answers `{ scope, name,
-  size, sha256, read }` for an id you made (32 random hex characters, `ASSET_ID`); `/server` serves
-  it at `/_blob/<id>` on that scope's origin only, to its pages and to a session with your check,
-  typed by its name. Refuse names that aren't assets (`assetNameProblem`).
+  the viewer, and it must check again, from its own session and its own stored declaration: never
+  trust `context.viewer` or `context.declared` for what your data allows (a page past the bridge
+  could forge them). `dbAccess(request, viewer, rules)` is the db rule set (another person's
+  `data/users/<id>` refused, `me` resolved), `atLeast(level, "admin")` for a publish. Hold every
+  write to an existing document to its `ifVersion` (updates and deletes too), apply a batch in
+  order against one state, and refuse a moved base or version with `new Refused("conflict")`;
+  check and admit the merged version as any (`checkFileSet`, `admitFiles`).
+- **Per version**: store each version's declaration with it (`declareCapabilities` at its publish)
+  and mount a version with `intersectDeclarations(version's, current)`.
+- **Who the page may know**: `Grant.user.id` is one path segment, never `me`; give
+  `pseudonymFor(secret, artifact, person)` where pages shouldn't link a person across artifacts.
+- **Assets**: `createContentHost({ assets: (id, access) => myStore.asset(id, access) })` answers
+  `{ scope, artifact, name, size, sha256, trusted?, read }` for an id you made (32 random hex
+  characters, `ASSET_ID`); `/server` serves it at `/_blob/<id>` on that scope's origin only, to an
+  access for that artifact (a session, or a framed page's sealed address), after your check,
+  revalidated at each load. Store an upload's `trusted` (the bridge sets it: an admin's code where
+  uploaded code may run) and give it back: other code-typed assets are served as downloads. Pages
+  show assets with `assets.url(id)` (some engines' frames send no address a `/_blob/` load could
+  carry). `{ get, bearer: true }` serves by id alone, an explicit opt-in for public artifacts.
+  Refuse names that aren't assets (`assetNameProblem`).
 - **Run the conformance cases** against your handlers (no browser):
 
   ```js
   import { defineRuntimeConformance } from "@botiverse/porthole/conformance";
-  for (const each of defineRuntimeConformance({ config: page, handlers: () => freshArtifactHandlers(), viewers, assets: () => assetStore })) {
+  for (const each of defineRuntimeConformance({
+    config: page, viewers, handlers: () => freshArtifactHandlers(), assets: () => assetStore,
+    // Your own API for the same artifact, signed in as `viewer` with that person's real session:
+    // the cases past the bridge then forge the context, as a page past it could.
+    api: (handlers, viewer) => apiAs(handlers, viewer),
+  })) {
     test(each.name, () => each.run());
   }
   ```

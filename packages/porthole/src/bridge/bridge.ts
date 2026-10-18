@@ -8,13 +8,14 @@ import {
 import type { AnnotationReport } from "../annotate/types.ts";
 import { parseReport } from "../annotate/validate.ts";
 import type { PortholeConfig } from "../config/schema.ts";
-import { effectiveGates } from "../compile/policy.ts";
+import { callGates, effectiveGates } from "../compile/policy.ts";
 import { blockedNavigationMessage, withoutSealedAddresses } from "./navigation.ts";
 import {
   RUNTIME_HOST_FUNCTIONS,
   familyOf,
   methodLevel,
   methodOf,
+  assetCodeRuns,
   rosterOf,
   runtimeCapability,
   type RuntimeCapabilityName,
@@ -24,9 +25,10 @@ import {
   type DeclaredCapability,
   type PageDeclaration,
 } from "../runtime/declaration.ts";
-import { dbAccess, parseDbRequest, type DbRequest } from "../runtime/db.ts";
-import { atLeast, type ViewerInfo } from "../runtime/levels.ts";
+import { dbAccess, parseDbRequest, withMe, type DbRequest } from "../runtime/db.ts";
+import { atLeast, higher, type ViewerInfo, type ViewerLevel } from "../runtime/levels.ts";
 import {
+  isCodeAsset,
   parseArtifactRequest,
   parseAssetRequest,
   parseCommentRequest,
@@ -98,7 +100,7 @@ export interface BridgeOptions {
    * Absent: a page without one (0.6's): built-ins only through the runtime, and 0.6's globals and
    * requests as before.
    */
-  readonly declaration?: PageDeclaration;
+  readonly declaration?: PageDeclaration | null;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -216,7 +218,8 @@ const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
   user: (args) => (args === undefined || isRecord(args) ? {} : null),
   comments: (args) => parseCommentRequest(args),
   artifact: (args, config) => parseArtifactRequest(args, config.limits),
-  assets: (args, config) => parseAssetRequest(args, config.limits),
+  // Code-typed names only where uploaded code may run (P089, after the review).
+  assets: (args, config) => parseAssetRequest(args, config.limits, assetCodeRuns(config)),
   db: (args) => parseDbRequest(args),
   resize: (args) => {
     if (
@@ -280,7 +283,7 @@ function declaredOf(
 export function createBridge(options: BridgeOptions): HostFunctionBridge {
   const { config, display, handlers, onEvent } = options;
   const now = options.now ?? (() => Date.now());
-  const calls = new Map<CapabilityName, number[]>();
+  const calls = new Map<string, number[]>();
   let declines = 0;
   let muted = false;
 
@@ -299,7 +302,7 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
     };
   };
 
-  const withinRate = (capability: CapabilityName, perMinute: number): boolean => {
+  const withinRate = (capability: string, perMinute: number): boolean => {
     const at = now();
     const recent = (calls.get(capability) ?? []).filter((time) => at - time < 60_000);
     if (recent.length >= perMinute) {
@@ -311,27 +314,59 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
     return true;
   };
 
+  /** The least level a call needs: its method's, and a db batch's writes' or a watch's read's. */
+  function levelOf(
+    capability: CapabilityName,
+    family: RuntimeCapabilityName,
+    method: string,
+    args: unknown,
+  ): ViewerLevel | null {
+    const declared = declaredOf(options.declaration ?? undefined, family);
+    const own = methodLevel(config, family, method, declared);
+    if (capability !== "db" || own === null) {
+      return own;
+    }
+    // A batch is each of its writes; a watch is a read (after the review: neither escapes the
+    // levels of what it does).
+    const request = args as DbRequest;
+    const inner =
+      request.op === "batch"
+        ? request.writes.map((write) => write.op)
+        : request.op === "watch"
+          ? [request.path.split("/").length % 2 === 0 ? "get" : "query"]
+          : [];
+    return inner.reduce<ViewerLevel>(
+      (most, op) => higher(most, methodLevel(config, family, op, declared) ?? most),
+      own,
+    );
+  }
+
   /**
    * Whether this viewer may make this call (P087), and the call as the handler gets it: the
-   * method's level (the contract's, the host's, the page's), the resources and tools a page's
-   * `data` names, and a `db` call's paths (another person's data refused, `me` resolved, the
-   * page's rules). 0.6's functions without a viewer run as before; the runtime's own need one.
+   * call's level (the contract's, the host's, the page's; a batch's writes', a watch's read's),
+   * the resources and tools a page's `data` names, and a `db` call's paths (another person's data
+   * refused, `me` resolved, the page's rules). Without a viewer: the runtime's own are refused,
+   * and under a runtime anything above view; a 0.6 config's functions run as before.
    */
   function checkAudience<N extends CapabilityName>(
     capability: N,
     family: RuntimeCapabilityName,
     args: CapabilityArgs[N],
   ): CapabilityArgs[N] | "undeclared" | "level" {
-    const { viewer, declaration } = options;
-    const declared = declaredOf(declaration, family);
+    const { viewer } = options;
+    const declaration = options.declaration ?? undefined;
     const method = methodOf(capability, args);
     if (method === null) {
       return args;
     }
+    const needed = levelOf(capability, family, method, args);
     if (viewer === undefined) {
-      return RUNTIME_HOST_FUNCTIONS.includes(capability) ? "level" : args;
+      if (RUNTIME_HOST_FUNCTIONS.includes(capability)) {
+        return "level";
+      }
+      // Under a runtime, a level the host set is never skipped for want of a viewer.
+      return config.runtime !== undefined && needed !== null && needed !== "view" ? "level" : args;
     }
-    const needed = methodLevel(config, family, method, declared);
     if (needed !== null && !atLeast(viewer.level, needed)) {
       return "level";
     }
@@ -350,7 +385,48 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
       const access = dbAccess(args as DbRequest, viewer, rules);
       return access.ok ? (access.request as CapabilityArgs[N]) : "level";
     }
+    if (capability === "assets" && (args as CapabilityArgs["assets"]).op === "upload") {
+      // What an upload may become (P089): code only an admin added where uploaded code may run.
+      const upload = args as CapabilityArgs["assets"] & { readonly op: "upload" };
+      return {
+        ...upload,
+        trusted:
+          isCodeAsset(upload.name) && assetCodeRuns(config) && atLeast(viewer.level, "admin"),
+      } as CapabilityArgs[N];
+    }
     return args;
+  }
+
+  /**
+   * The cheap checks for the runtime's own, before their arguments are read (after the review: a
+   * malformed call costs nothing but its rate): a method by its `op`, a viewer at its level, its
+   * host function's rate.
+   */
+  function precheck(capability: CapabilityName, raw: unknown): Refusal | null {
+    if (!RUNTIME_HOST_FUNCTIONS.includes(capability)) {
+      return null;
+    }
+    const family = familyOf(capability);
+    const method = methodOf(capability, raw);
+    if (family === null || method === null) {
+      return "invalid";
+    }
+    const viewer = options.viewer;
+    const needed = methodLevel(
+      config,
+      family.name,
+      method,
+      declaredOf(options.declaration ?? undefined, family.name),
+    );
+    if (viewer === undefined || (needed !== null && !atLeast(viewer.level, needed))) {
+      return "level";
+    }
+    for (const gate of effectiveGates(config, capability)) {
+      if (typeof gate === "object" && !withinRate(capability, gate.rateLimit.perMinute)) {
+        return "rate-limited";
+      }
+    }
+    return null;
   }
 
   return {
@@ -359,7 +435,9 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
     roster: () =>
       rosterOf(
         config,
-        options.declaration === undefined ? [] : Object.keys(options.declaration.capabilities),
+        options.declaration === undefined || options.declaration === null
+          ? []
+          : Object.keys(options.declaration.capabilities),
       ),
 
     async call<N extends CapabilityName>(
@@ -374,7 +452,8 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
       // The page's declaration (P086): a built-in needs none; any other runtime capability only
       // a page that declared it reaches; a page with no declaration, none of the runtime's own.
       const family = familyOf(capability);
-      const declaration = options.declaration;
+      // No declaration, or the host's explicit null for a page from before 0.7 (P086).
+      const declaration = options.declaration ?? undefined;
       if (
         family !== null &&
         !runtimeCapability(family.name).builtIn &&
@@ -383,6 +462,10 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
           : !Object.hasOwn(declaration.capabilities, family.name))
       ) {
         return refuse<Result>(capability, "undeclared");
+      }
+      const early = precheck(capability, raw);
+      if (early !== null) {
+        return refuse<Result>(capability, early);
       }
       const parsed = (VALIDATORS[capability] as Validator<N>)(raw, config);
       if (parsed === null) {
@@ -400,13 +483,22 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
         }
         args = audience;
       }
-      const gates = effectiveGates(config, capability);
+      // Its host function's gates, and its method's own (after the review): all apply.
+      const gates = callGates(config, capability, args);
+      const own = new Set(effectiveGates(config, capability));
       const confirms = gates.includes("confirm");
       if (confirms && muted) {
         return refuse<Result>(capability, "muted");
       }
+      const method = family === null ? null : methodOf(capability, args);
       for (const gate of gates) {
-        if (typeof gate === "object" && !withinRate(capability, gate.rateLimit.perMinute)) {
+        if (typeof gate !== "object") {
+          continue;
+        }
+        // The runtime's own were counted before their arguments were read (`precheck`).
+        const counted = own.has(gate) && RUNTIME_HOST_FUNCTIONS.includes(capability);
+        const key = own.has(gate) ? capability : `${capability}.${method ?? ""}`;
+        if (!counted && !withinRate(key, gate.rateLimit.perMinute)) {
           return refuse<Result>(capability, "rate-limited");
         }
       }
@@ -519,7 +611,8 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
         return refuse<Result>(capability, "not-declared");
       }
       const family = familyOf(capability);
-      const declared = family === null ? undefined : declaredOf(options.declaration, family.name);
+      const declared =
+        family === null ? undefined : declaredOf(options.declaration ?? undefined, family.name);
       const context = {
         displayId: display.id,
         title: display.title,
@@ -548,11 +641,21 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
       if (watches && subscription === undefined) {
         return refuse<Result>(capability, "invalid");
       }
+      // A db answer names the viewer's own tree `me`, never their id (after the review, P088).
+      const viewer = options.viewer;
+      const channel =
+        watches && subscription !== undefined && capability === "db"
+          ? {
+              changed: (state?: unknown) => subscription.changed(withMe(state, viewer)),
+              signal: subscription.signal,
+            }
+          : subscription;
       try {
-        const value = await (handler as (args: unknown, context: unknown) => unknown)(
+        const answered = await (handler as (args: unknown, context: unknown) => unknown)(
           args,
-          watches ? { ...context, ...subscription } : context,
+          watches ? { ...context, ...channel } : context,
         );
+        const value = capability === "db" ? withMe(answered, viewer) : answered;
         // Comments are write-only (P090): content hears whether the composer opened, never what
         // the host answered beyond that (a thread, its text).
         if (capability === "comments") {

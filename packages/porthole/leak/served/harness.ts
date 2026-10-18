@@ -5,6 +5,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { stripTypeScriptTypes } from "node:module";
 import type { AddressInfo } from "node:net";
@@ -28,7 +29,7 @@ import {
   type StoredAsset,
   type StoredFiles,
 } from "../../src/server/index.ts";
-import { weaken, weakenServed, weakened } from "../weakenings.ts";
+import { checkWeakenings, weaken, weakenServed, weakened } from "../weakenings.ts";
 import { asServiceWorkerAllowed, withoutResourcePolicy, withSelfForFiles } from "./files.ts";
 
 /**
@@ -178,14 +179,18 @@ async function sourceOf(pathname: string): Promise<Response | null> {
   if (!/^(src|leak\/mcp|leak\/runtime)\/[\w/.-]+\.ts$/u.test(relative) || relative.includes("..")) {
     return null;
   }
+  let source: string;
   try {
-    const text = weaken(relative, await readFile(path.join(PACKAGE, relative), "utf8"));
-    return new Response(stripTypeScriptTypes(text), {
-      headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" },
-    });
+    source = await readFile(path.join(PACKAGE, relative), "utf8");
   } catch {
     return null;
   }
+  // A control whose text is gone fails loudly (after the review): never a quiet 404 that looks
+  // like the control working.
+  const text = weaken(relative, source);
+  return new Response(stripTypeScriptTypes(text), {
+    headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" },
+  });
 }
 
 /**
@@ -204,12 +209,13 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
   const keep = (asset, removed) =>
     fetch("/__assets", {
       method: removed ? "DELETE" : "POST",
-      body: JSON.stringify({ id: asset.id, scope: asset.scope, name: asset.name, sha256: asset.sha256, base64: removed ? "" : btoa(String.fromCharCode(...asset.bytes)) }),
+      body: JSON.stringify({ id: asset.id, scope: asset.scope, artifact: asset.artifact, trusted: asset.trusted, name: asset.name, sha256: asset.sha256, base64: removed ? "" : btoa(String.fromCharCode(...asset.bytes)) }),
     });
   const runtimeOf = (options) => {
     if (!runtimes.has(options.key)) {
       runtimes.set(options.key, memoryRuntime({
         scope: options.scope,
+        artifact: options.artifact,
         uploadLevel: options.uploadLevel,
         onAsset: keep,
         // The app's composer answers with a thread; content must hear only whether it opened.
@@ -296,7 +302,8 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
         scheme: "light",
         instance,
         ...(options.fill ? { fill: true } : {}),
-        ...(options.runtime && options.runtime.declaration ? { declaration: options.runtime.declaration } : {}),
+        // The page's declaration, or the host's explicit null for a page from before 0.7 (P086).
+        ...(options.runtime && "declaration" in options.runtime ? { declaration: options.runtime.declaration } : {}),
         ...(options.runtime && options.runtime.viewer ? { viewer: options.runtime.viewer } : {}),
       });
       this.displays.push(display);
@@ -322,6 +329,7 @@ const MCP_HOST_PAGE = `<!doctype html>
 let hostCspOf = (): string => "frame-src 'none'";
 
 async function start(): Promise<Harness> {
+  checkWeakenings((relative) => readFileSync(path.join(PACKAGE, relative), "utf8"));
   const hits = new Map<string, number>();
   const pages = new Map<string, string>(
     ["1", "2"].map((version) => [
@@ -477,30 +485,45 @@ async function start(): Promise<Harness> {
       weakened.includes("service-worker") ? asServiceWorkerAllowed(request) : request,
     );
     if (served !== null) {
-      // Negative controls on the asset library (P089): its code runs whoever uploads, or an
-      // asset opened on its own runs.
+      // The harness's controls, each applied in turn, so several combine (after the review).
+      let answer = served;
+      const pathname = new URL(request.url).pathname;
+      const blob = pathname.startsWith("/_blob/") || pathname.includes("/__porthole/blob/");
+      // The asset library (P089): its code runs whoever uploads; an asset opened on its own runs;
+      // an untrusted script is served as one.
       if (weakened.includes("blob-script")) {
-        return withAssetScripts(served, request);
+        answer = withAssetScripts(answer, request);
       }
-      if (weakened.includes("blob-inert") && new URL(request.url).pathname.startsWith("/_blob/")) {
-        const headers = new Headers(served.headers);
+      if (weakened.includes("blob-inert") && blob) {
+        const headers = new Headers(answer.headers);
         headers.delete("content-security-policy");
-        return new Response(served.body, { status: served.status, headers });
+        answer = new Response(answer.body, { status: answer.status, headers });
+      }
+      if (weakened.includes("blob-trusted") && blob && answer.status === 200) {
+        const headers = new Headers(answer.headers);
+        if (headers.get("content-type") === "application/octet-stream") {
+          headers.set("content-type", "text/javascript; charset=utf-8");
+          headers.delete("content-disposition");
+        }
+        answer = new Response(answer.body, { status: answer.status, headers });
       }
       if (weakened.includes("file-self")) {
-        return withSelfForFiles(served);
+        answer = withSelfForFiles(answer);
       }
       if (weakened.includes("file-corp")) {
-        return withoutResourcePolicy(served);
+        answer = withoutResourcePolicy(answer);
       }
       // A negative control on the shell's navigation guard reaches served shells too (P079).
-      return weakened.includes("navigate-guard") &&
-        (served.headers.get("content-type") ?? "").startsWith("text/html")
-        ? new Response(weakenServed(await served.text()), {
-            status: served.status,
-            headers: served.headers,
-          })
-        : served;
+      if (
+        weakened.includes("navigate-guard") &&
+        (answer.headers.get("content-type") ?? "").startsWith("text/html")
+      ) {
+        answer = new Response(weakenServed(await answer.text()), {
+          status: answer.status,
+          headers: answer.headers,
+        });
+      }
+      return answer;
     }
     const pathname = new URL(request.url).pathname;
     // The host page's services keep assets here (P089): the bytes /_blob/<id> serves.
@@ -508,6 +531,8 @@ async function start(): Promise<Harness> {
       const body = (await request.json()) as {
         id: string;
         scope: string;
+        artifact: string;
+        trusted: boolean;
         name: string;
         sha256: string;
         base64: string;
@@ -515,7 +540,13 @@ async function start(): Promise<Harness> {
       if (request.method === "DELETE") {
         assets.delete(body.id);
       } else {
-        assets.set(body.id, storedAsset(body.scope, body.name, Buffer.from(body.base64, "base64")));
+        assets.set(
+          body.id,
+          storedAsset(body.scope, body.name, Buffer.from(body.base64, "base64"), {
+            artifact: body.artifact,
+            trusted: body.trusted,
+          }),
+        );
       }
       return new Response(null, { status: 204 });
     }
@@ -564,9 +595,16 @@ const RUNTIME_CAPABILITIES_ALL = {
 } as const;
 
 /** An asset as the harness's store keeps it. */
-export function storedAsset(scope: string, name: string, bytes: Uint8Array): StoredAsset {
+export function storedAsset(
+  scope: string,
+  name: string,
+  bytes: Uint8Array,
+  owner: { readonly artifact: string; readonly trusted?: boolean },
+): StoredAsset {
   return {
     scope,
+    artifact: owner.artifact,
+    ...(owner.trusted === true ? { trusted: true } : {}),
     name,
     size: bytes.length,
     sha256: createHash("sha256").update(bytes).digest("hex"),

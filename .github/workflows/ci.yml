@@ -58,6 +58,27 @@ jobs:
           path: .dev/leak-results
           retention-days: 7
 
+  # The negative controls (P032): each must fail exactly its probes on every engine.
+  controls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, webkit, firefox]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @botiverse/porthole exec playwright install --with-deps ${{ matrix.engine }}
+      - run: pnpm --filter @botiverse/porthole run test:controls
+        env:
+          PORTHOLE_LEAK_ENGINES: ${{ matrix.engine }}
+
   examples:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

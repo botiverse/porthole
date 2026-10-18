@@ -78,8 +78,15 @@ export function httpLocator(url: string, options: HttpLocatorOptions = {}): Inst
           "bad-location",
         );
       }
-      // Who is viewing, as the app's access decided (P087); one that doesn't parse is none.
+      // Who is viewing, as the app's access decided (P087); one that doesn't parse is an error.
       const viewer = data.viewer === undefined ? null : parseViewer(data.viewer);
+      if (data.viewer !== undefined && viewer === null) {
+        throw new LocateError(
+          "The app's issue endpoint named a viewer that isn't one",
+          response.status,
+          "bad-location",
+        );
+      }
       return {
         url: data.url,
         origin: data.origin,

@@ -70,6 +70,39 @@ function words(request: ConfirmRequest): Words {
       return { heading: "Let it follow this?", accept: "Allow", detail: request.args.uri };
     case "copyText":
       return { heading: "Copy this text?", accept: "Copy", detail: request.args.text };
+    // The runtime's (P088, P089): the whole effect, as the page asked for it.
+    case "artifact":
+      return request.args.op === "publish"
+        ? {
+            heading: "Publish a new version of this page?",
+            accept: "Publish",
+            detail: Object.entries(request.args.files)
+              .map(([path, file]) =>
+                file === null
+                  ? `${path}: removed`
+                  : "text" in file
+                    ? `${path}: ${file.text.length.toLocaleString("en-US")} characters`
+                    : `${path}: ${Math.floor((file.base64.length * 3) / 4).toLocaleString("en-US")} bytes`,
+              )
+              .join("\n"),
+            note: `From version ${request.args.base}${request.args.label === undefined ? "" : `: ${request.args.label}`}.`,
+          }
+        : { heading: "Allow this?", accept: "Allow", detail: json(request.args) };
+    case "assets":
+      return request.args.op === "upload"
+        ? {
+            heading: "Add this file to the page's library?",
+            accept: "Add",
+            detail: `${request.args.name} (${request.args.type}, ${request.args.size.toLocaleString("en-US")} bytes)`,
+            note: "Everyone who can see the page can load it.",
+          }
+        : request.args.op === "delete"
+          ? {
+              heading: "Remove this file from the page's library?",
+              accept: "Remove",
+              detail: request.args.id,
+            }
+          : { heading: "Allow this?", accept: "Allow", detail: json(request.args) };
     default:
       return { heading: "Allow this?", accept: "Allow", detail: json(request.args) };
   }

@@ -1,13 +1,17 @@
 import { Refused } from "../../src/bridge/refusal.ts";
+import { admitFiles } from "../../src/check/tools.ts";
+import type { PortholeConfig } from "../../src/config/schema.ts";
+import { checkFileSet } from "../../src/files/paths.ts";
 import type { CallContext, CapabilityHandlers, DbContext } from "../../src/bridge/types.ts";
 import {
   dbAccess,
   type DbData,
   type DbRequest,
+  type DbRules,
   type DbSnapshot,
   type DbWrite,
 } from "../../src/runtime/db.ts";
-import { atLeast, type ViewerLevel } from "../../src/runtime/levels.ts";
+import { atLeast, type ViewerInfo, type ViewerLevel } from "../../src/runtime/levels.ts";
 import {
   assetUrl,
   type ArtifactInfo,
@@ -29,6 +33,10 @@ import {
 export interface MemoryAsset {
   readonly id: string;
   readonly scope: string;
+  /** The artifact whose library holds it. */
+  readonly artifact: string;
+  /** May run as code (the upload's `trusted`, P089). */
+  readonly trusted: boolean;
   readonly name: string;
   readonly type: string;
   readonly size: number;
@@ -39,6 +47,10 @@ export interface MemoryAsset {
 export interface MemoryRuntimeOptions {
   /** The storage scope the artifact is served on (its assets' origin). */
   readonly scope?: string;
+  /** The artifact's id (its assets' owner). Default `page`. */
+  readonly artifact?: string;
+  /** The config a published version is admitted under (`admitFiles`), as a real host does. */
+  readonly config?: PortholeConfig;
   /** The artifact's first version's files, by path (text). */
   readonly files?: Readonly<Record<string, string>>;
   /** Who may upload assets (the host's config says the same: `assets.levels.upload`). */
@@ -126,6 +138,7 @@ function matches(data: DbData, [field, op, value]: readonly [string, string, unk
 
 export function memoryRuntime(options: MemoryRuntimeOptions = {}) {
   const scope = options.scope ?? "art-1";
+  const artifactId = options.artifact ?? "page";
   const calls: MemoryCall[] = [];
   const docs = new Map<string, Doc>();
   const watchers = new Set<{
@@ -162,9 +175,11 @@ export function memoryRuntime(options: MemoryRuntimeOptions = {}) {
     path.split("/").length % 2 === 0
       ? snapshot(path)
       : {
+          // As a query answers it: at most its limit (after the review).
           docs: [...docs.keys()]
             .filter((each) => inCollection(each, path))
             .sort()
+            .slice(0, 500)
             .map(snapshot),
         };
   const tell = (paths: readonly string[]) => {
@@ -176,13 +191,14 @@ export function memoryRuntime(options: MemoryRuntimeOptions = {}) {
   };
 
   /** A write's check against what is stored: the version it read. */
-  const conflicts = (write: DbWrite): boolean => {
-    const current = docs.get(write.path)?.version ?? 0;
-    if (write.ifVersion !== undefined) {
-      return write.ifVersion !== current;
+  const conflicts = (write: DbWrite, pending: ReadonlyMap<string, number> = new Map()): boolean => {
+    const current = pending.get(write.path) ?? docs.get(write.path)?.version ?? 0;
+    // An update needs a document that exists; every write to one that exists names the version
+    // it read (after the review: update and delete too).
+    if (write.op === "update" && current === 0) {
+      return true;
     }
-    // A write to a document that exists names the version it read; an update needs one that does.
-    return write.op === "update" ? current === 0 : write.op === "set" && current !== 0;
+    return write.ifVersion === undefined ? current !== 0 : write.ifVersion !== current;
   };
   const apply = (write: DbWrite): number | null => {
     if (write.op === "delete") {
@@ -237,9 +253,15 @@ export function memoryRuntime(options: MemoryRuntimeOptions = {}) {
           return request.op === "delete" ? undefined : { version: version ?? 0 };
         }
         case "batch": {
-          // All or none: every write checked before any is applied.
-          if (request.writes.some(conflicts)) {
-            throw new Refused("conflict");
+          // All or none: every write checked, in order, against the state the ones before it
+          // leave, before any is applied.
+          const pending = new Map<string, number>();
+          for (const write of request.writes) {
+            if (conflicts(write, pending)) {
+              throw new Refused("conflict");
+            }
+            const before = pending.get(write.path) ?? docs.get(write.path)?.version ?? 0;
+            pending.set(write.path, write.op === "delete" ? 0 : before + 1);
           }
           const written = request.writes.map(apply);
           tell(request.writes.map((each) => each.path));
@@ -289,8 +311,30 @@ export function memoryRuntime(options: MemoryRuntimeOptions = {}) {
         const bytes = "text" in file ? encoder.encode(file.text) : fromBase64(file.base64);
         files.set(path, { bytes, sha256: await sha256(bytes) });
       }
+      // The merged set is a version like any other: checked whole, and admitted (after the review).
+      const entry = args.entry ?? current.entry;
+      const manifest = Object.fromEntries(
+        [...files].map(([path, file]) => [path, { size: file.bytes.length }]),
+      );
+      if (checkFileSet(manifest, { entry }).length > 0) {
+        throw new Refused("not_allowed", "That version's files don't make a page.");
+      }
+      if (options.config !== undefined) {
+        const decoder = new TextDecoder();
+        const contents = Object.fromEntries(
+          [...files].map(([path, file]) => [
+            path,
+            /\.(html?|css|m?js|json|svg|txt|md)$/u.test(path)
+              ? decoder.decode(file.bytes)
+              : file.bytes,
+          ]),
+        );
+        if (!admitFiles(options.config, contents, { entry }).ok) {
+          throw new Refused("not_allowed", "That version would not load.");
+        }
+      }
       const number = current.number + 1;
-      versions.push({ id: `ver_${number}`, number, entry: args.entry ?? current.entry, files });
+      versions.push({ id: `ver_${number}`, number, entry, files });
       return { version: `ver_${number}`, number };
     },
     assets: async (args, context) => {
@@ -315,6 +359,8 @@ export function memoryRuntime(options: MemoryRuntimeOptions = {}) {
           const asset: MemoryAsset = {
             id,
             scope,
+            artifact: artifactId,
+            trusted: args.trusted,
             name: args.name,
             type: args.type,
             size: bytes.length,
@@ -377,8 +423,27 @@ export function memoryRuntime(options: MemoryRuntimeOptions = {}) {
     },
   };
 
+  /**
+   * The services as the app's own API answers a signed-in person (the conformance cases' raw
+   * mode): who asks is the session's, never the context a page's bridge passed (which a page past
+   * the bridge could forge), and the page's rules are the stored declaration's.
+   */
+  const api = (viewer: ViewerInfo, rules?: DbRules): CapabilityHandlers => {
+    const bound: Record<string, (args: unknown, context: CallContext) => unknown> = {};
+    for (const [name, handler] of Object.entries(handlers)) {
+      bound[name] = (args, context) =>
+        (handler as (args: unknown, context: unknown) => unknown)(args, {
+          ...context,
+          viewer,
+          ...(rules === undefined ? {} : { declared: { rules } }),
+        });
+    }
+    return bound;
+  };
+
   return {
     handlers,
+    api,
     calls,
     docs,
     versions,
@@ -391,6 +456,8 @@ export function memoryRuntime(options: MemoryRuntimeOptions = {}) {
           ? null
           : {
               scope: asset.scope,
+              artifact: asset.artifact,
+              trusted: asset.trusted,
               name: asset.name,
               size: asset.size,
               sha256: asset.sha256,

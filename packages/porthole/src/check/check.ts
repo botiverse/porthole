@@ -1,3 +1,4 @@
+import type { PageDeclaration } from "../runtime/declaration.ts";
 import type { ColorScheme, PortholeConfig } from "../config/schema.ts";
 import type { InstanceRef } from "../isolation/types.ts";
 import { presets } from "../presets/presets.ts";
@@ -68,6 +69,12 @@ export interface CheckOptions {
   readonly files?: FileContents;
   /** The page a set opens at (default `index.html`). */
   readonly entry?: string;
+  /**
+   * Under a runtime (P085): what the page declares (default null: a page with none, so a
+   * declared capability is null in the check, as in a preview). Its calls are answered as a
+   * declining host answers, by a view-level viewer.
+   */
+  readonly declaration?: PageDeclaration | null;
   readonly driver: CheckDriver;
   /** Widths, px. Default: the manual's phone and desktop widths (`config.layout`). */
   readonly widths?: readonly number[];
@@ -277,6 +284,7 @@ export async function checkPage(options: CheckOptions): Promise<CheckReport> {
           content,
           scriptLines,
           ...(instance === undefined ? {} : { instance }),
+          ...(options.declaration === undefined ? {} : { declaration: options.declaration }),
           widthPx: width,
           ...(fills ? { heightPx: 700 } : {}),
           scheme,

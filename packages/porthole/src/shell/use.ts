@@ -14,12 +14,34 @@
  */
 export const USE_RUNTIME = String.raw`
   // The capability runtime (P085): porthole.use(name) -> a frozen namespace, or null.
-  let offerReady = null;
-  const offer = new Promise((resolve) => {
-    offerReady = resolve;
-  });
+  // The host's offer: undefined until the handshake says (or gives up: null). A late answer is
+  // still taken, for the calls to use after it (after the review).
+  let offered = undefined;
+  const waiting = new Set();
   runtimeOffer = (given) => {
-    offerReady(given !== null && typeof given === "object" && given.capabilities !== null && typeof given.capabilities === "object" ? given.capabilities : null);
+    const capabilities = given !== null && typeof given === "object" && given.capabilities !== null && typeof given.capabilities === "object" ? given.capabilities : null;
+    if (capabilities !== null || offered === undefined) {
+      offered = capabilities;
+    }
+    for (const wake of Array.from(waiting)) {
+      wake();
+    }
+    waiting.clear();
+  };
+  // A use waits for the handshake a few seconds at most, then is null (no host is answering).
+  const ready = () =>
+    offered !== undefined
+      ? Promise.resolve()
+      : new Promise((resolve) => {
+          waiting.add(resolve);
+          setTimeout(resolve, 3000);
+        });
+  // Framed by a page that isn't one of this frame's hosts: nothing will answer (where the engine
+  // says who framed it).
+  const framedByHost = () => {
+    const ancestors = location.ancestorOrigins;
+    // "null": the engine masks it (a no-referrer frame): unknown, not a stranger.
+    return !ancestors || ancestors.length === 0 || ancestors[0] === "null" || plan.origins.indexOf(ancestors[0]) !== -1;
   };
   const NativeBlob = typeof Blob === "function" ? Blob : null;
   const NativeArrayBuffer = ArrayBuffer;
@@ -66,7 +88,13 @@ export const USE_RUNTIME = String.raw`
   const record = (value) => (value !== null && typeof value === "object" ? value : {});
   // Watches (db.onSnapshot): by the id this frame gives each, its listener.
   const watchers = new Map();
-  let nextWatch = 1;
+  // A watch's id is this page's own, at random: a page that follows another on the same
+  // transport can't be handed its watches (after the review).
+  const watchId = () => {
+    const bytes = new Uint8Array(8);
+    crypto.getRandomValues(bytes);
+    return "w" + Array.from(bytes, (each) => each.toString(16).padStart(2, "0")).join("");
+  };
   runtimeEvent = (params) => {
     const watcher = typeof params.watch === "string" ? watchers.get(params.watch) : undefined;
     if (watcher === undefined) {
@@ -82,7 +110,7 @@ export const USE_RUNTIME = String.raw`
     if (typeof onData !== "function") {
       throw new TypeError(capability + "." + method + ": onData must be a function");
     }
-    const id = "w" + nextWatch++;
+    const id = watchId();
     watchers.set(id, { onData });
     request("porthole/call", { capability, method, args, watch: id }).catch((error) => {
       watchers.delete(id);
@@ -148,6 +176,16 @@ export const USE_RUNTIME = String.raw`
         return bytes === null ? Promise.reject(coded("not_allowed", "assets.upload takes a File, a Blob or bytes")) : bytes.then((each) => call("assets", "upload", { name, base64: base64Of(each) }));
       },
       delete: (id) => call("assets", "delete", { id: String(id) }),
+      // The address that loads an asset in this page now (P091): in a frame, under its own sealed
+      // files' address, which every engine sends; elsewhere /_blob/<id>. Never stored: it carries
+      // this page's access.
+      url: (id) => {
+        const asset = String(id);
+        if (!/^[0-9a-f]{32}$/.test(asset)) {
+          throw new TypeError("assets.url(id): an asset's id is 32 lowercase hex characters");
+        }
+        return filesBase !== null && filesBase.indexOf("/__porthole/f/") !== -1 ? filesBase + "__porthole/blob/" + asset : "/_blob/" + asset;
+      },
     },
     db: {
       get: (path) => call("db", "get", { path }),
@@ -163,11 +201,11 @@ export const USE_RUNTIME = String.raw`
   const RENAMED = { db: { watch: "onSnapshot" } };
   const namespaces = new Map();
   const use = (name) => {
-    if (window.parent === window || typeof name !== "string" || !Object.prototype.hasOwnProperty.call(METHODS, name)) {
+    if (window.parent === window || !framedByHost() || typeof name !== "string" || !Object.prototype.hasOwnProperty.call(METHODS, name)) {
       return Promise.resolve(null);
     }
-    return offer.then((offered) => {
-      const methods = offered !== null && Array.isArray(offered[name]) ? offered[name] : null;
+    return ready().then(() => {
+      const methods = offered !== undefined && offered !== null && Array.isArray(offered[name]) ? offered[name] : null;
       if (methods === null) {
         return null;
       }
@@ -177,7 +215,15 @@ export const USE_RUNTIME = String.raw`
         for (const each of methods) {
           const key = Object.prototype.hasOwnProperty.call(renamed, each) ? renamed[each] : each;
           if (typeof each === "string" && Object.prototype.hasOwnProperty.call(METHODS[name], key)) {
-            space[key] = METHODS[name][key];
+            const call = METHODS[name][key];
+            // A method whose own gates want a gesture (after the review): refused here without one.
+            const gated = Array.isArray(plan.methodActivation) && plan.methodActivation.indexOf(name + "." + each) !== -1;
+            space[key] = gated
+              ? function () {
+                  const activation = navigator.userActivation;
+                  return activation && !activation.isActive ? Promise.reject(coded("not_allowed", name + "." + key + " needs a click: call it from a button's handler")) : call.apply(null, arguments);
+                }
+              : call;
           }
         }
         namespaces.set(name, Object.freeze(space));

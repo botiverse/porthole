@@ -54,6 +54,12 @@ export interface CapabilityConfig {
    * styles (P089); `interact` doesn't.
    */
   readonly levels?: Readonly<Record<string, ViewerLevel>>;
+  /**
+   * Gates of each runtime method it serves, by name, in place of the contract's own (after the
+   * review: `artifact.publish` and `assets.delete` need a click and a yes; `assets.upload` a yes
+   * where uploaded code may run). Every one applies on top of `gates`. `[]`: none of its own.
+   */
+  readonly methodGates?: Readonly<Record<string, readonly Gate[]>>;
 }
 
 /** The declared capabilities. Absent: not available, not wired, not in the CSP, not in the manual. */

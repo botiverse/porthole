@@ -1,3 +1,4 @@
+import type { PageDeclaration } from "../runtime/declaration.ts";
 import type { ColorScheme, PortholeConfig } from "../config/schema.ts";
 import type { InstanceRef } from "../isolation/types.ts";
 
@@ -14,6 +15,8 @@ export interface CheckRunSpec {
   readonly scriptLines: readonly number[];
   /** A served config's instance (located through the check's own server), else opaque. */
   readonly instance?: InstanceRef;
+  /** Under a runtime: the page's declaration (null: none). */
+  readonly declaration?: PageDeclaration | null;
   readonly widthPx: number;
   readonly heightPx?: number;
   readonly scheme: ColorScheme;

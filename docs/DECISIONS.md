@@ -2638,7 +2638,7 @@ windows and workers cross it).
 **Revisit when** content needs to load other versions' files (a diff view: through the host), or a
 browser keeps path matching across redirects.
 
-## P083 · 2026-10-18 · A page with files in a frame carries its access in its files' path, sealed · Accepted
+## P083 · 2026-10-18 · A page with files in a frame carries its access in its files' path, sealed · Accepted; amended by P091
 
 **Decision.** Amends P025 for served pages with files. The ticket's answer is the version's entry
 page, in the shell, `no-store`, with no cookie; its plan carries the address of its files,
@@ -2734,7 +2734,7 @@ artifact's display, not one sent eleven seconds before the load, and never for a
 Porthole supports lacks the Navigation API (then `frame-src` is the wall, and a set's pages restart
 the display).
 
-## P085 · 2026-10-18 · The capability runtime: one global, `porthole.use(name)`, under a contract pinned per artifact · Accepted
+## P085 · 2026-10-18 · The capability runtime: one global, `porthole.use(name)`, under a contract pinned per artifact · Accepted; amended by P091
 
 Task #124 (contract §7): a page published as an artifact is an app, and an app needs more of its host
 than 0.6's host functions: who is viewing, its comments, a new version of itself, an asset library,
@@ -2823,7 +2823,7 @@ contract it was written against; each capability's API is a versioned `.d.ts`. 0
 version ships (its own types and table; the pins tell which pages need it), or no host serves a
 page from before 0.7 (remove `shell/legacy.ts`).
 
-## P086 · 2026-10-18 · A page declares the capabilities it uses; built-ins need no declaring; the bridge holds every path to it · Accepted
+## P086 · 2026-10-18 · A page declares the capabilities it uses; built-ins need no declaring; the bridge holds every path to it · Accepted; amended by P091
 
 **Decision.**
 - **The declaration** is `{ capabilities: { name: config }, runtime }` (`PageDeclaration`), stored by
@@ -2869,7 +2869,7 @@ Chromium, WebKit and Firefox. Negative control `runtime-declaration` (the bridge
 **Revisit when** a host needs a declaration per version rather than per artifact, or a built-in
 grows an effect the person doesn't see.
 
-## P087 · 2026-10-18 · Viewer levels decide each method's audience; the host's access says the level; a refusal is a stable code, at call time · Accepted
+## P087 · 2026-10-18 · Viewer levels decide each method's audience; the host's access says the level; a refusal is a stable code, at call time · Accepted; amended by P091
 
 **Decision.**
 - **Levels** `view < interact < admin < owner` (`VIEWER_LEVELS`): view sees and comments; interact
@@ -2915,7 +2915,7 @@ level check taken out) → that case on all three engines.
 **Revisit when** a host needs levels per resource rather than per method (then the host's `Refused`
 says it, as now), or MCP Apps standardizes a viewer identity for views.
 
-## P088 · 2026-10-18 · State the host keeps: a page publishes itself (`artifact`), and shares data (`db`); amends P023 · Accepted
+## P088 · 2026-10-18 · State the host keeps: a page publishes itself (`artifact`), and shares data (`db`); amends P023 · Accepted; amended by P091
 
 P023 dropped `readState`/`writeState`: domain mode gives a page real `localStorage`. That is one
 person's, in one browser. Task #124's pages need state that people share and the agent reads: a
@@ -2964,7 +2964,7 @@ control `db-private` (the owner check taken out of `dbAccess`) → that case on 
 **Revisit when** a host needs transactions across documents beyond a batch, field-level deletes, or
 live presence (a `room` capability).
 
-## P089 · 2026-10-18 · An artifact's asset library at `/_blob/<id>` on its own origin; scripts and styles from it only where uploads are the admins' · Accepted
+## P089 · 2026-10-18 · An artifact's asset library at `/_blob/<id>` on its own origin; scripts and styles from it only where uploads are the admins' · Accepted; amended by P091
 
 Amends P022 and P082 (a page's CSP gains a source on its own origin) and P050 (a running page's own
 loads of its assets skip the host's per-request check).
@@ -2974,10 +2974,11 @@ loads of its assets skip the host's per-request check).
   `get(id) → { scope, name, size, sha256, read() } | null`. Ids are the host's: 32 lowercase hex
   characters made at random (`ASSET_ID`). `/server` serves `/_blob/<id>` only on the origin of the
   asset's own `scope` (another origin: 404), outside every version (P081 kept the path free).
-- **Who gets it**: a page of that origin loading it (`Sec-Fetch-Site: same-origin`, not a
-  navigation: the page was let in to be there; in a frame there is no cookie, P083), or a request
-  whose cookie holds a session for an artifact of the origin, which the host's check then decides.
-  Anything else is a plain 401; never an entry (an asset is no address to sign in for).
+- **Who gets it** (as P091 made it): a request carrying an access to the asset's own artifact (a
+  session cookie, or a framed set's sealed files' address as its `Referer`; or the frame's own
+  address for it, `assets.url(id)`), which the host's check then decides. Anything else is a plain
+  401; never an entry (an asset is no address to sign in for). The first cut took a same-origin
+  `Sec-Fetch-Site` alone, which anyone outside a browser can send.
 - **How it is served**: typed by Porthole's table by its name (never the uploader's type, never
   sniffed); never as a page (a name typed HTML goes as `application/octet-stream`, a download);
   `default-src 'none'; sandbox` (an SVG or XML opened on its own runs nothing), `nosniff`,
@@ -2998,11 +2999,9 @@ loads of its assets skip the host's per-request check).
 - Files someone who interacts uploaded are shown to every viewer: images, media, fonts and data
   only, never as code (no `script-src`/`style-src` then) and never as a page; an SVG shown as an
   image runs nothing, opened on its own runs nothing (its CSP).
-- A running page's own loads skip the host's check: a revoked viewer's open page keeps loading its
-  assets by id until it is closed, as it keeps what it already loaded; outside a browser
-  `Sec-Fetch-Site` can be forged, so an asset is reachable to whoever holds its id (128 random bits,
-  shown only to those the page shows it to), as a signed CDN address is. Navigations and every other
-  request still need a session and the host's check.
+- (The first cut's: a running page's own loads skipped the host's check, and a forged
+  `Sec-Fetch-Site` reached any asset by id. P091 closed it: every load carries an access and gets
+  the host's check, revalidated each time; by id alone only in bearer mode, the host's opt-in.)
 - `connect-src` lets a page read its assets' bytes: data it could show anyway.
 
 **Why.** Large or binary media that outlives versions, and that viewers add through the page, needs
@@ -3028,7 +3027,7 @@ store); `test/runtime.test.ts` (the CSP sources; upload limits and names).
 the public suffix list (CORP becomes defense in depth), or a host needs assets shared across
 artifacts (`copy_from`: a new id in the destination).
 
-## P090 · 2026-10-18 · Comments from the page: the host's composer at the page's anchor, write-only · Accepted
+## P090 · 2026-10-18 · Comments from the page: the host's composer at the page's anchor, write-only · Accepted; amended by P091
 
 **Decision.** `comments` is a built-in (P086) host function served by a handler: `open({ name,
 label?, quote? })` (a name the page chose, ≤ 256 characters, `slide-3`, `refs/a.md#L12`; a label ≤
@@ -3049,3 +3048,97 @@ only that). Negative control `comments-result` (the bridge passes the handler's 
 case on all three engines.
 **Revisit when** a page needs to show its comment counts (then a count, through the host, never the
 words).
+
+## P091 · 2026-10-18 · The security review of 0.7.0's first cut: what each finding changed · Accepted
+
+Amends P083 (a framed set's pages that may load assets send their own origin a `Referer`), P085,
+P086, P087, P088, P089 (assets need an access) and P090. No high finding; every one is fixed
+before the release, each with its regression (`test/runtime-review.test.ts`, `test/assets.test.ts`,
+`leak/served/runtime.spec.ts`).
+
+**Decision**, by finding:
+1. **Assets need an access, then the host's check** (was: a same-origin claim alone, which `curl`
+   can send). `/_blob/<id>` is served for a request that carries an access to an artifact of the
+   origin: a session cookie (tabs; a single page's frame where the engine keeps cookies), or a
+   framed set's sealed files' address (P083) as its `Referer`. A framed set's pages, and its
+   files, now say `Referrer-Policy: same-origin` (header and the shell's `<meta>`) where the
+   config serves assets: the address goes to the page's own origin only, which already sees it in
+   every file request. Measured: WebKit sends a cross-site frame's same-origin requests only the
+   origin, so every page also has `assets.url(id)`, the address that loads an asset in this page
+   now: `<sealed base>__porthole/blob/<id>` in a frame (the access in the path, as P083's files),
+   `/_blob/<id>` elsewhere; never stored (the manual and the `.d.ts` say so). The store is asked
+   with the access (`AssetStore.get(id, access)`), an asset names its artifact
+   (`StoredAsset.artifact`) and is served only to an access for that artifact (a session for B no
+   longer opens A's asset on a shared scope), after the host's check; `private, no-cache` with its
+   sha256 ETag, so a removal or a revocation holds at the next load. By id alone only in bearer
+   mode, an explicit opt-in (`AssetStore.bearer`). Only `/_blob/` and 32 hex characters is an
+   asset; any other path there is a clean address, as in 0.6.
+2. **db checks are linear and bounded, cheap ones first**: no object reached twice (structured
+   clone keeps shared references: 31 objects were 2^31 nodes), a node budget (100,000 a document,
+   one for a whole batch), a `where` operand's 1,000 nodes and 16 KiB; and for the runtime's own
+   host functions the method's level and the host function's rate come before their arguments are
+   read (`precheck`).
+3. **Gates per method** (`RuntimeMethod.gates`, `CapabilityConfig.methodGates`, `callGates`): what
+   changes the artifact for everyone, `artifact.publish` and `assets.delete`, needs a gesture and a
+   confirmation by default; `assets.upload` a confirmation where uploaded code may run. The shell
+   refuses those methods without a gesture (`ShellPlan.methodActivation`), the React dialog words
+   them, and the manual says so per method, with "show rows with textContent, never innerHTML".
+4. **A batch is its writes, a watch its read**: a batch needs the highest level of its writes'
+   methods, a watch that of `get` (a document) or `query` (a collection).
+5. **db never tells a page the viewer's id**: the bridge says `data/users/me` for every path in the
+   viewer's own tree, in answers and in watches (`withMe`).
+6. **No viewer is never a way past a level**: under a runtime, a display without a viewer is
+   refused anything above view; a viewer that doesn't parse is the host's error (`locateServed`,
+   `httpLocator`, a mount), never no viewer.
+7. **Rules are the page's own names**: `Object.hasOwn` in `dbAccess`, and a checked declaration is
+   copied into objects without a prototype (a collection named `constructor` is no rule).
+8. **A new page follows nothing the last one did**: another page of the set (P084) or a repeat
+   handshake ends the frame's watches and live subscriptions; the shell's watch ids are random.
+9. **What an upload may become**: where people who interact upload, code-typed names (scripts,
+   stylesheets, WebAssembly) are refused; an upload is `trusted` only when an admin made it where
+   uploaded code may run (the bridge sets it, the store keeps it), and a code-typed asset is
+   served as code only when trusted and the artifact's config still lets uploaded code run;
+   anything else goes as a download, whatever the CSP opens. The manual no longer says "never run".
+10. **Under a runtime a mount says what its page declared**: `MountOptions.declaration` is
+    required; `null` is the host's word for a page published before 0.7 (0.6's surface). A
+    declaration without a runtime is an error. `checkPage({ declaration })` takes one too.
+11. **The low ones**: a viewer's id is one db path segment, never `me`; a prefix in `data`'s names
+    vouches for no name with a dot segment, an escape or a backslash; a published `__proto__` path
+    is a path (objects without a prototype); `__proto__`, `constructor` and `prototype` are no
+    document fields; a batch names each path once; a store under `data` folds no case; the
+    reference store holds every write to an existing document to its version, checks a batch in
+    order, caps a collection watch as a query, and checks and admits a merged version.
+12. **Back compatibility**: `capabilities` is a built-in guide topic only under a runtime (a 0.6
+    config's own topic of that name stays its own).
+- Also: a version is shown with what it and the artifact both declare
+  (`intersectDeclarations(version's, current)`: hosts store a declaration per version);
+  `porthole.use` resolves null at once where the frame's ancestor isn't one of its hosts, waits for
+  the handshake 3 s at most, and takes a late offer for the calls after it; `pseudonymFor(secret,
+  artifact, person)` gives a person an id per artifact; `defineRuntimeConformance({ api })` runs
+  the past-the-bridge cases against the app's own API with a forged context (a viewer claiming to
+  be the owner, no rules), and the docs say never to trust `context.viewer` or `context.declared`
+  for what data allows.
+- **Harness**: a control whose text is gone stops the run before anything is served
+  (`checkWeakenings`), the harness's response controls compose, `blob-trusted` is new (an
+  untrusted asset served as the script its name says), and `scripts/controls.ts`
+  (`pnpm --filter @botiverse/porthole test:controls`, a CI job per engine) runs each control and
+  requires it to fail exactly its probes on every engine, and nothing else.
+
+**Threat it re-opens.** A framed set's pages tell their own origin their sealed address in
+`Referer` (P083 sent none): only to that origin, the content server that served it (it sees the
+address in every file request already); nothing goes to another origin (`same-origin`), and pages
+whose config serves no assets still send none.
+**Why.** Each finding was a way past a wall the entries above claimed: a forgeable header in place
+of an access, a validation step that cost exponential time on the host's main thread, levels a
+batch or a missing viewer skipped, an id leaked through paths, a prototype's names read as rules,
+a page's updates heard by the next page, code a viewer uploaded made runnable by a later config.
+**Rejected.**
+- A partitioned cookie for `/_blob/`: WebKit keeps none in a cross-site frame (P025).
+- Rewriting `/_blob/` addresses in the page (the shell or the server): CSS, scripts and markup
+  build them in more ways than a rewrite can see; `assets.url` is one call that always works.
+- Serving assets under the sealed address only: a page's stored HTML and data name `/_blob/<id>`,
+  which tabs and most frames load as they are.
+- `user-activation` on uploads: a file picker's change event isn't a gesture in every engine.
+**Revisit when** WebKit sends a cross-site frame's same-origin requests their full `Referer`, or
+keeps partitioned cookies there (then `/_blob/<id>` loads everywhere and `assets.url` is a
+convenience); or a host needs per-collection levels beyond a batch's.

@@ -786,9 +786,16 @@ if (db) {
   (`Grant.level`, `Grant.user` → `FrameLocation.viewer`; or `mount({ viewer })`); below it is
   `forbidden`, before any handler. Without a viewer 0.6's functions run as before; the runtime's own
   are refused.
-- **Order in the bridge**: declared in the config → declared by the page → arguments (shape,
-  limits: `too_large`) → the viewer's level, `data`'s names, `db`'s paths and rules → mute → rate →
-  gesture → consent → confirm → the handler (context: `viewer`, `declared`, `instance`).
+- **Order in the bridge**: declared in the config → declared by the page → for the runtime's own,
+  the method's level and the host function's rate before the arguments are read → arguments
+  (shape, bounded walks, limits: `too_large`) → the call's level (a batch's writes', a watch's
+  read's), `data`'s names, `db`'s paths and rules → mute → rates → gesture → consent → confirm
+  (the host function's gates and the method's own: `artifact.publish` and `assets.delete` a click
+  and a yes, an upload whose code may run a yes) → the handler (context: `viewer`, `declared`,
+  `instance`) → `db` answers with `data/users/me` (P091).
+- **Mounts under a runtime** say what the page declared (`declaration`, or `null` for a page from
+  before 0.7); an older version is mounted with `intersectDeclarations(version's, current)`. A
+  display without a viewer gets nothing above view; a viewer that doesn't parse is an error.
 - **Wire**: the roster in `ui/initialize`'s `hostCapabilities.experimental["porthole/runtime"]`;
   `porthole/call { capability, method, args, watch? }` → `{ value }` or an error with
   `data: { code, message }`; `porthole/event { watch, data }`; `porthole/unwatch { watch }`.
@@ -797,7 +804,14 @@ if (db) {
   private, the page's rules: `dbAccess`, which the host applies again), `artifact` (current version;
   a base-checked patch), `assets` (an `AssetStore` `/server` serves at `/_blob/<id>`), `comments`
   (the host's composer; content hears a boolean). `defineRuntimeConformance` checks an app's real
-  handlers; `leak/runtime/memory.ts` is the reference, in memory.
+  handlers, and with `api` its own API past the bridge with a forged context (never trust
+  `context.viewer` or `context.declared`); `leak/runtime/memory.ts` is the reference, in memory.
+  `pseudonymFor(secret, artifact, person)` gives a person an id per artifact.
+- **Assets on the content origin** (P089, P091): for an access to the asset's artifact (a session
+  cookie, a framed set's sealed address as `Referer`, or `assets.url(id)`'s
+  `<sealed base>__porthole/blob/<id>`), then the host's check, then `AssetStore.get(id, access)`;
+  revalidated (`no-cache`, ETag); code-typed only where trusted and the config lets uploaded code
+  run; by id alone only in bearer mode.
 - **The manual**: under a runtime, topic `interactive` lists `porthole.use`'s methods with levels and
   gates, and topic `capabilities` teaches declaring, levels, errors, where state goes, and each
   offered capability's `.d.ts`. 0.6's globals stay defined (`shell/legacy.ts`) and untaught.
@@ -920,7 +934,7 @@ for that to lapse and click with raw input.
 | The runtime: levels (P087) | each method's least level against the host's viewer, before any handler | `test/runtime.test.ts`, `test/assets.test.ts` (the grant's level to the bridge); `leak/served/runtime.spec.ts`: "a method above the viewer's level: forbidden, its handler never asked" | `runtime-level` → that case (all three) |
 | The runtime: per-user data (P088) | `dbAccess`: `me` is the host's id; another's `data/users/<id>`, or anything else under `data`, refused at every level, in the bridge and the host | `test/runtime.test.ts`; `leak/served/runtime.spec.ts`: "a person's own data is theirs" | `db-private` → that case (all three) |
 | The runtime: comments write-only (P090) | the bridge answers `comments` with `true` only for a handler's `true`; no read method | `test/runtime.test.ts`; `leak/served/runtime.spec.ts`: "comments are write-only" | `comments-result` → that case (all three) |
-| The asset library (P089) | `/_blob/<id>` on its scope's origin: own-origin loads or an artifact session (the host's check), typed by name, never a page, inert CSP, CORP, immutable; the page's CSP opens `<origin>/_blob/` for images, media, fonts and data, for scripts and styles only where uploads are the admins' | `test/assets.test.ts`; `leak/served/runtime.spec.ts`: an upload loads in its frame; a set's page loads it; "its scripts run only where uploads are the admins'"; "an asset opened on its own runs nothing" | `blob-script` → the scripts case; `blob-inert` → the opened-on-its-own case (all three) |
+| The asset library (P089, P091) | `/_blob/<id>` (or the frame's `<sealed base>__porthole/blob/<id>`) for an access to its artifact (a cookie, a sealed `Referer`, the sealed path), then the host's check, the store asked with it; typed by name, never a page, code only where trusted and uploaded code may run, inert CSP, CORP, revalidated; the page's CSP opens `<origin>/_blob/` for images, media, fonts and data, for scripts and styles only where uploads are the admins' | `test/assets.test.ts` (a forged same-origin claim: 401; another artifact's session: 404; revoked: 403; bearer mode); `leak/served/runtime.spec.ts`: an upload loads in its frame; a set's page loads it; static `/_blob/` in a frame by `Referer` (Chromium, Firefox; WebKit sends only the origin: measured); "a script asset runs as code only if an admin uploaded it"; "scripts load from /_blob/ only where uploads are the admins'"; "an asset reaches only its own artifact's pages"; "an asset opened on its own runs nothing" | `blob-trusted` → the trusted-code case; `blob-script,blob-trusted` (two walls) → that case and the tab's CSP case; `blob-inert` → the opened-on-its-own case (all three; `scripts/controls.ts`) |
 | Workers (P044, P045) | no Node module in `/server`; D1 tickets taken by one `DELETE … RETURNING` | `test/workers.test.ts` (workerd, no `nodejs_compat`, real D1: once per ticket, a race, anonymous, a revocation, flat names, reserved namespaces) | — |
 
 ### The clipboard, and copy buttons

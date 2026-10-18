@@ -2,7 +2,13 @@ import { MAX_COPY_CHARS, capabilitySpec, type CapabilityName } from "../config/c
 import type { PortholeConfig } from "../config/schema.ts";
 import { declaredCapabilities, effectiveGates } from "../compile/policy.ts";
 import { MCP_APPS_PROTOCOL_VERSION } from "../protocol/mcp-apps.ts";
-import { RUNTIME_GLOBAL, type RuntimeVersion } from "../runtime/contract.ts";
+import {
+  RUNTIME_GLOBAL,
+  methodGates,
+  offeredCapabilities,
+  runtimeCapability,
+  type RuntimeVersion,
+} from "../runtime/contract.ts";
 
 /**
  * What the shell wires, derived from the config: the JSON the shell's runtime is given. The
@@ -32,6 +38,11 @@ export interface ShellPlan {
   readonly legacyGlobals: readonly string[];
   /** The capability runtime's contract version, where the config has one (`porthole.use`). */
   readonly runtime?: RuntimeVersion;
+  /**
+   * The runtime methods whose own gates want a gesture (`capability.method`: `artifact.publish`,
+   * `assets.delete`): the shell refuses them without one, as it does a host function's.
+   */
+  readonly methodActivation?: readonly string[];
   /** The theme variables the shell applies; it drops any other name the host sends. */
   readonly themeVariables: readonly string[];
   /** The window event fired after a theme change. */
@@ -73,7 +84,16 @@ export function shellPlan(config: PortholeConfig): ShellPlan | null {
     capabilities,
     globals: runtime === undefined ? legacy : [RUNTIME_GLOBAL],
     legacyGlobals: runtime === undefined ? [] : legacy,
-    ...(runtime === undefined ? {} : { runtime }),
+    ...(runtime === undefined
+      ? {}
+      : {
+          runtime,
+          methodActivation: offeredCapabilities(config).flatMap((family) =>
+            Object.keys(runtimeCapability(family).methods)
+              .filter((method) => methodGates(config, family, method).includes("user-activation"))
+              .map((method) => `${family}.${method}`),
+          ),
+        }),
     themeVariables: Object.keys(config.theme.variables),
     themeEvent: config.theme.event,
     themeDocuments: config.theme.documents ?? "declared",

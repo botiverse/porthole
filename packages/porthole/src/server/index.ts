@@ -94,6 +94,7 @@ export {
   type FileSetProblem,
 } from "../files/paths.ts";
 export { fileTypeOf, type FileRole, type FileType } from "../files/types.ts";
+export { pseudonymFor } from "./pseudonym.ts";
 export type {
   Access,
   ArtifactStore,

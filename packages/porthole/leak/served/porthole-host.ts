@@ -46,6 +46,9 @@ export interface MountExtras {
   readonly runtime?: {
     readonly key: string;
     readonly scope: string;
+    /** The artifact the services are for (its assets' owner). */
+    readonly artifact?: string;
+    /** The page's declaration; `null` for a page from before 0.7 (required under a runtime). */
     readonly declaration?: unknown;
     readonly viewer?: { readonly level: string; readonly id?: string; readonly name?: string };
     readonly uploadLevel?: string;

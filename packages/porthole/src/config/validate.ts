@@ -329,7 +329,29 @@ export function validateConfig(input: unknown): PortholeConfig {
       fail(path, `is not a capability (${CAPABILITY_NAMES.join(", ")})`);
     }
     const capability = object(value, path);
-    only(capability, ["gates", "connect", "resource", "guide", "levels"], path);
+    only(capability, ["gates", "connect", "resource", "guide", "levels", "methodGates"], path);
+    if (capability.methodGates !== undefined) {
+      const family = familyOf(name as CapabilityName);
+      for (const [method, gates] of Object.entries(
+        object(capability.methodGates, `${path}.methodGates`),
+      )) {
+        const methods: Readonly<Record<string, RuntimeMethod>> | undefined =
+          family === null ? undefined : runtimeCapability(family.name).methods;
+        if (
+          methods === undefined ||
+          !Object.hasOwn(methods, method) ||
+          methods[method]?.serves !== name
+        ) {
+          fail(`${path}.methodGates.${method}`, `is not a runtime method ${name} serves`);
+        }
+        if (!Array.isArray(gates)) {
+          fail(`${path}.methodGates.${method}`, "must be an array of gates");
+        }
+        (gates as unknown[]).forEach((each, index) =>
+          gate(each, `${path}.methodGates.${method}[${index}]`),
+        );
+      }
+    }
     if (capability.levels !== undefined) {
       const levels = object(capability.levels, `${path}.levels`);
       const family = familyOf(name as CapabilityName);
@@ -548,7 +570,9 @@ export function validateConfig(input: unknown): PortholeConfig {
       const path = `config.guide.topics.${name}`;
       if (
         !/^[a-z][a-z0-9-]{0,31}$/u.test(name) ||
-        (BUILT_IN_TOPICS as readonly string[]).includes(name)
+        // `capabilities` is built in only under the runtime (P085): a 0.6 config's own stays.
+        ((BUILT_IN_TOPICS as readonly string[]).includes(name) &&
+          (name !== "capabilities" || config.runtime !== undefined))
       ) {
         fail(path, "must be a new topic name (lowercase), not a built-in one");
       }

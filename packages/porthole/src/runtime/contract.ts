@@ -1,6 +1,6 @@
-import type { CapabilityName } from "../config/capabilities.ts";
+import type { CapabilityName, Gate } from "../config/capabilities.ts";
 import type { PortholeConfig } from "../config/schema.ts";
-import { higher, type ViewerLevel } from "./levels.ts";
+import { atLeast, higher, type ViewerLevel } from "./levels.ts";
 
 /**
  * The capability runtime's contract (P085): what a page reaches through its one global,
@@ -49,6 +49,12 @@ export interface RuntimeMethod {
   readonly floor: ViewerLevel;
   /** A subscription: the content passes callbacks and gets a function that stops it. */
   readonly watch?: true;
+  /**
+   * Gates of its own, over its host function's (after the review, P088): what changes the
+   * artifact for everyone needs the person's click and their yes. A host's config may replace
+   * them (`CapabilityConfig.methodGates`).
+   */
+  readonly gates?: readonly Gate[];
 }
 
 export interface RuntimeCapability {
@@ -63,13 +69,21 @@ export interface RuntimeCapability {
 const method = (
   serves: CapabilityName,
   level: ViewerLevel,
-  extra: { readonly floor?: ViewerLevel; readonly watch?: true } = {},
+  extra: {
+    readonly floor?: ViewerLevel;
+    readonly watch?: true;
+    readonly gates?: readonly Gate[];
+  } = {},
 ): RuntimeMethod => ({
   serves,
   level,
   floor: extra.floor ?? "view",
   ...(extra.watch === undefined ? {} : { watch: true }),
+  ...(extra.gates === undefined ? {} : { gates: extra.gates }),
 });
+
+/** What changes the artifact for everyone: the person's click, then their yes. */
+const CHANGES: readonly Gate[] = ["user-activation", "confirm"];
 
 /** Contract 1's capabilities, by the name a page passes to `use`. */
 export const RUNTIME_CAPABILITIES = {
@@ -101,7 +115,7 @@ export const RUNTIME_CAPABILITIES = {
     builtIn: false,
     methods: {
       get: method("artifact", "view"),
-      publish: method("artifact", "admin", { floor: "admin" }),
+      publish: method("artifact", "admin", { floor: "admin", gates: CHANGES }),
     },
   },
   /** The artifact's asset library, served at `/_blob/<id>` (P089). */
@@ -109,8 +123,11 @@ export const RUNTIME_CAPABILITIES = {
     builtIn: false,
     methods: {
       list: method("assets", "view"),
+      // In the frame alone (P091): the address that loads an asset in this page now.
+      url: method("assets", "view"),
+      // An upload's own gate depends on whether what is uploaded may run (`methodGates`).
       upload: method("assets", "admin", { floor: "interact" }),
-      delete: method("assets", "admin", { floor: "admin" }),
+      delete: method("assets", "admin", { floor: "admin", gates: CHANGES }),
     },
   },
   /** The artifact's shared document store (P088). */
@@ -185,6 +202,39 @@ export function methodOf(serves: CapabilityName, args: unknown): string | null {
   const op =
     args !== null && typeof args === "object" ? (args as { readonly op?: unknown }).op : undefined;
   return typeof op === "string" && family.methods.includes(op) ? op : null;
+}
+
+/**
+ * Whether a config's asset uploads are its admins' alone (`assets.upload` at admin or above,
+ * P089): only then may scripts and styles an admin uploaded run from the library.
+ */
+export function assetCodeRuns(config: PortholeConfig): boolean {
+  const level = methodLevel(config, "assets", "upload");
+  return level !== null && atLeast(level, "admin");
+}
+
+/**
+ * A runtime method's own gates (after the review): the config's (`CapabilityConfig.methodGates`),
+ * else the contract's; an upload where uploaded code may run is confirmed (P089).
+ */
+export function methodGates(
+  config: PortholeConfig,
+  family: RuntimeCapabilityName,
+  name: string,
+): readonly Gate[] {
+  const methods: Readonly<Record<string, RuntimeMethod>> = runtimeCapability(family).methods;
+  const spec = Object.hasOwn(methods, name) ? methods[name] : undefined;
+  if (spec === undefined) {
+    return [];
+  }
+  const own = config.capabilities[spec.serves]?.methodGates;
+  if (own !== undefined && Object.hasOwn(own, name)) {
+    return own[name] ?? [];
+  }
+  if (family === "assets" && name === "upload") {
+    return assetCodeRuns(config) ? ["confirm"] : [];
+  }
+  return spec.gates ?? [];
 }
 
 /** What a page declared for one capability, as far as levels go (P086). */

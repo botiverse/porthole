@@ -72,8 +72,9 @@ export type Grant = (
   readonly level?: ViewerLevel;
   /**
    * Who the viewer is to pages that declare `user` (P087): the host's public id for them (whose
-   * per-user data, `data/users/<id>`, the page reaches) and a name. Never `viewer`, unless the
-   * host means it to be seen. Only with `level`.
+   * per-user data, `data/users/<id>`, the page reaches: one path segment, never `me`) and a name.
+   * Never `viewer`, unless the host means it to be seen; `pseudonymFor(secret, artifact, person)`
+   * gives an id per artifact, so pages can't link a person across artifacts. Only with `level`.
    */
   readonly user?: { readonly id: string; readonly name?: string };
 };
@@ -154,6 +155,17 @@ export type StoredVersion = { readonly html: string } | StoredFiles;
 export interface StoredAsset {
   /** The storage scope whose origin serves it (the artifact's). */
   readonly scope: string;
+  /**
+   * The artifact whose library holds it (`ServedDocument`'s `id`, after the review): served only
+   * to an access for that artifact, never another one sharing the scope.
+   */
+  readonly artifact: string;
+  /**
+   * Whether it may run as code (P089, after the review): a script, stylesheet or WebAssembly an
+   * admin uploaded where uploaded code may run (the upload's `trusted`). Any other code-typed
+   * asset is served as a download, whatever the config says now.
+   */
+  readonly trusted?: boolean;
   /** Its file name (its extension types it). */
   readonly name: string;
   readonly size: number;
@@ -168,7 +180,17 @@ export interface StoredAsset {
  * shown it; Porthole serves one only on its own scope's origin.
  */
 export interface AssetStore {
-  get(id: string): Promise<StoredAsset | null>;
+  /**
+   * The asset, for `access` (who asks, for which artifact: the host decides, and its check runs
+   * after); null if it isn't there for them. `access` is null only in bearer mode.
+   */
+  get(id: string, access: Access | null): Promise<StoredAsset | null>;
+  /**
+   * Bearer mode, an explicit opt-in (after the review): serve an asset to anyone holding its id,
+   * with no access and no host check (a public artifact's library). Its id is then a capability:
+   * whoever saw it keeps it until the asset is removed.
+   */
+  readonly bearer?: boolean;
 }
 
 /** Stored pages (artifact mode). Versions are immutable: a new page is a new version. */
@@ -244,9 +266,10 @@ export interface ServerOptions {
   readonly configs: Readonly<Record<string, PortholeConfig>>;
   readonly artifacts?: ArtifactStore;
   /**
-   * Artifacts' asset libraries (P089): `/_blob/<id>` on each content origin, for a page that
-   * loads it (its own origin's request) or a tab with a session for an artifact of that origin.
-   * Absent: `/_blob/` names nothing.
+   * Artifacts' asset libraries (P089): `/_blob/<id>` on each content origin, for a request that
+   * carries an access to the asset's own artifact (a frame's sealed files' address as its
+   * `Referer`, or a session cookie), after the host's check. Absent: `/_blob/` is a clean address
+   * like any other.
    */
   readonly assets?: AssetStore;
   readonly tickets?: TicketStore;

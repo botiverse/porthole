@@ -46,8 +46,19 @@ provides the services behind the handlers. Additive for 0.6 hosts: a config with
 - **Conformance**: `defineRuntimeConformance` (`/conformance`, no browser) runs an app's real
   handlers through the bridge and past it; `leak/runtime/memory.ts` is the in-memory reference.
 - **Leak suite**: `leak/served/runtime.spec.ts` on Chromium, WebKit and Firefox, with negative
-  controls `runtime-declaration`, `runtime-level`, `db-private`, `comments-result`, `blob-script`,
-  `blob-inert`.
+  controls `runtime-declaration`, `runtime-level`, `db-private`, `comments-result`, `blob-trusted`,
+  `blob-script,blob-trusted`, `blob-inert`, each required to fail exactly its probes
+  (`test:controls`, a CI job per engine).
+- **From the security review of the first cut** (P091): assets need an access to their own artifact
+  and the host's check (`AssetStore.get(id, access)`, `StoredAsset.artifact`, `trusted`,
+  `bearer`; `assets.url(id)`; revalidated), db checks bounded and cheap ones first, gates per
+  method (`artifact.publish`, `assets.delete`: a click and a yes; `methodGates`), a batch at its
+  writes' levels and a watch at its read's, `data/users/me` in answers, no viewer refused above
+  view, own-property rules, watches ended on a new page, code-typed uploads refused where people
+  who interact upload, `MountOptions.declaration` required under a runtime (`null` for a page from
+  before 0.7), viewer ids one path segment, `intersectDeclarations`, `pseudonymFor`,
+  `defineRuntimeConformance({ api })`, `checkPage({ declaration })`, and a 0.6 config's own
+  `capabilities` topic kept.
 
 ## 0.6.0
 

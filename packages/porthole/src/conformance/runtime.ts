@@ -9,7 +9,7 @@ import { checkDeclaration, type CapabilityDeclaration } from "../runtime/declara
 import type { DbSnapshot } from "../runtime/db.ts";
 import type { ViewerInfo } from "../runtime/levels.ts";
 import { ASSET_ID, assetUrl, type AssetInfo } from "../runtime/requests.ts";
-import type { AssetStore } from "../server/types.ts";
+import type { Access, AssetStore } from "../server/types.ts";
 
 /**
  * The capability runtime's host conformance (P085–P090): cases an app runs against its own
@@ -44,6 +44,18 @@ export interface RuntimeConformanceOptions {
   readonly instance?: InstanceRef;
   /** The asset store `/server` serves from (`ServerOptions.assets`), to see an upload served. */
   readonly assets?: (handlers: CapabilityHandlers) => AssetStore;
+  /**
+   * The app's own API for the same artifact, signed in as `viewer` with that person's real session
+   * (after the review): the raw mode. The cases that go past the bridge then call it with a
+   * forged context (a viewer claiming to be the owner, no rules), as a page that got past the
+   * bridge could, so an API that trusts `context.viewer` or `context.declared` fails them. Without
+   * it they call `handlers` with an honest context, which can't catch that: never trust
+   * `context.viewer` or `context.declared` for what your data allows.
+   */
+  readonly api?: (
+    handlers: CapabilityHandlers,
+    viewer: ViewerInfo,
+  ) => CapabilityHandlers | Promise<CapabilityHandlers>;
   /** The page's db rules the cases declare (default: `config` writable by admins only). */
   readonly rules?: Readonly<
     Record<string, { read?: ViewerInfo["level"]; write?: ViewerInfo["level"] }>
@@ -126,7 +138,8 @@ export function defineRuntimeConformance(
     args: unknown,
     viewer: ViewerInfo,
   ): Promise<{ ok: true; value: unknown } | { ok: false; code: string | null }> => {
-    const handler = handlers[capability] as
+    const raw = options.api === undefined ? null : await options.api(handlers, viewer);
+    const handler = (raw ?? handlers)[capability] as
       | ((args: unknown, context: unknown) => unknown)
       | undefined;
     if (handler === undefined) {
@@ -137,14 +150,30 @@ export function defineRuntimeConformance(
         displayId: display.id,
         title: display.title,
         capability,
-        viewer,
         ...(options.instance === undefined ? {} : { instance: options.instance }),
-        ...(capability === "db" ? { declared: { rules } } : {}),
+        // The raw mode forges what a page past the bridge would claim; else the honest context.
+        ...(raw === null
+          ? { viewer, ...(capability === "db" ? { declared: { rules } } : {}) }
+          : {
+              viewer: { level: "owner", ...(viewer.id === undefined ? {} : { id: viewer.id }) },
+              declared: {},
+            }),
       });
       return { ok: true, value };
     } catch (error) {
       return { ok: false, code: isRefused(error) ? error.code : null };
     }
+  };
+
+  /** An access for the instance, as `/server` asks the store with it. */
+  const access: Access = {
+    instance: options.instance ?? {
+      scope: "conformance",
+      document: { kind: "artifact", id: "page", version: "1" },
+    },
+    viewer: "conformance",
+    origin: "https://conformance.invalid",
+    expiresAt: Date.now() + 3_600_000,
   };
 
   const cases: RuntimeCase[] = [];
@@ -318,6 +347,26 @@ export function defineRuntimeConformance(
         expect(!listed.ok, "and their collections");
       },
     );
+    add("db: a person's own paths come back as data/users/me, never their id", async (handlers) => {
+      const mine = as(handlers, viewers.interact);
+      ok(await mine("db", { op: "set", path: "data/users/me/prefs", data: { n: 1 } }), "set own");
+      const got = ok(
+        await mine("db", { op: "get", path: "data/users/me/prefs" }),
+        "get",
+      ) as DbSnapshot;
+      const listed = ok(
+        await mine("db", { op: "query", collection: "data/users/me" }),
+        "query",
+      ) as {
+        docs: DbSnapshot[];
+      };
+      const said = JSON.stringify([got, listed]);
+      expect(got.path === "data/users/me/prefs", `a snapshot says me: ${got.path}`);
+      expect(
+        viewers.interact.id === undefined || !said.includes(viewers.interact.id),
+        "no answer names the viewer's id",
+      );
+    });
     add("db: the page's rules hold, at the bridge and in the app", async (handlers) => {
       expect(
         codeOf(
@@ -429,6 +478,22 @@ export function defineRuntimeConformance(
     );
   }
 
+  if (config.capabilities.artifact !== undefined) {
+    add("artifact: a publish whose merged files make no page is refused", async (handlers) => {
+      const call = as(handlers, viewers.admin);
+      const current = ok(await call("artifact", { op: "get" }), "get") as {
+        version: string;
+        entry: string;
+      };
+      const refused = await call("artifact", {
+        op: "publish",
+        base: current.version,
+        files: { [current.entry]: null },
+      });
+      expect(!refused.ok, "a publish that removes the entry is refused (check the merged set)");
+    });
+  }
+
   if (config.capabilities.assets !== undefined) {
     add("assets: an upload is listed, served by its id, and removed", async (handlers) => {
       const call = as(handlers, viewers.admin);
@@ -453,7 +518,7 @@ export function defineRuntimeConformance(
       );
       const store = options.assets?.(handlers);
       if (store !== undefined) {
-        const stored = await store.get(asset.id);
+        const stored = await store.get(asset.id, access);
         expect(stored !== null && stored.size === 14, "the server's store has it");
         const body = await stored?.read();
         const length =
@@ -468,7 +533,7 @@ export function defineRuntimeConformance(
       const after = ok(await call("assets", { op: "list" }), "list") as AssetInfo[];
       expect(!after.some((each) => each.id === asset.id), "a removed asset isn't listed");
       if (store !== undefined) {
-        expect((await store.get(asset.id)) === null, "nor served");
+        expect((await store.get(asset.id, access)) === null, "nor served");
       }
     });
     add("assets: removing is the admins', even past the bridge", async (handlers) => {

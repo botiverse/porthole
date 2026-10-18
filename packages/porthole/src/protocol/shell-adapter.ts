@@ -149,10 +149,20 @@ export const shellAdapter: ProtocolAdapter<ShellConnection> = {
       transport.send({ jsonrpc: "2.0", method, params });
 
     // Live data (P079): reads, subscriptions and the host's updates, through the bridge.
-    const live = liveData(bridge, (uri) => notify(M.resourceUpdated, { uri }));
+    let live = liveData(bridge, (uri) => notify(M.resourceUpdated, { uri }));
     // The capability runtime (P085), where the config has one: its calls and watches.
     const runtime = session.compiled.config.runtime;
-    const calls = runtimeCalls(bridge, notify);
+    let calls = runtimeCalls(bridge, notify);
+    // A new page on the same transport (another of the set's pages, P084; or a reload that says
+    // hello again) starts with nothing followed: the last page's watches and subscriptions end,
+    // so it never hears their updates or their refusals (after the review).
+    let greeted = false;
+    const forget = () => {
+      calls.close();
+      calls = runtimeCalls(bridge, notify);
+      live.close();
+      live = liveData(bridge, (uri) => notify(M.resourceUpdated, { uri }));
+    };
 
     const flush = () => {
       if (!initialized || closed || content === null || sentWhole) {
@@ -172,6 +182,10 @@ export const shellAdapter: ProtocolAdapter<ShellConnection> = {
     const onRequest = async (request: JsonRpcRequest) => {
       const params = request.params ?? {};
       if (request.method === M.initialize) {
+        if (greeted) {
+          forget();
+        }
+        greeted = true;
         respond(request.id, {
           result: {
             protocolVersion: MCP_APPS_PROTOCOL_VERSION,
@@ -283,7 +297,9 @@ export const shellAdapter: ProtocolAdapter<ShellConnection> = {
           calls.unwatch(params);
           return;
         case NAVIGATING_METHOD:
-          // Another page of the set opens in the frame (P084): its next load is that page.
+          // Another page of the set opens in the frame (P084): its next load is that page, which
+          // follows nothing yet.
+          forget();
           session.emit({ type: "navigating" });
           return;
         case M.requestTeardown:

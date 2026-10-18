@@ -157,8 +157,11 @@ export interface ContentHostOptions<V> {
   readonly authorizeTtlSeconds?: number;
   /** Policy 4, source: a stored page by id and version (artifact documents). */
   readonly source?: ArtifactStore["get"];
-  /** Policy 5, assets (P089): an artifact's asset library by id, served at `/_blob/<id>`. */
-  readonly assets?: AssetStore["get"];
+  /**
+   * Policy 5, assets (P089): an artifact's asset library by id, served at `/_blob/<id>` to an
+   * access for its artifact; or the store itself, with `bearer` (an explicit opt-in).
+   */
+  readonly assets?: AssetStore["get"] | AssetStore;
   readonly upstream?: Upstream;
   /**
    * The health gate, and with it the opaque fallback (P066): the kit checks the content domain
@@ -530,7 +533,12 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
         hostOrigins: options.appOrigins,
         configs,
         ...(options.source === undefined ? {} : { artifacts: { get: options.source } }),
-        ...(options.assets === undefined ? {} : { assets: { get: options.assets } }),
+        ...(options.assets === undefined
+          ? {}
+          : {
+              assets:
+                typeof options.assets === "function" ? { get: options.assets } : options.assets,
+            }),
         ...(options.tickets === undefined ? {} : { tickets: options.tickets }),
         ...(options.upstream === undefined ? {} : { upstream: options.upstream }),
         ...(options.entry === undefined

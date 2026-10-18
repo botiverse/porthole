@@ -36,8 +36,9 @@ interface PortholeArtifact {
   /** The current version and its files (fetch a file by its relative path). Level: view. */
   get(): Promise<PortholeArtifactVersion>;
   /**
-   * Publishes a new version of this artifact. The page can't change what it declares. On
-   * conflict: get() again, merge, publish again. Level: admin.
+   * Publishes a new version of this artifact, from a click; the app asks the person first. The
+   * page can't change what it declares. On conflict: get() again, merge, publish again. Level:
+   * admin.
    */
   publish(
     change: PortholeArtifactPublish,

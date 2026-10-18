@@ -507,10 +507,11 @@ export function generateGuide(config: PortholeConfig, topics?: readonly GuideTop
   const own = config.guide.topics ?? {};
   return (topics ?? builtInTopics(config))
     .map((topic) => {
-      if (Object.hasOwn(TOPICS, topic)) {
+      // A built-in topic the config has; a 0.6 config's own `capabilities` stays its own.
+      if (Object.hasOwn(TOPICS, topic) && builtInTopics(config).includes(topic as BuiltInTopic)) {
         return TOPICS[topic as BuiltInTopic](c);
       }
-      const text = own[topic];
+      const text = Object.hasOwn(own, topic) ? own[topic] : undefined;
       if (text === undefined) {
         throw new RangeError(`No guide topic ${JSON.stringify(topic)}`);
       }

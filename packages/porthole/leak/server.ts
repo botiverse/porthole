@@ -4,7 +4,8 @@ import { createServer } from "node:http";
 import { stripTypeScriptTypes } from "node:module";
 import { build } from "esbuild";
 import path from "node:path";
-import { weaken, weakened } from "./weakenings.ts";
+import { readFileSync } from "node:fs";
+import { checkWeakenings, weaken, weakened } from "./weakenings.ts";
 
 /**
  * The leak suite's web server: the reference host page (`leak/host/`), and the package's own
@@ -13,6 +14,8 @@ import { weaken, weakened } from "./weakenings.ts";
  */
 
 const root = path.resolve(import.meta.dirname, "..");
+// A control whose text is gone stops the server before anything is served (P032, after the review).
+checkWeakenings((relative) => readFileSync(path.join(root, relative), "utf8"));
 const port = Number(process.env.PORTHOLE_LEAK_PORT ?? 8797);
 
 const TYPES: Readonly<Record<string, string>> = {

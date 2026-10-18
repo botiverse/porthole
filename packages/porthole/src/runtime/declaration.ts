@@ -9,7 +9,7 @@ import {
   type RuntimeVersion,
 } from "./contract.ts";
 import { dbRulesProblem, type DbRules } from "./db.ts";
-import { isViewerLevel, type ViewerLevel } from "./levels.ts";
+import { higher, isViewerLevel, type ViewerLevel } from "./levels.ts";
 
 /**
  * A page's declaration (P086): the capabilities it uses, by name, each with its own config,
@@ -189,7 +189,25 @@ export function checkDeclaration(given: unknown, config: PortholeConfig): PageDe
       `The declaration doesn't fit this config: ${problems.map((each) => `${each.path} ${each.message}`).join("; ")}`,
     );
   }
-  return { capabilities: given.capabilities as CapabilityDeclaration, runtime };
+  return { capabilities: copied(given.capabilities) as CapabilityDeclaration, runtime };
+}
+
+/**
+ * A declaration's own copy, every object without a prototype (after the review): a rule or a
+ * level looked up by a name like `constructor` finds nothing but what the page wrote.
+ */
+function copied(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(copied);
+  }
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  const out = Object.create(null) as Record<string, unknown>;
+  for (const [key, each] of Object.entries(value)) {
+    out[key] = copied(each);
+  }
+  return out;
 }
 
 /**
@@ -249,10 +267,112 @@ export function declareCapabilities(options: {
   };
 }
 
+/**
+ * A name a prefix can't vouch for (after the review): a dot segment, or one written with an
+ * escape or a backslash, may resolve outside the prefix (`app://tasks/../secrets`).
+ */
+const ESCAPES_PREFIX = /(^|[/\\])\.{1,2}([/\\?#]|$)|%2e|%2f|%5c|\\/iu;
+
 /** Whether `name` matches a declared list's entry (exact, or a prefix ending in `*`). */
 export function declaredMatch(list: readonly string[] | undefined, name: string): boolean {
   return (
     list === undefined ||
-    list.some((each) => (each.endsWith("*") ? name.startsWith(each.slice(0, -1)) : each === name))
+    list.some((each) =>
+      each.endsWith("*")
+        ? name.startsWith(each.slice(0, -1)) && !ESCAPES_PREFIX.test(name)
+        : each === name,
+    )
   );
+}
+
+/** The stricter of two declared level maps. */
+function stricterLevels(
+  a: Readonly<Record<string, ViewerLevel>> | undefined,
+  b: Readonly<Record<string, ViewerLevel>> | undefined,
+): Readonly<Record<string, ViewerLevel>> | undefined {
+  if (a === undefined || b === undefined) {
+    return a ?? b;
+  }
+  const out: Record<string, ViewerLevel> = { ...a };
+  for (const [method, level] of Object.entries(b)) {
+    const other = Object.hasOwn(out, method) ? out[method] : undefined;
+    out[method] = other === undefined ? level : higher(other, level);
+  }
+  return out;
+}
+
+/** The names both lists admit (absent: everything). */
+function bothNames(
+  a: readonly string[] | undefined,
+  b: readonly string[] | undefined,
+): readonly string[] | undefined {
+  if (a === undefined || b === undefined) {
+    return a ?? b;
+  }
+  return [
+    ...new Set([
+      ...a.filter((each) => declaredMatch(b, each)),
+      ...b.filter((each) => declaredMatch(a, each)),
+    ]),
+  ];
+}
+
+/** The stricter of two pages' rules, by collection. */
+function stricterRules(a: DbRules | undefined, b: DbRules | undefined): DbRules | undefined {
+  if (a === undefined || b === undefined) {
+    return a ?? b;
+  }
+  const out: Record<string, { read?: ViewerLevel; write?: ViewerLevel }> = {};
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const x = Object.hasOwn(a, key) ? a[key] : undefined;
+    const y = Object.hasOwn(b, key) ? b[key] : undefined;
+    const read =
+      x?.read === undefined ? y?.read : y?.read === undefined ? x.read : higher(x.read, y.read);
+    const write =
+      x?.write === undefined
+        ? y?.write
+        : y?.write === undefined
+          ? x.write
+          : higher(x.write, y.write);
+    out[key] = {
+      ...(read === undefined ? {} : { read }),
+      ...(write === undefined ? {} : { write }),
+    };
+  }
+  return out;
+}
+
+/**
+ * What a version may do when it is shown (after the review): what it declared when it was
+ * published AND what the artifact declares now. A host stores each version's declaration with
+ * it (`declareCapabilities` at its publish) and mounts a version with this, so an old version
+ * never keeps what the artifact has since revoked, nor gains what it declared later. Each
+ * capability only where both declare it, at the stricter levels, the narrower `data` names and
+ * the stricter `db` rules; the version's own pinned runtime.
+ */
+export function intersectDeclarations(
+  version: PageDeclaration,
+  current: PageDeclaration,
+): PageDeclaration {
+  const capabilities: Record<string, DeclaredCapability & DeclaredData & DeclaredDb> = {};
+  const a = version.capabilities as Readonly<Record<string, DeclaredData & DeclaredDb>>;
+  const b = current.capabilities as Readonly<Record<string, DeclaredData & DeclaredDb>>;
+  for (const name of Object.keys(a)) {
+    if (!Object.hasOwn(b, name)) {
+      continue;
+    }
+    const x = a[name] ?? {};
+    const y = b[name] ?? {};
+    const levels = stricterLevels(x.levels, y.levels);
+    const resources = bothNames(x.resources, y.resources);
+    const tools = bothNames(x.tools, y.tools);
+    const rules = stricterRules(x.rules, y.rules);
+    capabilities[name] = {
+      ...(levels === undefined ? {} : { levels }),
+      ...(resources === undefined ? {} : { resources }),
+      ...(tools === undefined ? {} : { tools }),
+      ...(rules === undefined ? {} : { rules }),
+    };
+  }
+  return { capabilities, runtime: version.runtime };
 }

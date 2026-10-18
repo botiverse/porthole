@@ -40,12 +40,14 @@ async function show(
     readonly key?: string;
     readonly scope?: string;
     readonly uploadLevel?: string;
+    /** The artifact's id (its assets' owner); default a new one. */
+    readonly id?: string;
   } = {},
-): Promise<Shown> {
+): Promise<Shown & { readonly id: string }> {
   const served = await harness();
   const preset = options.preset ?? "runtime";
   const scope = options.scope ?? unique("rt");
-  const id = unique("page");
+  const id = options.id ?? unique("page");
   if (options.files === undefined) {
     served.pages.set(`${id}@1`, options.html ?? PAGE);
   } else {
@@ -58,8 +60,10 @@ async function show(
     runtime: {
       key,
       scope,
+      artifact: id,
+      // Under a runtime the host says what the page declared, or null for a page from before 0.7.
       ...(options.declaration === null
-        ? {}
+        ? { declaration: null }
         : { declaration: { capabilities: options.declaration ?? {}, runtime: "1" } }),
       ...(options.viewer === null
         ? {}
@@ -78,7 +82,28 @@ async function show(
   expect(await outcomeOf(shown.read)).toEqual({ state: "loaded" });
   const frame = await shown.frame();
   await frame.waitForLoadState("load");
-  return { frame, key, scope, origin: location.origin };
+  return { frame, key, scope, origin: location.origin, id };
+}
+
+/** A page of files (P081): in a frame its files' address is sealed, which its asset loads carry. */
+const filesWith = (body: string, head = ""): Record<string, string> => ({
+  "index.html": `<!doctype html><html><head><title>Files</title>${head}</head><body><main id="artifact">files</main><button id="go" style="width:200px;height:40px">go</button>${body}</body></html>`,
+});
+
+/** Runs `script` in the frame from a real click (a gesture-gated method), and its outcome. */
+async function clicked(frame: Frame, script: string): Promise<unknown> {
+  await frame.evaluate(
+    `document.getElementById("go").onclick = () => { (async () => { ${script} })().then((value) => { window.clicked = { value }; }, (error) => { window.clicked = { code: error && error.code ? error.code : String(error && error.message) }; }); };`,
+  );
+  await frame.locator("#go").click();
+  await expect
+    .poll(() =>
+      frame.evaluate(() =>
+        JSON.stringify((window as unknown as { clicked?: unknown }).clicked ?? null),
+      ),
+    )
+    .not.toBe("null");
+  return frame.evaluate(() => (window as unknown as { clicked: unknown }).clicked);
 }
 
 /** A runtime call as content can send it, past the shell's namespace: the host's answer. */
@@ -221,7 +246,8 @@ test.describe("porthole.use (P085)", () => {
       declaration: { artifact: {} },
       viewer: { level: "admin", id: "ann" },
     });
-    const result = await settled(
+    // A publish needs the person's click and their yes (after the review): from a button.
+    const result = await clicked(
       frame,
       `
       const artifact = await porthole.use("artifact");
@@ -242,9 +268,11 @@ test.describe("porthole.use (P085)", () => {
   test("an upload is served at /_blob/<id> on the page's own origin and loads in its frame", async ({
     page,
   }) => {
+    // A page of files: in a frame, its asset loads carry its sealed address (P091).
     const { frame } = await show(page, {
       declaration: { assets: {} },
       viewer: { level: "admin", id: "ann" },
+      files: filesWith(""),
     });
     // A 1x1 PNG, made in the page, uploaded, then shown by the url the upload gave.
     const shown = await settled(
@@ -256,7 +284,7 @@ test.describe("porthole.use (P085)", () => {
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
       const asset = await assets.upload(blob, { name: "dot.png" });
       const img = new Image();
-      img.src = asset.url;
+      img.src = assets.url(asset.id);
       await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = () => reject(new Error("no load")); });
       const listed = await assets.list();
       return { url: asset.url.replace(/[0-9a-f]{32}/u, "<id>"), type: asset.type, width: img.naturalWidth, listed: listed.length };
@@ -434,8 +462,8 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
 });
 
 test.describe("the asset library (P089)", () => {
-  /** A script asset that marks the page it runs in, in `scope`'s library. */
-  async function scriptAsset(scope: string): Promise<string> {
+  /** A script asset of `artifact`'s library that marks the page it runs in. */
+  async function scriptAsset(scope: string, artifact: string, trusted: boolean): Promise<string> {
     const served = await harness();
     const id = Array.from(
       { length: 32 },
@@ -447,28 +475,128 @@ test.describe("the asset library (P089)", () => {
         scope,
         "mark.js",
         new TextEncoder().encode('document.documentElement.dataset.blob = "ran";'),
+        { artifact, trusted },
       ),
     );
     return id;
   }
 
-  test("its scripts run only where uploads are the admins'; never where people who interact upload", async ({
+  test("a script asset runs as code only if an admin uploaded it where uploads are the admins'", async ({
     page,
   }) => {
-    for (const preset of ["runtime", "runtimeOpen"] as const) {
+    for (const [preset, trusted, runs] of [
+      ["runtime", true, true],
+      ["runtime", false, false],
+      ["runtimeOpen", true, false],
+    ] as const) {
       const scope = unique("rt");
-      const id = await scriptAsset(scope);
+      const pageId = unique("page");
+      const id = await scriptAsset(scope, pageId, trusted);
+      // Loaded at the frame's own address for it (P091), which every engine sends.
       const { frame } = await show(page, {
         preset,
         scope,
+        id: pageId,
         declaration: { assets: {} },
-        html: `<!doctype html><html><head><title>Blob</title><script src="/_blob/${id}"></script></head><body><main id="artifact">blob</main></body></html>`,
+        files: filesWith(
+          `<script>porthole.use("assets").then((assets) => { const s = document.createElement("script"); s.src = assets.url("${id}"); document.head.append(s); });</script>`,
+        ),
       });
       await frame.waitForLoadState("load");
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(500);
       const ran = await frame.evaluate(() => document.documentElement.dataset.blob ?? "");
-      expect(ran, preset).toBe(preset === "runtime" ? "ran" : "");
+      expect(ran, `${preset}, trusted ${trusted}`).toBe(runs ? "ran" : "");
     }
+  });
+
+  test("scripts load from /_blob/ only where uploads are the admins' (a tab, its session)", async ({
+    context,
+  }) => {
+    const served = await harness();
+    for (const [preset, runs] of [
+      ["runtime", true],
+      ["runtimeOpen", false],
+    ] as const) {
+      const scope = unique("rt");
+      const pageId = unique("page");
+      const id = await scriptAsset(scope, pageId, true);
+      served.pages.set(
+        `${pageId}@1`,
+        `<!doctype html><html><head><title>Tab</title><script src="/_blob/${id}"></script></head><body><main id="artifact">tab</main></body></html>`,
+      );
+      const instance: InstanceRef = {
+        scope,
+        document: { kind: "artifact", id: pageId, version: "1", preset },
+      };
+      const location = await served.porthole.issue(instance, { viewer: "probe" });
+      const tab = await context.newPage();
+      await tab.goto(location.url);
+      await tab.waitForTimeout(500);
+      const ran = await tab.evaluate(() => document.documentElement.dataset.blob ?? "");
+      expect(ran, preset).toBe(runs ? "ran" : "");
+      await tab.close();
+    }
+  });
+
+  test("a framed set's page loads /_blob/<id> by its own Referer where the engine sends one (measured)", async ({
+    page,
+    browserName,
+  }) => {
+    const served = await harness();
+    const scope = unique("rt");
+    const pageId = unique("page");
+    const id = Array.from(
+      { length: 32 },
+      () => "0123456789abcdef"[Math.floor(Math.random() * 16)],
+    ).join("");
+    served.assets.set(
+      id,
+      storedAsset(
+        scope,
+        "dot.gif",
+        Uint8Array.from(atob("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"), (each) =>
+          each.charCodeAt(0),
+        ),
+        { artifact: pageId },
+      ),
+    );
+    const { frame } = await show(page, {
+      scope,
+      id: pageId,
+      declaration: { assets: {} },
+      files: filesWith(`<img id="dot" src="/_blob/${id}">`),
+    });
+    await page.waitForTimeout(500);
+    const width = await frame.evaluate(
+      () => (document.getElementById("dot") as HTMLImageElement).naturalWidth,
+    );
+    // WebKit sends a cross-site frame's same-origin requests only its origin as Referer: there a
+    // page shows its assets by assets.url(id).
+    expect(width).toBe(browserName === "webkit" ? 0 : 1);
+  });
+
+  test("an asset reaches only its own artifact's pages, and none without an access", async ({
+    page,
+  }) => {
+    const served = await harness();
+    const scope = unique("rt");
+    const owner = unique("page");
+    const id = await scriptAsset(scope, owner, true);
+    // Another artifact on the same scope (one origin) loads none of it.
+    const other = await show(page, {
+      scope,
+      declaration: { assets: {} },
+      files: filesWith("", `<script src="/_blob/${id}"></script>`),
+    });
+    await page.waitForTimeout(300);
+    expect(await other.frame.evaluate(() => document.documentElement.dataset.blob ?? "")).toBe("");
+    // A request with no access at all: no.
+    const bare = await served.porthole.handle(
+      new Request(`${other.origin}/_blob/${id}`, {
+        headers: { "sec-fetch-site": "same-origin", "sec-fetch-mode": "no-cors" },
+      }),
+    );
+    expect(bare?.status).toBe(401);
   });
 
   test("an asset opened on its own runs nothing, on a tab with the artifact's session", async ({
@@ -476,6 +604,7 @@ test.describe("the asset library (P089)", () => {
   }) => {
     const served = await harness();
     const scope = unique("rt");
+    const pageId = unique("page");
     const id = Array.from(
       { length: 32 },
       () => "abcdef0123456789"[Math.floor(Math.random() * 16)],
@@ -488,9 +617,9 @@ test.describe("the asset library (P089)", () => {
         new TextEncoder().encode(
           '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><script>document.documentElement.setAttribute("data-ran", "1")</script><rect width="10" height="10"/></svg>',
         ),
+        { artifact: pageId },
       ),
     );
-    const pageId = unique("page");
     served.pages.set(`${pageId}@1`, PAGE);
     const instance: InstanceRef = {
       scope,
@@ -513,6 +642,7 @@ test.describe("the asset library (P089)", () => {
   }) => {
     const served = await harness();
     const scope = unique("rt");
+    const pageId = unique("page");
     const id = Array.from(
       { length: 32 },
       () => "0123456789abcdef"[Math.floor(Math.random() * 16)],
@@ -526,15 +656,17 @@ test.describe("the asset library (P089)", () => {
         Uint8Array.from(atob("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"), (each) =>
           each.charCodeAt(0),
         ),
+        { artifact: pageId },
       ),
     );
     const { frame } = await show(page, {
       scope,
+      id: pageId,
       declaration: { assets: {}, db: {} },
       files: {
-        "index.html": `<!doctype html><html><head><title>Set</title></head><body><main id="artifact">set</main><img id="dot" src="/_blob/${id}"><script src="./app.js"></script></body></html>`,
-        "app.js":
-          'porthole.use("db").then((db) => { document.documentElement.dataset.db = db === null ? "null" : Object.keys(db).length; });',
+        "index.html": `<!doctype html><html><head><title>Set</title></head><body><main id="artifact">set</main><img id="dot"><script src="./app.js"></script></body></html>`,
+        "app.js": `porthole.use("db").then((db) => { document.documentElement.dataset.db = db === null ? "null" : Object.keys(db).length; });
+porthole.use("assets").then((assets) => { document.getElementById("dot").src = assets.url("${id}"); });`,
       },
     });
     await expect

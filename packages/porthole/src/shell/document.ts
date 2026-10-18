@@ -38,6 +38,8 @@ export interface ShellDocumentOptions {
    * (`https://a-x.example-usercontent.com/v/3/`). The shell lets the frame navigate to the set's
    * other pages there, and to nothing else.
    */
+  /** `same-origin`: the document's loads tell its own origin its address (P091); else none. */
+  readonly referrer?: "same-origin";
   readonly files?: {
     readonly base: string;
     /**
@@ -181,7 +183,9 @@ export function shellDocument(plan: ShellPlan, csp: string, options: ShellDocume
     options.cspMeta === false
       ? null
       : `<meta http-equiv="Content-Security-Policy" content="${escapeAttribute(csp)}">`,
-    '<meta name="referrer" content="no-referrer">',
+    // A framed page of files whose config serves assets says its sealed address to its own
+    // origin only, which its asset loads carry (P091); every other document says nothing.
+    `<meta name="referrer" content="${options.referrer === "same-origin" ? "same-origin" : "no-referrer"}">`,
     // Off for good: an engine may prefetch names it sees in links, outside the CSP.
     '<meta http-equiv="x-dns-prefetch-control" content="off">',
   ].filter((line) => line !== null);

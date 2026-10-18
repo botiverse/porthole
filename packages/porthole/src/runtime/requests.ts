@@ -137,7 +137,8 @@ export function parseArtifactRequest(
   if (entries.length > Math.min(MAX_PUBLISH_FILES, maxFiles)) {
     return "too_large";
   }
-  const files: Record<string, PublishedFile> = {};
+  // No prototype: a path named `__proto__` is a path (after the review).
+  const files = Object.create(null) as Record<string, PublishedFile>;
   let total = 0;
   for (const [path, file] of entries) {
     if (filePathProblem(path) !== null) {
@@ -218,6 +219,12 @@ export type AssetRequest =
       readonly size: number;
       /** Porthole's type for `name` (`fileTypeOf`). */
       readonly type: string;
+      /**
+       * Whether it may run as code (P089, after the review): a script, stylesheet or WebAssembly
+       * an admin uploaded where uploaded code may run. Store it (`StoredAsset.trusted`): any other
+       * code-typed asset is served as a download.
+       */
+      readonly trusted: boolean;
     }
   | { readonly op: "delete"; readonly id: string };
 
@@ -245,7 +252,18 @@ export function assetNameProblem(name: unknown): string | null {
   return null;
 }
 
-export function parseAssetRequest(args: unknown, limits: Partial<Limits>): Parsed<AssetRequest> {
+/** Whether a name's type runs as code in a page (a script, a stylesheet, WebAssembly). */
+export function isCodeAsset(name: string): boolean {
+  const { role, type } = fileTypeOf(name);
+  return role === "script" || type.startsWith("text/css") || type === "application/wasm";
+}
+
+export function parseAssetRequest(
+  args: unknown,
+  limits: Partial<Limits>,
+  /** Whether uploaded code may run here (`assetCodeRuns`): else code-typed names are refused. */
+  code = true,
+): Parsed<AssetRequest> {
   if (!isRecord(args)) {
     return null;
   }
@@ -257,7 +275,7 @@ export function parseAssetRequest(args: unknown, limits: Partial<Limits>): Parse
         ? { op: "delete", id: args.id }
         : null;
     case "upload": {
-      if (assetNameProblem(args.name) !== null) {
+      if (assetNameProblem(args.name) !== null || (!code && isCodeAsset(args.name as string))) {
         return null;
       }
       const size = base64Bytes(args.base64);
@@ -274,6 +292,8 @@ export function parseAssetRequest(args: unknown, limits: Partial<Limits>): Parse
         base64: args.base64 as string,
         size,
         type: fileTypeOf(name).type,
+        // The bridge says, once it knows who uploads (P089).
+        trusted: false,
       };
     }
     default:

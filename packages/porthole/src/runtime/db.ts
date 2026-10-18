@@ -1,4 +1,7 @@
 import { atLeast, higher, isViewerLevel, type ViewerInfo, type ViewerLevel } from "./levels.ts";
+import { SEGMENT, isDbSegment } from "./segments.ts";
+
+export { isDbSegment };
 
 /**
  * The `db` capability's contract (P088): a document store the host keeps for an artifact, which
@@ -29,12 +32,15 @@ export const DB_LIMITS = {
   maxDepth: 32,
   /** The most watches one frame keeps at once. */
   maxWatches: 50,
+  /** The most values (objects, arrays, scalars) one document holds, and one batch. */
+  maxNodes: 100_000,
+  /** The most a `where` operand holds: values, and JSON bytes. */
+  maxOperandNodes: 1_000,
+  maxOperandBytes: 16_384,
 } as const;
 
 /** The per-user subtree: `data/users/<id>/…`, the viewer's own; `me` names the viewer. */
 export const DB_USERS_PREFIX = "data/users/";
-
-const SEGMENT = /^[A-Za-z0-9_.~:@+-]{1,128}$/u;
 
 /** A path's segments, or null for one that names nothing (empty, dot segments, odd characters). */
 export function dbSegments(path: unknown): string[] | null {
@@ -67,9 +73,22 @@ export type DbValue =
 
 export type DbData = { readonly [field: string]: DbValue };
 
-/** Whether `value` is plain JSON data, no deeper than the limit (a copy-free check). */
-function plainJson(value: unknown, depth: number): boolean {
-  if (depth > DB_LIMITS.maxDepth) {
+/** Field names a document never holds: a host merging them could set a prototype (P088). */
+const RESERVED_FIELDS = new Set(["__proto__", "constructor", "prototype"]);
+
+/**
+ * Whether `value` is plain JSON data within `budget` nodes, no deeper than the limit, with no
+ * object or array reached twice (P088, after the review: structured clone keeps shared
+ * references, so a walk without this is exponential in a message of a few dozen objects). Each
+ * node is visited once: linear in what was sent, and stopped at the budget.
+ */
+function plainJson(
+  value: unknown,
+  budget: { nodes: number; readonly seen: WeakSet<object> },
+  depth: number,
+): boolean {
+  budget.nodes -= 1;
+  if (budget.nodes < 0 || depth > DB_LIMITS.maxDepth) {
     return false;
   }
   if (value === null || typeof value === "boolean" || typeof value === "string") {
@@ -78,19 +97,39 @@ function plainJson(value: unknown, depth: number): boolean {
   if (typeof value === "number") {
     return Number.isFinite(value);
   }
-  if (Array.isArray(value)) {
-    return value.every((each) => plainJson(each, depth + 1));
+  if (typeof value !== "object") {
+    return false;
   }
-  if (typeof value === "object") {
-    const proto = Object.getPrototypeOf(value) as unknown;
-    if (proto !== Object.prototype && proto !== null) {
+  if (budget.seen.has(value)) {
+    return false;
+  }
+  budget.seen.add(value);
+  if (Array.isArray(value)) {
+    for (const each of value) {
+      if (!plainJson(each, budget, depth + 1)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  const proto = Object.getPrototypeOf(value) as unknown;
+  if (proto !== Object.prototype && proto !== null) {
+    return false;
+  }
+  for (const field of Object.keys(value)) {
+    if (field === "" || field.length > 256 || RESERVED_FIELDS.has(field)) {
       return false;
     }
-    return Object.entries(value as Record<string, unknown>).every(
-      ([field, each]) => field !== "" && field.length <= 256 && plainJson(each, depth + 1),
-    );
+    if (!plainJson((value as Record<string, unknown>)[field], budget, depth + 1)) {
+      return false;
+    }
   }
-  return false;
+  return true;
+}
+
+/** Whether `value` is plain JSON within `nodes` nodes (a document's, a `where` operand's). */
+export function isPlainJson(value: unknown, nodes: number = DB_LIMITS.maxNodes): boolean {
+  return plainJson(value, { nodes, seen: new WeakSet() }, 0);
 }
 
 const encoder = new TextEncoder();
@@ -99,11 +138,17 @@ const encoder = new TextEncoder();
 export const jsonBytes = (value: unknown): number => encoder.encode(JSON.stringify(value)).length;
 
 /** A document's data: a plain object, within the limits; "too_large" past them. */
-function dbData(value: unknown): DbData | "too_large" | null {
+function dbData(
+  value: unknown,
+  budget: { nodes: number; readonly seen: WeakSet<object> } = {
+    nodes: DB_LIMITS.maxNodes,
+    seen: new WeakSet(),
+  },
+): DbData | "too_large" | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
-  if (!plainJson(value, 0)) {
+  if (!plainJson(value, budget, 0)) {
     return null;
   }
   return jsonBytes(value) > DB_LIMITS.maxDocBytes ? "too_large" : (value as DbData);
@@ -178,7 +223,11 @@ export type DbResult =
 
 type Parsed<T> = T | "too_large" | null;
 
-function parseWrite(value: unknown, op?: string): Parsed<DbWrite> {
+function parseWrite(
+  value: unknown,
+  op?: string,
+  budget?: { nodes: number; readonly seen: WeakSet<object> },
+): Parsed<DbWrite> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
@@ -197,7 +246,7 @@ function parseWrite(value: unknown, op?: string): Parsed<DbWrite> {
   if (kind !== "set" && kind !== "update") {
     return null;
   }
-  const data = dbData(raw.data);
+  const data = dbData(raw.data, budget);
   if (data === null || data === "too_large") {
     return data;
   }
@@ -222,7 +271,8 @@ function parseWhere(value: unknown): readonly DbWhere[] | undefined | null {
       field === "" ||
       field.length > 256 ||
       !(WHERE_OPS as readonly unknown[]).includes(op) ||
-      !plainJson(operand, 1) ||
+      !isPlainJson(operand, DB_LIMITS.maxOperandNodes) ||
+      jsonBytes(operand) > DB_LIMITS.maxOperandBytes ||
       (op === "in" && (!Array.isArray(operand) || operand.length > DB_LIMITS.maxIn))
     ) {
       return null;
@@ -299,11 +349,19 @@ export function parseDbRequest(args: unknown): Parsed<DbRequest> {
         return "too_large";
       }
       const parsed: DbWrite[] = [];
+      // One budget for the whole batch, and one write a path: a batch is checked against one
+      // state, so two writes to a path would both pass it.
+      const budget = { nodes: DB_LIMITS.maxNodes, seen: new WeakSet<object>() };
+      const paths = new Set<string>();
       for (const each of writes) {
-        const write = parseWrite(each);
+        const write = parseWrite(each, undefined, budget);
         if (write === null || write === "too_large") {
           return write;
         }
+        if (paths.has(write.path)) {
+          return null;
+        }
+        paths.add(write.path);
         parsed.push(write);
       }
       if (jsonBytes(parsed) > DB_LIMITS.maxBatchBytes) {
@@ -369,11 +427,18 @@ function pathsOf(request: DbRequest): string[] {
 /** `path` with `me` resolved to the viewer, or null where it names someone else's data. */
 function ownPath(path: string, viewer: ViewerInfo | undefined): string | null {
   const segments = path.split("/");
-  if (segments[0] !== "data") {
+  // `data`, however a store folds its case (after the review: `Data/users/<id>` is no way round).
+  if (segments[0]?.toLowerCase() !== "data") {
     return path;
+  }
+  if (segments[0] !== "data") {
+    return null;
   }
   // `data` holds only per-user trees: `data/users/<id>/…`, the viewer's own.
   if (segments[1] !== "users" || segments.length < 3) {
+    return null;
+  }
+  if (!isDbSegment(viewer?.id)) {
     return null;
   }
   const id = segments[2] === "me" ? viewer?.id : segments[2];
@@ -388,7 +453,10 @@ function ownPath(path: string, viewer: ViewerInfo | undefined): string | null {
 function ruleLevel(rules: DbRules | undefined, path: string, write: boolean): ViewerLevel {
   const base: ViewerLevel = write ? "interact" : "view";
   const top = path.split("/")[0] ?? "";
-  const rule = rules?.[top] ?? rules?.["*"];
+  // Own rules only: a collection named `constructor` or `__proto__` is no rule (after the review).
+  const own = (key: string) =>
+    rules !== undefined && Object.hasOwn(rules, key) ? rules[key] : undefined;
+  const rule = own(top) ?? own("*");
   const asked = write ? rule?.write : rule?.read;
   return asked === undefined ? base : higher(base, asked);
 }
@@ -428,4 +496,35 @@ export function dbAccess(
     default:
       return { ok: true, request: { ...request, path: resolve(request.path) ?? "" } };
   }
+}
+
+/**
+ * A `db` answer as content gets it (P088, after the review): every path in the viewer's own tree
+ * says `data/users/me`, never their id, so a page that didn't declare `user` doesn't learn who is
+ * viewing from its own data's paths. Snapshots and `{ docs }`; anything else as it is.
+ */
+export function withMe(value: unknown, viewer: ViewerInfo | undefined): unknown {
+  const id = viewer?.id;
+  if (id === undefined || value === null || typeof value !== "object") {
+    return value;
+  }
+  const own = `${DB_USERS_PREFIX}${id}`;
+  const path = (each: unknown): unknown => {
+    if (each === null || typeof each !== "object" || Array.isArray(each)) {
+      return each;
+    }
+    const snapshot = each as { readonly path?: unknown };
+    if (
+      typeof snapshot.path === "string" &&
+      (snapshot.path === own || snapshot.path.startsWith(`${own}/`))
+    ) {
+      return { ...snapshot, path: `${DB_USERS_PREFIX}me${snapshot.path.slice(own.length)}` };
+    }
+    return each;
+  };
+  const docs = (value as { readonly docs?: unknown }).docs;
+  if (Array.isArray(docs)) {
+    return { ...value, docs: docs.map(path) };
+  }
+  return path(value);
 }

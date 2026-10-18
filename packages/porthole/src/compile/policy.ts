@@ -1,8 +1,7 @@
 import { CAPABILITIES, type CapabilityName, type Gate } from "../config/capabilities.ts";
 import type { PortholeConfig } from "../config/schema.ts";
 import { LIBRARY_PATH } from "../libraries/libraries.ts";
-import { methodLevel } from "../runtime/contract.ts";
-import { atLeast } from "../runtime/levels.ts";
+import { assetCodeRuns, familyOf, methodGates, methodOf } from "../runtime/contract.ts";
 import { ASSET_PATH } from "../runtime/requests.ts";
 
 /**
@@ -31,6 +30,22 @@ export function declaredCapabilities(config: PortholeConfig): CapabilityName[] {
 /** The gates a declared capability runs under: its own, else the vocabulary's defaults. */
 export function effectiveGates(config: PortholeConfig, name: CapabilityName): readonly Gate[] {
   return config.capabilities[name]?.gates ?? CAPABILITIES[name].defaultGates;
+}
+
+/**
+ * The gates one call runs under: its host function's, and its runtime method's own (after the
+ * review: `artifact.publish`, `assets.delete`, an upload whose code may run), every one applying.
+ */
+export function callGates(
+  config: PortholeConfig,
+  name: CapabilityName,
+  args: unknown,
+): readonly Gate[] {
+  const gates = effectiveGates(config, name);
+  const family = familyOf(name);
+  const method = family === null ? null : methodOf(name, args);
+  const own = family === null || method === null ? [] : methodGates(config, family.name, method);
+  return own.length === 0 ? gates : [...gates, ...own.filter((gate) => !gates.includes(gate))];
 }
 
 const unique = (values: readonly string[]): string[] => [...new Set(values)];
@@ -144,11 +159,7 @@ export function fileSetCspDirectives(
 export const ASSET_DIRECTIVES = ["img-src", "media-src", "font-src", "connect-src"] as const;
 export const ASSET_CODE_DIRECTIVES = ["script-src", "style-src"] as const;
 
-/** Whether a config's asset uploads are its admins' alone (`assets.upload` at admin or above). */
-export function assetCodeRuns(config: PortholeConfig): boolean {
-  const level = methodLevel(config, "assets", "upload");
-  return level !== null && atLeast(level, "admin");
-}
+export { assetCodeRuns };
 
 /**
  * A served page's CSP with its asset library opened (P089), on `origin` (the page's own, exact:

@@ -298,12 +298,16 @@ describe("the bridge holds a call to the declaration and the viewer's level (P08
       refusal: "undeclared",
     });
     expect(await bridge.call("user", {})).toMatchObject({ refusal: "undeclared" });
-    // Without a viewer, 0.6's functions run unchecked, as before.
-    expect(await bridge.call("sendPrompt", { text: "hi" })).toEqual({ ok: true, value: true });
+    // Without a viewer, under a runtime, nothing above view runs (after the review); a 0.6
+    // config's functions run unchecked, as before.
+    expect(await bridge.call("sendPrompt", { text: "hi" })).toMatchObject({ refusal: "level" });
+    expect(await bridge.call("copyText", { text: "hi" })).toEqual({ ok: true, value: true });
     expect(await bridge.call("comments", { anchor: { name: "x" } })).toMatchObject({
       refusal: "level",
     });
-    expect(memory.calls.map((each) => each.capability)).toEqual(["sendPrompt"]);
+    const old = bridgeOf(presets.inlineWidget({ capabilities: { sendPrompt: {} } }));
+    expect(await old.bridge.call("sendPrompt", { text: "hi" })).toEqual({ ok: true, value: true });
+    expect(memory.calls.map((each) => each.capability)).toEqual(["copyText"]);
   });
 
   test("a method above the viewer's level is forbidden, before any handler", async () => {
@@ -810,8 +814,12 @@ describe("the reference app's services pass the host conformance (P085-P090)", (
     for (const each of lax) {
       await each.run().catch(() => failures.push(each.name));
     }
-    expect(failures.filter((name) => name.startsWith("db:"))).toHaveLength(
-      lax.filter((each) => each.name.startsWith("db:")).length,
+    // Every db case but the one the bridge itself holds (`me` in answers, P088) fails.
+    const hosts = lax.filter(
+      (each) => each.name.startsWith("db:") && !each.name.includes("come back as data/users/me"),
+    );
+    expect(failures.filter((name) => name.startsWith("db:")).sort()).toEqual(
+      hosts.map((each) => each.name).sort(),
     );
   });
 });

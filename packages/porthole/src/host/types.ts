@@ -80,11 +80,13 @@ export interface MountOptions {
   /**
    * What the page declared (P086), as the host stored it with the artifact at publish
    * (`declareCapabilities`): its capabilities, and the runtime contract it is pinned to. The
-   * bridge holds the page to it; a page reaches only the built-ins and what it declared. Absent: a
-   * page without a declaration (0.6's): built-ins only through `porthole.use`, and 0.6's globals as
-   * before. Checked against the config at mount (a `TypeError` for one that doesn't fit).
+   * bridge holds the page to it; a page reaches only the built-ins and what it declared. Required
+   * under `config.runtime` (after the review): `null` says the page was published before 0.7 and
+   * has 0.6's surface (built-ins through `porthole.use`, 0.6's globals and requests as before).
+   * Checked against the config at mount (a `TypeError` for one that doesn't fit). For a version
+   * older than the artifact's current one, `intersectDeclarations(version's, current)`.
    */
-  readonly declaration?: PageDeclaration;
+  readonly declaration?: PageDeclaration | null;
   /**
    * Who is viewing (P087): their level, and for `user` their public id and name. A served
    * display's issue answer (`FrameLocation.viewer`, from the host's access) takes precedence.

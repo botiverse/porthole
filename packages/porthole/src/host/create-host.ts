@@ -101,8 +101,26 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         throw new TypeError(`${config.isolation} isolation needs MountOptions.instance`);
       }
       // The page's declaration and the viewer (P086, P087): the host's records, checked once.
+      // Under a runtime every mount says what its page declared, or null for a page published
+      // before 0.7, which then has 0.6's surface (after the review: never by omission).
+      if (config.runtime !== undefined && mount.declaration === undefined) {
+        throw new TypeError(
+          "Under config.runtime a mount needs MountOptions.declaration: the page's stored declaration, or null for a page published before 0.7",
+        );
+      }
+      if (
+        config.runtime === undefined &&
+        mount.declaration !== undefined &&
+        mount.declaration !== null
+      ) {
+        throw new TypeError(
+          "MountOptions.declaration needs config.runtime: nothing would hold the page to it",
+        );
+      }
       const declaration =
-        mount.declaration === undefined ? undefined : checkDeclaration(mount.declaration, config);
+        mount.declaration === undefined || mount.declaration === null
+          ? null
+          : checkDeclaration(mount.declaration, config);
       const mountViewer = mount.viewer === undefined ? null : parseViewer(mount.viewer);
       if (mount.viewer !== undefined && mountViewer === null) {
         throw new TypeError(
@@ -398,7 +416,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           ...(options.cached === undefined ? {} : { cached: options.cached }),
           userActivation: () => created.userActivation(),
           onEvent: onBridge,
-          ...(declaration === undefined ? {} : { declaration }),
+          ...(declaration === null ? {} : { declaration }),
           ...(viewer === undefined ? {} : { viewer }),
         });
         if (annotates) {

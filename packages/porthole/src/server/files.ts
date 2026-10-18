@@ -7,6 +7,7 @@ import {
 } from "../compile/policy.ts";
 import { DEFAULT_ENTRY, lookupFile, requestFilePath, type FileLookup } from "../files/paths.ts";
 import { fileTypeOf } from "../files/types.ts";
+import { isCodeAsset } from "../runtime/requests.ts";
 import { sha256, utf8 } from "./crypto.ts";
 import type { FileBody, StoredAsset, StoredFiles } from "./types.ts";
 
@@ -221,6 +222,13 @@ export async function serveFile(serving: FileServing): Promise<Response> {
     return nothing(serving, 404, method);
   }
   const { type, role } = fileTypeOf(found.path);
+  // In a frame, the version's files are at a sealed address (P083), which their own loads of the
+  // artifact's assets carry as their `Referer` (P091): to this origin only, never another.
+  const referrer =
+    serving.base.startsWith("/__porthole/f/") &&
+    serving.compiled.config.capabilities.assets !== undefined
+      ? "same-origin"
+      : "no-referrer";
   // Its version's files (P082), and its artifact's assets where the config serves them (P089).
   const frameCsp = serializeCsp(
     assetCspDirectives(
@@ -232,7 +240,7 @@ export async function serveFile(serving: FileServing): Promise<Response> {
   const headers = new Headers({
     "content-type": type,
     "x-content-type-options": "nosniff",
-    "referrer-policy": "no-referrer",
+    "referrer-policy": referrer,
     "x-robots-tag": "noindex, nofollow",
     // A page and a script (a worker's policy is its script's) get the page's CSP; anything else
     // runs nothing when opened on its own.
@@ -245,6 +253,7 @@ export async function serveFile(serving: FileServing): Promise<Response> {
       origins: serving.hostOrigins,
       document: await textOf(body),
       cspMeta: false,
+      ...(referrer === "same-origin" ? { referrer } : {}),
       files: {
         base,
         // At a ticket's address: the entry's own (its directory's, for an entry in one).
@@ -331,6 +340,8 @@ export async function serveAsset(serving: {
   readonly request: Request;
   readonly asset: StoredAsset;
   readonly frameAncestors: string;
+  /** Whether a code-typed asset is served as code (trusted, where uploaded code runs). */
+  readonly code: boolean;
 }): Promise<Response> {
   const { request, asset } = serving;
   const method = request.method.toUpperCase();
@@ -353,15 +364,21 @@ export async function serveAsset(serving: {
     return plain(404);
   }
   const typed = fileTypeOf(asset.name);
-  // Never a page: an asset is the library's, outside the shell (P089).
-  const type = typed.role === "page" ? "application/octet-stream" : typed.type;
+  // Never a page: an asset is the library's, outside the shell (P089); code only where it was
+  // trusted when it was uploaded (after the review).
+  const type =
+    typed.role === "page" || (isCodeAsset(asset.name) && !serving.code)
+      ? "application/octet-stream"
+      : typed.type;
   const headers = new Headers({
     "content-type": type,
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
     "x-robots-tag": "noindex, nofollow",
     "content-security-policy": `${INERT_FILE_CSP}; frame-ancestors ${serving.frameAncestors}`,
-    "cache-control": `private, max-age=${YEAR}, immutable`,
+    // Asked again at each load, so a removal or a revocation holds at once (after the review);
+    // the ETag keeps it cheap.
+    "cache-control": "private, no-cache",
     "cross-origin-resource-policy": "same-origin",
     "accept-ranges": "bytes",
   });

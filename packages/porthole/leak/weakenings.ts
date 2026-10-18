@@ -213,7 +213,13 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "        false",
     },
   ],
+  // Both of the bridge's level checks: before the arguments are read, and the call's own.
   "runtime-level": [
+    {
+      file: BRIDGE,
+      find: "    if (viewer === undefined || (needed !== null && !atLeast(viewer.level, needed))) {",
+      replace: "    if (viewer === undefined) {",
+    },
     {
       file: BRIDGE,
       find: "    if (needed !== null && !atLeast(viewer.level, needed)) {",
@@ -239,6 +245,8 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   // whoever uploaded them; an asset opened on its own runs.
   "blob-script": "harness",
   "blob-inert": "harness",
+  // An asset that wasn't trusted when it was uploaded, served as the script its name says.
+  "blob-trusted": "harness",
   // The shell's clipboard walls (P051): the async API, the copy and cut commands, copy events.
   clipboard: [
     {
@@ -293,8 +301,25 @@ export function weakenServed(html: string): string {
   for (const name of weakened.filter((each) => SERVED.includes(each))) {
     const weakening = WEAKENINGS[name];
     for (const edit of typeof weakening === "object" ? weakening : []) {
+      // A served document without the text (a status page) has nothing to weaken; the files' own
+      // text is checked once, before anything is served (`checkWeakenings`).
       out = out.replace(edit.find, edit.replace);
     }
   }
   return out;
+}
+
+/**
+ * Every requested control's edits, checked against the files before anything is served (after the
+ * review): a control whose text is gone stops the run, rather than weakening nothing.
+ */
+export function checkWeakenings(read: (relative: string) => string): void {
+  for (const name of weakened) {
+    const weakening = WEAKENINGS[name];
+    for (const edit of typeof weakening === "object" ? weakening : []) {
+      if (!read(edit.file).includes(edit.find)) {
+        throw new Error(`Weakening ${name} no longer matches ${edit.file}: update its text`);
+      }
+    }
+  }
 }
