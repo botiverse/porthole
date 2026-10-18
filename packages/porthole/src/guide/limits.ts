@@ -154,7 +154,7 @@ export function manualLimits(config: PortholeConfig, network: string): ManualLim
   if (!tokens.includes("allow-downloads")) {
     add(
       "downloads",
-      `Downloads don't work: <a download>, data: and blob: links, saves from script.${declared.has("downloadFile") ? " To give the person a file, ask the app (ui/download-file; with the App SDK, app.downloadFile)." : ""}`,
+      `Downloads don't work: <a download>, data: and blob: links, saves from script.${!declared.has("downloadFile") ? "" : config.runtime !== undefined ? " To give the person a file: downloads.save (topic capabilities)." : " To give the person a file, ask the app (ui/download-file; with the App SDK, app.downloadFile)."}`,
     );
   }
   if (!tokens.includes("allow-forms")) {
@@ -165,13 +165,13 @@ export function manualLimits(config: PortholeConfig, network: string): ManualLim
   }
   add(
     "link-schemes",
-    `mailto:, tel: and sms: links open nothing: show the address or number as text${globals.has("copyText") ? " (with a copy button)" : ""}.`,
+    `mailto:, tel: and sms: links open nothing: show the address or number as text${globals.has("copyText") || (config.runtime !== undefined && declared.has("copyText")) ? " (with a copy button)" : ""}.`,
   );
   if (!tokens.includes("allow-popups")) {
     add(
       "windows",
       globals.has("openLink") || declared.has("openLink")
-        ? "window.open and target=_blank open no window (window.open returns null or throws): links open in a new tab through the app (openLink; a click on <a href> does it)."
+        ? `window.open and target=_blank open no window (window.open returns null or throws): links open in a new tab through the app (${config.runtime === undefined ? "openLink" : "links.open"}; a click on <a href> does it).`
         : "Links to other pages, window.open and target=_blank open nothing (window.open returns null or throws).",
     );
   }
@@ -192,7 +192,7 @@ export function manualLimits(config: PortholeConfig, network: string): ManualLim
   );
   add(
     "shell",
-    `document.write and document.open throw; nested frames (iframe, object, embed) are removed; full screen and the clipboard are closed${globals.has("copyText") ? " (copy buttons call copyText)" : ""}.`,
+    `document.write and document.open throw; nested frames (iframe, object, embed) are removed; full screen and the clipboard are closed${globals.has("copyText") ? " (copy buttons call copyText)" : config.runtime !== undefined && declared.has("copyText") ? " (copy buttons call clipboard.copy)" : ""}.`,
   );
   add(
     "storage",

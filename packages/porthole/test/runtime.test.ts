@@ -195,6 +195,26 @@ describe("the config's runtime (P085)", () => {
   });
 });
 
+describe("the manual under the runtime (P085)", () => {
+  test("names porthole.use's methods wherever 0.6's manual named its globals", () => {
+    const compiled = compile(everything());
+    const text = `${compiled.guide()}\n${compiled.toolDescription()}`;
+    for (const old of [
+      "copyText",
+      "openLink",
+      "readData",
+      "subscribeData",
+      "downloadFile",
+      "sendPrompt",
+      "callTool",
+    ]) {
+      expect(text, old).not.toContain(old);
+    }
+    expect(text).toContain("downloads.save");
+    expect(text).toContain("links.open");
+  });
+});
+
 describe("a page's declaration (P086)", () => {
   const config = everything();
 

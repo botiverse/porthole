@@ -114,6 +114,11 @@ no `components` field (P015).
 | `resize` | none | event | (automatic) | `ui/notifications/size-changed` |
 | `copyText` | user-activation, 30/min | handler | `copyText(text)` | `porthole/copy-text` (none in the standard) |
 | `annotate` | 120/min (the frame's reports) | event | — | `porthole/annotate.*` (the host drives it, P053) |
+| `user` (runtime) | 60/min | viewer (the host's `ViewerInfo`) | `porthole.use("user")` | `porthole/call` (P087) |
+| `comments` (runtime) | user-activation, 30/min | handler (answers a boolean) | `porthole.use("comments")` | `porthole/call` (P090) |
+| `artifact` (runtime, artifact mode) | 10/min | handler (`op: get \| publish`) | `porthole.use("artifact")` | `porthole/call` (P088) |
+| `assets` (runtime, served artifacts) | 30/min | handler (`op: list \| upload \| delete`) | `porthole.use("assets")` | `porthole/call`; `/server` serves `/_blob/<id>` (P089) |
+| `db` (runtime) | 600/min | handler (`op: get \| query \| watch \| set \| update \| delete \| batch`) | `porthole.use("db")` | `porthole/call`, `porthole/event`, `porthole/unwatch` (P088) |
 
 Every preset declares only `resize` and `reportError` (they report to the host and
 carry nothing out); the host declares the rest. Gates are explained in P021: all
@@ -755,6 +760,48 @@ for `localStorage` in an opaque frame, applies the theme variables, and fires th
 config's theme event after a change. A capability that is not declared is simply
 absent.
 
+## The capability runtime (0.7.0: P085–P090)
+
+A config with `runtime: "1"` (inline widgets and artifact pages) gives its frames one global,
+`porthole`, whose only member is `use(name)`:
+
+```js
+const db = await porthole.use("db");          // a frozen namespace, or null (not here: draw without it)
+if (db) {
+  try { await db.set("votes/me-1", { choice: "b" }, { ifVersion: 0 }); }
+  catch (error) { show(error.message); if (error.code === "conflict") reread(); }  // a stable code
+}
+```
+
+- **Contract** (`RUNTIME_CAPABILITIES`, version 1; `types/runtime/v1/*.d.ts`): `clipboard`,
+  `links`, `downloads`, `comments` (built in), `user`, `chat`, `data`, `context`, `artifact`,
+  `assets`, `db` (declared). Each method is served by one of the config's host functions, gated as
+  the config says; the table in P085 maps them.
+- **Declaration** (P086): `{ capabilities: { name: config }, runtime }`, stored by the host,
+  resolved at publish by `declareCapabilities` (omitted carries forward, `{}` clears, an object
+  replaces), checked against the config, given to `mount({ declaration })`. The bridge refuses an
+  undeclared capability on every path (`undeclared` → `not_allowed`). No declaration: a 0.6 page.
+- **Levels** (P087): `view < interact < admin < owner`; each method's least level (config `levels`
+  at or above its floor; a page's declaration raises). The host's access says the viewer's level
+  (`Grant.level`, `Grant.user` → `FrameLocation.viewer`; or `mount({ viewer })`); below it is
+  `forbidden`, before any handler. Without a viewer 0.6's functions run as before; the runtime's own
+  are refused.
+- **Order in the bridge**: declared in the config → declared by the page → arguments (shape,
+  limits: `too_large`) → the viewer's level, `data`'s names, `db`'s paths and rules → mute → rate →
+  gesture → consent → confirm → the handler (context: `viewer`, `declared`, `instance`).
+- **Wire**: the roster in `ui/initialize`'s `hostCapabilities.experimental["porthole/runtime"]`;
+  `porthole/call { capability, method, args, watch? }` → `{ value }` or an error with
+  `data: { code, message }`; `porthole/event { watch, data }`; `porthole/unwatch { watch }`.
+  `data.read`/`data.subscribe` use MCP's `resources/*`.
+- **Services are the host's**: `db` (paths, versions, `ifVersion`, batches, watches, `data/users/<id>`
+  private, the page's rules: `dbAccess`, which the host applies again), `artifact` (current version;
+  a base-checked patch), `assets` (an `AssetStore` `/server` serves at `/_blob/<id>`), `comments`
+  (the host's composer; content hears a boolean). `defineRuntimeConformance` checks an app's real
+  handlers; `leak/runtime/memory.ts` is the reference, in memory.
+- **The manual**: under a runtime, topic `interactive` lists `porthole.use`'s methods with levels and
+  gates, and topic `capabilities` teaches declaring, levels, errors, where state goes, and each
+  offered capability's `.d.ts`. 0.6's globals stay defined (`shell/legacy.ts`) and untaught.
+
 ## The modes
 
 - **Inline widget** (`presets.inlineWidget`). The host has the HTML (the agent
@@ -869,6 +916,11 @@ for that to lapse and click with raw input.
 | Files: the version's own path in the CSP (P082) | `fileSetCspDirectives`: `<origin><base>` (tab) or `<origin>/__porthole/f/` (frame) in the seven loading directives; never `'self'` | `leak/served/files.spec.ts`: a page loads no other version's files; a way out past the base is blocked | `file-self` → those two cases (another version's data and module load; `%2e%2e` past the base reaches the server; all three) |
 | Files in a frame: access in the path (P083) | the ticket's answer is the entry; `/__porthole/f/<AES-GCM sealed session>/`; `history.replaceState` before anything loads; the host's check per file; an address opens on its own for an hour (then only the running page's own same-origin loads, till the session ends), renewed by the shell; reported as `./`, never whole | `test/files.test.ts` (sealed: no viewer or subject in it; another origin, a tampered or ended one: 401; revoked: 403; its hour, the page's own loads after it, renewal; redaction); `test/workers.test.ts` (workerd); every framed case of `leak/served/files.spec.ts` on WebKit (no cookie in frames), its reports never naming the address, its renewal under a moved clock | — |
 | Files: pages navigate within the set (P084) | the guard lets a navigation to a page under `files.base` go, after `porthole/navigating`; the host takes the next load as that page | `leak/served/files.spec.ts`: a link opens another page in the frame, the display goes on; a non-page file, `/`, `/__porthole/d/…` never open | `navigate-guard` → both cases (all three) |
+| The runtime: a page's declaration (P086) | the bridge refuses a capability the page didn't declare (`undeclared`), on `porthole/call` and 0.6's requests alike, before any handler | `test/runtime.test.ts`; `leak/served/runtime.spec.ts`: "an undeclared capability: null from use, refused when sent anyway, its handler never asked" | `runtime-declaration` → that case (all three) |
+| The runtime: levels (P087) | each method's least level against the host's viewer, before any handler | `test/runtime.test.ts`, `test/assets.test.ts` (the grant's level to the bridge); `leak/served/runtime.spec.ts`: "a method above the viewer's level: forbidden, its handler never asked" | `runtime-level` → that case (all three) |
+| The runtime: per-user data (P088) | `dbAccess`: `me` is the host's id; another's `data/users/<id>`, or anything else under `data`, refused at every level, in the bridge and the host | `test/runtime.test.ts`; `leak/served/runtime.spec.ts`: "a person's own data is theirs" | `db-private` → that case (all three) |
+| The runtime: comments write-only (P090) | the bridge answers `comments` with `true` only for a handler's `true`; no read method | `test/runtime.test.ts`; `leak/served/runtime.spec.ts`: "comments are write-only" | `comments-result` → that case (all three) |
+| The asset library (P089) | `/_blob/<id>` on its scope's origin: own-origin loads or an artifact session (the host's check), typed by name, never a page, inert CSP, CORP, immutable; the page's CSP opens `<origin>/_blob/` for images, media, fonts and data, for scripts and styles only where uploads are the admins' | `test/assets.test.ts`; `leak/served/runtime.spec.ts`: an upload loads in its frame; a set's page loads it; "its scripts run only where uploads are the admins'"; "an asset opened on its own runs nothing" | `blob-script` → the scripts case; `blob-inert` → the opened-on-its-own case (all three) |
 | Workers (P044, P045) | no Node module in `/server`; D1 tickets taken by one `DELETE … RETURNING` | `test/workers.test.ts` (workerd, no `nodejs_compat`, real D1: once per ticket, a race, anonymous, a revocation, flat names, reserved namespaces) | — |
 
 ### The clipboard, and copy buttons

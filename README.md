@@ -48,7 +48,10 @@ that proves the isolation holds.
 (`createContentHost`) is the whole host side an app needs around served content: it writes its
 policy (DESIGN.md § The host kit). Since 0.6.0 a served page may be many files (a build's
 output, a report with its images), each served from its version's manifest under that version's
-own address (P081–P084). The config, compiler,
+own address (P081–P084). Since 0.7.0 a page is an app: it reaches its host through one global,
+`porthole.use(name)`, for what it declared and its viewer's level allows (`user`, `comments`,
+`artifact`, `assets`, `db`, and 0.6's host functions), under a contract pinned per artifact
+(P085–P090). The config, compiler,
 presets and public interfaces are in; the runtime pieces land milestone by
 milestone (see DESIGN.md). Read, in order:
 

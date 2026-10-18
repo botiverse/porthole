@@ -367,6 +367,10 @@ export function memoryRuntime(options: MemoryRuntimeOptions = {}) {
       note("readData", args, context);
       return { contents: [{ uri: args.uri, mimeType: "application/json", text: '{"n":1}' }] };
     },
+    subscribeData: (args, context) => {
+      note("subscribeData", args, context);
+      return undefined;
+    },
     callTool: (args, context) => {
       note("callTool", args, context);
       return { content: [{ type: "text", text: `called ${args.name}` }] };

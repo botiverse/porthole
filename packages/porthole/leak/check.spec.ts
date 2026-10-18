@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { cdpDriver, checkPage, playwrightDriver } from "../src/check/index.ts";
 import {
   CAPABILITY_NAMES,
+  RUNTIME_HOST_FUNCTIONS,
   GUIDE_EXAMPLES,
   presets,
   type CapabilityMap,
@@ -14,8 +15,17 @@ import {
  * breaks is told so, briefly; the CDP driver (Cloudflare Browser Rendering's way) works too.
  */
 
-/** Every host function declared: each served by the check's declining handlers (P074). */
-const EVERY: CapabilityMap = Object.fromEntries(CAPABILITY_NAMES.map((name) => [name, {}]));
+/**
+ * Every host function declared: each served by the check's declining handlers (P074). The
+ * runtime's own (P085) need a config with the runtime: `RUNTIME_EVERY`.
+ */
+const EVERY: CapabilityMap = Object.fromEntries(
+  CAPABILITY_NAMES.filter((name) => !RUNTIME_HOST_FUNCTIONS.includes(name)).map((name) => [
+    name,
+    {},
+  ]),
+);
+const RUNTIME_EVERY: CapabilityMap = Object.fromEntries(CAPABILITY_NAMES.map((name) => [name, {}]));
 const SERVED = {
   isolation: "domain",
   contentOrigins: ["https://*.example-usercontent.com"],
@@ -30,6 +40,11 @@ const PRESETS: Record<string, PortholeConfig> = {
   }),
   artifact: presets.artifact(),
   "artifact, served, every host function": presets.artifact({ ...SERVED, capabilities: EVERY }),
+  "artifact, served, the capability runtime, every host function": presets.artifact({
+    ...SERVED,
+    runtime: "1",
+    capabilities: RUNTIME_EVERY,
+  }),
   "artifact, a whole-page viewer": presets.artifact({
     layout: { kind: "fill" },
     theme: { documents: "never" },

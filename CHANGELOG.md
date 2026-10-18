@@ -3,6 +3,52 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## 0.7.0
+
+The capability runtime (P085–P090): a page published as an artifact is an app, and reaches its host
+through one global, `porthole.use(name)`, under a contract pinned per artifact. Porthole provides
+the mechanism (declarations, levels, the wire, the gates, the asset library's serving); the app
+provides the services behind the handlers. Additive for 0.6 hosts: a config without `runtime` is
+0.6's, frames, globals and manual alike.
+
+- **The runtime** (P085): `config.runtime: "1"` (`presets.*({ runtime: "1" })`, inline widgets and
+  artifact pages). The shell defines `porthole`, frozen, with `use` only: `await
+  porthole.use("db")` is a frozen namespace or null (not offered, not declared, no host: the same
+  null), never a rejection. The roster comes in the handshake
+  (`hostCapabilities.experimental["porthole/runtime"]`); calls are `porthole/call { capability,
+  method, args }`, watches `porthole/event` / `porthole/unwatch`. Contract 1:
+  `clipboard`, `links`, `downloads`, `comments` (built in), `user`, `chat`, `data`, `context`,
+  `artifact`, `assets`, `db` (declared), each method served by one of the config's host functions
+  (`RUNTIME_CAPABILITIES`, the mapping in P085). New host functions: `user`, `comments`,
+  `artifact`, `assets`, `db`.
+- **Types**: `types/runtime/v1/*.d.ts` (shipped; one per capability and the call contract), taught
+  by the manual's new `capabilities` topic with declaring, levels, errors and where state goes.
+- **Declarations** (P086): `PageDeclaration` `{ capabilities, runtime }`; `declareCapabilities`
+  at publish (omitted carries forward with its pin, `{}` clears, an object replaces),
+  `declarationProblems`, `checkDeclaration`; `mount({ declaration })` (React: `declaration`). The
+  bridge refuses what a page didn't declare on every path, 0.6's requests included.
+- **Levels** (P087): `view < interact < admin < owner`; each method's level (`CapabilityConfig.levels`
+  at or above its floor; a page may raise). `Grant.level` and `Grant.user` go in the issue's answer
+  (`FrameLocation.viewer`) through `httpLocator` to the bridge; `mount({ viewer })` (React:
+  `viewer`) otherwise. Refusals carry new codes: `forbidden`, `conflict`, `too_large`
+  (`REFUSAL_CODES`); handlers get `context.viewer` and `context.declared`.
+- **State the host keeps** (P088, amending P023): `artifact.get()`/`publish({ base, files })`
+  (base-checked, admin), `db` (`get`, `query`, `onSnapshot`, `set`, `update`, `delete`, `batch`,
+  `ifVersion`, per-level `rules`, `data/users/<id>` private; `dbAccess` for the host's own API).
+- **The asset library** (P089): `ServerOptions.assets` / `createContentHost({ assets })` serves
+  `/_blob/<id>` on the asset's own origin (its pages' loads, or a session with the host's check),
+  typed by name, never a page, inert, immutable; a page's CSP opens `<origin>/_blob/` for images,
+  media, fonts and data, and for scripts and styles only where uploads are the admins'.
+- **Comments** (P090): `comments.open(anchor)` opens the host's composer at the page's anchor;
+  content hears only whether it opened.
+- **Legacy**: 0.6's globals stay (`shell/legacy.ts`), untaught under a runtime, held to a declared
+  page's declaration.
+- **Conformance**: `defineRuntimeConformance` (`/conformance`, no browser) runs an app's real
+  handlers through the bridge and past it; `leak/runtime/memory.ts` is the in-memory reference.
+- **Leak suite**: `leak/served/runtime.spec.ts` on Chromium, WebKit and Firefox, with negative
+  controls `runtime-declaration`, `runtime-level`, `db-private`, `comments-result`, `blob-script`,
+  `blob-inert`.
+
 ## 0.6.0
 
 A served page may be many files (P081–P084): a build's output, a report with its images, a

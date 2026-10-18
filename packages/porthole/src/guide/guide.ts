@@ -121,7 +121,7 @@ function files(config: PortholeConfig): string | null {
   return lines(
     "Files: a page may come with files of its own (stylesheets, scripts and modules, images, fonts, data, workers, other pages), published beside it, with index.html the page it opens at.",
     '- Name them by relative path (./style.css, assets/app.js, data.json), never with a leading / or a full address: a page loads only its own version\'s files. fetch("./data.json") works; a module\'s imports and a worker\'s script resolve from the module (new Worker(new URL("./worker.js", import.meta.url))).',
-    `- A link to another of your pages (about.html, or about; docs/ for docs/index.html) opens it in place. A link to any other file doesn't open: show an image with <img>${downloads ? ", offer a file with downloadFile" : ""}. A missing path shows your 404.html, if you publish one.`,
+    `- A link to another of your pages (about.html, or about; docs/ for docs/index.html) opens it in place. A link to any other file doesn't open: show an image with <img>${downloads ? `, offer a file with ${config.runtime === undefined ? "downloadFile" : "downloads.save"}` : ""}. A missing path shows your 404.html, if you publish one.`,
     "- Paths are case-sensitive, relative, with no .., //, \\, %, ? or #. Each file is served as its extension says (.html a page, .js and .mjs scripts, .css, .json, .txt, .svg, .png, .woff2, .mp4, …), never as what it holds; an extension the server doesn't know is a download.",
     '- A build tool\'s output works when it writes relative paths (Vite: base: "./"). No service workers.',
     `- At most ${limits.maxFiles.toLocaleString("en-US")} files, ${sizeWords(limits.maxFileBytes)} each (a page under ${sizeWords(config.limits.maxBytes)}) and ${sizeWords(limits.maxVersionBytes)} in all.`,
@@ -137,7 +137,7 @@ function network(config: PortholeConfig): string {
   if (open.length === 0) {
     // A live widget's data comes from the app alone (P079), and its scripts from Porthole's copies.
     const data = declaredCapabilities(config).includes("readData")
-      ? " Your data comes only from the app (readData)."
+      ? ` Your data comes only from the app (${config.runtime === undefined ? "readData" : "data.read"}).`
       : "";
     return servesLibraries(config)
       ? `Network: none. Nothing loads from outside (no scripts, styles, fonts, images or data from any server) and any fetch fails, so write everything inline; the only scripts that load are the libraries below, from this frame's own address.${data}`

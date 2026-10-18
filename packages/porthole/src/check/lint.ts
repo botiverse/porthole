@@ -190,7 +190,9 @@ export function lintContent(config: PortholeConfig, content: string): Finding[] 
       "clipboard",
       "warning",
       declared.has("copyText")
-        ? "The clipboard is closed to content: a copy button calls copyText(text) from its click."
+        ? config.runtime === undefined
+          ? "The clipboard is closed to content: a copy button calls copyText(text) from its click."
+          : 'The clipboard is closed to content: a copy button calls (await porthole.use("clipboard")).copy(text) from its click.'
         : "The clipboard is closed to content: copying from a button doesn't work here.",
       clipboard.index,
     );
@@ -237,7 +239,7 @@ export function lintContent(config: PortholeConfig, content: string): Finding[] 
         add(
           "egress",
           "warning",
-          `Nothing loads from ${origin} here (${kind}): ${kind === "script" && librarySources(config).length > 0 ? "write it inline, or use one of the libraries served here (the manual's Libraries)" : kind === "script" || kind === "style" ? "write it inline, or use a library from an allowed CDN" : kind === "connect" && config.capabilities.readData !== undefined ? "the content can't call it; read the app's data with readData" : kind === "connect" ? "the content can't call it; work from data in the content" : "put it inline as a data: URL"}.`,
+          `Nothing loads from ${origin} here (${kind}): ${kind === "script" && librarySources(config).length > 0 ? "write it inline, or use one of the libraries served here (the manual's Libraries)" : kind === "script" || kind === "style" ? "write it inline, or use a library from an allowed CDN" : kind === "connect" && config.capabilities.readData !== undefined ? `the content can't call it; read the app's data with ${config.runtime === undefined ? "readData" : "data.read"}` : kind === "connect" ? "the content can't call it; work from data in the content" : "put it inline as a data: URL"}.`,
           match.index,
         );
       }

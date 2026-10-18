@@ -39,6 +39,30 @@ export interface MountExtras {
   readonly fill?: boolean;
   /** `"refused"`: the host refuses every data call, with no handlers (P080). */
   readonly live?: boolean | "refused";
+  /**
+   * The capability runtime's reference services (P085-P090), shared by every mount that names
+   * the same `key` (two people on one artifact), with the page's declaration and the viewer.
+   */
+  readonly runtime?: {
+    readonly key: string;
+    readonly scope: string;
+    readonly declaration?: unknown;
+    readonly viewer?: { readonly level: string; readonly id?: string; readonly name?: string };
+    readonly uploadLevel?: string;
+  };
+}
+
+/** What the reference services were asked, by key (the cases' oracle). */
+export function runtimeCalls(
+  page: Page,
+  key: string,
+): Promise<{ capability: string; args: unknown; viewer: string | null }[]> {
+  return page.evaluate(
+    (each) =>
+      ((window as unknown as { runtimes: Map<string, { calls: unknown[] }> }).runtimes.get(each)
+        ?.calls ?? []) as { capability: string; args: unknown; viewer: string | null }[],
+    key,
+  );
 }
 
 export const app = (scope: string): InstanceRef => ({

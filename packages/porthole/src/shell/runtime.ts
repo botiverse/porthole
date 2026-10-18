@@ -359,7 +359,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // the person makes (their keys, their menu) copies their selection as the browser makes it: no
   // copy or cut listener of the content's runs, so none can swap what goes on the clipboard.
   const noClipboard = function () {
-    return Promise.reject(new DOMException("Content can't use the clipboard here" + (declared("copyText") ? ": call copyText(text) from a click" : ""), "NotAllowedError"));
+    return Promise.reject(new DOMException("Content can't use the clipboard here" + (declared("copyText") ? (plan.runtime ? ': call (await porthole.use("clipboard")).copy(text) from a click' : ": call copyText(text) from a click") : ""), "NotAllowedError"));
   };
   if (typeof Clipboard === "function") {
     for (const name of ["write", "writeText", "read", "readText"]) {

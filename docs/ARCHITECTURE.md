@@ -16,6 +16,13 @@ Porthole renders **agent-drawn HTML plus a declared set of host functions.**
   needs** (origins it must reach), and its **guide entry** (how the manual
   describes it).
 
+A page published as an artifact may be an app: under the **capability runtime** it reaches its
+host through one global, `porthole.use(name)`, for the capabilities it declared and its viewer's
+level allows. The runtime is how content reaches host functions, not new ones: each of its
+methods is served by a host function the config declares, and the bridge alone decides each call
+(the page's declaration, the viewer's level, the gates). The services behind them (a document
+store, an asset library, versions, comments) are the host's.
+
 One capability list therefore drives three artifacts: the **bridge** (which
 functions the shell wires and the host handles), the **CSP** (what the sandbox
 may reach), and the **manual** (what the agent is told). This is why the config
@@ -216,7 +223,8 @@ only the declared content origins.
 
 2. **Content ↔ the outside network.** Closed by default and opened only to the
    origins the config's capabilities declare (and, for a served page with files,
-   its own version's path on its own origin: the host's own server, P082). Two
+   its own version's path on its own origin, and its artifact's asset library at `/_blob/`: the
+   host's own server, P082, P089). Two
    kinds of attacker matter:
    - *Attacking the host* (steal credentials, read other data, escape the
      sandbox): stopped by origin isolation — the content is a stranger to the
@@ -234,14 +242,21 @@ only the declared content origins.
      closed than its config says: an origin the config opens stays shut. On such
      a page prefer domain mode, whose frames inherit nothing (P058).
 
-3. **Message boundary.** Every message crossing the frame is validated against a
+3. **Host's decision ↔ what a page may do.** Under the capability runtime a page reaches only the
+   built-ins and what it declared at publish (stored by the host, given to the mount), and each
+   method only for viewers at its level (`view < interact < admin < owner`), which the host's
+   access says. The bridge refuses before any handler; the host's own API checks again, since it
+   is its data's wall. A person's per-user data is reached by the host's id for them, never the
+   content's word.
+
+4. **Message boundary.** Every message crossing the frame is validated against a
    schema and checked for sender identity before use; the shell accepts messages
    only from its host, and the host only from its frame. What the frame says about
    itself (its size, its errors, an annotation's anchor and where it is) is the
    content's word even when the shell says it, since they share a realm: the host
    bounds it and uses it as a UI hint, never as a permission (P053).
 
-4. **Host's decision ↔ content domain.** Authentication and authorization
+5. **Host's decision ↔ content domain.** Authentication and authorization
    *policy* are the host's; carrying the host's decision safely onto the content
    domain is Porthole's *mechanism*. The host decides who may open an instance
    before it calls `issue` (a viewer it knows, or a public link), and may decide
@@ -262,6 +277,10 @@ only the declared content origins.
   names are the default vocabulary.
 - **The person's clipboard** is the host's alone: content asks for a copy
   (`copyText`), the host performs it and shows what it copied (P051, P052).
+- **The capability runtime** (`config.runtime`): a contract version's capabilities, each a
+  namespace of methods over host functions, with a versioned `.d.ts`; a host offers them through
+  its config and serves them through its handlers; an artifact's asset library is served by
+  `/server` from the host's store at `/_blob/<id>` on the artifact's origin.
 - **Annotations** (`annotate`): the host drives a select mode and marks anchors in
   the shell; anchors are W3C Web Annotation selectors a host stores with its own
   comments (P053).

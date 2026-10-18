@@ -204,6 +204,41 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: '  const nonce = "";',
     },
   ],
+  // The capability runtime's walls (P085-P090), in the bridge the host page runs: a page held to
+  // its declaration, a call to the viewer's level, a person to their own data, comments write-only.
+  "runtime-declaration": [
+    {
+      file: BRIDGE,
+      find: "        (declaration === undefined\n          ? RUNTIME_HOST_FUNCTIONS.includes(capability)\n          : !Object.hasOwn(declaration.capabilities, family.name))",
+      replace: "        false",
+    },
+  ],
+  "runtime-level": [
+    {
+      file: BRIDGE,
+      find: "    if (needed !== null && !atLeast(viewer.level, needed)) {",
+      replace: "    if (false) {",
+    },
+  ],
+  // The per-user data's owner check, in the helper the bridge and a host's own services share.
+  "db-private": [
+    {
+      file: "src/runtime/db.ts",
+      find: "  if (id === undefined || viewer?.id === undefined || id !== viewer.id) {\n    return null;\n  }",
+      replace: "",
+    },
+  ],
+  "comments-result": [
+    {
+      file: BRIDGE,
+      find: "          return { ok: true, value: (value === true) as Result };",
+      replace: "          return { ok: true, value: value as Result };",
+    },
+  ],
+  // The asset library's CSP (P089), taken out by the served harness: scripts from it run
+  // whoever uploaded them; an asset opened on its own runs.
+  "blob-script": "harness",
+  "blob-inert": "harness",
   // The shell's clipboard walls (P051): the async API, the copy and cut commands, copy events.
   clipboard: [
     {

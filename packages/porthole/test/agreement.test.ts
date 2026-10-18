@@ -395,7 +395,9 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
       expect(text).toContain(
         `At most ${limits.maxFiles.toLocaleString("en-US")} files, ${sizeWords(limits.maxFileBytes)} each (a page under ${sizeWords(config.limits.maxBytes)}) and ${sizeWords(limits.maxVersionBytes)} in all.`,
       );
-      expect(text.includes("offer a file with downloadFile")).toBe(
+      // How a page offers a file: 0.6's capability, or the runtime's method (P085).
+      const offer = config.runtime === undefined ? "downloadFile" : "downloads.save";
+      expect(text.includes(`offer a file with ${offer}`)).toBe(
         config.capabilities.downloadFile !== undefined,
       );
     }

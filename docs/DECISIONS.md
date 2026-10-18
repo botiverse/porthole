@@ -353,7 +353,7 @@ wall.
 **Revisit when** a gate needs to depend on the call's arguments (then the host's
 `confirm` decides, as it does for tool calls today).
 
-## P022 · 2026-10-11 · Every preset starts with egress closed; library CDNs are a one-line opt-in · Accepted; amended by P082
+## P022 · 2026-10-11 · Every preset starts with egress closed; library CDNs are a one-line opt-in · Accepted; amended by P082, P089
 
 **Decision.** Every preset's base egress is empty: nothing loads from outside and
 every fetch fails. `LIBRARY_CDNS` (cdnjs, jsDelivr, unpkg, esm.sh for scripts,
@@ -370,7 +370,7 @@ allowlists (break ESM imports and data fetches for no egress gain).
 **Revisit when** most hosts open the CDNs anyway (then consider a preset variant,
 by a decision that names the residual supply-chain risk).
 
-## P023 · 2026-10-11 · No `readState`/`writeState` capabilities · Accepted
+## P023 · 2026-10-11 · No `readState`/`writeState` capabilities · Accepted; amended by P088
 
 **Decision.** The vocabulary drops `readState` and `writeState`. An opaque frame
 keeps an in-memory `localStorage` for its life; content that needs storage that
@@ -979,7 +979,7 @@ location and the rest (a decision each, if ever); delegation in opaque or domain
 **Revisit when** WebKit or Firefox enforce the clipboard-write policy feature (then the
 measurement changes), or a host needs another feature.
 
-## P050 · 2026-10-11 · The host's check runs on every request; Porthole carries the host's decision and never makes it · Accepted
+## P050 · 2026-10-11 · The host's check runs on every request; Porthole carries the host's decision and never makes it · Accepted; amended by P089
 
 **Decision.** `ServerOptions.authorize = { check(request), ttlSeconds? }`. Porthole calls it after
 a ticket or cookie verifies and before anything of the content is served: a document's first
@@ -2342,7 +2342,7 @@ accepts either outcome, as the opaque probes do. The opaque probes `5.*` keep fa
 Navigation API, a host needs libraries in opaque frames, or agents' live widgets reach for a library
 the two don't cover.
 
-## P080 · 2026-10-15 · The host hears a navigation the shell stopped; a host may refuse all data without handlers; a refusal tells content why · Accepted
+## P080 · 2026-10-15 · The host hears a navigation the shell stopped; a host may refuse all data without handlers; a refusal tells content why · Accepted; codes amended by P087
 
 From Ferry's adoption of 0.5.0's live widgets (#12, #13, #14). 0.5.1, additive but for the text of
 a refused data call's error (below).
@@ -2590,7 +2590,7 @@ content needs offline (a service worker of Porthole's own making), the conforman
 content domain joins the public suffix list (then siblings are other sites, and CORP is defense in
 depth only).
 
-## P082 · 2026-10-18 · A served page with files loads its own version's files, by their path; never `'self'` · Accepted
+## P082 · 2026-10-18 · A served page with files loads its own version's files, by their path; never `'self'` · Accepted; amended by P089
 
 **Decision.** Amends P022 for served pages with files. Their pages and scripts get the frame's CSP
 with one source added to `script-src`, `style-src`, `font-src`, `img-src`, `media-src`,
@@ -2733,3 +2733,319 @@ artifact's display, not one sent eleven seconds before the load, and never for a
 **Revisit when** hosts annotate multi-page artifacts (give the marks to each page), or an engine
 Porthole supports lacks the Navigation API (then `frame-src` is the wall, and a set's pages restart
 the display).
+
+## P085 · 2026-10-18 · The capability runtime: one global, `porthole.use(name)`, under a contract pinned per artifact · Accepted
+
+Task #124 (contract §7): a page published as an artifact is an app, and an app needs more of its host
+than 0.6's host functions: who is viewing, its comments, a new version of itself, an asset library,
+shared data. 笑笑's measured study of Claude's artifacts (Notion, 2026-10-18) gives the shape: a page
+declares `capabilities: { name: config }` at publish, calls `await claude.use(name)` and gets a
+frozen namespace or null, hears permission problems when it calls, and is pinned to the runtime
+contract it was written against; each capability's API is a versioned `.d.ts`. 0.7.0.
+
+**Decision.**
+- **The switch is the config's** (`PortholeConfig.runtime: "1"`, `presets.*({ runtime })`): inline
+  widgets and artifact pages only (the shell's protocol). Without it a frame, its globals and its
+  manual are 0.6's, byte for byte (`test/agreement.test.ts`, the existing leak suites).
+- **One global.** The shell defines `porthole`, frozen and fixed, whose only member is `use(name)`
+  (`shell/use.ts`, spliced into the runtime as `__RUNTIME__`). `use` never rejects: it resolves the
+  capability's namespace (frozen, the same object each time) or null, and null says nothing of why
+  (the host doesn't offer it here, the page didn't declare it, no host answered: a preview, a tab).
+  On a tab (`window.parent === window`) it is null at once; in a frame whose host never answers,
+  after the handshake gives up (10 s).
+- **What is offered** comes in the handshake, in MCP Apps' own extension point:
+  `hostCapabilities.experimental["porthole/runtime"] = { version, capabilities: { name: [methods] } }`,
+  the display's roster (`rosterOf(config, declared)`: the built-ins the config serves, and what the
+  page declared). The same for every viewer: levels refuse at call time (P087).
+- **Calls** go as `porthole/call { capability, method, args }` (own-prefixed, P002), answered
+  `{ value }` or a JSON-RPC error whose `data` is `{ code, message }` (P080); a watch adds a
+  frame-chosen `watch` id, its updates come as `porthole/event { watch, data }`, and
+  `porthole/unwatch { watch }` (a notification, never gated) ends it; at most 50 a frame.
+  `data.read` and `data.subscribe` ride MCP's own `resources/*` (the cache and subscriptions of
+  P079). The shell's namespace is sugar: the host's bridge decides every call, whichever way it came.
+- **The contract** (`RUNTIME_CAPABILITIES`, version `"1"`): each capability a namespace of methods,
+  each method served by one of the config's host functions, with a level (P087) and, for a watch,
+  callbacks. The config still declares host functions and their gates (PRINCIPLE 4); the runtime
+  only says how a page reaches them:
+
+  | `use(…)` | methods | host function | built in (P086) |
+  | --- | --- | --- | --- |
+  | `clipboard` | `copy(text)` | `copyText` | yes |
+  | `links` | `open(url)` | `openLink` | yes |
+  | `downloads` | `save({ name, text \| data })` | `downloadFile` (`ui/download-file`) | yes |
+  | `comments` | `open(anchor)` | `comments` (new, P090) | yes |
+  | `user` | `get()` | `user` (new, answered from the viewer, P087) | no |
+  | `chat` | `send(text)` | `sendPrompt` | no |
+  | `data` | `read(uri)`, `subscribe(uri, onData, onError)`, `call(name, args)` | `readData`, `subscribeData`, `callTool` | no |
+  | `context` | `set({ content, structuredContent })` | `setModelContext` | no |
+  | `artifact` | `get()`, `publish(change)` | `artifact` (new, P088) | no |
+  | `assets` | `list()`, `upload(file)`, `delete(id)` | `assets` (new, P089) | no |
+  | `db` | `get`, `query`, `onSnapshot`, `set`, `update`, `delete`, `batch` | `db` (new, P088) | no |
+
+  `resize`, `reportError` and `annotate` stay the shell's own: content never calls them by name.
+- **Types.** Each capability's API is a `.d.ts` per contract version (`types/runtime/v1/`, shipped
+  in the package, compiled by `pnpm typecheck` with a page-shaped `check.ts`), the call contract in
+  `porthole.d.ts`. `scripts/runtime-types.ts` embeds them in `src/runtime/types.generated.ts` (a
+  module, P075); the manual's new `capabilities` topic teaches the call contract, declaring, levels,
+  where state goes (localStorage for one person's view, `artifact` when the page is the record, `db`
+  for shared data), and each offered capability's types (`test/agreement.test.ts`: exactly the
+  offered ones, as the files hold them).
+- **The pin.** A declaration carries the contract version it was written against (P086); a mount
+  checks the version is one this Porthole serves (`RUNTIME_VERSIONS`). A new version will be a new
+  directory of types and a new table; a page keeps its own.
+- **The legacy path** (`shell/legacy.ts`, since 0.7.0): 0.6's globals (`sendPrompt`, `copyText`,
+  `openLink`, `readData`, `subscribeData`) are still defined for what the config declares, under a
+  runtime too, so stored 0.5 and 0.6 pages run unchanged; under a runtime the manual no longer
+  teaches them (`ShellPlan.legacyGlobals`, defined and untaught, asserted by the agreement test),
+  and a page that declared capabilities is held to its declaration on that path as well (P086).
+  Remove it when no host serves a page written before 0.7.
+
+**Why.**
+- One entry point keeps the global namespace the content's own, and a namespace per capability
+  lets the manual teach a capability as one block (its declaration, its methods, its types).
+- Null rather than an error at `use`: a page draws without what isn't there, wherever it is shown
+  (Claude's `ArtifactCheck` preview has no runtime and resolves null too); permission is a property
+  of each call (consent, rate, level), not of the page.
+- The roster in the handshake: said once, in the field MCP Apps keeps for extensions, without a
+  round trip per `use`.
+- Pinned contracts: Claude's runtime does the same (`contract` per artifact); old pages keep the
+  API they were written against.
+
+**Rejected.**
+- A global per capability (`window.db`): the content's namespace, and a new global per release.
+- The name `claude`: a vendor's. `porthole` is Porthole's, the same in every host that runs it.
+- A `porthole/use` request per call to `use`: a round trip for what the handshake can say once.
+- Refusing at `use` (a page that branches on who views it at load) and rejecting `use`.
+- Dropping 0.6's globals: every stored page that calls them would break.
+- Throwing for a capability the config doesn't offer: a page is written once for many hosts.
+
+**Revisit when** MCP Apps specifies capability negotiation for views (follow it), a second contract
+version ships (its own types and table; the pins tell which pages need it), or no host serves a
+page from before 0.7 (remove `shell/legacy.ts`).
+
+## P086 · 2026-10-18 · A page declares the capabilities it uses; built-ins need no declaring; the bridge holds every path to it · Accepted
+
+**Decision.**
+- **The declaration** is `{ capabilities: { name: config }, runtime }` (`PageDeclaration`), stored by
+  the host with the artifact and given to each mount (`MountOptions.declaration`, React's
+  `declaration`), checked against the config there (`checkDeclaration`: a `TypeError` for one that
+  doesn't fit). Configs of their own: `data: { resources?, tools? }` (exact names, or a prefix
+  ending in `*`; absent: all the host serves), `db: { rules? }` (P088), and any capability's
+  `levels` (P087, raise only).
+- **At publish** (`declareCapabilities({ stored, given, config, runtime? })`, the helper hosts call):
+  `given` omitted carries the stored declaration forward with its pin (none stored: an empty one,
+  pinned to the current contract); `{}` clears it; a non-empty object replaces it whole (anything
+  not restated is revoked); each name checked against the host's offer (`declarationProblems`:
+  known, offered by the config, not built in, of its own shape). The pin moves only when the author
+  asks (`runtime`).
+- **Built-ins** are reachable by any page whose host offers them, declared or not: `clipboard`,
+  `links`, `downloads`, `comments`, whose every effect is the host's own UI, shown to the person (a
+  copy it shows, a link and a download it confirms, a composer the person writes in). Everything
+  else (`user`, `chat`, `data`, `context`, `artifact`, `assets`, `db`) only a page that declared it.
+- **The bridge holds a call to it**, whichever way it came (`porthole/call`, or 0.6's requests and
+  globals: `resources/read`, `ui/message`, …), before its arguments are read: a capability the page
+  didn't declare is refused `undeclared` (content: `not_allowed`), as is a resource or tool its
+  `data` doesn't name. A display with no declaration is a 0.6 page: built-ins through `use`, 0.6's
+  globals and requests as before, and none of the runtime's own host functions.
+- **A page can't change its own declaration**: `artifact.publish` carries none, so a new version
+  made from the page keeps what its author declared.
+
+**Why.** "What can this page do?" is answered by reading what it declared, checked against what the
+host offers (PRINCIPLE 4 per page, as the config is per kind). The built-ins are the effects a
+person sees and answers in the host's UI; declaring them would only add noise to every page with a
+link.
+**Rejected.**
+- Everything declared, links and copy buttons too.
+- A declaration in the page (a `<meta>`): the content's word, which could grant itself anything.
+- The declaration in the frame's plan: the shell shares the content's realm; the bridge is the wall.
+- A page that republishes itself with a new declaration: a page (or what injected it) widening its
+  own reach.
+**Tested.** `test/runtime.test.ts` (problems, carry/clear/replace and the pin, a mount's check; the
+bridge refusing an undeclared capability and 0.6's requests from a declared page before any
+handler; data's names); `leak/served/runtime.spec.ts` ("an undeclared capability: null from use,
+refused when sent anyway, its handler never asked"; "under the runtime, with no declaration") on
+Chromium, WebKit and Firefox. Negative control `runtime-declaration` (the bridge's check taken out)
+→ the first case on all three engines.
+**Revisit when** a host needs a declaration per version rather than per artifact, or a built-in
+grows an effect the person doesn't see.
+
+## P087 · 2026-10-18 · Viewer levels decide each method's audience; the host's access says the level; a refusal is a stable code, at call time · Accepted
+
+**Decision.**
+- **Levels** `view < interact < admin < owner` (`VIEWER_LEVELS`): view sees and comments; interact
+  uses what the page does (writes its data, asks the agent); admin publishes versions and manages
+  assets; owner. Each runtime method declares the least level that may call it, and a floor below
+  which a host's config can't set it (`RUNTIME_CAPABILITIES`): reads `view`; `chat.send`,
+  `data.call`, `context.set` and db writes `interact`; `artifact.publish` and `assets.delete`
+  `admin` (floor admin); `assets.upload` `admin` (floor interact). A config may set a host
+  function's methods' levels (`CapabilityConfig.levels`, at or above the floor); a page's
+  declaration may raise them, never lower (`methodLevel`).
+- **Who says the level**: the host, per request. The host kit's `access(instance, viewer)` returns a
+  `Grant` with `level` (and `user: { id, name }`, the person as a page that declares `user` may know
+  them: the host's public id, not `Grant.viewer`); `/server`'s `issue` answers it as
+  `FrameLocation.viewer`, never in the ticket, the cookie or the page; `httpLocator` and
+  `locateServed` carry it (dropped if it doesn't parse) to the display's bridge. An opaque frame, or
+  a host without the kit, passes `MountOptions.viewer`; the issue's answer wins where both are.
+- **The bridge checks at call time**, after the declaration (P086) and the arguments, before any
+  gate or handler: below the method's level is `level` (content: `forbidden`). Without a viewer,
+  0.6's host functions run as before (no level is checked: a 0.6 host is unchanged) and the
+  runtime's own (`user`, `comments`, `artifact`, `assets`, `db`) are refused (fail closed). The
+  handler's context carries the viewer (`CallContext.viewer`) and the page's declaration for that
+  capability (`declared`): the app's API checks again, since it is its data's wall
+  (`defineRuntimeConformance` runs its handlers past the bridge to see that it does).
+- **`user.get()`** answers `{ id, name, level }` from the viewer the host gave, nothing else.
+- **Codes.** `REFUSAL_CODES` gains `forbidden` (this person may see it but not do this),
+  `conflict` (it moved since it was read, P088) and `too_large` (past a limit); `Refusal` gains
+  `undeclared`, `level`, `too-large`. Content gets the code and Porthole's sentence for it (or the
+  host's `Refused`), never why beyond it. Amends P080's vocabulary; 0.6's data refusals keep their
+  five codes and words.
+
+**Why.** Claude's runtime decides each capability's audience the same way (view < interact < admin <
+owner), and the same page runs for every viewer: a level is a property of the person at the call,
+not of the page. Carried in the issue's answer, the level is decided when the frame is made, by the
+same policy that decides access, without another request; it never needs to reach the content
+origin. `forbidden` apart from `not_allowed` lets a page say "ask for access" rather than "not here".
+**Rejected.** A level refused at `use`; the level in the ticket or cookie (the content server never
+needs it; less to carry); a level the content says; `not_allowed` for a level.
+**Tested.** `test/runtime.test.ts` (levels and floors; refused before any handler; no viewer;
+`user`); `test/assets.test.ts` (a grant's level in the issue's answer and only with one; never in
+the page; the locator drops what doesn't parse); `leak/served/runtime.spec.ts` ("a method above the
+viewer's level: forbidden, its handler never asked"). Negative control `runtime-level` (the bridge's
+level check taken out) → that case on all three engines.
+**Revisit when** a host needs levels per resource rather than per method (then the host's `Refused`
+says it, as now), or MCP Apps standardizes a viewer identity for views.
+
+## P088 · 2026-10-18 · State the host keeps: a page publishes itself (`artifact`), and shares data (`db`); amends P023 · Accepted
+
+P023 dropped `readState`/`writeState`: domain mode gives a page real `localStorage`. That is one
+person's, in one browser. Task #124's pages need state that people share and the agent reads: a
+checklist that is the record, votes, a board. "Revisit when a host needs persisted state for opaque
+frames": hosts now need it for every frame, shared. The state stays the host's (PRINCIPLE 8:
+Porthole stores nothing); Porthole defines the protocol, checks what crosses the frame, and gates it.
+
+**Decision.**
+- **`artifact`** (artifact mode only): `get()` answers the current version (`{ version, number?,
+  entry, files: [{ path, size, sha256 }] }`), `publish({ base, files, entry?, label?, note? })` a
+  new one: a patch on `base`'s files (text, bytes as base64, `null` removes; the rest kept), at most
+  255 files and the config's file limits (`too_large` past them), paths by `filePathProblem`. Admin
+  and above (floor admin). The host checks `base` is current and refuses with `Refused("conflict")`
+  if it moved; it admits the files as any publish (`admitFiles`). No declaration rides it (P086).
+- **`db`**: a document store per artifact. Paths are slash-separated, segments of
+  `A-Z a-z 0-9 _ . ~ : @ + -`, a collection odd (1–15), a document even (2–16). Ops: `get`,
+  `set`, `update` (a top-level merge), `delete`, `query` (`where` ≤ 10 of `== != < <= > >= in
+  array-contains`, `orderBy`, `limit` ≤ 500), `batch` (≤ 50 writes, ≤ 1 MiB, all or none),
+  `watch` (`onSnapshot`: a document's snapshot or a collection's `{ docs }`, now and at each
+  change, through the host's `changed`, as `subscribeData`'s). Data is plain JSON, ≤ 1 MiB a
+  document, ≤ 32 deep. Every write to a document that exists names the version it read
+  (`ifVersion`; `0`: must not exist), and `update` needs one that exists; a mismatch is `conflict`.
+  Snapshots: `{ path, id, exists, version, data? }`, `version` counting writes from 1.
+- **Who reaches what** (`dbAccess`, applied by the bridge and again by the host): `data/users/<id>`
+  is that person's (`me`, resolved by Porthole to the viewer's id from the host); any other path
+  under `data`, or another person's, is refused at every level (`forbidden`); a viewer with no id
+  has none. The page's `db.rules` (by top-level collection or `*`: `{ read?, write? }` levels) raise
+  the defaults (read view, write interact).
+- Hosts implement both behind their own API (Ferry's server, raft-artifacts' Worker), which the
+  handlers call as the viewer; `defineRuntimeConformance` checks versions, conflicts, batches,
+  watches, the per-user data and the rules, past the bridge too.
+
+**Why.** Claude's runtime has the same two (`artifact` republishes itself, `db` with `if_version`,
+`data/users/<id>` and `as_level` rules); an agent reads and writes the same rows through its tools,
+so the shapes are the platform's, not a page's. Versions on every write make concurrent viewers
+safe without locks; per-user data resolved by the host's id, never the content's word, keeps one
+person's prefs from another.
+**Rejected.** P023's key-value `readState`/`writeState` (no versions, no sharing rules); storage in
+Porthole; rules evaluated only in the content (its word) or only in the bridge (the app's API is
+reachable by the viewer directly); a CRDT or a live room (later: `room`, broadcast and presence).
+**Tested.** `test/runtime.test.ts` (shapes, limits, `me`, another's data, rules, data with no id;
+the reference services against the conformance cases, and a lax host failing every db case);
+`leak/served/runtime.spec.ts` (db end to end with a conflict and a watch hearing another person's
+write; a page publishing itself, a stale base a conflict; "a person's own data is theirs"). Negative
+control `db-private` (the owner check taken out of `dbAccess`) → that case on all three engines.
+**Revisit when** a host needs transactions across documents beyond a batch, field-level deletes, or
+live presence (a `room` capability).
+
+## P089 · 2026-10-18 · An artifact's asset library at `/_blob/<id>` on its own origin; scripts and styles from it only where uploads are the admins' · Accepted
+
+Amends P022 and P082 (a page's CSP gains a source on its own origin) and P050 (a running page's own
+loads of its assets skip the host's per-request check).
+
+**Decision.**
+- **The store** is the host's (`ServerOptions.assets`, `createContentHost({ assets })`):
+  `get(id) → { scope, name, size, sha256, read() } | null`. Ids are the host's: 32 lowercase hex
+  characters made at random (`ASSET_ID`). `/server` serves `/_blob/<id>` only on the origin of the
+  asset's own `scope` (another origin: 404), outside every version (P081 kept the path free).
+- **Who gets it**: a page of that origin loading it (`Sec-Fetch-Site: same-origin`, not a
+  navigation: the page was let in to be there; in a frame there is no cookie, P083), or a request
+  whose cookie holds a session for an artifact of the origin, which the host's check then decides.
+  Anything else is a plain 401; never an entry (an asset is no address to sign in for).
+- **How it is served**: typed by Porthole's table by its name (never the uploader's type, never
+  sniffed); never as a page (a name typed HTML goes as `application/octet-stream`, a download);
+  `default-src 'none'; sandbox` (an SVG or XML opened on its own runs nothing), `nosniff`,
+  `Cross-Origin-Resource-Policy: same-origin`, `private, max-age=31536000, immutable` (an id never
+  names other bytes), its sha256 the ETag, one range.
+- **The page's CSP** (`assetCspDirectives`), where its config declares `assets`: `<origin>/_blob/`
+  (the page's own origin, exact) in `img-src`, `media-src`, `font-src` and `connect-src`, always; in
+  `script-src` and `style-src` only where `assets.upload` is admin or above (`assetCodeRuns`):
+  people who may publish the page's code may add code. Never `'self'`.
+- **The capability** (`assets`, artifact mode, domain isolation): `list()` (view), `upload(file)`
+  (admin; a host may let people who interact, floor interact), `delete(id)` (admin, floor admin).
+  An upload's name must be one Porthole's table types and not a page; at most `maxFileBytes`.
+  `upload` answers `{ id, url: "/_blob/<id>", name, type, size }`.
+
+**Threats it re-opens, bounded.**
+- Content loads from its own origin outside its version's path: only `/_blob/`, its artifact's own
+  library, the same trust domain as its versions (P082).
+- Files someone who interacts uploaded are shown to every viewer: images, media, fonts and data
+  only, never as code (no `script-src`/`style-src` then) and never as a page; an SVG shown as an
+  image runs nothing, opened on its own runs nothing (its CSP).
+- A running page's own loads skip the host's check: a revoked viewer's open page keeps loading its
+  assets by id until it is closed, as it keeps what it already loaded; outside a browser
+  `Sec-Fetch-Site` can be forged, so an asset is reachable to whoever holds its id (128 random bits,
+  shown only to those the page shows it to), as a signed CDN address is. Navigations and every other
+  request still need a session and the host's check.
+- `connect-src` lets a page read its assets' bytes: data it could show anyway.
+
+**Why.** Large or binary media that outlives versions, and that viewers add through the page, needs
+a stable address any version can use; Claude's content origin serves `/_blob/<id>` outside
+`/_f/<version>/` the same way (measured, task #124 §1.4). A frame has no cookie (P083), and a stored
+asset address can't carry a session, so the page's own origin is the credential.
+**Rejected.** Serving assets under the frame's sealed path (a page stores `/_blob/<id>` in its data
+and HTML, where a sealed address would be a session leaked into a record); `'self'`; capability
+URLs with no session for navigations; the uploader's type; HTML assets; scripts from the library
+whoever uploads.
+**Measured** (Playwright 1.63, `leak/served/runtime.spec.ts`): an upload from the page is served and
+loads in its frame, and a file set's page loads the library in its frame, on Chromium, WebKit and
+Firefox (each sends `Sec-Fetch-Site` for `*.localhost`); a script asset runs where uploads are the
+admins' and not where people who interact upload; an SVG asset opened on a tab with the artifact's
+session runs nothing. Negative controls: `blob-script` (the harness opens scripts and styles to the
+library whoever uploads) → "its scripts run only where uploads are the admins'"; `blob-inert` (the
+harness drops an asset's CSP) → "an asset opened on its own runs nothing"; on all three engines.
+**Tested.** `test/assets.test.ts` (served to its own origin's loads, inert, typed, ranges; 404 on
+another scope's origin or a malformed id; never a page; 401 without a session, never an entry; a
+tab's session with the host's check; the page's CSP with and without uploads open; nothing without a
+store); `test/runtime.test.ts` (the CSP sources; upload limits and names).
+**Revisit when** an engine stops sending Fetch Metadata to a content origin, the content domain joins
+the public suffix list (CORP becomes defense in depth), or a host needs assets shared across
+artifacts (`copy_from`: a new id in the destination).
+
+## P090 · 2026-10-18 · Comments from the page: the host's composer at the page's anchor, write-only · Accepted
+
+**Decision.** `comments` is a built-in (P086) host function served by a handler: `open({ name,
+label?, quote? })` (a name the page chose, ≤ 256 characters, `slide-3`, `refs/a.md#L12`; a label ≤
+200; the quoted text ≤ 2,000), from a click (`user-activation`, 30 a minute), at view level. The
+host opens its own composer at that anchor (a custom anchor, task #124 §9, beside P053's quote and
+element anchors) and the person writes and posts there. Content hears whether the composer opened:
+the bridge answers `true` only for a handler's `true`, whatever else it returned. There is no method
+that reads a thread.
+**Why.** Threads hold other people's words: a page that could read them could carry them out (into
+its data, to the agent) or answer as someone. Reading and replying is the agent's, through the host's
+tools (Claude's `ArtifactComments`), and the person's, in the host's UI.
+**Rejected.** A `list` or `on` method; the page posting a comment itself (a comment is a person's
+word, written by them); comments only through annotations (P053's anchors are the host's to drive).
+**Tested.** `test/runtime.test.ts` (a handler that answers a thread: content hears `false`; a
+malformed anchor refused); `leak/served/runtime.spec.ts` ("comments are write-only": the namespace
+has `open` only, a raw `comments.list` is refused, the composer opens from a click and content hears
+only that). Negative control `comments-result` (the bridge passes the handler's answer on) → that
+case on all three engines.
+**Revisit when** a page needs to show its comment counts (then a count, through the host, never the
+words).

@@ -42,7 +42,13 @@ a served frame navigating itself away. 0.5.1 (P080): the host hears a navigation
 (`navigationBlocked`), a `Refused` as `consent` refuses all data without handlers, and refusals
 tell content why (`data: { code, message }`). 0.6 (P081–P084): a served page may be many files
 (`StoredFiles`), each served from its version's manifest under that version's own address, its CSP
-opening that path only; `checkFileSet`, `lintFiles`, `checkPage({ files })`.
+opening that path only; `checkFileSet`, `lintFiles`, `checkPage({ files })`. 0.7 (P085–P090): the
+capability runtime: `config.runtime`, one global `porthole.use(name)` (a frozen namespace or null),
+a page's declaration (`declareCapabilities`, built-ins vs declared), viewer levels from the host's
+access (`Grant.level`), `porthole/call` through the bridge, the runtime's own host functions
+(`user`, `comments`, `artifact`, `assets`, `db`), `/_blob/` assets, versioned `.d.ts`
+(`types/runtime/v1`), 0.6's globals as the legacy path (`shell/legacy.ts`), and
+`defineRuntimeConformance` with the in-memory reference (`leak/runtime/memory.ts`).
 
 ## Setup
 
@@ -79,10 +85,14 @@ packages/porthole/src/   config/ compile/ shell/ guide/ theme/ presets/   the co
                          protocol/ bridge/ transport/ platform/ isolation/ host/   the seams
                          react/ mcp/ conformance/ server/ node/ check/    the subpath entries
                          displays/   the display registry (defineDisplays)
+                         runtime/   the capability runtime's contract, levels, declarations, db
+packages/porthole/types/runtime/v<n>/   each runtime contract's .d.ts (shipped; embedded in the
+                         manual by scripts/runtime-types.ts)
 packages/porthole/test/  unit tests; agreement.test.ts is the config ↔ CSP ↔ shell ↔ manual check
 packages/porthole/leak/  the leak suite run against Porthole's reference host; react.spec.ts the
                          React binding in real browsers (leak/react/app.tsx, bundled by esbuild);
-                         kit/ the host kit's reference app, kit.spec.ts the runner against it
+                         kit/ the host kit's reference app, kit.spec.ts the runner against it;
+                         runtime/memory.ts the runtime's reference services, in memory
 packages/porthole/prod-shape/  the prod-shape suite (run in ops/prod-shape's containers)
 packages/porthole/examples/    shipped: one app on Node and Workers, and the suite against it
                          (adopter-facing: keep it working, with docs/ADOPTING.md and the README)

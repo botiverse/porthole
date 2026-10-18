@@ -256,3 +256,44 @@ describe("the viewer a host's access gives a display (P087)", () => {
     expect(await locate({ level: "view", id: "x\u0000y" })).not.toHaveProperty("viewer");
   });
 });
+
+describe("the host kit carries both (P087, P089)", () => {
+  test("access's level reaches the issue's answer; the kit serves its assets", async () => {
+    const { createContentHost } = await import("../src/server/index.ts");
+    const config = presets.artifact({
+      isolation: "domain",
+      contentOrigins: ["https://*.usercontent.example.net"],
+      runtime: "1",
+      capabilities: { assets: {}, user: {} },
+    });
+    const content = createContentHost<{ id: string }>({
+      domain: "usercontent.example.net",
+      appOrigins: [HOST],
+      secret: new Uint8Array(32).fill(5),
+      configs: { artifact: config },
+      name: prefixedName("a-"),
+      instance: (proposal) => proposal,
+      access: (_instance, viewer) =>
+        viewer === null ? null : { viewer: viewer.id, level: "admin", user: { id: viewer.id } },
+      source: () => Promise.resolve({ html: "<!doctype html><title>P</title>" }),
+      assets: (id) => Promise.resolve(id === ID ? asset("one", "logo.png", "png bytes") : null),
+    });
+    const issue = content.issue(() => ({ id: "ada" }));
+    const answer = await issue(
+      new Request(`${HOST}/porthole/frames`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: HOST },
+        body: JSON.stringify({ instance: instance("one") }),
+      }),
+    );
+    expect(answer.status).toBe(201);
+    expect(((await answer.json()) as { viewer?: unknown }).viewer).toEqual({
+      level: "admin",
+      id: "ada",
+    });
+    const served = await content.fetch(
+      new Request(`https://a-one.usercontent.example.net/_blob/${ID}`, { headers: ownLoad }),
+    );
+    expect([served?.status, served?.headers.get("content-type")]).toEqual([200, "image/png"]);
+  });
+});

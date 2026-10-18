@@ -4,6 +4,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { stripTypeScriptTypes } from "node:module";
 import type { AddressInfo } from "node:net";
@@ -24,6 +25,7 @@ import {
   createServer,
   proxyTo,
   type PortholeServer,
+  type StoredAsset,
   type StoredFiles,
 } from "../../src/server/index.ts";
 import { weaken, weakenServed, weakened } from "../weakenings.ts";
@@ -58,6 +60,11 @@ export interface Harness {
   readonly revoked: Set<string>;
   /** Every URL the main server (host page and content origins) was asked for, in order. */
   readonly requests: string[];
+  /**
+   * Artifacts' asset libraries (P089), by id: what `/server` serves at `/_blob/<id>`. The host
+   * page's reference services add to it (`POST /__assets`), and a case may too.
+   */
+  readonly assets: Map<string, StoredAsset>;
 }
 
 /** A library as a CDN serves it, for the CDN cases (routed by the test, never fetched). */
@@ -168,7 +175,7 @@ const PACKAGE = path.resolve(import.meta.dirname, "../..");
 /** The package's own TypeScript, stripped as Node strips it, for a host page to import. */
 async function sourceOf(pathname: string): Promise<Response | null> {
   const relative = pathname.replace(/^\/+/u, "");
-  if (!/^(src|leak\/mcp)\/[\w/.-]+\.ts$/u.test(relative) || relative.includes("..")) {
+  if (!/^(src|leak\/mcp|leak\/runtime)\/[\w/.-]+\.ts$/u.test(relative) || relative.includes("..")) {
     return null;
   }
   try {
@@ -189,6 +196,28 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Porthole host</title></head>
 <body><main id="displays"></main><script type="module">
   import { createHost, Refused } from "/src/index.ts";
+  import { memoryRuntime } from "/leak/runtime/memory.ts";
+  // The capability runtime's reference services (P085-P090), in memory, one per key a case names
+  // (two people's displays share one): their calls are the cases' oracle. Assets go to the
+  // harness's server too, which serves them at /_blob/<id>.
+  const runtimes = (window.runtimes = new Map());
+  const keep = (asset, removed) =>
+    fetch("/__assets", {
+      method: removed ? "DELETE" : "POST",
+      body: JSON.stringify({ id: asset.id, scope: asset.scope, name: asset.name, sha256: asset.sha256, base64: removed ? "" : btoa(String.fromCharCode(...asset.bytes)) }),
+    });
+  const runtimeOf = (options) => {
+    if (!runtimes.has(options.key)) {
+      runtimes.set(options.key, memoryRuntime({
+        scope: options.scope,
+        uploadLevel: options.uploadLevel,
+        onAsset: keep,
+        // The app's composer answers with a thread; content must hear only whether it opened.
+        composer: () => ({ thread: "a reply only the app sees" }),
+      }));
+    }
+    return runtimes.get(options.key);
+  };
   // A host's data for live widgets (P079): resources by URI as JSON, their subscribers, the
   // viewer's consent (asked once per display) and a cache of last values.
   const liveData = (window.liveData = {
@@ -240,7 +269,12 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
       box.style.cssText = "width: 600px; height: 300px";
       document.getElementById("displays").append(box);
       // A null location: the host's backend failing to give one.
+      const runtime = options.runtime ? runtimeOf(options.runtime) : null;
       const host = createHost(config, {
+        // The runtime's services, a person who says yes to every confirmation and consent.
+        ...(runtime === null
+          ? {}
+          : { handlers: runtime.handlers, confirm: async () => true, consent: () => true }),
         // "refused": a page where live data never runs: consent a Refused, no handlers (P080).
         ...(options.live === "refused"
           ? { consent: new Refused("not_allowed", "Live data shows on the dashboard.") }
@@ -256,7 +290,15 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
           },
         },
       });
-      const display = host.mount(box, { displayId: "d" + index, title: "Probe", scheme: "light", instance, ...(options.fill ? { fill: true } : {}) });
+      const display = host.mount(box, {
+        displayId: "d" + index,
+        title: "Probe",
+        scheme: "light",
+        instance,
+        ...(options.fill ? { fill: true } : {}),
+        ...(options.runtime && options.runtime.declaration ? { declaration: options.runtime.declaration } : {}),
+        ...(options.runtime && options.runtime.viewer ? { viewer: options.runtime.viewer } : {}),
+      });
       this.displays.push(display);
       if (typeof options.content === "string") {
         display.setContent(options.content);
@@ -295,6 +337,7 @@ async function start(): Promise<Harness> {
   const revoked = new Set<string>();
   const requests: string[] = [];
   const fileSets = new Map<string, StoredFiles>();
+  const assets = new Map<string, StoredAsset>();
 
   const app = createHttpServer((request, response) => {
     const pathname = new URL(request.url ?? "/", "http://app").pathname;
@@ -329,7 +372,7 @@ async function start(): Promise<Harness> {
       response.end(PORTHOLE_HOST_PAGE);
       return;
     }
-    if (url.pathname.startsWith("/src/")) {
+    if (url.pathname.startsWith("/src/") || url.pathname.startsWith("/leak/runtime/")) {
       void sourceOf(url.pathname).then(async (source) => {
         response.writeHead(source === null ? 404 : 200, { "content-type": "text/javascript" });
         response.end(source === null ? "" : await source.text());
@@ -372,6 +415,26 @@ async function start(): Promise<Harness> {
     mcpApp: presets.mcpApp({ isolation: "domain", contentOrigins: [contentSource] }),
     // A live widget (P079): no network of its own, Porthole's libraries on its origin.
     liveWidget: presets.liveWidget({ isolation: "domain", contentOrigins: [contentSource] }),
+    // The capability runtime (P085-P090): every capability; uploads the admins' (scripts from the
+    // asset library run), or open to people who interact (they never do).
+    runtime: presets.artifact({
+      isolation: "domain",
+      contentOrigins: [contentSource],
+      runtime: "1",
+      capabilities: RUNTIME_CAPABILITIES_ALL,
+    }),
+    runtimeOpen: presets.artifact({
+      isolation: "domain",
+      contentOrigins: [contentSource],
+      runtime: "1",
+      capabilities: { ...RUNTIME_CAPABILITIES_ALL, assets: { levels: { upload: "interact" } } },
+    }),
+    // A 0.6 page's config: no runtime (copy buttons and data, as before).
+    artifactLegacy: presets.artifact({
+      isolation: "domain",
+      contentOrigins: [contentSource],
+      capabilities: { copyText: {}, readData: {}, subscribeData: {} },
+    }),
     url: presets.url({ contentOrigins: [contentSource] }),
   };
   const porthole = createServer({
@@ -390,6 +453,7 @@ async function start(): Promise<Harness> {
       },
     },
     upstream: proxyTo({ target: () => `http://127.0.0.1:${appPort}` }),
+    assets: { get: (id) => Promise.resolve(assets.get(id) ?? null) },
     ...(weakened.includes("authorize")
       ? {}
       : {
@@ -413,6 +477,16 @@ async function start(): Promise<Harness> {
       weakened.includes("service-worker") ? asServiceWorkerAllowed(request) : request,
     );
     if (served !== null) {
+      // Negative controls on the asset library (P089): its code runs whoever uploads, or an
+      // asset opened on its own runs.
+      if (weakened.includes("blob-script")) {
+        return withAssetScripts(served, request);
+      }
+      if (weakened.includes("blob-inert") && new URL(request.url).pathname.startsWith("/_blob/")) {
+        const headers = new Headers(served.headers);
+        headers.delete("content-security-policy");
+        return new Response(served.body, { status: served.status, headers });
+      }
       if (weakened.includes("file-self")) {
         return withSelfForFiles(served);
       }
@@ -429,6 +503,22 @@ async function start(): Promise<Harness> {
         : served;
     }
     const pathname = new URL(request.url).pathname;
+    // The host page's services keep assets here (P089): the bytes /_blob/<id> serves.
+    if (pathname === "/__assets" && (request.method === "POST" || request.method === "DELETE")) {
+      const body = (await request.json()) as {
+        id: string;
+        scope: string;
+        name: string;
+        sha256: string;
+        base64: string;
+      };
+      if (request.method === "DELETE") {
+        assets.delete(body.id);
+      } else {
+        assets.set(body.id, storedAsset(body.scope, body.name, Buffer.from(body.base64, "base64")));
+      }
+      return new Response(null, { status: 204 });
+    }
     if (pathname === "/host") {
       return html(HOST_PAGE, { "content-security-policy": hostCsp });
     }
@@ -452,7 +542,62 @@ async function start(): Promise<Harness> {
     fileSets,
     revoked,
     requests,
+    assets,
   };
+}
+
+/** The host functions the runtime configs offer: every one. */
+const RUNTIME_CAPABILITIES_ALL = {
+  copyText: {},
+  openLink: {},
+  downloadFile: {},
+  sendPrompt: {},
+  readData: {},
+  subscribeData: {},
+  callTool: {},
+  setModelContext: {},
+  user: {},
+  comments: {},
+  artifact: {},
+  assets: {},
+  db: {},
+} as const;
+
+/** An asset as the harness's store keeps it. */
+export function storedAsset(scope: string, name: string, bytes: Uint8Array): StoredAsset {
+  return {
+    scope,
+    name,
+    size: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    read: () => Promise.resolve(new Uint8Array(bytes)),
+  };
+}
+
+/**
+ * The `blob-script` control (P089): every served page's scripts and styles may load from its
+ * asset library, whoever uploaded to it.
+ */
+function withAssetScripts(served: Response, request: Request): Response {
+  const csp = served.headers.get("content-security-policy");
+  if (csp === null || !csp.includes("/_blob/")) {
+    return served;
+  }
+  const origin = new URL(request.url).origin;
+  const headers = new Headers(served.headers);
+  headers.set(
+    "content-security-policy",
+    csp
+      .split("; ")
+      .map((each) =>
+        (each.startsWith("script-src ") || each.startsWith("style-src ")) &&
+        !each.includes("/_blob/")
+          ? `${each} ${origin}/_blob/`
+          : each,
+      )
+      .join("; "),
+  );
+  return new Response(served.body, { status: served.status, headers });
 }
 
 let started: Promise<Harness> | null = null;

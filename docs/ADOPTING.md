@@ -50,8 +50,8 @@ data (fetch, WebSocket). Every preset starts closed, and a kind opens more only 
 
 | Level | Config (`options`) | What it opens | The risk it re-opens | Typical host | The agent's manual says | Why | Tested by |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **Closed** (the default) | nothing to write | Nothing from outside the frame: content runs on what it carries (inline code, `data:` and `blob:` URLs). | None. | Widgets that draw their own SVG and CSS; any host that hasn't decided yet. | `Network: none. Nothing loads from outside` (and `write everything inline`) | [P006](DECISIONS.md#p006--2026-10-11--egress-is-closed-by-default-including-channels-a-frame-csp-doesnt-cover--accepted), [P022](DECISIONS.md#p022--2026-10-11--every-preset-starts-with-egress-closed-library-cdns-are-a-one-line-opt-in--accepted-amended-by-p082) | probes `1.connect`, `2.resources`, `3.webrtc`, `4.*` (nested frames), `5.*` (navigating out), `8.*` (resource hints), `10.self`; served `served.domain.egress` |
-| **Library CDNs** (`LIBRARY_CDNS`, plus script hosts of your own) | `egress: LIBRARY_CDNS`; more script hosts: `egress: { ...LIBRARY_CDNS, script: [...LIBRARY_CDNS.script, "https://cdn.example.com"] }` | Scripts, styles, fonts, images and data from cdnjs, jsDelivr, unpkg and esm.sh; Google Fonts; scripts only from three libraries' own CDNs (Tailwind's Play CDN, jQuery, Plotly). Nothing else. | Code you don't control runs in the frame (a compromised or look-alike package), still inside the sandbox and egress; and a path requested from a CDN is a narrow channel out, read by the CDN's operator. The manual tells agents to pin versions. | Ferry's widgets, Raft Artifacts' pages: agents load Chart.js, ECharts, d3, Mermaid, Tailwind, jQuery, Plotly. | `scripts, styles, fonts, images and data (fetch, WebSocket) from https://cdnjs.cloudflare.com` …, `scripts from https://cdn.tailwindcss.com, https://code.jquery.com, https://cdn.plot.ly` and `pin an exact version` | [P078](DECISIONS.md#p078--2026-10-13--library_cdns-adds-tailwinds-jquerys-and-plotlys-own-cdns-for-scripts-only--accepted), [P022](DECISIONS.md#p022--2026-10-11--every-preset-starts-with-egress-closed-library-cdns-are-a-one-line-opt-in--accepted-amended-by-p082), [P048](DECISIONS.md#p048--2026-10-11--artifact-pages-reach-library-cdns-only-by-the-hosts-config--accepted) | `leak/cdn.spec.ts` (a CDN library loads only when the config opens it, opaque and served; another origin never; the libraries' own CDNs serve scripts and nothing else); probes `1.connect`, `2.resources` (an allowed origin loads, no other does) |
+| **Closed** (the default) | nothing to write | Nothing from outside the frame: content runs on what it carries (inline code, `data:` and `blob:` URLs). | None. | Widgets that draw their own SVG and CSS; any host that hasn't decided yet. | `Network: none. Nothing loads from outside` (and `write everything inline`) | [P006](DECISIONS.md#p006--2026-10-11--egress-is-closed-by-default-including-channels-a-frame-csp-doesnt-cover--accepted), [P022](DECISIONS.md#p022--2026-10-11--every-preset-starts-with-egress-closed-library-cdns-are-a-one-line-opt-in--accepted-amended-by-p082-p089) | probes `1.connect`, `2.resources`, `3.webrtc`, `4.*` (nested frames), `5.*` (navigating out), `8.*` (resource hints), `10.self`; served `served.domain.egress` |
+| **Library CDNs** (`LIBRARY_CDNS`, plus script hosts of your own) | `egress: LIBRARY_CDNS`; more script hosts: `egress: { ...LIBRARY_CDNS, script: [...LIBRARY_CDNS.script, "https://cdn.example.com"] }` | Scripts, styles, fonts, images and data from cdnjs, jsDelivr, unpkg and esm.sh; Google Fonts; scripts only from three libraries' own CDNs (Tailwind's Play CDN, jQuery, Plotly). Nothing else. | Code you don't control runs in the frame (a compromised or look-alike package), still inside the sandbox and egress; and a path requested from a CDN is a narrow channel out, read by the CDN's operator. The manual tells agents to pin versions. | Ferry's widgets, Raft Artifacts' pages: agents load Chart.js, ECharts, d3, Mermaid, Tailwind, jQuery, Plotly. | `scripts, styles, fonts, images and data (fetch, WebSocket) from https://cdnjs.cloudflare.com` …, `scripts from https://cdn.tailwindcss.com, https://code.jquery.com, https://cdn.plot.ly` and `pin an exact version` | [P078](DECISIONS.md#p078--2026-10-13--library_cdns-adds-tailwinds-jquerys-and-plotlys-own-cdns-for-scripts-only--accepted), [P022](DECISIONS.md#p022--2026-10-11--every-preset-starts-with-egress-closed-library-cdns-are-a-one-line-opt-in--accepted-amended-by-p082-p089), [P048](DECISIONS.md#p048--2026-10-11--artifact-pages-reach-library-cdns-only-by-the-hosts-config--accepted) | `leak/cdn.spec.ts` (a CDN library loads only when the config opens it, opaque and served; another origin never; the libraries' own CDNs serve scripts and nothing else); probes `1.connect`, `2.resources` (an allowed origin loads, no other does) |
 | **Passive from any https site** (`anyHttps`, on top of either) | `egress: { ...LIBRARY_CDNS, anyHttps: ["img"] }`; closed but for them: `egress: { anyHttps: ["img"] }` | The passive kinds you name (`img`, `media`, `font`) from any https site. Never scripts, styles, data, workers or frames, and never `http:`: a config naming another kind is refused. | Any site an image names learns that someone viewed the content, and from which address; content can send data out in an image URL to a server of its choosing (the channel P006 closes); whoever owns an image controls what it shows, inside the frame. | A host showing content that already exists, with hotlinked media: Raft's HTML attachment previews, reports whose `<img>` point at other sites (the case P059 was written for). | `images from any https site` (`fonts, images, audio and video from any https site` for all three) | [P059](DECISIONS.md#p059--2026-10-11--passive-content-may-load-from-any-https-site-by-the-hosts-explicit-choice--accepted), [P062](DECISIONS.md#p062--2026-10-11--serveddomainegress-holds-a-host-to-its-own-configs-egress--accepted) | `leak/cdn.spec.ts` (a hotlinked image loads; a script, a stylesheet and a fetch to the same site never reach it; without the flag, nothing does); served `served.domain.egress` (the image must reach an https canary; scripts, styles, fetches and frames never), `leak/served/any-https.spec.ts` |
 | **Porthole's libraries** (`egress.libraries`, served kinds only; on in `presets.liveWidget`) | `egress: { libraries: true }` with `isolation: "domain"` | Chart.js 4.5.1 and D3 7.9.0 as scripts, from the frame's own origin (`/__porthole/lib/…`, served by `/server` on every content origin). Nothing from outside. | None from outside: the requests reach your content server, which serves fixed, pinned files. | Live widgets, which read your data and must have no network of their own (P079). | `Libraries, served from this frame's own address` with a `<script>` line for each | [P079](DECISIONS.md#p079--2026-10-15--live-widgets-no-network-of-their-own-portholes-libraries-on-their-origin-the-hosts-data-behind-the-viewers-consent-and-frames-that-never-navigate-away--accepted-amended-by-p084) | `test/libraries.test.ts`; `leak/served/live.spec.ts` (they load and draw; an external script, a stylesheet, an image and every fetch reach no oracle) |
 
@@ -312,9 +312,8 @@ entry: {
   frame's address instead. A base's segments are letters, digits and `. _ : ~ -`.
 - **An artifact's versions share an origin**, so they are one trust domain (P082): give versions
   that must stay apart scopes of their own.
-- **Each version is a directory of its origin** (`/v/<n>/`). Keep `/_blob/` (`ASSET_LIBRARY_PATH`)
-  free: it is reserved for an asset library across versions (not built yet); `versionedAddress`
-  names nothing there.
+- **Each version is a directory of its origin** (`/v/<n>/`). `/_blob/` (`ASSET_LIBRARY_PATH`) is
+  the asset library's, across versions (0.7, below); `versionedAddress` names nothing there.
 - **In a frame**, the files' address carries the frame's access (WebKit keeps no cookie there,
   P083): the frame's URL is `/__porthole/f/<sealed>/`, good for the session. A host's
   `issue` and its locator don't change.
@@ -323,6 +322,72 @@ entry: {
 - **The agent's side:** `lintFiles` and `admitFiles` before you take a version, `checkPage({ files
   })` to run it, and the manual's Files section where a kind serves files. Show a set served: an
   opaque frame has no origin to serve its files from.
+
+### The capability runtime: pages that are apps
+
+0.7 (P085–P090). A page reaches your services through one global, `porthole.use(name)`, for what
+it declared when it was published and what its viewer's level allows. Porthole carries, checks
+and gates the calls; you keep the services.
+
+```js
+import { declareCapabilities, presets } from "@botiverse/porthole";
+
+// 1. The kind's config offers the runtime and the host functions behind it.
+const page = presets.artifact({
+  isolation: "domain", contentOrigins: [source], runtime: "1",
+  capabilities: { copyText: {}, openLink: {}, comments: {}, user: {}, artifact: {}, assets: {}, db: {} },
+});
+
+// 2. At publish: the artifact's declaration (omitted: carried forward; {}: cleared; an object: replaced).
+const declared = declareCapabilities({ stored: artifact.declaration, given: body.capabilities, config: page });
+if (!declared.ok) return problems(declared.problems);       // [{ path: "capabilities.db.rules", message }]
+await myStore.saveDeclaration(artifact.id, declared.declaration); // { capabilities, runtime: "1" }
+
+// 3. The viewer's level, in your access (the issue's answer carries it to the display's bridge).
+access: async (instance, viewer) =>
+  viewer && { viewer: viewer.id, level: await levelOf(viewer, instance), user: { id: viewer.publicId, name: viewer.name } },
+
+// 4. Your services, as handlers (the page's calls arrive checked: declared, shaped, at level).
+handlers: {
+  db: (args, { viewer, declared, instance, changed, signal }) => myApi.db(instance, viewer, args, declared?.rules, { changed, signal }),
+  artifact: (args, { viewer, instance }) => myApi.artifact(instance, viewer, args),   // Refused("conflict") when base moved
+  assets: (args, { viewer, instance }) => myApi.assets(instance, viewer, args),
+  comments: ({ anchor }) => composer.open(anchor),                                     // true if it opened
+},
+// 5. The mount: the artifact's stored declaration.
+<PortholeView display="page" instance={instance} declaration={artifact.declaration} />
+```
+
+- **Built-ins** (`clipboard`, `links`, `downloads`, `comments`) reach every page whose kind offers
+  them; everything else only a page that declared it. A page with no declaration (one published
+  before 0.7) gets the built-ins through `use` and 0.6's globals as before: give it a declaration
+  when it is next published.
+- **Levels**: `view < interact < admin < owner`. Reads are `view`; `chat.send`, `data.call`,
+  `context.set` and db writes `interact`; `artifact.publish` and asset removal `admin`; uploads
+  `admin` unless you set `assets: { levels: { upload: "interact" } }` (then scripts and styles from
+  the library never run: P089). Raise any method in its config's `levels`. Without a viewer the
+  runtime's own are refused.
+- **Your API is the wall.** The bridge refuses early, in your page; your handlers call your API as
+  the viewer, and it must check again: `dbAccess(request, viewer, rules)` is the db rule set
+  (another person's `data/users/<id>` refused, `me` resolved), `atLeast(level, "admin")` for a
+  publish. Check every write's `ifVersion` and refuse a moved base or version with
+  `new Refused("conflict")`; admit a published version as any (`admitFiles`).
+- **Assets**: `createContentHost({ assets: (id) => myStore.asset(id) })` answers `{ scope, name,
+  size, sha256, read }` for an id you made (32 random hex characters, `ASSET_ID`); `/server` serves
+  it at `/_blob/<id>` on that scope's origin only, to its pages and to a session with your check,
+  typed by its name. Refuse names that aren't assets (`assetNameProblem`).
+- **Run the conformance cases** against your handlers (no browser):
+
+  ```js
+  import { defineRuntimeConformance } from "@botiverse/porthole/conformance";
+  for (const each of defineRuntimeConformance({ config: page, handlers: () => freshArtifactHandlers(), viewers, assets: () => assetStore })) {
+    test(each.name, () => each.run());
+  }
+  ```
+
+- **The agent** declares capabilities in your publish tool (`capabilities: { db: {} }`) and reads
+  topic `capabilities` of the manual: declaring, levels, errors, where state goes, each one's types
+  (`types/runtime/v1/*.d.ts`, also in the package for a page's own TypeScript).
 
 ### The page
 
@@ -621,11 +686,12 @@ prints each reason at the end; so does `--reporter=json`.
 | Import | What |
 | --- | --- |
 | `@botiverse/porthole` | `createHost`, `presets`, `defineDisplays`, `portholeClient`, `frameFallback`, `entryTarget`, `lintContent`, `admitContent`, `showTool`, `guideTool`, `checkTool`, `answerGuide`, `guideChanges`, `compile` |
+| `@botiverse/porthole` (the runtime, 0.7) | `declareCapabilities`, `declarationProblems`, `checkDeclaration`, `dbAccess`, `atLeast`, `methodLevel`, `rosterOf`, `assetNameProblem`, `RUNTIME_CAPABILITIES`, `RUNTIME_TYPES`, `Refused` (`conflict`, `forbidden`, `too_large`); `types/runtime/v1/*.d.ts` |
 | `@botiverse/porthole/react` | `PortholeProvider`, `PortholeFrame`, `PortholeView`, `usePortholeLink`, `cssVariableTheme`, `useRunAgain` |
 | `@botiverse/porthole/server` | `createContentHost` (`routes`, `forget`), `contentHostFor`, `prefixedName`, `memoryTicketStore`, `d1TicketStore`, `upstreamHeaders`, `statusPage`, `conformancePage`, the callbacks' types |
 | `@botiverse/porthole/node` | `nodeServer`, `nodeHost`, `nodeProbe`, `toRequest`, `sendResponse` |
 | `@botiverse/porthole/check` | `checkPage`, `playwrightDriver`, `cdpDriver` (`CHECK_ORIGIN`, `CHECK_CONTENT_DOMAIN`: the names a driver of your own answers); `/check/page`, the check page's script (`checkPage` has it already) |
 | `@botiverse/porthole/mcp` | the MCP Apps adapter (views, the sandbox proxy) |
-| `@botiverse/porthole/conformance` | `defineHostConformance`, `conformanceProjects`, `onDemand`, `conformancePage`; `/conformance/reporter`, skip reasons |
+| `@botiverse/porthole/conformance` | `defineHostConformance`, `conformanceProjects`, `onDemand`, `conformancePage`, `defineRuntimeConformance` (no browser); `/conformance/reporter`, skip reasons |
 
 The types' doc comments are the precise reference; DESIGN.md § "The host kit" is the long form.

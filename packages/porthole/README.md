@@ -77,6 +77,22 @@ that opens that version's path and nothing else of its origin; `checkFileSet` ch
 paths and limits when it is published, `lintFiles` and `checkPage({ files })` are the agent's
 side. docs/ADOPTING.md § Pages made of many files.
 
+## A page that is an app: the capability runtime
+
+With `runtime: "1"` in its config (0.7), a page reaches its host through one global, for what it
+declared when it was published and what its viewer's level allows:
+
+```js
+const db = await porthole.use("db");                 // a frozen namespace, or null: draw without it
+const votes = db && (await db.query("votes")).docs;  // a refusal rejects with error.code and a sentence
+```
+
+The host keeps the services: its handlers (`db`, `artifact`, `assets`, `comments`; `user` is the
+viewer it gives), `declareCapabilities` at publish, the viewer's level in its access
+(`Grant.level`), and an asset store `/server` serves at `/_blob/<id>`. `defineRuntimeConformance`
+checks the handlers. The types: `types/runtime/v1/*.d.ts`. docs/ADOPTING.md § The capability
+runtime.
+
 ## What the agent gets
 
 ```js

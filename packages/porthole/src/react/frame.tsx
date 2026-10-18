@@ -1,3 +1,5 @@
+import type { PageDeclaration } from "../runtime/declaration.ts";
+import type { ViewerInfo } from "../runtime/levels.ts";
 import {
   createContext,
   useCallback,
@@ -407,6 +409,17 @@ export interface PortholeFrameProps {
    * shows, for its confirmations only, never sent to the frame (P077).
    */
   readonly instance?: InstanceRef;
+  /**
+   * What the page declared (P086), as the host stored it with the artifact: the capabilities it
+   * reaches through `porthole.use`, and its pinned runtime. By value: a change makes the display
+   * again.
+   */
+  readonly declaration?: PageDeclaration;
+  /**
+   * Who is viewing (P087), for an opaque frame or one whose issue gave none. By value: a change
+   * makes the display again.
+   */
+  readonly viewer?: ViewerInfo;
   /** The color scheme it shows in. Default: the provider's `scheme`, else light. */
   readonly scheme?: ColorScheme;
   /** The host's live values for the config's theme variables (from its design tokens). */
@@ -664,6 +677,8 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
   // By value: a config or instance made inline (each render) is the same display.
   const config = useByValue(frame.config);
   const instance = useByValue(frame.instance);
+  const declaration = useByValue(frame.declaration);
+  const viewer = useByValue(frame.viewer);
   const fills = config.mode === "url" || frame.fill === true || config.layout.kind === "fill";
   // A consent that refuses everything (P080), this frame's or else the provider's, by value: a
   // display made with it needs no data handlers, so a change makes the display again.
@@ -830,6 +845,8 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
         initialHeightPx: startHeight,
         ...(view === undefined ? {} : { document: view }),
         ...(instance === undefined ? {} : { instance }),
+        ...(declaration === undefined ? {} : { declaration }),
+        ...(viewer === undefined ? {} : { viewer }),
         ...(fills ? { fill: true } : {}),
       });
     } catch (error) {
@@ -870,6 +887,8 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
     config,
     view,
     instance,
+    declaration,
+    viewer,
     startHeight,
     fills,
     pageHandlers,
