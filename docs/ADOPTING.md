@@ -272,7 +272,14 @@ nodeServer({ content, app: async (request) => (await routes(request)) ?? app(req
   listener there is `nodeListener(app, { scheme })`, not `toRequest` and `sendResponse` by hand:
   `toRequest` throws for a request fetch can't take (`TRACE`, a Host that is no URL), and a throw
   in a listener ends a Node process. `nodeListener`, `nodeHost` and `nodeServer` answer those 405
-  and 400, and a handler that fails 500 (P092).
+  and 400, and a handler or listener that fails 500 (P092). Pass `onError: (error, request) =>
+  log.error(…)` to any of them to hear your own failures (by default a process warning).
+- **Rate limit:** `rateLimit: { perMinute }` keys an anonymous viewer by the address the server
+  saw (the socket's peer on Node, `CF-Connecting-IP` on Workers), never by `X-Forwarded-For` a
+  client can write (P092). **Behind a proxy** (a TLS edge, a load balancer, a CDN), that address
+  is the proxy's: say how many proxies append to `X-Forwarded-For` (`trustedProxies: 1` for one
+  edge, `2` for a CDN in front of a balancer), or key it yourself (`key: (request, viewer) =>
+  …`). Without either, anonymous requests through the proxy share one allowance.
 - **Health:** `health: { probe: nodeProbe(), onServedChange: (served) => … }` checks the content
   domain over the real network and falls back to opaque frames while it doesn't answer.
 

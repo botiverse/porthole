@@ -434,7 +434,10 @@ Workers, Deno, Bun).** It gives:
   else (404). App ids travel in the document's fields. **The client never chooses an origin**:
   the scope the server maps to does. Then `access` (401 without a viewer, 403 refused), a ticket,
   and `201 FrameLocation`. `503 not-served` while content isn't served; `409` when `/server`
-  refuses the instance; an optional per-viewer rate limit (429). The body is read to at most
+  refuses the instance; an optional per-viewer rate limit (429), an anonymous viewer keyed by an
+  address the host trusts (the socket's peer, `CF-Connecting-IP` on Workers, or behind
+  `trustedProxies` the `X-Forwarded-For` entry they appended; never what a client says, P092).
+  The body is read to at most
   `ISSUE_BODY_BYTES` (64 KiB), counted as it arrives: past it the read stops and the answer is
   `413 too-large`; a Content-Length over it is refused before the viewer is asked (P092).
 - **`authorize(viewerOf)` and `urlOf(scope, path)`: redirect entry** (below).
@@ -498,11 +501,16 @@ returns a request listener and an upgrade listener for `http.createServer`: cont
 goes away (`proxyTo` passes it on, so a proxied event stream ends with its page); the body is
 written as the socket drains and cancelled when the client leaves; an error mid-body destroys
 the response rather than end it looking whole. Nothing a request does throws out of the
-listeners (P092): a request fetch can't take is 405 (`CONNECT`, `TRACE`, `TRACK`) or 400 (a Host
-or a target that is no URL); a handler that throws or rejects, or a head Node can't write, is 500.
-`nodeListener(app, { scheme })` is a fetch-style app's listener with the same guarantee (it is
-`nodeServer`'s `app`). `nodeProbe()` is the health probe (`*.localhost` resolved to loopback, no
-redirects, 4 KB read). `/server` stays free of Node.
+listeners or ends the process (P092): a request fetch can't take is 405 (`CONNECT`, `TRACE`,
+`TRACK`) or 400 (a Host or a target that is no URL); a handler or an app listener that throws or
+rejects, or an answer Node can't write, is 500, and `onError` hears it (by default a process
+warning); an upgrade's socket closes on its own errors. A HEAD gets the head, its body cancelled;
+a client gone before the answer cancels it too. The request body is read only as it is pulled
+(a reserved label's request reaches the app whole); once the answer is out, what no one read is
+dropped (at most 1 MiB and 5 s) before the connection closes, so a client still sending reads
+its answer. `nodeListener(app, { scheme, onError })` is a fetch-style app's listener with the
+same guarantees (it is `nodeServer`'s `app`). `nodeProbe()` is the health probe (`*.localhost`
+resolved to loopback, no redirects, 4 KB read). `/server` stays free of Node.
 
 **Client** (core). `httpLocator(url, { headers, credentials, onNotServed })` POSTs
 `{ instance }`, passes the abort signal, refuses redirects, and throws a `LocateError` with the

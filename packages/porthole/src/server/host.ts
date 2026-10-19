@@ -11,6 +11,7 @@ import {
   type ContentDomainInfo,
 } from "./domain.ts";
 import { reservedLabels, type Naming } from "./naming.ts";
+import { peerAddress } from "./peer.ts";
 import { appStatusPage } from "./pages.ts";
 import { createServer } from "./server.ts";
 import type {
@@ -170,10 +171,22 @@ export interface ContentHostOptions<V> {
    * served throw at startup.
    */
   readonly health?: HealthOptions;
-  /** Issues per viewer (or address) per minute, in this process. */
+  /**
+   * Issues per viewer (or, with no viewer, per address) per minute, in this process. The address
+   * is one the host trusts, never one a client says (P092): the socket's peer (the Node adapter
+   * leaves it on the request), or on Workers `CF-Connecting-IP`. Behind proxies, say how many
+   * append to `X-Forwarded-For` (`trustedProxies`), or key it yourself (`key`); otherwise every
+   * request through a proxy is that proxy's address.
+   */
   readonly rateLimit?: {
     readonly perMinute: number;
     readonly key?: (request: Request, viewer: V | null) => string;
+    /**
+     * How many proxies in front of the app each append the address they saw to
+     * `X-Forwarded-For` (default 0: it is never read). The address is the entry the outermost
+     * appended; the entries before it are the client's to write.
+     */
+    readonly trustedProxies?: number;
   };
   /** The kit's events: a function, or a logger (`{ info, warn, error }`). */
   readonly log?: ((event: ContentHostEvent) => void) | ContentLogger;
@@ -454,6 +467,37 @@ const authorizeSource = (url: string): string => {
  * MCP view's declared egress, the largest proposal, a few KiB.
  */
 export const ISSUE_BODY_BYTES = 65_536;
+
+/** Whether a request came through Workers: Cloudflare's own `cf`, which no client can send. */
+const onWorkers = (request: Request): boolean => {
+  const cf: unknown = (request as { readonly cf?: unknown }).cf;
+  return typeof cf === "object" && cf !== null;
+};
+
+/**
+ * The address an anonymous viewer's rate is keyed by (P092): one the host trusts, never what a
+ * client says. Behind `trustedProxies` proxies, the X-Forwarded-For entry the outermost appended
+ * (a header with fewer entries came past them: its peer); else the socket's peer, as the Node
+ * adapter saw it; on Workers, CF-Connecting-IP (Cloudflare's edge sets it); else none known.
+ */
+function clientAddress(request: Request, trustedProxies: number): string {
+  if (trustedProxies > 0) {
+    const hops = (request.headers.get("x-forwarded-for") ?? "")
+      .split(",")
+      .map((hop) => hop.trim())
+      .filter((hop) => hop !== "");
+    const hop = hops[hops.length - trustedProxies];
+    if (hop !== undefined) {
+      return hop;
+    }
+  }
+  const peer = peerAddress(request);
+  if (peer !== null) {
+    return peer;
+  }
+  const edge = onWorkers(request) ? request.headers.get("cf-connecting-ip") : null;
+  return edge === null || edge === "" ? "unknown" : edge;
+}
 
 const tooLarge = () =>
   refusal(413, "too-large", `The body is { instance }: at most ${ISSUE_BODY_BYTES} bytes`);
@@ -930,7 +974,7 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
         const key =
           options.rateLimit?.key?.(request, viewer) ??
           (viewer === null
-            ? `address:${request.headers.get("cf-connecting-ip") ?? request.headers.get("x-forwarded-for") ?? ""}`
+            ? `address:${clientAddress(request, options.rateLimit?.trustedProxies ?? 0)}`
             : `viewer:${JSON.stringify(viewer)}`);
         if (!withinRate(key)) {
           return refusal(429, "rate-limited", "Too many frames asked for: try again in a minute");

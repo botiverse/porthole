@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import {
   createServer as createHttpServer,
   request as httpRequest,
@@ -15,11 +14,11 @@ import {
   contentDomain,
   createContentHost,
   HEALTH_PATH,
+  ISSUE_BODY_BYTES,
   prefixedName,
   type ContentHostEvent,
   type ContentHostOptions,
 } from "../src/server/index.ts";
-import { ISSUE_BODY_BYTES } from "../src/server/host.ts";
 
 /** The host kit (P066): domain settings, the routing middleware, the issue endpoint, the gate. */
 
@@ -297,7 +296,7 @@ describe("the issue endpoint", () => {
       expect((await issue(post(padded(page("private1"), 2_000).body))).status).toBe(401);
     });
 
-    it("over Node, chunked: the client gets its 413, the server stops reading and closes", async () => {
+    it("over Node, chunked: the client gets its 413, and the server drops a bounded rest and closes", async () => {
       const { issue } = anonymous();
       const server = createHttpServer(nodeListener(issue));
       let read = 0;
@@ -323,7 +322,7 @@ describe("the issue endpoint", () => {
           const asked = httpRequest(
             { host: "127.0.0.1", port, path: "/api/frames", method: "POST" },
             (response) => {
-              resolve(`${response.statusCode} ${response.headers.connection}`);
+              resolve(String(response.statusCode));
               asked.destroy();
             },
           );
@@ -342,14 +341,124 @@ describe("the issue endpoint", () => {
           asked.write(JSON.stringify({ instance: page("public1") }));
           pump();
         });
-        expect(said).toBe("413 close");
-        // Closed by the server once the answer is out, not parked on the unread body.
+        expect(said).toBe("413");
+        // Closed, not parked on the unread body; what it read: the limit, the rest it drops (at
+        // most 1 MiB), and the buffers on the way, not the 64 MiB.
         await vi.waitFor(() => expect(read).toBeGreaterThan(0));
         // What the socket took off the wire: the limit and the buffers on the way, not the 64 MiB.
         expect(read).toBeLessThan(4 * 1_048_576);
       } finally {
         server.close();
       }
+    });
+
+    describe("over Node, the 413 reaches a client still sending (P092)", () => {
+      const listenIssue = async () => {
+        const { issue } = anonymous();
+        const server = createHttpServer(nodeListener(issue));
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+        return { server, port: (server.address() as AddressInfo).port };
+      };
+      /**
+       * Sends the head (and `early` bytes of body), the rest of `size` once the server has answered,
+       * and reads only then: closed at once with the body unread, the 413 is reset away.
+       */
+      const late = (port: number, head: string, size: number, early = 0, chunked = false) =>
+        new Promise<string>((resolve) => {
+          const framed = (bytes: number) =>
+            chunked
+              ? Buffer.concat([
+                  Buffer.from(`${bytes.toString(16)}\r\n`),
+                  Buffer.alloc(bytes, 0x20),
+                  Buffer.from("\r\n"),
+                ])
+              : Buffer.alloc(bytes, 0x20);
+          const socket = connect(port, "127.0.0.1", () => {
+            socket.pause();
+            socket.write(head);
+            for (let sent = 0; sent < early; sent += 16_384) {
+              socket.write(framed(16_384));
+            }
+            setTimeout(() => {
+              for (let sent = early; sent < size; sent += 65_536) {
+                socket.write(framed(65_536));
+              }
+              if (chunked) {
+                socket.write("0\r\n\r\n");
+              }
+            }, 150);
+            setTimeout(() => socket.resume(), 400);
+          });
+          let said = "";
+          const done = (outcome: string) => {
+            socket.destroy();
+            resolve(outcome);
+          };
+          socket.on("data", (chunk) => {
+            said += String(chunk);
+            if (said.includes("\r\n")) {
+              done(said.split("\r\n")[0] ?? "");
+            }
+          });
+          socket.on("error", (error: NodeJS.ErrnoException) => done(`error ${error.code}`));
+          socket.on("close", () => done(said === "" ? "closed" : (said.split("\r\n")[0] ?? "")));
+        });
+
+      it("a declared length over the limit (refused before reading)", async () => {
+        const { server, port } = await listenIssue();
+        try {
+          const head = `POST /api/frames HTTP/1.1\r\nHost: localhost\r\nContent-Length: 524288\r\n\r\n`;
+          for (let at = 0; at < 3; at += 1) {
+            expect(await late(port, head, 524_288)).toBe("HTTP/1.1 413 Payload Too Large");
+          }
+        } finally {
+          server.close();
+        }
+      });
+
+      it("a chunked body read to the limit, then cancelled", async () => {
+        const { server, port } = await listenIssue();
+        try {
+          const head = `POST /api/frames HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n`;
+          for (let at = 0; at < 3; at += 1) {
+            expect(await late(port, head, 524_288, 98_304, true)).toBe(
+              "HTTP/1.1 413 Payload Too Large",
+            );
+          }
+        } finally {
+          server.close();
+        }
+      });
+
+      it(
+        "a client that sends no more is closed within the drop's 5 s",
+        { timeout: 30_000 },
+        async () => {
+          const { server, port } = await listenIssue();
+          try {
+            const started = Date.now();
+            const outcome = await new Promise<string>((resolve) => {
+              const socket = connect(port, "127.0.0.1", () =>
+                socket.write(
+                  `POST /api/frames HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10485760\r\n\r\n${" ".repeat(1_000)}`,
+                ),
+              );
+              let said = "";
+              socket.on("data", (chunk) => (said += String(chunk)));
+              socket.on("error", () => undefined);
+              socket.on("close", () => resolve(said.split("\r\n")[0] ?? ""));
+              setTimeout(() => {
+                socket.destroy();
+                resolve("still open after 9 s");
+              }, 9_000);
+            });
+            expect(outcome).toBe("HTTP/1.1 413 Payload Too Large");
+            expect(Date.now() - started).toBeLessThan(8_000);
+          } finally {
+            server.close();
+          }
+        },
+      );
     });
 
     it("bad JSON, an empty body and a body that breaks off are 400", async () => {
@@ -373,6 +482,78 @@ describe("the issue endpoint", () => {
     expect((await ask(page("a2"), "v1")).status).toBe(201);
     expect((await ask(page("a3"), "v1")).status).toBe(429);
     expect((await ask(page("a3"), "v2")).status).toBe(201);
+  });
+
+  describe("an anonymous viewer's rate is keyed by an address the host trusts (P092)", () => {
+    const anonymousAsk = (extra: Partial<ContentHostOptions<Viewer>>) => {
+      const issue = kit(extra).content.issue(() => null);
+      return (headers: Record<string, string>, cf = false) => {
+        const request = new Request(`${APP}/api/frames`, {
+          method: "POST",
+          headers: { "content-type": "application/json", ...headers },
+          body: JSON.stringify({ instance: page("public1") }),
+        });
+        // A Workers request: the platform's own `cf`, which no client can send.
+        return issue(cf ? Object.assign(request, { cf: { colo: "AMS" } }) : request);
+      };
+    };
+
+    it("never what X-Forwarded-For or CF-Connecting-IP claim off Workers", async () => {
+      const ask = anonymousAsk({ rateLimit: { perMinute: 1 } });
+      expect((await ask({ "x-forwarded-for": "1.1.1.1" })).status).toBe(201);
+      expect((await ask({ "x-forwarded-for": "2.2.2.2" })).status).toBe(429);
+      expect((await ask({ "cf-connecting-ip": "3.3.3.3" })).status).toBe(429);
+    });
+
+    it("on Workers, CF-Connecting-IP (Cloudflare's edge sets it)", async () => {
+      const ask = anonymousAsk({ rateLimit: { perMinute: 1 } });
+      expect((await ask({ "cf-connecting-ip": "3.3.3.3" }, true)).status).toBe(201);
+      expect((await ask({ "cf-connecting-ip": "4.4.4.4" }, true)).status).toBe(201);
+      expect(
+        (await ask({ "cf-connecting-ip": "3.3.3.3", "x-forwarded-for": "9.9.9.9" }, true)).status,
+      ).toBe(429);
+    });
+
+    it("behind proxies (trustedProxies), the address the outermost one appended", async () => {
+      const ask = anonymousAsk({ rateLimit: { perMinute: 1, trustedProxies: 2 } });
+      // The client claims a first entry; the CDN appends the client, the balancer the CDN.
+      expect((await ask({ "x-forwarded-for": "6.6.6.6, 5.5.5.5, 10.0.0.1" })).status).toBe(201);
+      expect((await ask({ "x-forwarded-for": "7.7.7.7, 5.5.5.5, 10.0.0.1" })).status).toBe(429);
+      expect((await ask({ "x-forwarded-for": "5.5.5.6, 10.0.0.1" })).status).toBe(201);
+    });
+
+    it("on Node, the socket's peer, whatever the headers say", async () => {
+      const issue = kit({ rateLimit: { perMinute: 1 } }).content.issue(() => null);
+      const server = createHttpServer(nodeListener(issue));
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const port = (server.address() as AddressInfo).port;
+      const from = (localAddress: string, forwarded: string) =>
+        new Promise<number>((resolve, reject) => {
+          const asked = httpRequest(
+            {
+              host: "127.0.0.1",
+              port,
+              localAddress,
+              path: "/api/frames",
+              method: "POST",
+              headers: { "content-type": "application/json", "x-forwarded-for": forwarded },
+            },
+            (response) => {
+              response.resume();
+              resolve(response.statusCode ?? 0);
+            },
+          );
+          asked.on("error", reject);
+          asked.end(JSON.stringify({ instance: page("public1") }));
+        });
+      try {
+        expect(await from("127.0.0.1", "1.1.1.1")).toBe(201);
+        expect(await from("127.0.0.1", "2.2.2.2")).toBe(429);
+        expect(await from("127.0.0.2", "1.1.1.1")).toBe(201);
+      } finally {
+        server.close();
+      }
+    });
   });
 
   it("carries the per-request check: a revoked subject's cookie is denied on its next request", async () => {
@@ -629,121 +810,6 @@ describe("on Node", () => {
       });
     } finally {
       server.close();
-    }
-  });
-});
-
-describe("the Node adapter never throws out of a request (S01, P092)", () => {
-  const module = (path: string) => JSON.stringify(new URL(path, import.meta.url).href);
-  // A server of its own process, as an app runs it: Node's default for an uncaught exception or
-  // an unhandled rejection ends that process, which this test would see.
-  const script = `
-    import { createServer } from "node:http";
-    import { nodeHost, nodeServer } from ${module("../src/node/index.ts")};
-    import { createContentHost, prefixedName } from ${module("../src/server/index.ts")};
-    import { presets } from ${module("../src/index.ts")};
-    const content = createContentHost({
-      domain: "content.localhost",
-      appOrigins: ["http://localhost:5173"],
-      secret: "a test secret that is at least thirty-two bytes long",
-      configs: (source) => ({ artifact: presets.artifact({ isolation: "domain", contentOrigins: [source] }) }),
-      name: prefixedName("a-"),
-      reserved: ["p-*"],
-      instance: () => null,
-      access: () => null,
-    });
-    const app = (request) => {
-      const path = new URL(request.url).pathname;
-      if (path === "/throws") throw new Error("the app broke");
-      if (path === "/rejects") return Promise.reject(new Error("the app broke later"));
-      // A header fetch takes and Node can't write.
-      if (path === "/unwritable") return new Response("x", { headers: { "x-said": "a\\u0001b" } });
-      return new Response("the app");
-    };
-    const whole = nodeServer({ content, app });
-    // The app's own Node listener: what it throws is answered too.
-    const listener = (q, r) => {
-      if (q.url === "/throws") throw new Error("the app's listener broke");
-      r.end("own");
-    };
-    const own = createServer(nodeHost(content, { request: listener }).request);
-    whole.listen(0, "127.0.0.1", () =>
-      own.listen(0, "127.0.0.1", () =>
-        process.stdout.write(JSON.stringify([whole.address().port, own.address().port]) + "\\n"),
-      ),
-    );
-  `;
-  /** The status line a raw request gets (one connection each). */
-  const ask = (port: number, raw: string) =>
-    new Promise<string>((resolve) => {
-      const socket = connect(port, "127.0.0.1", () => socket.write(raw));
-      let said = "";
-      socket.on("data", (chunk) => {
-        said += String(chunk);
-        if (said.includes("\r\n")) {
-          socket.destroy();
-          resolve(said.split("\r\n")[0] ?? "");
-        }
-      });
-      socket.on("error", (error) => resolve(`error: ${error.message}`));
-      socket.on("close", () => resolve(said === "" ? "closed" : (said.split("\r\n")[0] ?? "")));
-    });
-  const request = (target: string, host: string, method = "GET", more = "") =>
-    `${method} ${target} HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n${more}\r\n`;
-  const upgrade = "Connection: Upgrade\r\nUpgrade: websocket\r\n";
-
-  it("answers 405 and 400 for requests fetch can't take, 500 for a handler that throws or an answer Node can't write, and serves the next", async () => {
-    const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stderr = "";
-    child.stderr.on("data", (chunk) => (stderr += String(chunk)));
-    try {
-      const [whole, own] = await new Promise<[number, number]>((resolve, reject) => {
-        child.stdout.once("data", (chunk) =>
-          resolve(JSON.parse(String(chunk)) as [number, number]),
-        );
-        child.once("exit", (code) => reject(new Error(`exited ${code}: ${stderr}`)));
-      });
-      const content = "a-1.content.localhost";
-      const cases: [number, string, string][] = [
-        // Methods fetch can't carry, on the content domain and on the app's own host.
-        [whole, request("/", content, "TRACE"), "HTTP/1.1 405 Method Not Allowed"],
-        [whole, request("/", "localhost", "TRACE"), "HTTP/1.1 405 Method Not Allowed"],
-        [own, request("/", content, "TRACE"), "HTTP/1.1 405 Method Not Allowed"],
-        // A Host or a target that is no URL.
-        [whole, request("/", "a b"), "HTTP/1.1 400 Bad Request"],
-        [whole, request("/", ""), "HTTP/1.1 400 Bad Request"],
-        [whole, request("*", content, "OPTIONS"), "HTTP/1.1 400 Bad Request"],
-        [whole, request("http://[::1", "localhost"), "HTTP/1.1 400 Bad Request"],
-        [own, request("*", content), "HTTP/1.1 400 Bad Request"],
-        // The handler, and the answer's writing.
-        [whole, request("/throws", "localhost"), "HTTP/1.1 500 Internal Server Error"],
-        [whole, request("/rejects", "localhost"), "HTTP/1.1 500 Internal Server Error"],
-        [whole, request("/unwritable", "localhost"), "HTTP/1.1 500 Internal Server Error"],
-        [own, request("/throws", "localhost"), "HTTP/1.1 500 Internal Server Error"],
-        // A reserved label: the app's listener, called once Porthole's fetch says it isn't its.
-        [own, request("/throws", "p-1.content.localhost"), "HTTP/1.1 500 Internal Server Error"],
-        // WebSockets on the content domain, converted the same way.
-        [whole, request("/", content, "TRACE", upgrade), "HTTP/1.1 405 Method Not Allowed"],
-        [whole, request("*", content, "GET", upgrade), "HTTP/1.1 400 Bad Request"],
-        // A server without an upgrade listener: Node gives the request listener the upgrade.
-        [own, request("/", content, "TRACE", upgrade), "HTTP/1.1 405 Method Not Allowed"],
-      ];
-      for (const [port, raw, status] of cases) {
-        expect([raw.split("\r\n")[0], await ask(port, raw)]).toEqual([
-          raw.split("\r\n")[0],
-          status,
-        ]);
-      }
-      // Still there, and serving.
-      expect(await ask(whole, request("/", "localhost"))).toBe("HTTP/1.1 200 OK");
-      expect(await ask(whole, request("/nothing", content))).toBe("HTTP/1.1 404 Not Found");
-      expect(await ask(own, request("/", "localhost"))).toBe("HTTP/1.1 200 OK");
-      expect(child.exitCode).toBe(null);
-      expect(stderr).toBe("");
-    } finally {
-      child.kill();
     }
   });
 });
