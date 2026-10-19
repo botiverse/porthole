@@ -379,23 +379,108 @@ export function parseDbRequest(args: unknown): Parsed<DbRequest> {
  * the least level that may read and write it. They only raise the contract's (read: view, write:
  * interact); the host evaluates them again on its side (`dbAccess`).
  */
-export type DbRules = Readonly<
-  Record<string, { readonly read?: ViewerLevel; readonly write?: ViewerLevel }>
->;
+export type DbRules = Readonly<Record<string, DbRule>>;
 
-/** A rules object's problem, or null. */
-export function dbRulesProblem(value: unknown): string | null {
+/** One collection's rule: the least level that may read it, and write it (absent: the contract's). */
+export interface DbRule {
+  readonly read?: ViewerLevel;
+  readonly write?: ViewerLevel;
+}
+
+/**
+ * The most collections a page's rules name (P086). At publish, `DB_MAX_RULES`; where a
+ * declaration is shown (a mount, `intersectDeclarations`), an intersection of two: twice that, and
+ * `*` (P093, after its review).
+ */
+export const DB_MAX_RULES = 100;
+export const DB_MAX_SHOWN_RULES = 2 * DB_MAX_RULES + 1;
+
+/** Where a declaration is checked: at publish, or where it is shown (a mount, an intersection). */
+export type DeclarationStage = "publish" | "shown";
+
+/** A collection's name, ASCII case folded: a store that folds case keeps `Votes` where `votes` is. */
+export const foldCollection = (name: string): string =>
+  name.replace(/[A-Z]+/gu, (run) => run.toLowerCase());
+
+/** The level a rule asks to read or write (absent: the contract's, read view and write interact). */
+export function dbRuleLevel(rule: DbRule | undefined, write: boolean): ViewerLevel {
+  const base: ViewerLevel = write ? "interact" : "view";
+  const asked = write ? rule?.write : rule?.read;
+  return asked === undefined ? base : higher(base, asked);
+}
+
+/** The stricter of two rules, read and write each (absent: the contract's level). */
+export function stricterDbRule(x: DbRule | undefined, y: DbRule | undefined): DbRule {
+  const out = Object.create(null) as { read?: ViewerLevel; write?: ViewerLevel };
+  for (const field of ["read", "write"] as const) {
+    const p = x?.[field];
+    const q = y?.[field];
+    const level = p === undefined ? q : q === undefined ? p : higher(p, q);
+    if (level !== undefined) {
+      out[field] = level;
+    }
+  }
+  return out;
+}
+
+/**
+ * The rule a top-level collection is under (P086, P093): the rule object the rules give its exact
+ * name, else `*`'s, whole; never field by field (a collection's `{}` is the contract's levels,
+ * whatever `*` says). Then made stricter by every rule that names it in another ASCII case (a
+ * store that folds case keeps `Votes` where `votes` is): never looser than the exact name's
+ * lookup, and the same where nothing names it in another case. Own names only: a collection
+ * named `constructor` or `__proto__` is no rule unless the rules name it (P091). `dbAccess` and
+ * `intersectDeclarations` both read rules through this.
+ */
+export function dbRuleOf(rules: DbRules | undefined, collection: string): DbRule | undefined {
+  if (rules === undefined) {
+    return undefined;
+  }
+  const own = (key: string) => (Object.hasOwn(rules, key) ? rules[key] : undefined);
+  // After the re-review: `*` counts whenever the exact name is absent, variants or not.
+  let rule = own(collection) ?? own("*");
+  if (collection === "*") {
+    return rule;
+  }
+  const folded = foldCollection(collection);
+  for (const name of Object.keys(rules)) {
+    const each = rules[name];
+    if (
+      name !== "*" &&
+      name !== collection &&
+      typeof each === "object" &&
+      foldCollection(name) === folded
+    ) {
+      rule = stricterDbRule(rule, each);
+    }
+  }
+  return rule;
+}
+
+/**
+ * A rules object's problem, or null. At publish (the default) at most `DB_MAX_RULES` names, none
+ * two that differ only in case (P093); where shown, an intersection's `DB_MAX_SHOWN_RULES`, and
+ * names in more than one case as a page from before P093 may have them.
+ */
+export function dbRulesProblem(value: unknown, stage: DeclarationStage = "publish"): string | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return "must be an object of { read?, write } levels by collection";
   }
   const entries = Object.entries(value as Record<string, unknown>);
-  if (entries.length > 100) {
-    return "may name at most 100 collections";
+  const most = stage === "publish" ? DB_MAX_RULES : DB_MAX_SHOWN_RULES;
+  if (entries.length > most) {
+    return `may name at most ${most} collections`;
   }
+  const folded = new Map<string, string>();
   for (const [collection, rule] of entries) {
     if (collection !== "*" && !SEGMENT.test(collection)) {
       return `${JSON.stringify(collection)} is not a collection name (or "*")`;
     }
+    const other = folded.get(foldCollection(collection));
+    if (stage === "publish" && other !== undefined) {
+      return `${JSON.stringify(other)} and ${JSON.stringify(collection)} differ only in case: name a collection once (a rule holds for its name in any case)`;
+    }
+    folded.set(foldCollection(collection), collection);
     if (rule === null || typeof rule !== "object" || Array.isArray(rule)) {
       return `${collection}: must be { read?, write? }`;
     }
@@ -451,14 +536,7 @@ function ownPath(path: string, viewer: ViewerInfo | undefined): string | null {
 
 /** The least level a rule asks for `path`. */
 function ruleLevel(rules: DbRules | undefined, path: string, write: boolean): ViewerLevel {
-  const base: ViewerLevel = write ? "interact" : "view";
-  const top = path.split("/")[0] ?? "";
-  // Own rules only: a collection named `constructor` or `__proto__` is no rule (after the review).
-  const own = (key: string) =>
-    rules !== undefined && Object.hasOwn(rules, key) ? rules[key] : undefined;
-  const rule = own(top) ?? own("*");
-  const asked = write ? rule?.write : rule?.read;
-  return asked === undefined ? base : higher(base, asked);
+  return dbRuleLevel(dbRuleOf(rules, path.split("/")[0] ?? ""), write);
 }
 
 /**

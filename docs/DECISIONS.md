@@ -3296,3 +3296,117 @@ servers pin the MCP SDK ≥ 2.2.0 (drop that override); when the admin creates t
 environment (add it to the publish job and npm's setting together); when ci.yml gains, renames or
 drops a job (REQUIRED_CI_JOBS follows; the test says so); or when a vendored library or the
 fixture changes (rerun `node scripts/notices.ts`, update the fixture's notices).
+
+## P093 · 2026-10-19 · A version within the current declaration: each side's rules as `dbAccess` reads them, in any case, in objects without a prototype · Accepted
+
+Amends P086, P088 (rules hold for a collection's name in any case) and P091 ("a version is shown
+with what it and the artifact both declare"). The 2026-10-19 audit (baseline 264b12fa), S02
+(high): `intersectDeclarations` merged `db.rules` name by name, comparing only the names both
+wrote, while `dbAccess` puts a collection under its own rule object, else under `*`. A version's
+`public: { read: view, write: interact }` within the current `"*": { read: owner, write: owner }`
+kept the version's `public`, so a viewer at `view` read `public/item`, which the current
+declaration refuses. The same merge wrote into a plain `{}`: a collection named `__proto__` (a
+legal segment) set the output's prototype instead of being a rule, and fell to `*` or the
+contract's levels. The independent review of the first cut added findings 5 to 9. Regressions:
+`test/declaration-intersection.test.ts`, and a `defineRuntimeConformance` case.
+
+**Decision**, by finding:
+1. **Each side as `dbAccess` reads it.** For each name either side's rules give, and `*`, the
+   output's rule is the stricter (read and write each) of the rule each side puts that name
+   under: its own rule object if it names it, else its `*`, whole; never field by field (a side's
+   `public: {}` is the contract's levels, whatever its `*` says). A name neither gives falls to
+   the output's `*`, the stricter of both `*`s. So the output allows each level exactly what both
+   sides allow it. One lookup, `dbRuleOf` (db.ts), serves `dbAccess` and the intersection, and one
+   level function, `dbRuleLevel`, serves `dbAccess` and the pruning in 5, so they can't drift.
+2. **No prototypes.** Every object the intersection makes (capabilities, each capability, levels,
+   rules, each rule) is without a prototype, and its lists are copies. `declareCapabilities`
+   returns its own copy as `checkDeclaration` has since P091, both for what it is given and for
+   a stored declaration it carries forward. `methodLevel` reads a page's levels by its own names
+   only. The rest of the runtime was checked for the pattern: the other keyed writes take names
+   from the config or from a fixed list.
+3. **A side that isn't a declaration is a problem.** `higher` with a level that isn't one returns
+   the other, so a malformed stricter side would loosen the result in silence. Either side whose
+   shape is wrong (a level that isn't one, a rule that isn't an object, a name with `*` inside,
+   an unknown or built-in capability, a runtime Porthole doesn't serve) is refused, as the mount
+   refuses it, by `declarationProblems`' own shape checks (`configProblems`), without the offer:
+   the intersection has no config, and the mount checks the result against the config.
+4. **The acceptance is a property.** Over every pair of declarations built from `*` and one
+   collection (each absent, `{}`, or one of six rules); 1,500 seeded random pairs (rules on `*`,
+   `public` in three cases, `__proto__`, `constructor`, `toString`, `data`; levels; `data` names; a
+   capability absent on either side; plain or prototype-less input, as a store or a mount has
+   it); and pairs at the publish limits (100 rule names and 200 `data` names a side, names in
+   another case across sides): for every viewer level and every db, `data` and `artifact` call,
+   the intersection allows at most what both sides allow, both as returned and as a mount checks
+   it (the mount takes it), and exactly that where the sides spell each collection alike (6).
+   "At most" is S02; "at least" means an old version keeps whatever nothing revoked. The audit's
+   case is also run through the bridge.
+5. **An intersection fits a mount** (review, medium). The union of two pages' names can pass the
+   publish limits (51 + 51 collections are 102 > 100; `data` names 200 + 151), which the mount
+   refused, so an author who renamed collections across publishes had no older version shown.
+   The limits stay at publish (`declarationProblems`, `declareCapabilities`: 100 rule names, 200
+   names a list); where a declaration is shown (`checkDeclaration` at the mount, either side of an
+   intersection, a stored one carried forward) they are an intersection's: 201 rule names (twice,
+   and `*`) and 400 names. The intersection also checks its own result against those (two sides
+   that were themselves intersections could pass them: a problem, not a mount that fails). A name
+   whose rule is the output's `*`'s (on both read and write) gets none of its own, which is exact;
+   the bound doesn't count on it.
+6. **Rules hold for a collection's name in any case** (review, medium; older than this entry).
+   Under `{ votes: { write: owner } }` an interact viewer was refused `votes/a` and allowed
+   `Votes/a`, which a store that folds case takes for the same document (P091 folded `data` only).
+   `dbRuleOf` takes the exact-case rule (the name's own, else `*`), then makes it stricter by
+   every rule that names the collection in another ASCII case. It is never looser than the
+   exact-case lookup, and the same where nothing names the collection in another case (a test
+   compares the two over `*`, `votes` and `Votes`, each absent or one of six rules, every spelling,
+   level and op). The first cut ignored `*` where only a variant was named: under
+   `{ "*": { write: owner }, Votes: { write: interact } }` an interact viewer wrote `votes/x`,
+   which `*` had refused; the re-review caught it, and `*` now counts whenever the exact name is
+   absent. A publish that names a collection in two cases is refused (`dbRulesProblem`), while a
+   stored one from before is still shown. The intersection gives one name for each name in any
+   case, spelled as the version spells it: exact where both sides spell each collection alike;
+   where they spell one differently (an old version's `Votes`, the current `votes`), it may be
+   stricter than both (another spelling also counts `*`), never looser. Accepted: a page that
+   renames a collection's case across publishes is rare, and a stricter old version is safe.
+   Paths are passed as the page wrote them: lowercasing them would change what 0.7.0's data under
+   camelCase collections means. `defineRuntimeConformance` checks an app's own wall for
+   `Config/main` and `CONFIG/main`.
+7. **A form that doesn't throw** (review, low). `tryIntersectDeclarations` answers `{ ok: true,
+   declaration }` or `{ ok: false, problems }`, as `declareCapabilities` does, and
+   `intersectDeclarations` is it with a `TypeError`. ADOPTING's snippet calls it before render
+   (a render's throw isn't the mount's, which the React binding catches) and shows a version
+   whose declarations don't intersect as an error: never mounted with `null` (0.6's surface) or
+   with either declaration alone.
+
+**API.** Compatible, with additions: `tryIntersectDeclarations`; `dbRulesProblem(value, stage?)`
+(`"publish"` by default, as before). Tighter: `intersectDeclarations` throws a `TypeError` for an
+input that isn't a declaration's shape (before, the result was undefined); a publish naming a
+collection twice in different cases is refused; a collection's rule holds for its name in any
+case. Looser, bounded: a mount takes up to 201 rule names and 400 names a list (an intersection
+of two pages at the publish limits). Checked declarations (`checkDeclaration`, `declareCapabilities`,
+the intersection) have no prototype: JSON, structured clone and `toEqual` see them as before, but
+calling `.hasOwnProperty()` on one, or putting one in a template string (`String(...)`), throws
+(no `Object.prototype`); use `Object.hasOwn` and `JSON.stringify`. ADOPTING says so.
+**Threat it re-opens.** None: it narrows what an old version may do to what both declarations
+allow, and a rule to every spelling of its name. A mount's larger limits re-open no threat: they
+bound a list a host stored, not one a page sends, and each name is checked as before.
+**Rejected.**
+- A field-by-field fallback (a name's `read`, else `*`'s `read`). `dbAccess` doesn't read rules
+  that way, so for a `{}` rule the result would be stricter than both sides (an old version
+  losing access nothing revoked), and there would be a second semantics to keep in step.
+- Changing `dbAccess` to read field by field: that changes what every stored page's rules mean.
+- Dropping the version's names the current doesn't give: the current's `*` would then govern
+  alone, looser than the version's own rule.
+- Refusing `__proto__` or `constructor` as collection names: they are legal segments (P091 kept
+  `__proto__` as a path), and an object without a prototype holds them.
+- Checking the inputs against the config inside the intersection: it has no config, and the
+  mount checks the result.
+- Raising the publish limits to fit an intersection: they bound what a page declares; only what
+  is shown is two declarations' worth.
+- Lowercasing paths, or rule names at publish: 0.7.0's stored data and declarations would mean
+  something else (a `myNotes` collection's documents found under `mynotes`).
+- Refusing a stored declaration that names a collection in two cases: pages published under 0.7.0
+  would stop showing; the strictest of the variants holds them instead.
+- Catching inside `intersectDeclarations` and answering `null`: `null` is a page from before 0.7,
+  which gets 0.6's surface.
+**Revisit when** rules grow beyond read and write by top-level name (nested paths, patterns
+inside a name), or `dbAccess`'s lookup changes (`dbRuleOf` then changes for both); or names stop
+being ASCII.

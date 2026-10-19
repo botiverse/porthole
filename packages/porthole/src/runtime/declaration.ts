@@ -6,9 +6,19 @@ import {
   isRuntimeVersion,
   offeredCapabilities,
   runtimeCapability,
+  type RuntimeCapabilityName,
   type RuntimeVersion,
 } from "./contract.ts";
-import { dbRulesProblem, type DbRules } from "./db.ts";
+import {
+  dbRuleLevel,
+  dbRuleOf,
+  dbRulesProblem,
+  foldCollection,
+  stricterDbRule,
+  type DbRule,
+  type DbRules,
+  type DeclarationStage,
+} from "./db.ts";
 import { higher, isViewerLevel, type ViewerLevel } from "./levels.ts";
 
 /**
@@ -69,10 +79,19 @@ const KEYS: Readonly<Record<string, readonly string[]>> = {
   db: ["levels", "rules"],
 };
 
-const names = (values: unknown, path: string, problems: DeclarationProblem[]): void => {
+/** The most names `data` lists at publish; where shown (an intersection of two), twice that (P093). */
+const MAX_NAMES = 200;
+
+const names = (
+  values: unknown,
+  path: string,
+  problems: DeclarationProblem[],
+  stage: DeclarationStage,
+): void => {
+  const most = stage === "publish" ? MAX_NAMES : 2 * MAX_NAMES;
   if (
     !Array.isArray(values) ||
-    values.length > 200 ||
+    values.length > most ||
     values.some(
       (each) =>
         typeof each !== "string" ||
@@ -85,7 +104,7 @@ const names = (values: unknown, path: string, problems: DeclarationProblem[]): v
   ) {
     problems.push({
       path,
-      message: "must be a list of names (at most 200), each exact or a prefix ending in *",
+      message: `must be a list of names (at most ${most}), each exact or a prefix ending in *`,
     });
   }
 };
@@ -98,6 +117,19 @@ export function declarationProblems(
   given: unknown,
   config: PortholeConfig,
   runtime: RuntimeVersion = RUNTIME_VERSION,
+): DeclarationProblem[] {
+  return stagedProblems(given, config, runtime, "publish");
+}
+
+/**
+ * `declarationProblems` at a stage (P093): at publish, the limits a page is held to; where a
+ * declaration is shown (a mount), an intersection of two such (`intersectDeclarations`) fits too.
+ */
+function stagedProblems(
+  given: unknown,
+  config: PortholeConfig,
+  runtime: RuntimeVersion,
+  stage: DeclarationStage,
 ): DeclarationProblem[] {
   const problems: DeclarationProblem[] = [];
   if (!isRuntimeVersion(runtime)) {
@@ -116,8 +148,7 @@ export function declarationProblems(
       });
       continue;
     }
-    const spec = runtimeCapability(name);
-    if (spec.builtIn) {
+    if (runtimeCapability(name).builtIn) {
       problems.push({ path, message: "is built in: use it without declaring it" });
       continue;
     }
@@ -125,51 +156,63 @@ export function declarationProblems(
       problems.push({ path, message: "isn't offered here" });
       continue;
     }
-    if (!isRecord(value)) {
-      problems.push({ path, message: "must be an object ({} for none of its own)" });
-      continue;
+    configProblems(name, value, path, problems, stage);
+  }
+  return problems;
+}
+
+/** The problems with one capability's config, its shape alone (no host's offer needed). */
+function configProblems(
+  name: RuntimeCapabilityName,
+  value: unknown,
+  path: string,
+  problems: DeclarationProblem[],
+  stage: DeclarationStage,
+): void {
+  const spec = runtimeCapability(name);
+  if (!isRecord(value)) {
+    problems.push({ path, message: "must be an object ({} for none of its own)" });
+    return;
+  }
+  const allowed = KEYS[name] ?? ["levels"];
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) {
+      problems.push({ path: `${path}.${key}`, message: `is not a field of ${name}'s config` });
     }
-    const allowed = KEYS[name] ?? ["levels"];
-    for (const key of Object.keys(value)) {
-      if (!allowed.includes(key)) {
-        problems.push({ path: `${path}.${key}`, message: `is not a field of ${name}'s config` });
-      }
-    }
-    if (value.levels !== undefined) {
-      if (!isRecord(value.levels)) {
-        problems.push({ path: `${path}.levels`, message: "must be an object of levels by method" });
-      } else {
-        for (const [method, level] of Object.entries(value.levels)) {
-          if (!Object.hasOwn(spec.methods, method)) {
-            problems.push({
-              path: `${path}.levels.${method}`,
-              message: `is not a method of ${name} (${Object.keys(spec.methods).join(", ")})`,
-            });
-          } else if (!isViewerLevel(level)) {
-            problems.push({
-              path: `${path}.levels.${method}`,
-              message: "must be view, interact, admin or owner",
-            });
-          }
+  }
+  if (value.levels !== undefined) {
+    if (!isRecord(value.levels)) {
+      problems.push({ path: `${path}.levels`, message: "must be an object of levels by method" });
+    } else {
+      for (const [method, level] of Object.entries(value.levels)) {
+        if (!Object.hasOwn(spec.methods, method)) {
+          problems.push({
+            path: `${path}.levels.${method}`,
+            message: `is not a method of ${name} (${Object.keys(spec.methods).join(", ")})`,
+          });
+        } else if (!isViewerLevel(level)) {
+          problems.push({
+            path: `${path}.levels.${method}`,
+            message: "must be view, interact, admin or owner",
+          });
         }
       }
     }
-    if (name === "data") {
-      if (value.resources !== undefined) {
-        names(value.resources, `${path}.resources`, problems);
-      }
-      if (value.tools !== undefined) {
-        names(value.tools, `${path}.tools`, problems);
-      }
+  }
+  if (name === "data") {
+    if (value.resources !== undefined) {
+      names(value.resources, `${path}.resources`, problems, stage);
     }
-    if (name === "db" && value.rules !== undefined) {
-      const problem = dbRulesProblem(value.rules);
-      if (problem !== null) {
-        problems.push({ path: `${path}.rules`, message: problem });
-      }
+    if (value.tools !== undefined) {
+      names(value.tools, `${path}.tools`, problems, stage);
     }
   }
-  return problems;
+  if (name === "db" && value.rules !== undefined) {
+    const problem = dbRulesProblem(value.rules, stage);
+    if (problem !== null) {
+      problems.push({ path: `${path}.rules`, message: problem });
+    }
+  }
 }
 
 /** A declaration checked (a host's stored one, given to `mount`); throws a `TypeError` naming its problems. */
@@ -183,7 +226,7 @@ export function checkDeclaration(given: unknown, config: PortholeConfig): PageDe
       `A declaration's runtime ${JSON.stringify(runtime)} is not one this Porthole serves`,
     );
   }
-  const problems = declarationProblems(given.capabilities, config, runtime);
+  const problems = stagedProblems(given.capabilities, config, runtime, "shown");
   if (problems.length > 0) {
     throw new TypeError(
       `The declaration doesn't fit this config: ${problems.map((each) => `${each.path} ${each.message}`).join("; ")}`,
@@ -239,15 +282,16 @@ export function declareCapabilities(options: {
   }
   const runtime: RuntimeVersion = options.runtime ?? stored?.runtime ?? RUNTIME_VERSION;
   if (given === undefined) {
-    const declaration = stored ?? { capabilities: {}, runtime };
-    const pinned = { capabilities: declaration.capabilities, runtime };
-    // A stored declaration still fits the host's offer (a host may have narrowed its config).
-    const problems = declarationProblems(pinned.capabilities, config, runtime);
+    const capabilities = stored?.capabilities ?? {};
+    // A stored declaration still fits the host's offer (a host may have narrowed its config); as
+    // stored, a page's from before P093 too (rule names in more than one case).
+    const problems = stagedProblems(capabilities, config, runtime, "shown");
     return problems.length > 0
       ? { ok: false, problems }
       : {
           ok: true,
-          declaration: pinned,
+          // Its own copy, as at a publish that gives one (P093, after its review).
+          declaration: { capabilities: copied(capabilities) as CapabilityDeclaration, runtime },
           changed: stored === undefined || stored === null || stored.runtime !== runtime,
         };
   }
@@ -255,7 +299,8 @@ export function declareCapabilities(options: {
   if (problems.length > 0) {
     return { ok: false, problems };
   }
-  const declaration = { capabilities: given as CapabilityDeclaration, runtime };
+  // Its own copy, without prototypes (P093): what was checked, not the caller's object.
+  const declaration = { capabilities: copied(given) as CapabilityDeclaration, runtime };
   return {
     ok: true,
     declaration,
@@ -285,18 +330,28 @@ export function declaredMatch(list: readonly string[] | undefined, name: string)
   );
 }
 
-/** The stricter of two declared level maps. */
+/**
+ * An object without a prototype (P093): a name the page wrote (`__proto__`, a collection's) is an
+ * own key of it when set, never a prototype's setter or a prototype's name when read.
+ */
+const bare = <T>(): Record<string, T> => Object.create(null) as Record<string, T>;
+
+/** The stricter of two declared level maps (absent: the contract's, everywhere). */
 function stricterLevels(
   a: Readonly<Record<string, ViewerLevel>> | undefined,
   b: Readonly<Record<string, ViewerLevel>> | undefined,
 ): Readonly<Record<string, ViewerLevel>> | undefined {
-  if (a === undefined || b === undefined) {
-    return a ?? b;
+  if (a === undefined && b === undefined) {
+    return undefined;
   }
-  const out: Record<string, ViewerLevel> = { ...a };
-  for (const [method, level] of Object.entries(b)) {
-    const other = Object.hasOwn(out, method) ? out[method] : undefined;
-    out[method] = other === undefined ? level : higher(other, level);
+  const out = bare<ViewerLevel>();
+  for (const method of new Set([...Object.keys(a ?? {}), ...Object.keys(b ?? {})])) {
+    const x = a !== undefined && Object.hasOwn(a, method) ? a[method] : undefined;
+    const y = b !== undefined && Object.hasOwn(b, method) ? b[method] : undefined;
+    const level = x === undefined ? y : y === undefined ? x : higher(x, y);
+    if (level !== undefined) {
+      out[method] = level;
+    }
   }
   return out;
 }
@@ -307,7 +362,7 @@ function bothNames(
   b: readonly string[] | undefined,
 ): readonly string[] | undefined {
   if (a === undefined || b === undefined) {
-    return a ?? b;
+    return a === undefined ? b?.slice() : a.slice();
   }
   return [
     ...new Set([
@@ -317,29 +372,70 @@ function bothNames(
   ];
 }
 
-/** The stricter of two pages' rules, by collection. */
+/**
+ * The stricter of two pages' rules, by collection (P093, the 2026-10-19 audit's S02): each name
+ * either side's rules give, in any case, and `*`, is under the stricter of the rule EACH side
+ * puts it under, as `dbAccess` reads that side (`dbRuleOf`). A collection neither names is under
+ * both sides' `*`, the output's `*`. So the output allows a level at most what both allow it (an
+ * old version's `public` doesn't outlive the current `*`, nor the other way), and exactly that
+ * where both spell each collection alike; where they spell one differently it may be stricter
+ * (after the re-review). One name for each name in any case (as the first side spells it); none
+ * for a name whose rule is the output's `*`'s (after the review: it says nothing `*` doesn't).
+ */
 function stricterRules(a: DbRules | undefined, b: DbRules | undefined): DbRules | undefined {
-  if (a === undefined || b === undefined) {
-    return a ?? b;
+  if (a === undefined && b === undefined) {
+    return undefined;
   }
-  const out: Record<string, { read?: ViewerLevel; write?: ViewerLevel }> = {};
-  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
-    const x = Object.hasOwn(a, key) ? a[key] : undefined;
-    const y = Object.hasOwn(b, key) ? b[key] : undefined;
-    const read =
-      x?.read === undefined ? y?.read : y?.read === undefined ? x.read : higher(x.read, y.read);
-    const write =
-      x?.write === undefined
-        ? y?.write
-        : y?.write === undefined
-          ? x.write
-          : higher(x.write, y.write);
-    out[key] = {
-      ...(read === undefined ? {} : { read }),
-      ...(write === undefined ? {} : { write }),
-    };
+  const wildcard = stricterDbRule(dbRuleOf(a, "*"), dbRuleOf(b, "*"));
+  const same = (rule: DbRule) =>
+    dbRuleLevel(rule, false) === dbRuleLevel(wildcard, false) &&
+    dbRuleLevel(rule, true) === dbRuleLevel(wildcard, true);
+  const out = bare<DbRule>();
+  const seen = new Set<string>();
+  for (const name of [...Object.keys(a ?? {}), ...Object.keys(b ?? {})]) {
+    const folded = foldCollection(name);
+    if (name === "*" || seen.has(folded)) {
+      continue;
+    }
+    seen.add(folded);
+    const rule = stricterDbRule(dbRuleOf(a, name), dbRuleOf(b, name));
+    if (!same(rule)) {
+      out[name] = rule;
+    }
+  }
+  if ((a !== undefined && Object.hasOwn(a, "*")) || (b !== undefined && Object.hasOwn(b, "*"))) {
+    out["*"] = wildcard;
   }
   return out;
+}
+
+/**
+ * The problems with a declaration's shape where it is shown (no host's offer: the mount checks
+ * that), each path under `which`: what would be read as allowing anything could loosen the other
+ * side (`higher` with a level that isn't one returns the other).
+ */
+function shapeProblems(declaration: unknown, which: string): DeclarationProblem[] {
+  const problems: DeclarationProblem[] = [];
+  if (!isRecord(declaration) || !isRecord(declaration.capabilities)) {
+    return [{ path: `${which}.capabilities`, message: "must be an object: { name: config }" }];
+  }
+  if (!isRuntimeVersion(declaration.runtime)) {
+    problems.push({
+      path: `${which}.runtime`,
+      message: "is not a runtime version Porthole serves",
+    });
+  }
+  for (const [name, value] of Object.entries(declaration.capabilities)) {
+    const path = `${which}.capabilities.${name}`;
+    if (!isRuntimeCapabilityName(name)) {
+      problems.push({ path, message: "is not a capability" });
+    } else if (runtimeCapability(name).builtIn) {
+      problems.push({ path, message: "is built in: use it without declaring it" });
+    } else {
+      configProblems(name, value, path, problems, "shown");
+    }
+  }
+  return problems;
 }
 
 /**
@@ -348,31 +444,73 @@ function stricterRules(a: DbRules | undefined, b: DbRules | undefined): DbRules 
  * it (`declareCapabilities` at its publish) and mounts a version with this, so an old version
  * never keeps what the artifact has since revoked, nor gains what it declared later. Each
  * capability only where both declare it, at the stricter levels, the narrower `data` names and
- * the stricter `db` rules; the version's own pinned runtime.
+ * the stricter `db` rules (each side read as `dbAccess` reads it, P093); the version's own pinned
+ * runtime. Whatever the result allows, each side allows alone; a mount takes it (two pages at
+ * the publish limits make one within a mount's). Objects without a prototype.
+ *
+ * Answers its problems (P093, after its review) where either side isn't a declaration's shape
+ * (or the two make one past a mount's limits): show the version as an error, never with `null`
+ * (that is 0.6's surface) or with either side alone.
  */
-export function intersectDeclarations(
+export function tryIntersectDeclarations(
   version: PageDeclaration,
   current: PageDeclaration,
-): PageDeclaration {
-  const capabilities: Record<string, DeclaredCapability & DeclaredData & DeclaredDb> = {};
+):
+  | { readonly ok: true; readonly declaration: PageDeclaration }
+  | { readonly ok: false; readonly problems: readonly DeclarationProblem[] } {
+  const problems = [...shapeProblems(version, "version"), ...shapeProblems(current, "current")];
+  if (problems.length > 0) {
+    return { ok: false, problems };
+  }
   const a = version.capabilities as Readonly<Record<string, DeclaredData & DeclaredDb>>;
   const b = current.capabilities as Readonly<Record<string, DeclaredData & DeclaredDb>>;
+  const capabilities = bare<DeclaredCapability & DeclaredData & DeclaredDb>();
   for (const name of Object.keys(a)) {
     if (!Object.hasOwn(b, name)) {
       continue;
     }
     const x = a[name] ?? {};
     const y = b[name] ?? {};
+    const out = Object.create(null) as {
+      levels?: Readonly<Record<string, ViewerLevel>>;
+      resources?: readonly string[];
+      tools?: readonly string[];
+      rules?: DbRules;
+    };
     const levels = stricterLevels(x.levels, y.levels);
     const resources = bothNames(x.resources, y.resources);
     const tools = bothNames(x.tools, y.tools);
     const rules = stricterRules(x.rules, y.rules);
-    capabilities[name] = {
-      ...(levels === undefined ? {} : { levels }),
-      ...(resources === undefined ? {} : { resources }),
-      ...(tools === undefined ? {} : { tools }),
-      ...(rules === undefined ? {} : { rules }),
-    };
+    if (levels !== undefined) {
+      out.levels = levels;
+    }
+    if (resources !== undefined) {
+      out.resources = resources;
+    }
+    if (tools !== undefined) {
+      out.tools = tools;
+    }
+    if (rules !== undefined) {
+      out.rules = rules;
+    }
+    capabilities[name] = out;
   }
-  return { capabilities, runtime: version.runtime };
+  const declaration: PageDeclaration = { capabilities, runtime: version.runtime };
+  // Within a mount's limits: sides that were themselves intersections could make one past them.
+  const past = shapeProblems(declaration, "intersection");
+  return past.length > 0 ? { ok: false, problems: past } : { ok: true, declaration };
+}
+
+/** `tryIntersectDeclarations`, a `TypeError` naming the problems where it answers some. */
+export function intersectDeclarations(
+  version: PageDeclaration,
+  current: PageDeclaration,
+): PageDeclaration {
+  const result = tryIntersectDeclarations(version, current);
+  if (!result.ok) {
+    throw new TypeError(
+      `The declarations don't intersect: ${result.problems.map((each) => `${each.path} ${each.message}`).join("; ")}`,
+    );
+  }
+  return result.declaration;
 }

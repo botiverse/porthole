@@ -794,7 +794,8 @@ if (db) {
   and a yes, an upload whose code may run a yes) → the handler (context: `viewer`, `declared`,
   `instance`) → `db` answers with `data/users/me` (P091).
 - **Mounts under a runtime** say what the page declared (`declaration`, or `null` for a page from
-  before 0.7); an older version is mounted with `intersectDeclarations(version's, current)`. A
+  before 0.7); an older version is mounted with `intersectDeclarations(version's, current)`, which
+  allows exactly what both allow (each side's `db` rules read as `dbAccess` reads them, P093). A
   display without a viewer gets nothing above view; a viewer that doesn't parse is an error.
 - **Wire**: the roster in `ui/initialize`'s `hostCapabilities.experimental["porthole/runtime"]`;
   `porthole/call { capability, method, args, watch? }` → `{ value }` or an error with
