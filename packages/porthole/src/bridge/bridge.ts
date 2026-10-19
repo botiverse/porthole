@@ -13,8 +13,10 @@ import { blockedNavigationMessage, withoutSealedAddresses } from "./navigation.t
 import {
   RUNTIME_HOST_FUNCTIONS,
   familyOf,
+  methodGates,
   methodLevel,
   methodOf,
+  methodsOfCall,
   assetCodeRuns,
   rosterOf,
   runtimeCapability,
@@ -60,7 +62,8 @@ import type {
  * The host-function bridge: every capability call from a frame passes here, and nowhere else
  * reaches a host handler. In order: declared → arguments well formed → not muted → within its
  * rate → a user gesture, if gated so → the viewer's consent, if gated so → a person's
- * confirmation, if gated so → the handler (or, for a stale-allowed read, the host's cache).
+ * confirmation, if gated so → the handler (or, for a read, a result the host already gave for it,
+ * or for a stale-allowed one the host's cache).
  */
 
 export type BridgeEvent =
@@ -267,6 +270,18 @@ export function onceConsent(consent: Consent): Consent {
   };
 }
 
+/** Whether a page's `data` names the resource or tool a data call is for (P086). */
+function dataNamed(
+  declaration: PageDeclaration,
+  capability: CapabilityName,
+  args: unknown,
+): boolean {
+  const data = declaration.capabilities.data;
+  return capability === "callTool"
+    ? declaredMatch(data?.tools, (args as CapabilityArgs["callTool"]).name)
+    : declaredMatch(data?.resources, (args as CapabilityArgs["readData"]).uri);
+}
+
 /** What the page declared for one runtime capability, if it declared it. */
 function declaredOf(
   declaration: PageDeclaration | undefined,
@@ -302,42 +317,39 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
     };
   };
 
-  const withinRate = (capability: string, perMinute: number): boolean => {
+  /** Counts `times` calls against `key`'s rate, unless they would pass it (then none). */
+  const withinRate = (key: string, perMinute: number, times = 1): boolean => {
     const at = now();
-    const recent = (calls.get(capability) ?? []).filter((time) => at - time < 60_000);
-    if (recent.length >= perMinute) {
-      calls.set(capability, recent);
+    const recent = (calls.get(key) ?? []).filter((time) => at - time < 60_000);
+    if (recent.length + times > perMinute) {
+      calls.set(key, recent);
       return false;
     }
-    recent.push(at);
-    calls.set(capability, recent);
+    for (let each = 0; each < times; each += 1) {
+      recent.push(at);
+    }
+    calls.set(key, recent);
     return true;
   };
 
-  /** The least level a call needs: its method's, and a db batch's writes' or a watch's read's. */
+  /**
+   * The least level a call needs: the highest of the methods it runs (its own, a db batch's
+   * writes', a watch's read's: after the review, neither escapes the levels of what it does).
+   */
   function levelOf(
     capability: CapabilityName,
     family: RuntimeCapabilityName,
-    method: string,
     args: unknown,
   ): ViewerLevel | null {
     const declared = declaredOf(options.declaration ?? undefined, family);
-    const own = methodLevel(config, family, method, declared);
-    if (capability !== "db" || own === null) {
-      return own;
+    const [own, ...inner] = methodsOfCall(capability, args);
+    const level = own === undefined ? null : methodLevel(config, family, own, declared);
+    if (level === null) {
+      return null;
     }
-    // A batch is each of its writes; a watch is a read (after the review: neither escapes the
-    // levels of what it does).
-    const request = args as DbRequest;
-    const inner =
-      request.op === "batch"
-        ? request.writes.map((write) => write.op)
-        : request.op === "watch"
-          ? [request.path.split("/").length % 2 === 0 ? "get" : "query"]
-          : [];
     return inner.reduce<ViewerLevel>(
-      (most, op) => higher(most, methodLevel(config, family, op, declared) ?? most),
-      own,
+      (most, method) => higher(most, methodLevel(config, family, method, declared) ?? most),
+      level,
     );
   }
 
@@ -346,7 +358,8 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
    * call's level (the contract's, the host's, the page's; a batch's writes', a watch's read's),
    * the resources and tools a page's `data` names, and a `db` call's paths (another person's data
    * refused, `me` resolved, the page's rules). Without a viewer: the runtime's own are refused,
-   * and under a runtime anything above view; a 0.6 config's functions run as before.
+   * and under a runtime anything above view; a 0.6 config's functions run as before. The names a
+   * page's declaration gives are held whether or not there is a viewer (P094).
    */
   function checkAudience<N extends CapabilityName>(
     capability: N,
@@ -355,30 +368,29 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
   ): CapabilityArgs[N] | "undeclared" | "level" {
     const { viewer } = options;
     const declaration = options.declaration ?? undefined;
-    const method = methodOf(capability, args);
-    if (method === null) {
+    if (methodOf(capability, args) === null) {
       return args;
     }
-    const needed = levelOf(capability, family, method, args);
+    const needed = levelOf(capability, family, args);
+    // What the page's `data` names (P086): the declaration's word, not the viewer's, so it holds
+    // without a viewer too (P094). A page with no declaration is 0.6's: the host's handlers decide.
+    const named =
+      family !== "data" || declaration === undefined || dataNamed(declaration, capability, args);
     if (viewer === undefined) {
       if (RUNTIME_HOST_FUNCTIONS.includes(capability)) {
         return "level";
       }
       // Under a runtime, a level the host set is never skipped for want of a viewer.
-      return config.runtime !== undefined && needed !== null && needed !== "view" ? "level" : args;
+      if (config.runtime !== undefined && needed !== null && needed !== "view") {
+        return "level";
+      }
+      return named ? args : "undeclared";
     }
     if (needed !== null && !atLeast(viewer.level, needed)) {
       return "level";
     }
-    if (family === "data" && declaration !== undefined) {
-      const data = declaration.capabilities.data;
-      const named =
-        capability === "callTool"
-          ? declaredMatch(data?.tools, (args as CapabilityArgs["callTool"]).name)
-          : declaredMatch(data?.resources, (args as CapabilityArgs["readData"]).uri);
-      if (!named) {
-        return "undeclared";
-      }
+    if (!named) {
+      return "undeclared";
     }
     if (capability === "db") {
       const rules = declaration?.capabilities.db?.rules;
@@ -483,23 +495,40 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
         }
         args = audience;
       }
-      // Its host function's gates, and its method's own (after the review): all apply.
+      // Its host function's gates, and the own gates of each method it runs (after the review;
+      // P094: a db batch's writes', a watch's read's): all apply.
       const gates = callGates(config, capability, args);
       const own = new Set(effectiveGates(config, capability));
       const confirms = gates.includes("confirm");
       if (confirms && muted) {
         return refuse<Result>(capability, "muted");
       }
-      const method = family === null ? null : methodOf(capability, args);
-      for (const gate of gates) {
-        if (typeof gate !== "object") {
-          continue;
+      // The runtime's own were counted against their host function's rate before their arguments
+      // were read (`precheck`).
+      if (!RUNTIME_HOST_FUNCTIONS.includes(capability)) {
+        for (const gate of own) {
+          if (typeof gate === "object" && !withinRate(capability, gate.rateLimit.perMinute)) {
+            return refuse<Result>(capability, "rate-limited");
+          }
         }
-        // The runtime's own were counted before their arguments were read (`precheck`).
-        const counted = own.has(gate) && RUNTIME_HOST_FUNCTIONS.includes(capability);
-        const key = own.has(gate) ? capability : `${capability}.${method ?? ""}`;
-        if (!counted && !withinRate(key, gate.rateLimit.perMinute)) {
-          return refuse<Result>(capability, "rate-limited");
+      }
+      // A method's rate counts each time the call runs it, with its direct calls: a batch of
+      // three sets is three sets (P094).
+      if (family !== null) {
+        const times = new Map<string, number>();
+        for (const method of methodsOfCall(capability, args)) {
+          times.set(method, (times.get(method) ?? 0) + 1);
+        }
+        for (const [method, count] of times) {
+          for (const gate of methodGates(config, family.name, method)) {
+            if (
+              typeof gate === "object" &&
+              !own.has(gate) &&
+              !withinRate(`${capability}.${method}`, gate.rateLimit.perMinute, count)
+            ) {
+              return refuse<Result>(capability, "rate-limited");
+            }
+          }
         }
       }
       if (gates.includes("user-activation")) {
@@ -605,6 +634,12 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
             level: viewer.level,
           } as Result,
         };
+      }
+      // A result the host already gave for this read (a subscription's `changed(result)`, the
+      // fresh read after a stale answer), past every gate a read has (P094): no handler is asked,
+      // and none is needed (P079).
+      if (capability === "readData" && callOptions?.held !== undefined) {
+        return { ok: true, value: callOptions.held.value as Result };
       }
       const handler = (handlers as Record<string, CapabilityHandler<N> | undefined>)[capability];
       if (handler === undefined) {

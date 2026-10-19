@@ -1,7 +1,7 @@
 import { CAPABILITIES, type CapabilityName, type Gate } from "../config/capabilities.ts";
 import type { PortholeConfig } from "../config/schema.ts";
 import { LIBRARY_PATH } from "../libraries/libraries.ts";
-import { assetCodeRuns, familyOf, methodGates, methodOf } from "../runtime/contract.ts";
+import { assetCodeRuns, familyOf, methodGates, methodsOfCall } from "../runtime/contract.ts";
 import { ASSET_PATH } from "../runtime/requests.ts";
 
 /**
@@ -33,19 +33,28 @@ export function effectiveGates(config: PortholeConfig, name: CapabilityName): re
 }
 
 /**
- * The gates one call runs under: its host function's, and its runtime method's own (after the
- * review: `artifact.publish`, `assets.delete`, an upload whose code may run), every one applying.
+ * The gates one call runs under: its host function's, and the own gates of each runtime method it
+ * runs (after the review: `artifact.publish`, `assets.delete`, an upload whose code may run; P094:
+ * a db batch's writes' and a watch's read's too, `methodsOfCall`), every one applying.
  */
 export function callGates(
   config: PortholeConfig,
   name: CapabilityName,
   args: unknown,
 ): readonly Gate[] {
-  const gates = effectiveGates(config, name);
+  const gates = [...effectiveGates(config, name)];
   const family = familyOf(name);
-  const method = family === null ? null : methodOf(name, args);
-  const own = family === null || method === null ? [] : methodGates(config, family.name, method);
-  return own.length === 0 ? gates : [...gates, ...own.filter((gate) => !gates.includes(gate))];
+  if (family === null) {
+    return gates;
+  }
+  for (const method of new Set(methodsOfCall(name, args))) {
+    for (const gate of methodGates(config, family.name, method)) {
+      if (!gates.includes(gate)) {
+        gates.push(gate);
+      }
+    }
+  }
+  return gates;
 }
 
 const unique = (values: readonly string[]): string[] => [...new Set(values)];

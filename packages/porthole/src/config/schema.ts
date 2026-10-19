@@ -58,6 +58,9 @@ export interface CapabilityConfig {
    * Gates of each runtime method it serves, by name, in place of the contract's own (after the
    * review: `artifact.publish` and `assets.delete` need a click and a yes; `assets.upload` a yes
    * where uploaded code may run). Every one applies on top of `gates`. `[]`: none of its own.
+   * A call that runs other methods runs under theirs too (P094): a db `batch` under each of its
+   * writes' (`set`, `update`, `delete`; one confirmation for the whole batch, a rate counting each
+   * write), a `watch` under `get`'s (a document) or `query`'s (a collection).
    */
   readonly methodGates?: Readonly<Record<string, readonly Gate[]>>;
 }

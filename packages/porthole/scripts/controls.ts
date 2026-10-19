@@ -20,9 +20,21 @@ export const CONTROLS: Readonly<Record<string, { spec: string; fails: readonly s
     spec: "leak/served/runtime.spec.ts",
     fails: ["an undeclared capability: null from use, refused when sent anyway"],
   },
+  // The pushed-result probe (P094) stands on the level check too: both its reads are refused for it.
   "runtime-level": {
     spec: "leak/served/runtime.spec.ts",
-    fails: ["a method above the viewer's level: forbidden"],
+    fails: [
+      "a method above the viewer's level: forbidden",
+      "a read above the viewer's level: a result the host pushed is refused",
+    ],
+  },
+  "runtime-data-names": {
+    spec: "leak/served/runtime.spec.ts",
+    fails: ["a resource outside the page's data names: refused with a viewer and without one"],
+  },
+  "live-held-read": {
+    spec: "leak/served/runtime.spec.ts",
+    fails: ["a read above the viewer's level: a result the host pushed is refused"],
   },
   "db-private": {
     spec: "leak/served/runtime.spec.ts",

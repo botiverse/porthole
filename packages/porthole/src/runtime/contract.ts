@@ -205,6 +205,34 @@ export function methodOf(serves: CapabilityName, args: unknown): string | null {
 }
 
 /**
+ * The runtime methods a validated call runs, each as often as it runs it: its own, and for a db
+ * batch each of its writes' (`set`, `update`, `delete`), for a db watch the read it repeats (`get`
+ * for a document, `query` for a collection). Each one's level and gates apply to the call (P091
+ * item 4 for levels, P094 for gates): a batch is its writes, a watch its read.
+ */
+export function methodsOfCall(serves: CapabilityName, args: unknown): readonly string[] {
+  const own = methodOf(serves, args);
+  if (own === null) {
+    return [];
+  }
+  if (serves !== "db") {
+    return [own];
+  }
+  const request = args as {
+    readonly op: string;
+    readonly path?: string;
+    readonly writes?: readonly { readonly op: string }[];
+  };
+  if (request.op === "batch") {
+    return [own, ...(request.writes ?? []).map((write) => write.op)];
+  }
+  if (request.op === "watch") {
+    return [own, (request.path ?? "").split("/").length % 2 === 0 ? "get" : "query"];
+  }
+  return [own];
+}
+
+/**
  * Whether a config's asset uploads are its admins' alone (`assets.upload` at admin or above,
  * P089): only then may scripts and styles an admin uploaded run from the library.
  */

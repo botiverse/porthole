@@ -6,10 +6,14 @@ import { STALE_META } from "./mcp-apps.ts";
  * `resources/subscribe`, `resources/unsubscribe`, `notifications/resources/updated`): the frame's
  * subscriptions by URI, each ended by its controller, and a fresh result the host gave for one
  * (pushed through `changed(result)`, or read after a stale answer), kept for the frame's next read
- * of it. Every call goes through the bridge, which gates it; the adapter only says what to send.
+ * of it. Every call goes through the bridge, which gates it, a read answered by a kept result too
+ * (P094); the adapter only says what to send.
  */
 export interface LiveData {
-  /** A read: a fresh result kept for it, else the host's (its cache first, when subscribed). */
+  /**
+   * A read, past the read's gates whatever answers it: a fresh result kept for it, else the
+   * host's (its cache first, when subscribed).
+   */
   read(uri: unknown): Promise<CallOutcome<unknown>>;
   /** Starts the host's subscription; a second for a URI is a no-op. */
   subscribe(uri: unknown): Promise<CallOutcome<undefined>>;
@@ -62,9 +66,20 @@ export function liveData(
   return {
     async read(uri) {
       if (typeof uri === "string" && fresh.has(uri)) {
+        // A kept result is the host's answer to a read: it goes through the read's gates as any
+        // read does (level, names, rate, gesture, consent, confirm), with no new upstream call
+        // (P094). Used once; kept again if the gates refused it and nothing newer came.
         const value = fresh.get(uri);
         fresh.delete(uri);
-        return { ok: true, value };
+        const outcome = await bridge.call(
+          "readData",
+          { uri },
+          { ...activation(), held: { value } },
+        );
+        if (!outcome.ok && !closed && subscriptions.has(uri) && !fresh.has(uri)) {
+          fresh.set(uri, value);
+        }
+        return outcome;
       }
       const subscribed = typeof uri === "string" && subscriptions.has(uri);
       const outcome = await bridge.call(

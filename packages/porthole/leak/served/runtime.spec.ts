@@ -380,6 +380,78 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
     expect(await runtimeCalls(page, interact.key)).toEqual([]);
   });
 
+  test("a resource outside the page's data names: refused with a viewer and without one, its handler never asked", async ({
+    page,
+  }) => {
+    // The page's names are its declaration's word: no viewer is never a way past them (S03, P094).
+    for (const viewer of [null, { level: "view", id: "vic" }]) {
+      const { frame, key } = await show(page, {
+        declaration: { data: { resources: ["app://allowed"] } },
+        viewer,
+      });
+      const who = viewer === null ? "no viewer" : viewer.level;
+      expect(
+        await settled(frame, `return (await porthole.use("data")).read("app://outside-list");`),
+        who,
+      ).toEqual({ code: "not_allowed" });
+      const sent = await raw(frame, {
+        capability: "data",
+        method: "read",
+        args: { uri: "app://outside-list" },
+      });
+      expect(sent.error?.data?.code, who).toBe("not_allowed");
+      expect(
+        await settled(frame, `return (await porthole.use("data")).read("app://allowed");`),
+        who,
+      ).toEqual({ value: { n: 1 } });
+      expect(
+        (await runtimeCalls(page, key)).map((each) => (each.args as { uri: string }).uri),
+        who,
+      ).toEqual(["app://allowed"]);
+    }
+  });
+
+  test("a read above the viewer's level: a result the host pushed is refused as a cold read is", async ({
+    page,
+  }) => {
+    // Reads need admin, following needs view: a push the host sends answers no read the viewer
+    // may not make (S04, P094).
+    const { frame, key } = await show(page, {
+      declaration: { data: { levels: { read: "admin" } } },
+      viewer: { level: "interact", id: "ada" },
+    });
+    await frame.evaluate(`window.heard = []; window.failed = [];
+      porthole.use("data").then((data) => data.subscribe("app://counter",
+        (value) => window.heard.push(value), (error) => window.failed.push(error.code)));`);
+    const failed = () =>
+      frame.evaluate(() => (window as unknown as { failed: string[] }).failed.length);
+    // The first read, cold: refused for its level.
+    await expect.poll(failed).toBe(1);
+    await page.evaluate(
+      ([each]) =>
+        (
+          window as unknown as { runtimePushes: Map<string, (result: unknown) => void> }
+        ).runtimePushes.get(`${each} app://counter`)?.({
+          contents: [{ uri: "app://counter", mimeType: "application/json", text: '{"pushed":1}' }],
+        }),
+      [key],
+    );
+    // The read the push announced: refused the same.
+    await expect.poll(failed).toBe(2);
+    expect(
+      await frame.evaluate(() => {
+        const { heard, failed: codes } = window as unknown as {
+          heard: unknown[];
+          failed: string[];
+        };
+        return { heard, codes };
+      }),
+    ).toEqual({ heard: [], codes: ["forbidden", "forbidden"] });
+    expect((await runtimeCalls(page, key)).map((each) => each.capability)).toEqual([
+      "subscribeData",
+    ]);
+  });
+
   test("a person's own data is theirs: another person's is refused, never reaching the service", async ({
     page,
   }) => {

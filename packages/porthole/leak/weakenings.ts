@@ -226,6 +226,22 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "    if (false) {",
     },
   ],
+  // The names a page's `data` gives (P086), held with a viewer and without one (P094).
+  "runtime-data-names": [
+    {
+      file: BRIDGE,
+      find: '      family !== "data" || declaration === undefined || dataNamed(declaration, capability, args);',
+      replace: "      true;",
+    },
+  ],
+  // A result the host pushed (`changed(result)`) answers a read past the read's gates (P094).
+  "live-held-read": [
+    {
+      file: "src/protocol/live-data.ts",
+      find: '        const outcome = await bridge.call(\n          "readData",\n          { uri },\n          { ...activation(), held: { value } },\n        );',
+      replace: "        const outcome = { ok: true, value };",
+    },
+  ],
   // The per-user data's owner check, in the helper the bridge and a host's own services share.
   "db-private": [
     {

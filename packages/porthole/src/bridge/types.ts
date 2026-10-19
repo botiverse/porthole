@@ -182,6 +182,12 @@ export interface CallOptions {
   readonly subscription?: Pick<SubscriptionContext, "changed" | "signal">;
   /** `readData`: the host's cache may answer, marked stale (the content subscribes to it). */
   readonly stale?: boolean;
+  /**
+   * `readData`: a result the host already gave for this read (a subscription's `changed(result)`,
+   * the fresh read after a stale answer). It answers the read after every gate a read has, without
+   * the handler or the cache (P094: a kept result is never a way past the read's gates).
+   */
+  readonly held?: { readonly value: unknown };
 }
 
 /** What adapters call; one per display. */
