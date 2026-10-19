@@ -137,20 +137,24 @@ export function parseArtifactRequest(
     return null;
   }
   const { maxFiles, maxFileBytes, maxVersionBytes } = fileLimits(limits);
-  const entries = Object.entries(args.files);
-  if (entries.length === 0) {
+  // Its count before any file is read, and each file's size before it is encoded, against the
+  // version's total so far (P095: one file object shared under every path is one object to send).
+  const given = args.files;
+  const paths = Object.keys(given);
+  if (paths.length === 0) {
     return null;
   }
-  if (entries.length > Math.min(MAX_PUBLISH_FILES, maxFiles)) {
+  if (paths.length > Math.min(MAX_PUBLISH_FILES, maxFiles)) {
     return "too_large";
   }
   // No prototype: a path named `__proto__` is a path (after the review).
   const files = Object.create(null) as Record<string, PublishedFile>;
   let total = 0;
-  for (const [path, file] of entries) {
+  for (const path of paths) {
     if (filePathProblem(path) !== null) {
       return null;
     }
+    const file = given[path];
     if (file === null) {
       files[path] = null;
       continue;
@@ -160,9 +164,16 @@ export function parseArtifactRequest(
     }
     let size: number | null = null;
     if (typeof file.text === "string" && file.base64 === undefined) {
+      // A character is a byte or more in UTF-8: past a limit by its length, it isn't encoded.
+      if (file.text.length > maxFileBytes || total + file.text.length > maxVersionBytes) {
+        return "too_large";
+      }
       size = encoder.encode(file.text).length;
       files[path] = { text: file.text };
     } else if (file.text === undefined) {
+      if (typeof file.base64 === "string" && (file.base64.length / 4) * 3 - 2 > maxFileBytes) {
+        return "too_large";
+      }
       size = base64Bytes(file.base64);
       if (size !== null) {
         files[path] = { base64: file.base64 as string };
@@ -171,13 +182,10 @@ export function parseArtifactRequest(
     if (size === null) {
       return null;
     }
-    if (size > maxFileBytes) {
+    total += size;
+    if (size > maxFileBytes || total > maxVersionBytes) {
       return "too_large";
     }
-    total += size;
-  }
-  if (total > maxVersionBytes) {
-    return "too_large";
   }
   if (
     (args.entry !== undefined && filePathProblem(args.entry) !== null) ||

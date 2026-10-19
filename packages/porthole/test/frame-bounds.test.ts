@@ -176,3 +176,36 @@ describe("P095 4: a db call's size is known before it is written out", () => {
     expect(parseDbRequest({ op: "set", path: "notes/a", data: over })).toBe("too_large");
   });
 });
+
+describe("P095 5: a publish's count and size are known before its files are read or encoded", () => {
+  test("past the count, no file is read", () => {
+    let reads = 0;
+    const files: Record<string, unknown> = {};
+    for (let index = 0; index < 300; index += 1) {
+      Object.defineProperty(files, `f${index}.html`, {
+        enumerable: true,
+        get: () => {
+          reads += 1;
+          return { text: "x" };
+        },
+      });
+    }
+    expect(parseArtifactRequest({ op: "publish", base: "1", files }, {})).toBe("too_large");
+    expect(reads).toBe(0);
+  });
+
+  test("one large file under many paths is encoded only until the version's total is passed", () => {
+    const encode = vi.spyOn(TextEncoder.prototype, "encode");
+    try {
+      const file = { text: "x".repeat(4_000_000) };
+      const files = Object.fromEntries(
+        Array.from({ length: 200 }, (_, index) => [`f${index}.txt`, file]),
+      );
+      const limits = { maxFiles: 255, maxFileBytes: 5_000_000, maxVersionBytes: 20_000_000 };
+      expect(parseArtifactRequest({ op: "publish", base: "1", files }, limits)).toBe("too_large");
+      expect(encode.mock.calls.length).toBeLessThanOrEqual(5);
+    } finally {
+      encode.mockRestore();
+    }
+  });
+});
