@@ -89,6 +89,7 @@ export {
   declareCapabilities,
   declaredMatch,
   intersectDeclarations,
+  tryIntersectDeclarations,
   type CapabilityDeclaration,
   type DeclarationProblem,
   type DeclaredCapability,

@@ -5,8 +5,10 @@ import {
   dbAccess,
   declareCapabilities,
   declaredMatch,
+  dbRulesProblem,
   intersectDeclarations,
   methodLevel,
+  tryIntersectDeclarations,
   presets,
   VIEWER_LEVELS,
   type DbRequest,
@@ -109,7 +111,7 @@ function artifactAllows(
   return needed !== null && atLeast(level, needed);
 }
 
-const COLLECTIONS = ["public", "__proto__", "constructor", "toString", "other"];
+const COLLECTIONS = ["public", "Public", "__proto__", "constructor", "toString", "other"];
 
 const DB_REQUESTS: readonly DbRequest[] = [
   ...COLLECTIONS.flatMap((name): DbRequest[] => [
@@ -223,10 +225,8 @@ describe("S02: a version shown under the current declaration keeps nothing it re
       expect(dbAllows(both, level, { op: "set", path: "public/item", data: {} })).toBe(false);
     }
     expect(dbAllows(both, "owner", { op: "get", path: "public/item" })).toBe(true);
-    expect(both.capabilities.db?.rules).toEqual({
-      public: { read: "owner", write: "owner" },
-      "*": { read: "owner", write: "owner" },
-    });
+    // `public` is under the same rule as `*` on both sides now: no name of its own (review).
+    expect(both.capabilities.db?.rules).toEqual({ "*": { read: "owner", write: "owner" } });
   });
 
   test("and the other way: the version's wildcard holds the current's own rules", () => {
@@ -366,7 +366,7 @@ describe("S02: a version shown under the current declaration keeps nothing it re
         const db: Record<string, unknown> = {};
         if (chance(0.85)) {
           db.rules = own(
-            ["*", "public", "__proto__", "constructor", "toString", "data"]
+            ["*", "public", "Public", "PUBLIC", "__proto__", "constructor", "toString", "data"]
               .filter(() => chance(0.5))
               .map((key) => [key, rule()] as const),
           );
@@ -430,5 +430,185 @@ describe("P093: a checked declaration is its own copy", () => {
     // A later change to what the caller passed isn't the declaration checked.
     (given.db as { rules: Record<string, unknown> }).rules = { "*": "anything" };
     expect(Object.hasOwn(declaration.capabilities.db?.rules ?? {}, "__proto__")).toBe(true);
+  });
+});
+
+/** The independent review of P093's first cut: each finding's regression. */
+describe("P093 review", () => {
+  const many = (prefix: string, count: number, rule: Rule): [string, Rule][] =>
+    Array.from({ length: count }, (_, index) => [`${prefix}${index}`, rule]);
+
+  test("1: two declarations at the publish limits intersect into one a mount takes", () => {
+    // 100 names each, none of them redundant: the union is 200 (the publish limit is 100).
+    const version = declared({
+      db: { rules: own(many("a", 100, { read: "admin" })) },
+      data: {
+        resources: [...many("app://x/a", 199, {}).map(([name]) => name), "app://x/*"],
+        tools: [...many("a", 199, {}).map(([name]) => name), "*"],
+      },
+    });
+    const current = declared({
+      db: { rules: own([...many("b", 99, { write: "owner" }), ["*", { read: "interact" }]]) },
+      data: {
+        resources: [...many("app://x/b", 199, {}).map(([name]) => name), "app://x/*"],
+        tools: [...many("b", 199, {}).map(([name]) => name), "*"],
+      },
+    });
+    for (const each of [version, current]) {
+      expect(() => mounted(each)).not.toThrow();
+      expect(declareCapabilities({ given: each.capabilities, config }).ok).toBe(true);
+    }
+    const both = intersectDeclarations(version, current);
+    expect(Object.keys(both.capabilities.db?.rules ?? {})).toHaveLength(200);
+    expect(both.capabilities.data?.resources?.length).toBeGreaterThan(200);
+    expect(() => mounted(both)).not.toThrow();
+    expectBoth(version, current);
+    expect(dbAllows(mounted(both), "interact", { op: "get", path: "a0/x" })).toBe(false);
+    expect(dbAllows(mounted(both), "admin", { op: "set", path: "b0/x", data: {} })).toBe(false);
+    expect(dbAllows(mounted(both), "admin", { op: "get", path: "a0/x" })).toBe(true);
+    expect(dataAllows(mounted(both), "view", "read", "app://x/a0")).toBe(true);
+    // The publish limits stay: one more name at publish is refused.
+    const over = { db: { rules: own(many("c", 101, {})) } };
+    expect(declareCapabilities({ given: over, config }).ok).toBe(false);
+    const names = { data: { tools: many("t", 201, {}).map(([name]) => name) } };
+    expect(declareCapabilities({ given: names, config }).ok).toBe(false);
+  });
+
+  test("1: property at the limits: 100 rule names and 200 data names a side, any case across sides", () => {
+    const next = random(0x9301);
+    const level = () => VIEWER_LEVELS[Math.floor(next() * 4)] as ViewerLevel;
+    const shuffled = <T>(list: readonly T[]) =>
+      list
+        .map((each) => [next(), each] as const)
+        .sort(([x], [y]) => x - y)
+        .map(([, each]) => each);
+    // Names distinct in any case within a side (publish refuses two that differ only in case).
+    const pool = [
+      ...COLLECTIONS.filter((name) => name !== "Public"),
+      ...many("c", 150, {}).map(([name]) => name),
+    ];
+    const side = (upper: boolean): PageDeclaration => {
+      const chosen = shuffled(pool).slice(0, next() < 0.5 ? 100 : 99);
+      const rules = chosen.map((name): [string, Rule] => [
+        upper && next() < 0.5 ? name.toUpperCase() : name,
+        { ...(next() < 0.6 ? { read: level() } : {}), ...(next() < 0.6 ? { write: level() } : {}) },
+      ]);
+      if (chosen.length === 99) {
+        rules.push(["*", { read: level() }]);
+      }
+      const resources = shuffled([
+        ...RESOURCES,
+        "app://tasks/*",
+        "app://*",
+        ...many("app://n/", 300, {}).map(([name]) => name),
+      ]).slice(0, 200);
+      const made = declared({ db: { rules: own(rules) }, data: { resources } });
+      expect(declareCapabilities({ given: made.capabilities, config }).ok).toBe(true);
+      return next() < 0.5 ? made : mounted(made);
+    };
+    for (let round = 0; round < 12; round += 1) {
+      expectBoth(side(false), side(true));
+    }
+  }, 30_000);
+
+  test("1: a name under the same rule as `*` on both sides gets none of its own", () => {
+    const both = intersectDeclarations(
+      declared({ db: { rules: { a: { read: "admin" }, b: { write: "admin" }, "*": {} } } }),
+      declared({ db: { rules: { a: { read: "view" }, "*": { write: "admin" } } } }),
+    );
+    // a: { read: admin } (the current's own `a` rule, whole: its `*` doesn't reach `a`) differs
+    // from * ({ write: admin }); b is { write: admin } on both sides, which `*` says.
+    expect(both.capabilities.db?.rules).toEqual({ a: { read: "admin" }, "*": { write: "admin" } });
+    expectBoth(
+      declared({ db: { rules: { a: { read: "admin" }, b: { write: "admin" }, "*": {} } } }),
+      declared({ db: { rules: { a: { read: "view" }, "*": { write: "admin" } } } }),
+    );
+  });
+
+  test("2: a rule holds for its collection in any ASCII case", () => {
+    const rules = { votes: { write: "owner" as const } };
+    for (const path of ["votes/a", "Votes/a", "VOTES/a", "vOtEs/a"]) {
+      expect(dbAccess({ op: "set", path, data: {} }, { level: "admin", id: ID }, rules).ok).toBe(
+        false,
+      );
+      expect(dbAccess({ op: "set", path, data: {} }, { level: "owner", id: ID }, rules).ok).toBe(
+        true,
+      );
+    }
+    // A page from before (variants published under 0.7.0): the strictest of them, else `*`.
+    const variants = own<Rule>([
+      ["votes", { read: "admin" }],
+      ["Votes", { write: "owner" }],
+      ["*", { read: "owner" }],
+    ]);
+    const as = (level: ViewerLevel, request: DbRequest) =>
+      dbAccess(request, { level, id: ID }, variants).ok;
+    expect(as("interact", { op: "get", path: "VOTES/a" })).toBe(false);
+    expect(as("admin", { op: "get", path: "vOtes/a" })).toBe(true);
+    expect(as("admin", { op: "set", path: "votes/a", data: {} })).toBe(false);
+    expect(as("owner", { op: "set", path: "votes/a", data: {} })).toBe(true);
+    expect(as("admin", { op: "get", path: "other/a" })).toBe(false);
+    // The path reaches the handler as the page wrote it (0.7.0's data keeps its names).
+    const access = dbAccess({ op: "get", path: "Votes/a" }, { level: "owner", id: ID }, variants);
+    expect(access).toEqual({ ok: true, request: { op: "get", path: "Votes/a" } });
+  });
+
+  test("2: names that differ only in case are refused at publish, still shown from a store", () => {
+    const rules = own<Rule>([
+      ["votes", { read: "admin" }],
+      ["Votes", {}],
+    ]);
+    expect(dbRulesProblem(rules)).toMatch(/case/u);
+    const published = declareCapabilities({ given: { db: { rules } }, config });
+    expect(published.ok).toBe(false);
+    expect(() => mounted(declared({ db: { rules } }))).not.toThrow();
+    // Each side's own variants, and variants across the two: one name in the result.
+    const both = intersectDeclarations(
+      declared({ db: { rules } }),
+      declared({ db: { rules: { VOTES: { write: "owner" } } } }),
+    );
+    expect(Object.keys(both.capabilities.db?.rules ?? {})).toEqual(["votes"]);
+    expect(both.capabilities.db?.rules).toEqual({ votes: { read: "admin", write: "owner" } });
+    expect(dbRulesProblem(both.capabilities.db?.rules)).toBeNull();
+    expectBoth(
+      declared({ db: { rules } }),
+      declared({ db: { rules: { VOTES: { write: "owner" } } } }),
+    );
+  });
+
+  test("3: tryIntersectDeclarations answers a problem instead of throwing", () => {
+    const fine = declared({ db: { rules: { votes: { read: "admin" } } } });
+    const bad = declared({ db: { rules: { "*": { read: "Owner" } } } });
+    const refused = tryIntersectDeclarations(fine, bad);
+    expect(refused.ok).toBe(false);
+    expect(refused.ok ? [] : refused.problems.map((each) => each.path)).toEqual([
+      "current.capabilities.db.rules",
+    ]);
+    const shown = tryIntersectDeclarations(fine, fine);
+    expect(shown).toEqual({ ok: true, declaration: intersectDeclarations(fine, fine) });
+    expect(() => intersectDeclarations(fine, bad)).toThrow(TypeError);
+  });
+
+  test("4: a stored declaration carried forward is a copy too", () => {
+    const stored = checkDeclaration(
+      JSON.parse(
+        '{"capabilities":{"db":{"rules":{"__proto__":{"read":"owner"}}}},"runtime":"1"}',
+      ) as unknown,
+      config,
+    );
+    const plain = JSON.parse(JSON.stringify(stored)) as PageDeclaration;
+    const result = declareCapabilities({ stored: plain, config });
+    expect(result.ok).toBe(true);
+    const declaration = (result as { declaration: PageDeclaration }).declaration;
+    expect(declaration.capabilities).not.toBe(plain.capabilities);
+    const rules = declaration.capabilities.db?.rules ?? {};
+    expect(Object.getPrototypeOf(rules)).toBeNull();
+    expect(Object.hasOwn(rules, "__proto__")).toBe(true);
+  });
+
+  test("6: a built-in both sides declare is refused, as the mount refuses it", () => {
+    const builtIn = declared({ clipboard: {} });
+    expect(() => mounted(builtIn)).toThrow(TypeError);
+    expect(() => intersectDeclarations(builtIn, builtIn)).toThrow(TypeError);
   });
 });

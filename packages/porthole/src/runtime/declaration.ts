@@ -9,7 +9,16 @@ import {
   type RuntimeCapabilityName,
   type RuntimeVersion,
 } from "./contract.ts";
-import { dbRuleOf, dbRulesProblem, type DbRule, type DbRules } from "./db.ts";
+import {
+  dbRuleLevel,
+  dbRuleOf,
+  dbRulesProblem,
+  foldCollection,
+  stricterDbRule,
+  type DbRule,
+  type DbRules,
+  type DeclarationStage,
+} from "./db.ts";
 import { higher, isViewerLevel, type ViewerLevel } from "./levels.ts";
 
 /**
@@ -70,10 +79,19 @@ const KEYS: Readonly<Record<string, readonly string[]>> = {
   db: ["levels", "rules"],
 };
 
-const names = (values: unknown, path: string, problems: DeclarationProblem[]): void => {
+/** The most names `data` lists at publish; where shown (an intersection of two), twice that (P093). */
+const MAX_NAMES = 200;
+
+const names = (
+  values: unknown,
+  path: string,
+  problems: DeclarationProblem[],
+  stage: DeclarationStage,
+): void => {
+  const most = stage === "publish" ? MAX_NAMES : 2 * MAX_NAMES;
   if (
     !Array.isArray(values) ||
-    values.length > 200 ||
+    values.length > most ||
     values.some(
       (each) =>
         typeof each !== "string" ||
@@ -86,7 +104,7 @@ const names = (values: unknown, path: string, problems: DeclarationProblem[]): v
   ) {
     problems.push({
       path,
-      message: "must be a list of names (at most 200), each exact or a prefix ending in *",
+      message: `must be a list of names (at most ${most}), each exact or a prefix ending in *`,
     });
   }
 };
@@ -99,6 +117,19 @@ export function declarationProblems(
   given: unknown,
   config: PortholeConfig,
   runtime: RuntimeVersion = RUNTIME_VERSION,
+): DeclarationProblem[] {
+  return stagedProblems(given, config, runtime, "publish");
+}
+
+/**
+ * `declarationProblems` at a stage (P093): at publish, the limits a page is held to; where a
+ * declaration is shown (a mount), an intersection of two such (`intersectDeclarations`) fits too.
+ */
+function stagedProblems(
+  given: unknown,
+  config: PortholeConfig,
+  runtime: RuntimeVersion,
+  stage: DeclarationStage,
 ): DeclarationProblem[] {
   const problems: DeclarationProblem[] = [];
   if (!isRuntimeVersion(runtime)) {
@@ -125,7 +156,7 @@ export function declarationProblems(
       problems.push({ path, message: "isn't offered here" });
       continue;
     }
-    configProblems(name, value, path, problems);
+    configProblems(name, value, path, problems, stage);
   }
   return problems;
 }
@@ -136,6 +167,7 @@ function configProblems(
   value: unknown,
   path: string,
   problems: DeclarationProblem[],
+  stage: DeclarationStage,
 ): void {
   const spec = runtimeCapability(name);
   if (!isRecord(value)) {
@@ -169,14 +201,14 @@ function configProblems(
   }
   if (name === "data") {
     if (value.resources !== undefined) {
-      names(value.resources, `${path}.resources`, problems);
+      names(value.resources, `${path}.resources`, problems, stage);
     }
     if (value.tools !== undefined) {
-      names(value.tools, `${path}.tools`, problems);
+      names(value.tools, `${path}.tools`, problems, stage);
     }
   }
   if (name === "db" && value.rules !== undefined) {
-    const problem = dbRulesProblem(value.rules);
+    const problem = dbRulesProblem(value.rules, stage);
     if (problem !== null) {
       problems.push({ path: `${path}.rules`, message: problem });
     }
@@ -194,7 +226,7 @@ export function checkDeclaration(given: unknown, config: PortholeConfig): PageDe
       `A declaration's runtime ${JSON.stringify(runtime)} is not one this Porthole serves`,
     );
   }
-  const problems = declarationProblems(given.capabilities, config, runtime);
+  const problems = stagedProblems(given.capabilities, config, runtime, "shown");
   if (problems.length > 0) {
     throw new TypeError(
       `The declaration doesn't fit this config: ${problems.map((each) => `${each.path} ${each.message}`).join("; ")}`,
@@ -250,15 +282,16 @@ export function declareCapabilities(options: {
   }
   const runtime: RuntimeVersion = options.runtime ?? stored?.runtime ?? RUNTIME_VERSION;
   if (given === undefined) {
-    const declaration = stored ?? { capabilities: {}, runtime };
-    const pinned = { capabilities: declaration.capabilities, runtime };
-    // A stored declaration still fits the host's offer (a host may have narrowed its config).
-    const problems = declarationProblems(pinned.capabilities, config, runtime);
+    const capabilities = stored?.capabilities ?? {};
+    // A stored declaration still fits the host's offer (a host may have narrowed its config); as
+    // stored, a page's from before P093 too (rule names in more than one case).
+    const problems = stagedProblems(capabilities, config, runtime, "shown");
     return problems.length > 0
       ? { ok: false, problems }
       : {
           ok: true,
-          declaration: pinned,
+          // Its own copy, as at a publish that gives one (P093, after its review).
+          declaration: { capabilities: copied(capabilities) as CapabilityDeclaration, runtime },
           changed: stored === undefined || stored === null || stored.runtime !== runtime,
         };
   }
@@ -339,61 +372,70 @@ function bothNames(
   ];
 }
 
-/** The stricter of two rules, read and write each (absent: the contract's level). */
-function stricterRule(x: DbRule | undefined, y: DbRule | undefined): DbRule {
-  const out = Object.create(null) as { read?: ViewerLevel; write?: ViewerLevel };
-  for (const field of ["read", "write"] as const) {
-    const p = x?.[field];
-    const q = y?.[field];
-    const level = p === undefined ? q : q === undefined ? p : higher(p, q);
-    if (level !== undefined) {
-      out[field] = level;
-    }
-  }
-  return out;
-}
-
 /**
  * The stricter of two pages' rules, by collection (P093, the 2026-10-19 audit's S02): each name
- * either side's rules give, and `*`, is under the stricter of the rule EACH side puts it under, as
- * `dbAccess` reads that side (`dbRuleOf`: the name's own rule object, else `*`'s). A collection
- * neither names is under both sides' `*`, the output's `*`. So the output allows a level exactly
- * what both allow it: an old version's `public` doesn't outlive the current `*`, nor the other way.
+ * either side's rules give, in any case, and `*`, is under the stricter of the rule EACH side
+ * puts it under, as `dbAccess` reads that side (`dbRuleOf`: the name's own rule object in any
+ * ASCII case, else `*`'s). A collection neither names is under both sides' `*`, the output's `*`.
+ * So the output allows a level exactly what both allow it: an old version's `public` doesn't
+ * outlive the current `*`, nor the other way. One name for each name in any case (as the first
+ * side spells it); none for a name whose rule is the output's `*`'s (after the review: it says
+ * nothing `*` doesn't).
  */
 function stricterRules(a: DbRules | undefined, b: DbRules | undefined): DbRules | undefined {
   if (a === undefined && b === undefined) {
     return undefined;
   }
+  const wildcard = stricterDbRule(dbRuleOf(a, "*"), dbRuleOf(b, "*"));
+  const same = (rule: DbRule) =>
+    dbRuleLevel(rule, false) === dbRuleLevel(wildcard, false) &&
+    dbRuleLevel(rule, true) === dbRuleLevel(wildcard, true);
   const out = bare<DbRule>();
-  for (const name of new Set([...Object.keys(a ?? {}), ...Object.keys(b ?? {})])) {
-    out[name] = stricterRule(dbRuleOf(a, name), dbRuleOf(b, name));
+  const seen = new Set<string>();
+  for (const name of [...Object.keys(a ?? {}), ...Object.keys(b ?? {})]) {
+    const folded = foldCollection(name);
+    if (name === "*" || seen.has(folded)) {
+      continue;
+    }
+    seen.add(folded);
+    const rule = stricterDbRule(dbRuleOf(a, name), dbRuleOf(b, name));
+    if (!same(rule)) {
+      out[name] = rule;
+    }
+  }
+  if ((a !== undefined && Object.hasOwn(a, "*")) || (b !== undefined && Object.hasOwn(b, "*"))) {
+    out["*"] = wildcard;
   }
   return out;
 }
 
-/** A `TypeError` for a declaration that isn't one: read as allowing anything, it could loosen the other. */
-function checkedShape(declaration: unknown, which: string): PageDeclaration {
+/**
+ * The problems with a declaration's shape where it is shown (no host's offer: the mount checks
+ * that), each path under `which`: what would be read as allowing anything could loosen the other
+ * side (`higher` with a level that isn't one returns the other).
+ */
+function shapeProblems(declaration: unknown, which: string): DeclarationProblem[] {
   const problems: DeclarationProblem[] = [];
   if (!isRecord(declaration) || !isRecord(declaration.capabilities)) {
-    problems.push({ path: "capabilities", message: "must be an object: { name: config }" });
-  } else {
-    if (!isRuntimeVersion(declaration.runtime)) {
-      problems.push({ path: "runtime", message: "is not a runtime version Porthole serves" });
-    }
-    for (const [name, value] of Object.entries(declaration.capabilities)) {
-      if (isRuntimeCapabilityName(name)) {
-        configProblems(name, value, `capabilities.${name}`, problems);
-      } else {
-        problems.push({ path: `capabilities.${name}`, message: "is not a capability" });
-      }
+    return [{ path: `${which}.capabilities`, message: "must be an object: { name: config }" }];
+  }
+  if (!isRuntimeVersion(declaration.runtime)) {
+    problems.push({
+      path: `${which}.runtime`,
+      message: "is not a runtime version Porthole serves",
+    });
+  }
+  for (const [name, value] of Object.entries(declaration.capabilities)) {
+    const path = `${which}.capabilities.${name}`;
+    if (!isRuntimeCapabilityName(name)) {
+      problems.push({ path, message: "is not a capability" });
+    } else if (runtimeCapability(name).builtIn) {
+      problems.push({ path, message: "is built in: use it without declaring it" });
+    } else {
+      configProblems(name, value, path, problems, "shown");
     }
   }
-  if (problems.length > 0) {
-    throw new TypeError(
-      `The ${which} declaration isn't one: ${problems.map((each) => `${each.path} ${each.message}`).join("; ")}`,
-    );
-  }
-  return declaration as PageDeclaration;
+  return problems;
 }
 
 /**
@@ -403,19 +445,25 @@ function checkedShape(declaration: unknown, which: string): PageDeclaration {
  * never keeps what the artifact has since revoked, nor gains what it declared later. Each
  * capability only where both declare it, at the stricter levels, the narrower `data` names and
  * the stricter `db` rules (each side read as `dbAccess` reads it, P093); the version's own pinned
- * runtime. Whatever the result allows, each side allows alone. Objects without a prototype; a
- * `TypeError` for either side that isn't a declaration's shape (P093).
+ * runtime. Whatever the result allows, each side allows alone; a mount takes it (two pages at
+ * the publish limits make one within a mount's). Objects without a prototype.
+ *
+ * Answers its problems (P093, after its review) where either side isn't a declaration's shape
+ * (or the two make one past a mount's limits): show the version as an error, never with `null`
+ * (that is 0.6's surface) or with either side alone.
  */
-export function intersectDeclarations(
+export function tryIntersectDeclarations(
   version: PageDeclaration,
   current: PageDeclaration,
-): PageDeclaration {
-  const a = checkedShape(version, "version's").capabilities as Readonly<
-    Record<string, DeclaredData & DeclaredDb>
-  >;
-  const b = checkedShape(current, "current").capabilities as Readonly<
-    Record<string, DeclaredData & DeclaredDb>
-  >;
+):
+  | { readonly ok: true; readonly declaration: PageDeclaration }
+  | { readonly ok: false; readonly problems: readonly DeclarationProblem[] } {
+  const problems = [...shapeProblems(version, "version"), ...shapeProblems(current, "current")];
+  if (problems.length > 0) {
+    return { ok: false, problems };
+  }
+  const a = version.capabilities as Readonly<Record<string, DeclaredData & DeclaredDb>>;
+  const b = current.capabilities as Readonly<Record<string, DeclaredData & DeclaredDb>>;
   const capabilities = bare<DeclaredCapability & DeclaredData & DeclaredDb>();
   for (const name of Object.keys(a)) {
     if (!Object.hasOwn(b, name)) {
@@ -447,5 +495,22 @@ export function intersectDeclarations(
     }
     capabilities[name] = out;
   }
-  return { capabilities, runtime: version.runtime };
+  const declaration: PageDeclaration = { capabilities, runtime: version.runtime };
+  // Within a mount's limits: sides that were themselves intersections could make one past them.
+  const past = shapeProblems(declaration, "intersection");
+  return past.length > 0 ? { ok: false, problems: past } : { ok: true, declaration };
+}
+
+/** `tryIntersectDeclarations`, a `TypeError` naming the problems where it answers some. */
+export function intersectDeclarations(
+  version: PageDeclaration,
+  current: PageDeclaration,
+): PageDeclaration {
+  const result = tryIntersectDeclarations(version, current);
+  if (!result.ok) {
+    throw new TypeError(
+      `The declarations don't intersect: ${result.problems.map((each) => `${each.path} ${each.message}`).join("; ")}`,
+    );
+  }
+  return result.declaration;
 }

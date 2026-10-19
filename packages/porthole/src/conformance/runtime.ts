@@ -393,6 +393,26 @@ export function defineRuntimeConformance(
         "an admin writes it",
       );
     });
+    // P093: a store that folds case keeps `Config/main` where `config/main` is.
+    add(
+      "db: a rule holds for its collection in any case, at the bridge and in the app",
+      async (handlers) => {
+        for (const path of ["Config/main", "CONFIG/main"]) {
+          expect(
+            codeOf(await as(handlers, viewers.interact)("db", { op: "set", path, data: {} })) ===
+              "forbidden",
+            `the rule for config holds at the bridge for ${path}`,
+          );
+          const past = await direct(
+            handlers,
+            "db",
+            { op: "set", path, data: {} },
+            viewers.interact,
+          );
+          expect(!past.ok, `the app's handler holds the rule for config for ${path} itself`);
+        }
+      },
+    );
   }
 
   if (config.capabilities.artifact !== undefined) {

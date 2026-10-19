@@ -355,9 +355,12 @@ handlers: {
   comments: ({ anchor }) => composer.open(anchor),                                     // true if it opened
 },
 // 5. The mount: what this version declared, within what the artifact declares now; null for a
-//    page published before 0.7 (required under a runtime).
-<PortholeView display="page" instance={instance}
-  declaration={version.declaration ? intersectDeclarations(version.declaration, artifact.declaration) : null} />
+//    page published before 0.7 (required under a runtime). Before rendering: a stored
+//    declaration that isn't one's shape is a problem to show, never a mount with null (0.6's
+//    surface) or with either declaration alone (P093).
+const shown = version.declaration ? tryIntersectDeclarations(version.declaration, artifact.declaration) : null;
+if (shown && !shown.ok) return <VersionError problems={shown.problems} />;   // "This version can't be shown"
+<PortholeView display="page" instance={instance} declaration={shown ? shown.declaration : null} />
 ```
 
 - **Built-ins** (`clipboard`, `links`, `downloads`, `comments`) reach every page whose kind offers
@@ -378,9 +381,16 @@ handlers: {
   order against one state, and refuse a moved base or version with `new Refused("conflict")`;
   check and admit the merged version as any (`checkFileSet`, `admitFiles`).
 - **Per version**: store each version's declaration with it (`declareCapabilities` at its publish)
-  and mount a version with `intersectDeclarations(version's, current)`; your API's rules for that
-  version are the same intersection's (whatever it allows, both declarations allow; a stored
-  declaration that isn't one's shape is a `TypeError`).
+  and mount a version with `tryIntersectDeclarations(version's, current)` (`intersectDeclarations`
+  throws its problems as a `TypeError`); your API's rules for that version are the same
+  intersection's (whatever it allows, both declarations allow).
+- **Rules hold in any case**: `dbAccess` puts `Votes/a` under the rule for `votes` (any ASCII
+  case, the strictest where a page from before P093 named a collection in two), so a store that
+  folds case is safe with it; paths reach your handler as the page wrote them (Porthole never
+  lowercases them), and a publish that names a collection twice in different cases is refused.
+- **Objects without a prototype**: checked declarations (`checkDeclaration`, `declareCapabilities`,
+  the intersection) have none, so `.hasOwnProperty()` on one, or one in a template string,
+  throws: use `Object.hasOwn` and `JSON.stringify`.
 - **Who the page may know**: `Grant.user.id` is one path segment, never `me`; give
   `pseudonymFor(secret, artifact, person)` where pages shouldn't link a person across artifacts.
 - **Assets**: `createContentHost({ assets: (id, access) => myStore.asset(id, access) })` answers
