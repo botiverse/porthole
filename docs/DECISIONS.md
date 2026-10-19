@@ -3410,3 +3410,112 @@ bound a list a host stored, not one a page sends, and each name is checked as be
 **Revisit when** rules grow beyond read and write by top-level name (nested paths, patterns
 inside a name), or `dbAccess`'s lookup changes (`dbRuleOf` then changes for both); or names stop
 being ASCII.
+
+## P092 · 2026-10-19 · The server's audit findings: a request never ends the Node process, an issue body is bounded · Accepted
+
+Amends P066 (the issue endpoint, its rate limit) and P070 (`nodeHost`, `toRequest`,
+`sendResponse`). From the pre-release audit of 0.7.0 (2026-10-19, baseline 264b12fa), items S01
+and S06, and an independent review of the first fix. Each change has its regression, failing
+before it: `test/node.test.ts` (servers in a process of their own, `test/node/server.ts`; one
+test per case) and `test/host-kit.test.ts`.
+
+**Decision**, by finding:
+1. **S01: nothing a request does throws out of the Node adapter's listeners, or ends the
+   process.** `toRequest` builds a fetch `Request`, which throws for a method fetch can't carry
+   (`CONNECT`, `TRACE`, `TRACK`) and for a Host or target that is no URL (`Host: a b`, an empty
+   Host, `*`, a broken absolute-form target). It ran in the listener, so one unauthenticated
+   `TRACE` ended the process (exit 1, on the content domain and on the app's own hosts alike). A
+   handler's failure, or a head Node can't write (a header value fetch takes and Node doesn't,
+   `\x01`), rejected inside a `.then`: an unhandled rejection, which ends a Node process too. And
+   Node takes its own `error` listener off a socket before it emits `upgrade`, so a client that
+   reset its upgrade had any refusal written to it end the process with an unhandled
+   `ECONNRESET`. Now:
+   - the conversion is `convert`: 405 for those methods, 400 for anything else it can't take;
+     never a throw (requests and WebSockets alike);
+   - a fetch-style handler's answer goes through one path (`serve`): a sync throw, a rejection, a
+     non-Response or a failed write answers 500, or cuts off a response already started;
+   - `sendResponse` never rejects: no Response, a body already read or locked, or a head Node
+     refuses is a 500 with its own reason phrase;
+   - the app's own listeners (`request`, `upgrade`, `appSocket`, `nodeServer`'s `request`) are
+     called through `callApp`: a throw, or an async listener's rejection, answers 500 or closes
+     the socket;
+   - every upgrade socket gets an `error` listener first (it closes the socket);
+   - **`onError(error, request)`** (new, on `nodeHost`, `nodeServer` and `nodeListener`) hears
+     what failed on the app's side, once the client has its 500; by default a process warning
+     (`process.emitWarning`). The client never reads it;
+   - **`nodeListener(app, { scheme, onError })`** (new): a fetch-style app as a Node listener
+     with the same guarantees (`nodeServer`'s `app`; the reference app uses it, as adopters
+     should, ADOPTING). `toRequest` and `sendResponse` stay for callers who convert themselves.
+2. **S06: the issue endpoint reads at most `ISSUE_BODY_BYTES` (64 KiB, exported from `/server`)
+   of its body.** It read and parsed the whole body after `viewerOf`, which may rightly say no
+   one (a public link, P046), and before `access`: an unauthenticated request cost memory and
+   time in its size. The body is now read as it arrives, counting the bytes read: past the limit
+   the read stops, the body is cancelled, and the answer is `413 too-large`. A Content-Length over
+   the limit is refused before the viewer is asked or a byte read; a Content-Length is never the
+   bound (absent, chunked, or under the truth, the bytes read are counted). Bad JSON, an empty
+   body and a body that breaks off stay `400 bad-json`. Anonymous public access is unchanged: the
+   order (viewer, rate limit, body, `instance`, `access`) stays, since `access` needs the
+   instance the body names.
+3. **On Node, a body no one reads is dropped, bounded, before the connection closes.** Closing at
+   once (the first fix said `Connection: close`) resets the connection while the client is still
+   sending, and the 413 with it (measured: a client that sends its body after the answer gets
+   `EPIPE` and no 413). Now `toRequest`'s body is read only as it is pulled, and cancelling it
+   drops the rest rather than destroy the request; once an answer is out, what is left of the
+   body is read and dropped, at most 1 MiB (`DROP_BYTES`) and 5 s (`DROP_MS`), then the
+   connection closes; a body dropped whole leaves it to go on (keep-alive).
+4. **What a request leaves behind stops with it** (the review's findings in the same code):
+   - **HEAD**: Node writes no body for HEAD, so the head waited for a body that may never end and
+     the body was pulled without backpressure (one HEAD to an event stream starved the server).
+     `sendResponse` now sends the head, cancels the body and ends.
+   - **A client gone before the answer**: `sendResponse` saw no `close` (it had fired) and waited
+     on a drain that never came, so the body was never cancelled. Now a response already
+     destroyed cancels the body and writes nothing, and the wait checks it too. `nodeListener`'s
+     requests carry the same signal as `nodeHost`'s (aborted when the client leaves).
+   - **A reserved label's POST through `nodeHost`** hung (pre-existing): `Readable.toWeb` took
+     the body before `content.fetch` said the label was the app's. `nodeHost` now asks
+     `content.owns` first, and the body is read only when pulled (item 3), so the app's listener
+     gets the request whole.
+5. **The issue endpoint's rate limit keys an anonymous viewer by an address the host trusts**
+   (pre-existing): it took `CF-Connecting-IP` or `X-Forwarded-For`, which any client sets, so a
+   new value was a new allowance. The default never reads `X-Forwarded-For`: the address is the
+   socket's peer, which the Node adapter leaves on the fetch request under a symbol no client can
+   send (`src/server/peer.ts`, no Node API in `/server`); on Workers `CF-Connecting-IP`
+   (Cloudflare's edge sets it; a request has `cf` only there); otherwise none known, one key for
+   every anonymous request. Behind proxies, `rateLimit.trustedProxies: n` (new) takes the
+   `X-Forwarded-For` entry the outermost of `n` proxies appended (the entries before it are the
+   client's to write), or `rateLimit.key` keys it as the app likes. Without either, every
+   anonymous request through a proxy shares the proxy's address: limited together, never
+   bypassed. An IPv6 address counts by its /64 (a host or a subscriber is given a /64, so a key
+   per address would let one client rotate through enough keys to wipe every bucket); an
+   IPv4-mapped one as its IPv4. `trustedProxies` is safe only where the app can't be reached but
+   through those proxies (a direct client writes the counted entry); where the peer is unknown
+   (another adapter, a rebuilt `Request`), every anonymous request shares one key, and ADOPTING
+   says to set `key` there.
+
+**Threat it re-opens.** None: each closes a way an unauthenticated request could stop or load
+the host, or pass its rate limit. A proposal over 64 KiB is refused where it was taken (the
+largest real one, an MCP view's declared egress, is a few KiB). Behind a proxy with no
+`trustedProxies` or `key`, anonymous viewers share one allowance (stricter than before).
+**Why.** Availability is the host's: a library the app mounts on its server must not give any
+client a way to end that server's process (it hosts the app's own business), to hold its
+connections or its memory before anyone is known to be asking, or to choose its own rate limit.
+**Rejected.**
+- A process-wide `uncaughtException` / `unhandledRejection` handler: it hides the app's own bugs,
+  is the app's to install, and leaves the process in an unknown state.
+- Answering a failure silently (the first fix): the app's own bugs became 500s no one heard.
+  Re-emitting them as the server's `error` event: with no listener, that ends the process.
+- 501 for `TRACE` (RFC 9110 calls it apt for a method no resource supports): the audit and the
+  fetch adapters compared (Hono's answers 400 for any request it can't convert) use 4xx; 405 goes
+  without `Allow`, since the adapter can't know which methods the app's resource takes.
+- Refusing anonymous issue requests, or asking `access` before reading: public links are an
+  existing feature (P046), and `access` needs the instance the body names.
+- Trusting Content-Length as the bound, or relying on the edge's body limit: a chunked body has
+  no length to check, a client may declare less than it sends, and an edge may set no limit (or
+  one far above 64 KiB).
+- `Connection: close` on an answer before the body (the first fix): see item 3. Dropping an
+  unbounded rest (Node's own `_dump`): a client could make the server read forever.
+- Trusting `X-Forwarded-For` by default, or its first entry: a client writes it.
+- An option for the body limit: no proposal comes near it.
+**Revisit when** a document kind carries more than a few KiB in its proposal (then a per-kind limit
+or an option); a host needs a larger drop to answer large uploads (`DROP_BYTES`); or Node keeps an
+upgrade socket's error listener.

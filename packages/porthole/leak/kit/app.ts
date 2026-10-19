@@ -3,7 +3,7 @@ import { createServer as createHttpServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { entryTarget, presets, type PortholeConfig } from "../../src/index.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
-import { nodeHost, nodeProbe, sendResponse, toRequest } from "../../src/node/index.ts";
+import { nodeHost, nodeListener, nodeProbe } from "../../src/node/index.ts";
 import {
   conformancePage,
   createContentHost,
@@ -304,13 +304,8 @@ export async function startKit(settings: KitSettings): Promise<Kit> {
   };
 
   const porthole = nodeHost(content, {
-    request: (request, response) => {
-      // As an app behind a TLS edge sees itself: http, whatever the browser used (P074).
-      appRoutes(toRequest(request, "http")).then(
-        (answer) => sendResponse(response, answer),
-        () => response.writeHead(500).end(),
-      );
-    },
+    // As an app behind a TLS edge sees itself: http, whatever the browser used (P074).
+    request: nodeListener(appRoutes, { scheme: "http" }),
   });
   const server = createHttpServer(porthole.request);
   server.on("upgrade", porthole.upgrade);

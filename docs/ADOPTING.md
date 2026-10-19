@@ -268,7 +268,29 @@ nodeServer({ content, app: async (request) => (await routes(request)) ?? app(req
   yourself as soon as you make it is fine too.
 - **`nodeHost(content, { request })`** is for an app that keeps its own `node:http` server (or a
   framework that owns one): put its `request` and `upgrade` listeners on your server, call
-  `content.start()` once it listens and `content.close()` when it stops.
+  `content.start()` once it listens and `content.close()` when it stops. A fetch-style app's
+  listener there is `nodeListener(app, { scheme })`, not `toRequest` and `sendResponse` by hand:
+  `toRequest` throws for a request fetch can't take (`TRACE`, a Host that is no URL), and a throw
+  in a listener ends a Node process. `nodeListener`, `nodeHost` and `nodeServer` answer those 405
+  and 400, and a handler or listener that fails 500 (P092). Pass `onError: (error, request) =>
+  log.error(…)` to any of them to hear your own failures (by default a process warning).
+- **Rate limit:** `rateLimit: { perMinute }` keys an anonymous viewer by the address the server
+  saw (the socket's peer on Node, `CF-Connecting-IP` on Workers), never by `X-Forwarded-For` a
+  client can write (P092). **Behind a proxy** (a TLS edge, a load balancer, a CDN), that address
+  is the proxy's: say how many proxies append to `X-Forwarded-For` (`trustedProxies: 1` for one
+  edge, `2` for a CDN in front of a balancer), or key it yourself (`key: (request, viewer) =>
+  …`). Without either, anonymous requests through the proxy share one allowance. An IPv6
+  address counts by its /64 (one client's network). Three cases to know:
+  - **No peer address:** the Node adapter leaves the socket's peer on the request it makes. Where
+    it is missing (Hono's own Node adapter, an app that rebuilds the request with
+    `new Request(req)`, Deno or Bun), every anonymous request shares one allowance: set
+    `rateLimit.key`.
+  - **`trustedProxies` only where the app can't be reached except through those proxies:** a
+    client that reaches it directly writes the very `X-Forwarded-For` entry that is counted.
+  - **Uploads after the answer:** once an answer is out, a request body no one read is dropped
+    for at most 1 MiB and 5 s, then the connection closes (P092). An app that answers early and
+    keeps reading the upload (a handler that returns its Response before it has read the
+    request's body) is cut off there.
 - **Health:** `health: { probe: nodeProbe(), onServedChange: (served) => … }` checks the content
   domain over the real network and falls back to opaque frames while it doesn't answer.
 
@@ -720,7 +742,7 @@ prints each reason at the end; so does `--reporter=json`.
 | `@botiverse/porthole` (the runtime, 0.7) | `declareCapabilities`, `declarationProblems`, `checkDeclaration`, `dbAccess`, `atLeast`, `methodLevel`, `rosterOf`, `assetNameProblem`, `RUNTIME_CAPABILITIES`, `RUNTIME_TYPES`, `Refused` (`conflict`, `forbidden`, `too_large`); `types/runtime/v1/*.d.ts` |
 | `@botiverse/porthole/react` | `PortholeProvider`, `PortholeFrame`, `PortholeView`, `usePortholeLink`, `cssVariableTheme`, `useRunAgain` |
 | `@botiverse/porthole/server` | `createContentHost` (`routes`, `forget`), `contentHostFor`, `prefixedName`, `memoryTicketStore`, `d1TicketStore`, `upstreamHeaders`, `statusPage`, `conformancePage`, the callbacks' types |
-| `@botiverse/porthole/node` | `nodeServer`, `nodeHost`, `nodeProbe`, `toRequest`, `sendResponse` |
+| `@botiverse/porthole/node` | `nodeServer`, `nodeHost`, `nodeListener`, `nodeProbe`, `toRequest`, `sendResponse` |
 | `@botiverse/porthole/check` | `checkPage`, `playwrightDriver`, `cdpDriver` (`CHECK_ORIGIN`, `CHECK_CONTENT_DOMAIN`: the names a driver of your own answers); `/check/page`, the check page's script (`checkPage` has it already) |
 | `@botiverse/porthole/mcp` | the MCP Apps adapter (views, the sandbox proxy) |
 | `@botiverse/porthole/conformance` | `defineHostConformance`, `conformanceProjects`, `onDemand`, `conformancePage`, `defineRuntimeConformance` (no browser); `/conformance/reporter`, skip reasons |

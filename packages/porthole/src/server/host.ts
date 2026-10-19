@@ -11,6 +11,7 @@ import {
   type ContentDomainInfo,
 } from "./domain.ts";
 import { reservedLabels, type Naming } from "./naming.ts";
+import { peerAddress } from "./peer.ts";
 import { appStatusPage } from "./pages.ts";
 import { createServer } from "./server.ts";
 import type {
@@ -170,10 +171,22 @@ export interface ContentHostOptions<V> {
    * served throw at startup.
    */
   readonly health?: HealthOptions;
-  /** Issues per viewer (or address) per minute, in this process. */
+  /**
+   * Issues per viewer (or, with no viewer, per address) per minute, in this process. The address
+   * is one the host trusts, never one a client says (P092): the socket's peer (the Node adapter
+   * leaves it on the request), or on Workers `CF-Connecting-IP`. Behind proxies, say how many
+   * append to `X-Forwarded-For` (`trustedProxies`), or key it yourself (`key`); otherwise every
+   * request through a proxy is that proxy's address.
+   */
   readonly rateLimit?: {
     readonly perMinute: number;
     readonly key?: (request: Request, viewer: V | null) => string;
+    /**
+     * How many proxies in front of the app each append the address they saw to
+     * `X-Forwarded-For` (default 0: it is never read). The address is the entry the outermost
+     * appended; the entries before it are the client's to write.
+     */
+    readonly trustedProxies?: number;
   };
   /** The kit's events: a function, or a logger (`{ info, warn, error }`). */
   readonly log?: ((event: ContentHostEvent) => void) | ContentLogger;
@@ -448,6 +461,138 @@ const authorizeSource = (url: string): string => {
   const parsed = new URL(url);
   return `${parsed.origin}${parsed.pathname}`;
 };
+
+/**
+ * The most an issue request's body may be (S06, P092). `{ instance }` is a few hundred bytes; an
+ * MCP view's declared egress, the largest proposal, a few KiB.
+ */
+export const ISSUE_BODY_BYTES = 65_536;
+
+/** Whether a request came through Workers: Cloudflare's own `cf`, which no client can send. */
+const onWorkers = (request: Request): boolean => {
+  const cf: unknown = (request as { readonly cf?: unknown }).cf;
+  return typeof cf === "object" && cf !== null;
+};
+
+/**
+ * The address an anonymous viewer's rate is keyed by (P092): one the host trusts, never what a
+ * client says. Behind `trustedProxies` proxies, the X-Forwarded-For entry the outermost appended
+ * (a header with fewer entries came past them: its peer); else the socket's peer, as the Node
+ * adapter saw it; on Workers, CF-Connecting-IP (Cloudflare's edge sets it); else none known.
+ */
+function clientAddress(request: Request, trustedProxies: number): string {
+  if (trustedProxies > 0) {
+    const hops = (request.headers.get("x-forwarded-for") ?? "")
+      .split(",")
+      .map((hop) => hop.trim())
+      .filter((hop) => hop !== "");
+    const hop = hops[hops.length - trustedProxies];
+    if (hop !== undefined) {
+      return clientOf(hop);
+    }
+  }
+  const peer = peerAddress(request);
+  if (peer !== null) {
+    return clientOf(peer);
+  }
+  const edge = onWorkers(request) ? request.headers.get("cf-connecting-ip") : null;
+  return edge === null || edge === "" ? "unknown" : clientOf(edge);
+}
+
+/** An IPv6 address's groups (8; an embedded IPv4 tail as two), or null where it is no IPv6. */
+function ipv6Groups(address: string): string[] | null {
+  const halves = address.toLowerCase().split("::");
+  if (halves.length > 2) {
+    return null;
+  }
+  const groupsOf = (part: string | undefined) =>
+    part === undefined || part === ""
+      ? []
+      : part.split(":").flatMap((group) => (group.includes(".") ? ["0", "0"] : [group]));
+  const head = groupsOf(halves[0]);
+  const tail = groupsOf(halves[1]);
+  const groups =
+    halves.length === 2
+      ? [...head, ...Array<string>(Math.max(0, 8 - head.length - tail.length)).fill("0"), ...tail]
+      : head;
+  return groups.length === 8 && groups.every((group) => /^[0-9a-f]{1,4}$/u.test(group))
+    ? groups
+    : null;
+}
+
+/**
+ * The part of an address that names one client (P092): an IPv6 address by its /64, since a host
+ * or a subscriber is given a /64 and rotating addresses within it costs nothing (one key each
+ * would let one client fill the limiter and wipe every bucket); an IPv4-mapped one as its IPv4;
+ * anything else as it is.
+ */
+function clientOf(address: string): string {
+  const bare = (address.startsWith("[") ? address.slice(1, address.indexOf("]")) : address).split(
+    "%",
+  )[0];
+  if (bare === undefined || !bare.includes(":")) {
+    return address;
+  }
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/iu.exec(bare)?.[1];
+  if (mapped !== undefined) {
+    return mapped;
+  }
+  const groups = ipv6Groups(bare);
+  return groups === null
+    ? address
+    : `${groups
+        .slice(0, 4)
+        .map((group) => group.replace(/^0+(?=.)/u, ""))
+        .join(":")}::/64`;
+}
+
+const tooLarge = () =>
+  refusal(413, "too-large", `The body is { instance }: at most ${ISSUE_BODY_BYTES} bytes`);
+
+/** Whether a request declares a body longer than `limit` (an early refusal; never the bound). */
+const declaresMoreThan = (request: Request, limit: number): boolean => {
+  const declared = request.headers.get("content-length")?.trim() ?? "";
+  return /^\d+$/u.test(declared) && Number(declared) > limit;
+};
+
+/**
+ * A request's body as text, reading at most `limit` bytes (S06, P092): past it the read stops,
+ * the body is cancelled, and the answer is null. The bytes read are counted, whatever the
+ * request's Content-Length says (absent, chunked, or not the truth). Throws where the body can't
+ * be read (the client went away mid-way).
+ */
+async function boundedText(request: Request, limit: number): Promise<string | null> {
+  if (request.body === null) {
+    return "";
+  }
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    if (!(value instanceof Uint8Array)) {
+      reader.cancel().catch(() => undefined);
+      throw new TypeError("A body is bytes");
+    }
+    size += value.byteLength;
+    if (size > limit) {
+      reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  // As `Request.json()` decodes: UTF-8, a byte-order mark dropped.
+  return new TextDecoder().decode(bytes);
+}
 
 /** The default probe: the runtime's `fetch`, no redirects followed, a timeout. */
 const fetchProbe: HealthProbe = async (url, timeoutMs) => {
@@ -863,6 +1008,10 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
               : `Content frames aren't served now: ${view.reason ?? "the content domain is checking"}`,
           );
         }
+        // Before anything is asked or read: the cheap refusal of a body that says it is too big.
+        if (declaresMoreThan(request, ISSUE_BODY_BYTES)) {
+          return tooLarge();
+        }
         let viewer: V | null;
         try {
           viewer = await viewerOf(request);
@@ -872,14 +1021,20 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
         const key =
           options.rateLimit?.key?.(request, viewer) ??
           (viewer === null
-            ? `address:${request.headers.get("cf-connecting-ip") ?? request.headers.get("x-forwarded-for") ?? ""}`
+            ? `address:${clientAddress(request, options.rateLimit?.trustedProxies ?? 0)}`
             : `viewer:${JSON.stringify(viewer)}`);
         if (!withinRate(key)) {
           return refusal(429, "rate-limited", "Too many frames asked for: try again in a minute");
         }
+        // Bounded by the bytes read, never by what the request declares (S06, P092): the viewer
+        // may be no one (a public link), and access is asked only once the body says what of.
         let body: unknown;
         try {
-          body = await request.json();
+          const text = await boundedText(request, ISSUE_BODY_BYTES);
+          if (text === null) {
+            return tooLarge();
+          }
+          body = JSON.parse(text);
         } catch {
           return refusal(400, "bad-json", "The body is JSON: { instance }");
         }

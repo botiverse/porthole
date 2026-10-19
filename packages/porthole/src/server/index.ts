@@ -36,6 +36,7 @@ export { createServer } from "./server.ts";
 export {
   createContentHost,
   HEALTH_PATH,
+  ISSUE_BODY_BYTES,
   type ContentHealthView,
   type ContentHost,
   type ContentHostEvent,
