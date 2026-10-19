@@ -226,19 +226,20 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "    if (false) {",
     },
   ],
-  // The names a page's `data` gives (P086), held with a viewer and without one (P094).
+  // The names a page's `data` gives (P086), held without a viewer too (P094): exactly 264b12fa's
+  // hole, the no-viewer branch's return, so the probe's case with a viewer still passes under it.
   "runtime-data-names": [
     {
       file: BRIDGE,
-      find: '      family !== "data" || declaration === undefined || dataNamed(declaration, capability, args);',
-      replace: "      true;",
+      find: '      return named ? args : "undeclared";',
+      replace: "      return args;",
     },
   ],
   // A result the host pushed (`changed(result)`) answers a read past the read's gates (P094).
   "live-held-read": [
     {
       file: "src/protocol/live-data.ts",
-      find: '        const outcome = await bridge.call(\n          "readData",\n          { uri },\n          { ...activation(), held: { value } },\n        );',
+      find: '        const outcome = await bridge.call(\n          "readData",\n          { uri },\n          { ...activation(), held: { uri, value } },\n        );',
       replace: "        const outcome = { ok: true, value };",
     },
   ],

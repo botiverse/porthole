@@ -1,3 +1,5 @@
+import { createElement } from "react";
+import { renderToString } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import {
   compile,
@@ -11,6 +13,7 @@ import {
 } from "../src/index.ts";
 import { createBridge, onceConsent, type BridgeOptions } from "../src/bridge/bridge.ts";
 import { liveData } from "../src/protocol/live-data.ts";
+import { ConfirmDialog } from "../src/react/dialog.tsx";
 
 /**
  * The 2026-10-19 audit's gate findings (P094), at the lowest layer that sees each: S03 the page's
@@ -233,6 +236,31 @@ describe("S04: a read is authorized as a read, whether a pushed result, the cach
     expect(await live.read(uri)).toMatchObject({ ok: false, refusal: "no-user-activation" });
   });
 
+  test("a held result answers only the read it was kept for, and nothing but a read (S04)", async () => {
+    const config = presets.liveWidget();
+    const { bridge, asked } = bridgeOf(config);
+    // A custom adapter that mixes up its keys gets a refusal, never another URI's data.
+    expect(
+      await bridge.call("readData", { uri: "app://a" }, { held: { uri: "app://b", value: 1 } }),
+    ).toMatchObject({ ok: false, refusal: "invalid" });
+    expect(
+      await bridge.call("readData", { uri: "app://a" }, { held: { uri: "app://a", value: 1 } }),
+    ).toEqual({ ok: true, value: 1 });
+    expect(asked).toEqual([]);
+    // Ignored for anything else: the handler answers.
+    const signal = new AbortController().signal;
+    expect(
+      (
+        await bridge.call(
+          "subscribeData",
+          { uri: "app://a" },
+          { held: { uri: "app://a", value: 1 }, subscription: { changed: () => {}, signal } },
+        )
+      ).ok,
+    ).toBe(true);
+    expect(asked).toEqual(["subscribeData app://a"]);
+  });
+
   test("the cache and the fresh read after it: every answer past the read's gates (S04)", async () => {
     const config = runtime({ readData: { levels: { read: "admin" } }, subscribeData: {} });
     const cachedAsked: string[] = [];
@@ -301,11 +329,47 @@ describe("C01: a db batch runs under its writes' gates, a watch under its read's
     const asked = bridgeOf(config, options);
     expect((await asked.bridge.call("db", batch)).ok).toBe(true);
     expect(asked.confirmed).toHaveLength(1);
-    // The person is shown every write.
+    // The person is shown every write, and the host told which of them asked.
     expect(asked.confirmed[0]?.args).toMatchObject({
       op: "batch",
       writes: [{ path: "n/a" }, { path: "n/x" }, { path: "n/y" }],
     });
+    expect(asked.confirmed[0]?.askedBy).toEqual(["delete"]);
+    // Where only the host function's own gates ask, no method is named.
+    const whole = bridgeOf(runtime({ db: { gates: ["confirm"] } }), options);
+    expect((await whole.bridge.call("db", batch)).ok).toBe(true);
+    expect(whole.confirmed[0]?.askedBy).toBeUndefined();
+  });
+
+  test("the default dialog leads a batch with the writes that asked, then every write (C01)", () => {
+    const big = { text: "x".repeat(2_000) };
+    const writes = [
+      ...Array.from({ length: 48 }, (_, index) => ({ op: "set", path: `n/s${index}`, data: big })),
+      { op: "delete", path: "n/x" },
+      { op: "delete", path: "n/y" },
+    ];
+    const shown = (askedBy?: readonly string[]) =>
+      renderToString(
+        createElement(ConfirmDialog, {
+          request: {
+            capability: "db",
+            args: { op: "batch", writes },
+            display: { id: "d", title: "Board" },
+            ...(askedBy === undefined ? {} : { askedBy }),
+          } as ConfirmRequest,
+          onAnswer: () => {},
+        }),
+      );
+    const html = shown(["delete"]);
+    expect(html).not.toContain("Allow this?");
+    // Above the details, which scroll: what the gates asked about, however late in the batch.
+    expect(html).toContain("Delete n/x, n/y; and 48 other writes.");
+    expect(html.indexOf("data-porthole-summary")).toBeGreaterThan(-1);
+    expect(html.indexOf("data-porthole-summary")).toBeLessThan(
+      html.indexOf("data-porthole-detail"),
+    );
+    // The host function's own confirmation: every write, by kind, a bounded list.
+    expect(shown()).toMatch(/Set n\/s0, n\/s1, .*, n\/s9 and 38 more; delete n\/x, n\/y\./u);
   });
 
   test("a gesture, a consent and a rate on the writes hold inside a batch (C01)", async () => {

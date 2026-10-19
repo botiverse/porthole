@@ -384,30 +384,38 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
     page,
   }) => {
     // The page's names are its declaration's word: no viewer is never a way past them (S03, P094).
-    for (const viewer of [null, { level: "view", id: "vic" }]) {
+    // Each viewer's case runs whatever an earlier one found (soft), so a control that takes out
+    // only the no-viewer branch is seen to leave the case with a viewer passing.
+    for (const viewer of [{ level: "view", id: "vic" }, null]) {
       const { frame, key } = await show(page, {
         declaration: { data: { resources: ["app://allowed"] } },
         viewer,
       });
       const who = viewer === null ? "no viewer" : viewer.level;
-      expect(
-        await settled(frame, `return (await porthole.use("data")).read("app://outside-list");`),
-        who,
-      ).toEqual({ code: "not_allowed" });
+      expect
+        .soft(
+          await settled(frame, `return (await porthole.use("data")).read("app://outside-list");`),
+          who,
+        )
+        .toEqual({ code: "not_allowed" });
       const sent = await raw(frame, {
         capability: "data",
         method: "read",
         args: { uri: "app://outside-list" },
       });
-      expect(sent.error?.data?.code, who).toBe("not_allowed");
-      expect(
-        await settled(frame, `return (await porthole.use("data")).read("app://allowed");`),
-        who,
-      ).toEqual({ value: { n: 1 } });
-      expect(
-        (await runtimeCalls(page, key)).map((each) => (each.args as { uri: string }).uri),
-        who,
-      ).toEqual(["app://allowed"]);
+      expect.soft(sent.error?.data?.code, who).toBe("not_allowed");
+      expect
+        .soft(
+          await settled(frame, `return (await porthole.use("data")).read("app://allowed");`),
+          who,
+        )
+        .toEqual({ value: { n: 1 } });
+      expect
+        .soft(
+          (await runtimeCalls(page, key)).map((each) => (each.args as { uri: string }).uri),
+          who,
+        )
+        .toEqual(["app://allowed"]);
     }
   });
 

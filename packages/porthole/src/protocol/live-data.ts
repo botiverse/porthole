@@ -74,7 +74,7 @@ export function liveData(
         const outcome = await bridge.call(
           "readData",
           { uri },
-          { ...activation(), held: { value } },
+          { ...activation(), held: { uri, value } },
         );
         if (!outcome.ok && !closed && subscriptions.has(uri) && !fresh.has(uri)) {
           fresh.set(uri, value);

@@ -3544,9 +3544,11 @@ and C01 of the audit at 264b12fa; each with its regression (`test/audit-gates.te
    answer) and answered the next `resources/read` with it in the adapter, before the bridge: with
    `readData` stricter than `subscribeData` (a level, a consent, a rate, a gesture), a person who
    may follow but not read got the data once the host pushed it. Now every read goes through
-   `bridge.call("readData")`; a kept result rides it (`CallOptions.held`) and is the answer after
-   every gate a read has (level, names, mute, rate, gesture, consent, confirm), with no handler,
-   no cache and no upstream call. P079's "without the read handler" stays true: a host may still
+   `bridge.call("readData")`; a kept result rides it (`CallOptions.held: { uri, value }`) and is
+   the answer after every gate a read has (level, names, mute, rate, gesture, consent, confirm),
+   with no handler, no cache and no upstream call; a `uri` that isn't the read's is refused
+   (`invalid`: a custom adapter that mixed its keys gets no other URI's data), and `held` means
+   nothing for any other capability. P079's "without the read handler" stays true: a host may still
    serve reads from pushes alone. A kept result is used once; one the gates refused is kept for
    the next read unless a newer one came or the subscription ended. Each read it answers counts
    against `readData`'s rate, as a cold read does (a stale answer and the fresh read behind it
@@ -3564,15 +3566,21 @@ and C01 of the audit at 264b12fa; each with its regression (`test/audit-gates.te
    method has gates of its own ("db.batch(writes) needs what each of its writes needs",
    "db.onSnapshot needs what get … or query … needs"); the contract's own db methods have none, so
    a default config is unchanged. `methodGates.batch` and `.watch` still add gates of their own;
-   neither takes the writes' away.
-- **Public API**: `CallOptions` gains `held` (optional, additive). The bridge's order: names come
-  with the level check, before mute and the gates; for a read, a kept result is the last step,
-  where the handler would be.
+   neither takes the writes' away. The confirmation names what asked (`ConfirmRequest.askedBy`:
+   the methods whose own gates want the yes), and the default dialog leads a db change with it,
+   above the details that scroll ("Delete n/x, n/y; and 48 other writes.", at most ten paths a
+   kind, then a count), so a gated delete is never the fiftieth line of a JSON block. A watch is
+   checked when it starts, and its updates are its answers: a rate counts once per watch, as a
+   subscription's does, not per update.
+- **Public API**: `CallOptions` gains `held` and `ConfirmRequest` gains `askedBy` (both optional,
+  additive). The bridge's order: names come with the level check, before mute and the gates; for
+  a read, a kept result is the last step, where the handler would be.
 - **Harness**: the served harness's host keeps each runtime subscription's `changed` so a case can
   push a result as a host does (`window.runtimePushes`). Two new negative controls:
-  `runtime-data-names` (the bridge's names check taken out) and `live-held-read` (a kept result
-  answered in the adapter again), each failing its one probe on Chromium, WebKit and Firefox
-  (`scripts/controls.ts`).
+  `runtime-data-names` (264b12fa's hole put back exactly: the no-viewer branch's names check; the
+  probe checks each viewer softly, so its case with a viewer is seen still passing) and
+  `live-held-read` (a kept result answered in the adapter again), each failing its one probe on
+  Chromium, WebKit and Firefox (`scripts/controls.ts`).
 
 **Threat it re-opens.** None: each change refuses more. Hosts see the difference only where they
 relied on what the audit found: a no-viewer runtime display reading names its page didn't declare;
@@ -3609,17 +3617,27 @@ batch escapes its writes' gates.
   whole batch, shown whole.
 - C01: counting a batch once against each write method's rate: 50 deletes would cost one, past a
   rate set on deletes.
+- C01: checking a watch's gates again at each update, ending it with a refusal when they fail
+  (as S04's reads are): nothing they read can turn while the watch lives. The viewer and the
+  declaration are the frame's bridge's; the consent answer is the display's, kept by
+  `onceConsent` (a yes stays a yes); a new page or frame ends the watch (P091 item 8). The other
+  gates ask for what an update can't give (a gesture, a yes per change), and a rate per update
+  would end a watch for the page's data changing, not for anything the page did. S04 differs:
+  there a second host function's weaker gates handed data to the read's path.
 **Tested.** `test/audit-gates.test.ts`: S03 (the same names judgement with no viewer, `view` and
 `owner`; reads, subscriptions, tools; above view still `level` without a viewer; no declaration,
 `null`, no runtime as before); S04 (a pushed result past a stricter level, rate, consent and
 gesture; the cache and the fresh read behind it; an admin, and a host with no read handler, still
 answered from the push, once); C01 (a confirmed delete inside a batch, one confirmation showing
-every write; a gesture, a consent and a rate on writes inside a batch, each write counted; a watch
-under get's or query's; the manual's words). `leak/served/runtime.spec.ts`: "a resource outside
+every write, naming the delete that asked; the default dialog leading with it above the scrolled
+details; a gesture, a consent and a rate on writes inside a batch, each write counted; a watch
+under get's or query's; the manual's words; a held result for another URI refused). `leak/served/runtime.spec.ts`: "a resource outside
 the page's data names: refused with a viewer and without one, its handler never asked" (control
 `runtime-data-names`), "a read above the viewer's level: a result the host pushed is refused as a
 cold read is" (control `live-held-read`), on Chromium, WebKit and Firefox; both fail at 264b12fa.
 **Revisit when** a host needs a batch exempt from a gate its writes have (then an explicit opt-out
 named on `batch`, with its own entry), a runtime method comes to run others besides a batch and a
-watch (`methodsOfCall` grows with it), or MCP Apps standardizes a subscription that carries data
-to the view itself (then that channel needs the read's gates).
+watch (`methodsOfCall` grows with it), MCP Apps standardizes a subscription that carries data to
+the view itself (then that channel needs the read's gates), or a host can withdraw consent or
+change a viewer's level within a display (then each watch's update, and each kept result, is
+checked again, and a withdrawal ends the watch with a refusal).

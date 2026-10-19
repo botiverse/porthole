@@ -112,7 +112,8 @@ createHost(displays.configFor(instance, contentSource), {
         contents: [{ uri, mimeType: "application/json", text: JSON.stringify(await load(uri)) }],
       };
     },
-    // Call changed() when it changes (the content reads it again), or changed(result) to send it.
+    // Call changed() when it changes (the content reads it again), or changed(result) to send it:
+    // the content's read of it then passes readData's gates, and counts against its rate (P094).
     subscribeData: ({ uri }, { changed, signal }) => {
       const stop = realtime.on(uri, () => changed());
       signal.addEventListener("abort", stop);
@@ -152,7 +153,9 @@ createHost(displays.configFor(instance, contentSource), {
   The manual tells the agent to draw the widget without the data, with that sentence. A handler's
   other errors are `failed` in Porthole's words: their messages stay yours.
 - **Rates stay gates**: 120 reads and 60 subscriptions a minute per display by default; change them
-  with the capability's `gates` (keep `"consent"` in the list).
+  with the capability's `gates` (keep `"consent"` in the list). Every read counts, a read your
+  `changed(result)` answers too (P094): a widget that follows a resource changing faster than
+  twice a second needs a higher read rate.
 - **Your page's CSP**: send `displays.embedderCsp(source, …)` (`frame-src` of your content origins
   and the authorize route, nothing else). It keeps a frame from navigating to an outside site; the
   shell keeps a served frame from navigating to another content origin (P079), and tells you:

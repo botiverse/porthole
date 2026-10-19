@@ -60,7 +60,8 @@ export interface CapabilityConfig {
    * where uploaded code may run). Every one applies on top of `gates`. `[]`: none of its own.
    * A call that runs other methods runs under theirs too (P094): a db `batch` under each of its
    * writes' (`set`, `update`, `delete`; one confirmation for the whole batch, a rate counting each
-   * write), a `watch` under `get`'s (a document) or `query`'s (a collection).
+   * write), a `watch` under `get`'s (a document) or `query`'s (a collection), checked when it
+   * starts: its updates are its answers, so a rate counts once per watch, not per update.
    */
   readonly methodGates?: Readonly<Record<string, readonly Gate[]>>;
 }

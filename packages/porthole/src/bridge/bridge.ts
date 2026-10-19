@@ -573,8 +573,20 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
         }
         let answer: ConfirmAnswer = false;
         try {
+          // Which of the methods the call runs asked for this yes (P094): a batch's gated writes.
+          const askedBy =
+            family === null
+              ? []
+              : [...new Set(methodsOfCall(capability, args))].filter((each) =>
+                  methodGates(config, family.name, each).includes("confirm"),
+                );
           answer = await options.confirm(
-            { capability, args, display } as ConfirmRequest,
+            {
+              capability,
+              args,
+              display,
+              ...(askedBy.length === 0 ? {} : { askedBy }),
+            } as ConfirmRequest,
             () => void run(),
           );
         } catch {
@@ -639,7 +651,10 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
       // fresh read after a stale answer), past every gate a read has (P094): no handler is asked,
       // and none is needed (P079).
       if (capability === "readData" && callOptions?.held !== undefined) {
-        return { ok: true, value: callOptions.held.value as Result };
+        // Kept for another URI (an adapter that mixed its keys): no answer, never that one's data.
+        return callOptions.held.uri === (args as CapabilityArgs["readData"]).uri
+          ? { ok: true, value: callOptions.held.value as Result }
+          : refuse<Result>(capability, "invalid");
       }
       const handler = (handlers as Record<string, CapabilityHandler<N> | undefined>)[capability];
       if (handler === undefined) {
