@@ -43,17 +43,18 @@ that proves the isolation holds.
 
 ## Status
 
-**Private. Phase 1 in progress.** One package, `@botiverse/porthole`, with
-`/react`, `/mcp`, `/conformance`, `/server` and `/node` subpaths. Since 0.2.0 the host kit
-(`createContentHost`) is the whole host side an app needs around served content: it writes its
-policy (DESIGN.md § The host kit). Since 0.6.0 a served page may be many files (a build's
-output, a report with its images), each served from its version's manifest under that version's
-own address (P081–P084). Since 0.7.0 a page is an app: it reaches its host through one global,
-`porthole.use(name)`, for what it declared and its viewer's level allows (`user`, `comments`,
-`artifact`, `assets`, `db`, and 0.6's host functions), under a contract pinned per artifact
-(P085–P090). The config, compiler,
-presets and public interfaces are in; the runtime pieces land milestone by
-milestone (see DESIGN.md). Read, in order:
+**Pre-1.0, published on npm.** One package, [`@botiverse/porthole`](packages/porthole/README.md),
+with `/react`, `/mcp`, `/conformance`, `/server`, `/node` and `/check` subpaths; its versions and
+what each changed are in [CHANGELOG.md](CHANGELOG.md) (until 1.0 a minor version may change the API,
+and says how). Phase 1's core milestones (M1–M5, DESIGN.md § Milestones) are done; CI runs the leak
+suite on Chromium, WebKit and Firefox for every change, and npm gets only a commit that passed all
+of CI (P097). Since 0.2.0 the host kit (`createContentHost`) is the whole host side an app needs
+around served content: it writes its policy (DESIGN.md § The host kit). Since 0.6.0 a served page
+may be many files (a build's output, a report with its images), each served from its version's
+manifest under that version's own address (P081–P084). Since 0.7.0 a page is an app: it reaches its
+host through one global, `porthole.use(name)`, for what it declared and its viewer's level allows
+(`user`, `comments`, `artifact`, `assets`, `db`, and 0.6's host functions), under a contract pinned
+per artifact (P085–P090). Read, in order:
 
 1. [docs/PRINCIPLES.md](docs/PRINCIPLES.md) — the rules decisions are made by.
 2. [docs/OBJECTIVES.md](docs/OBJECTIVES.md) — what Porthole is for, with success criteria and non-goals.
@@ -68,6 +69,15 @@ opens and the risk it re-opens; for content that reads your data,
 
 See also [AGENTS.md](AGENTS.md) for how to work in this repo.
 
+## Security
+
+Found a way past one of Porthole's walls? Report it privately, never in a public issue: see
+[SECURITY.md](SECURITY.md) for how, which versions get fixes, and what happens next.
+
 ## License
 
-[Apache-2.0](LICENSE), copyright Botiverse.
+[Apache-2.0](LICENSE), copyright Botiverse. Third-party code keeps its own license: the libraries
+the package vendors are in
+[packages/porthole/THIRD_PARTY_NOTICES.md](packages/porthole/THIRD_PARTY_NOTICES.md) (shipped with
+it), and the leak suite's committed Vite + React build in
+[its fixture's notices](packages/porthole/leak/fixtures/vite-react/THIRD_PARTY_NOTICES.md).
