@@ -279,7 +279,18 @@ nodeServer({ content, app: async (request) => (await routes(request)) ?? app(req
   client can write (P092). **Behind a proxy** (a TLS edge, a load balancer, a CDN), that address
   is the proxy's: say how many proxies append to `X-Forwarded-For` (`trustedProxies: 1` for one
   edge, `2` for a CDN in front of a balancer), or key it yourself (`key: (request, viewer) =>
-  …`). Without either, anonymous requests through the proxy share one allowance.
+  …`). Without either, anonymous requests through the proxy share one allowance. An IPv6
+  address counts by its /64 (one client's network). Three cases to know:
+  - **No peer address:** the Node adapter leaves the socket's peer on the request it makes. Where
+    it is missing (Hono's own Node adapter, an app that rebuilds the request with
+    `new Request(req)`, Deno or Bun), every anonymous request shares one allowance: set
+    `rateLimit.key`.
+  - **`trustedProxies` only where the app can't be reached except through those proxies:** a
+    client that reaches it directly writes the very `X-Forwarded-For` entry that is counted.
+  - **Uploads after the answer:** once an answer is out, a request body no one read is dropped
+    for at most 1 MiB and 5 s, then the connection closes (P092). An app that answers early and
+    keeps reading the upload (a handler that returns its Response before it has read the
+    request's body) is cut off there.
 - **Health:** `health: { probe: nodeProbe(), onServedChange: (served) => … }` checks the content
   domain over the real network and falls back to opaque frames while it doesn't answer.
 

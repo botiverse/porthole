@@ -3485,7 +3485,12 @@ test per case) and `test/host-kit.test.ts`.
    `X-Forwarded-For` entry the outermost of `n` proxies appended (the entries before it are the
    client's to write), or `rateLimit.key` keys it as the app likes. Without either, every
    anonymous request through a proxy shares the proxy's address: limited together, never
-   bypassed.
+   bypassed. An IPv6 address counts by its /64 (a host or a subscriber is given a /64, so a key
+   per address would let one client rotate through enough keys to wipe every bucket); an
+   IPv4-mapped one as its IPv4. `trustedProxies` is safe only where the app can't be reached but
+   through those proxies (a direct client writes the counted entry); where the peer is unknown
+   (another adapter, a rebuilt `Request`), every anonymous request shares one key, and ADOPTING
+   says to set `key` there.
 
 **Threat it re-opens.** None: each closes a way an unauthenticated request could stop or load
 the host, or pass its rate limit. A proposal over 64 KiB is refused where it was taken (the

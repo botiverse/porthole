@@ -584,7 +584,7 @@ export function nodeHost<V>(content: ContentHost<V>, app: NodeHostOptions): Node
           refuseSocket(socket);
           return;
         }
-        content.access(asked).then(
+        const settled = content.access(asked).then(
           (access) => {
             if (access === null) {
               refuseSocket(socket);
@@ -610,6 +610,11 @@ export function nodeHost<V>(content: ContentHost<V>, app: NodeHostOptions): Node
             refuseSocket(socket);
           },
         );
+        // Neither branch above throws (callApp catches the app's); should one, the socket closes.
+        settled.catch((error: unknown) => {
+          report(app.onError, error, request);
+          socket.destroy();
+        });
       } catch (error) {
         report(app.onError, error, request);
         socket.destroy();

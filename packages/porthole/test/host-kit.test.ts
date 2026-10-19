@@ -514,6 +514,19 @@ describe("the issue endpoint", () => {
       ).toBe(429);
     });
 
+    it("an IPv6 address by its /64 (rotating within it is free); an IPv4-mapped one as IPv4", async () => {
+      const ask = anonymousAsk({ rateLimit: { perMinute: 1 } });
+      const from = async (address: string) =>
+        (await ask({ "cf-connecting-ip": address }, true)).status;
+      expect(await from("2001:db8:1:2::1")).toBe(201);
+      expect(await from("2001:0DB8:0001:0002:ffff:ffff:ffff:9")).toBe(429);
+      expect(await from("[2001:db8:1:2::abcd]")).toBe(429);
+      expect(await from("2001:db8:1:3::1")).toBe(201);
+      expect(await from("::ffff:192.0.2.1")).toBe(201);
+      expect(await from("192.0.2.1")).toBe(429);
+      expect(await from("::ffff:192.0.2.2")).toBe(201);
+    });
+
     it("behind proxies (trustedProxies), the address the outermost one appended", async () => {
       const ask = anonymousAsk({ rateLimit: { perMinute: 1, trustedProxies: 2 } });
       // The client claims a first entry; the CDN appends the client, the balancer the CDN.

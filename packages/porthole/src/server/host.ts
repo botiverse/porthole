@@ -488,15 +488,62 @@ function clientAddress(request: Request, trustedProxies: number): string {
       .filter((hop) => hop !== "");
     const hop = hops[hops.length - trustedProxies];
     if (hop !== undefined) {
-      return hop;
+      return clientOf(hop);
     }
   }
   const peer = peerAddress(request);
   if (peer !== null) {
-    return peer;
+    return clientOf(peer);
   }
   const edge = onWorkers(request) ? request.headers.get("cf-connecting-ip") : null;
-  return edge === null || edge === "" ? "unknown" : edge;
+  return edge === null || edge === "" ? "unknown" : clientOf(edge);
+}
+
+/** An IPv6 address's groups (8; an embedded IPv4 tail as two), or null where it is no IPv6. */
+function ipv6Groups(address: string): string[] | null {
+  const halves = address.toLowerCase().split("::");
+  if (halves.length > 2) {
+    return null;
+  }
+  const groupsOf = (part: string | undefined) =>
+    part === undefined || part === ""
+      ? []
+      : part.split(":").flatMap((group) => (group.includes(".") ? ["0", "0"] : [group]));
+  const head = groupsOf(halves[0]);
+  const tail = groupsOf(halves[1]);
+  const groups =
+    halves.length === 2
+      ? [...head, ...Array<string>(Math.max(0, 8 - head.length - tail.length)).fill("0"), ...tail]
+      : head;
+  return groups.length === 8 && groups.every((group) => /^[0-9a-f]{1,4}$/u.test(group))
+    ? groups
+    : null;
+}
+
+/**
+ * The part of an address that names one client (P092): an IPv6 address by its /64, since a host
+ * or a subscriber is given a /64 and rotating addresses within it costs nothing (one key each
+ * would let one client fill the limiter and wipe every bucket); an IPv4-mapped one as its IPv4;
+ * anything else as it is.
+ */
+function clientOf(address: string): string {
+  const bare = (address.startsWith("[") ? address.slice(1, address.indexOf("]")) : address).split(
+    "%",
+  )[0];
+  if (bare === undefined || !bare.includes(":")) {
+    return address;
+  }
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/iu.exec(bare)?.[1];
+  if (mapped !== undefined) {
+    return mapped;
+  }
+  const groups = ipv6Groups(bare);
+  return groups === null
+    ? address
+    : `${groups
+        .slice(0, 4)
+        .map((group) => group.replace(/^0+(?=.)/u, ""))
+        .join(":")}::/64`;
 }
 
 const tooLarge = () =>
