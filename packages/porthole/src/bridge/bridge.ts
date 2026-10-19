@@ -10,6 +10,7 @@ import { parseReport } from "../annotate/validate.ts";
 import type { PortholeConfig } from "../config/schema.ts";
 import { callGates, effectiveGates } from "../compile/policy.ts";
 import { boundedText } from "./bounded-text.ts";
+import { isJsonData } from "./json-data.ts";
 import { blockedNavigationMessage, cutText, withoutSealedAddresses } from "./navigation.ts";
 import {
   RUNTIME_HOST_FUNCTIONS,
@@ -170,7 +171,11 @@ const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
   },
   downloadFile: (args) => {
     const contents = isRecord(args) ? args.contents : undefined;
-    return Array.isArray(contents) && contents.length > 0 && contents.length <= 100
+    // Plain, bounded JSON only (P095): what reaches the dialog and the handler is what MCP says.
+    return Array.isArray(contents) &&
+      contents.length > 0 &&
+      contents.length <= 100 &&
+      isJsonData(contents)
       ? { contents }
       : null;
   },
@@ -184,7 +189,7 @@ const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
       return null;
     }
     const given = args.arguments ?? {};
-    return isRecord(given) ? { name: args.name, arguments: given } : null;
+    return isRecord(given) && isJsonData(given) ? { name: args.name, arguments: given } : null;
   },
   readData: (args) => resourceUri(args),
   subscribeData: (args) => resourceUri(args),
@@ -195,7 +200,8 @@ const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
     const { content, structuredContent } = args;
     if (
       (content !== undefined && !Array.isArray(content)) ||
-      (structuredContent !== undefined && !isRecord(structuredContent))
+      (structuredContent !== undefined && !isRecord(structuredContent)) ||
+      !isJsonData({ content, structuredContent })
     ) {
       return null;
     }

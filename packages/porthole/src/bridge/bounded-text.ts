@@ -10,10 +10,11 @@ import { cutText } from "./navigation.ts";
  * A string is as it is, cut. Anything else is written the way JSON writes it, with each object
  * read once (`"[Circular]"` where it is inside itself, `"[Repeated]"` where it was written
  * already), at most `nodes` values (`…` where it stops) and `depth` levels (`"[Object]"`,
- * `"[Array]"` below), a BigInt as `"5n"` (`"[BigInt]"` past 2,000 digits), a Date as its time,
- * an Error as its name and message, any other object as its kind (`"[Map]"`), and anything that
- * throws when read as `"[unreadable]"`. Every cut is `cutText`'s: no part of a sealed address's
- * access is left at one. Never throws.
+ * `"[Array]"` below), a boxed primitive as its value (as JSON does), a BigInt as `"5n"`
+ * (`"[BigInt]"` past 2,000 digits), a Date as its time, an Error as its name and message, any other
+ * object as its kind (`"[Map]"`), and anything that throws when read as `"[unreadable]"`; any of
+ * these but a boxed primitive and a Date means the text isn't `whole`. Every cut is `cutText`'s:
+ * no part of a sealed address's access is left at one. Never throws.
  */
 
 export interface TextLimits {
@@ -36,6 +37,20 @@ export interface BoundedText {
 
 /** A BigInt past this has more digits than a report shows; its decimal text is superlinear. */
 const BIGGEST = 10n ** 2_000n;
+
+/** A boxed primitive's value, read by its own prototype's `valueOf` (which throws for a fake). */
+function unboxed(kind: string, boxed: object): unknown {
+  switch (kind) {
+    case "String":
+      return String.prototype.valueOf.call(boxed);
+    case "Number":
+      return Number.prototype.valueOf.call(boxed);
+    case "Boolean":
+      return Boolean.prototype.valueOf.call(boxed);
+    default:
+      return BigInt.prototype.valueOf.call(boxed);
+  }
+}
 
 /** A field whose read threw (a getter, a proxy: what structured clone never delivers). */
 const UNREADABLE: unique symbol = Symbol("unreadable");
@@ -98,12 +113,9 @@ export function formatBounded(value: unknown, limits: TextLimits, indent = 0): B
         out += each ? "true" : "false";
         return;
       case "bigint":
-        if (each < BIGGEST && each > -BIGGEST) {
-          out += `"${String(each)}n"`;
-        } else {
-          whole = false;
-          out += '"[BigInt]"';
-        }
+        // No JSON for it: its digits, or past 2,000 of them its kind, and either way not whole.
+        whole = false;
+        out += each < BIGGEST && each > -BIGGEST ? `"${String(each)}n"` : '"[BigInt]"';
         return;
       case "object":
         break;
@@ -116,10 +128,12 @@ export function formatBounded(value: unknown, limits: TextLimits, indent = 0): B
       return;
     }
     if (inside.has(each)) {
+      whole = false;
       out += '"[Circular]"';
       return;
     }
     if (written.has(each)) {
+      whole = false;
       out += '"[Repeated]"';
       return;
     }
@@ -148,12 +162,18 @@ export function formatBounded(value: unknown, limits: TextLimits, indent = 0): B
     }
     const kind = Object.prototype.toString.call(each).slice(8, -1);
     const proto: unknown = Object.getPrototypeOf(each);
+    // A boxed primitive is its value, as JSON writes it (`new String("x")` is "x").
+    if (kind === "String" || kind === "Number" || kind === "Boolean" || kind === "BigInt") {
+      write(unboxed(kind, each), depth);
+      return;
+    }
     if (kind === "Date") {
       const time = Date.prototype.getTime.call(each);
       out += quoted(Number.isFinite(time) ? new Date(time).toISOString() : "Invalid Date");
       return;
     }
     if (kind === "Error") {
+      whole = false;
       const { name, message } = each as { name?: unknown; message?: unknown };
       out += quoted(
         `${typeof name === "string" ? cutText(name, 100) : "Error"}: ${typeof message === "string" ? cutText(message, limits.chars) : ""}`,
@@ -161,6 +181,8 @@ export function formatBounded(value: unknown, limits: TextLimits, indent = 0): B
       return;
     }
     if (proto !== Object.prototype && proto !== null) {
+      // A Map, a typed array, a Blob: its kind only, so the text is no longer all of it.
+      whole = false;
       out += quoted(`[${kind}]`);
       return;
     }
