@@ -1,11 +1,12 @@
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { createBridge, type BridgeEvent } from "../src/bridge/bridge.ts";
 import type { ConfirmAnswer, ConfirmRequest } from "../src/bridge/types.ts";
 import { presets, type PresetOptions } from "../src/index.ts";
 import { ConfirmDialog } from "../src/react/index.ts";
 import { filePathProblem } from "../src/files/paths.ts";
+import { DB_LIMITS, parseDbRequest } from "../src/runtime/db.ts";
 import {
   assetNameProblem,
   downloadContents,
@@ -141,5 +142,37 @@ describe("P095 3: what a page names things is well-formed Unicode, refused up fr
     ).toBeNull();
     // A pair is a character: fine.
     expect(downloadContents({ name: "\u{1F600}.txt", text: "x" })).not.toBeNull();
+  });
+});
+
+describe("P095 4: a db call's size is known before it is written out", () => {
+  test("a document past its bytes is too large without being serialized", () => {
+    const stringify = vi.spyOn(JSON, "stringify");
+    try {
+      const big = "\u0000".repeat(DB_LIMITS.maxDocBytes + 1);
+      expect(parseDbRequest({ op: "set", path: "notes/a", data: { big } })).toBe("too_large");
+      const where = [["n", "==", "x".repeat(DB_LIMITS.maxOperandBytes + 1)]];
+      expect(parseDbRequest({ op: "query", collection: "notes", where })).toBeNull();
+      const writes = Array.from({ length: 3 }, (_, index) => ({
+        op: "set",
+        path: `notes/${index}`,
+        data: { text: "y".repeat(DB_LIMITS.maxBatchBytes / 2) },
+      }));
+      expect(parseDbRequest({ op: "batch", writes })).toBe("too_large");
+      // Each write within its own limit is counted exactly; nothing past a limit is written out.
+      expect(stringify).toHaveBeenCalledTimes(3);
+      for (const result of stringify.mock.results) {
+        expect(String(result.value).length).toBeLessThanOrEqual(DB_LIMITS.maxDocBytes);
+      }
+    } finally {
+      stringify.mockRestore();
+    }
+  });
+
+  test("within its bytes, the count is exact: JSON's UTF-8 bytes", () => {
+    const data = { text: "é".repeat(DB_LIMITS.maxDocBytes / 2 - 6) };
+    expect(parseDbRequest({ op: "set", path: "notes/a", data })).toMatchObject({ op: "set" });
+    const over = { text: "é".repeat(DB_LIMITS.maxDocBytes / 2) };
+    expect(parseDbRequest({ op: "set", path: "notes/a", data: over })).toBe("too_large");
   });
 });
