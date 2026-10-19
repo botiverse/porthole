@@ -145,10 +145,13 @@ function leastJsonBytes(value: unknown, max: number): number {
   if (value === null || typeof value !== "object") {
     return 1;
   }
+  // The brackets, and a separator before each value but the first.
   let total = 2;
+  let first = true;
   if (Array.isArray(value)) {
     for (const each of value as readonly unknown[]) {
-      total += leastJsonBytes(each, max - total) + 1;
+      total += (first ? 0 : 1) + leastJsonBytes(each, max - total);
+      first = false;
       if (total > max) {
         return total;
       }
@@ -156,7 +159,9 @@ function leastJsonBytes(value: unknown, max: number): number {
     return total;
   }
   for (const [field, each] of Object.entries(value)) {
-    total += field.length + 4 + leastJsonBytes(each, max - total);
+    // `"field":` and the value.
+    total += (first ? 0 : 1) + field.length + 3 + leastJsonBytes(each, max - total);
+    first = false;
     if (total > max) {
       return total;
     }

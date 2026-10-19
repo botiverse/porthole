@@ -365,3 +365,24 @@ describe("review 1: what a call carries is plain JSON, and the dialog never hide
     );
   });
 });
+
+describe("review 2: a db document of exactly its bytes is within them", () => {
+  test("objects, arrays and nesting, at the limit and one past it", () => {
+    const max = DB_LIMITS.maxDocBytes;
+    const shapes = [
+      (s: string) => ({ a: s }),
+      (s: string) => ({ a: [s, 1] }),
+      (s: string) => ({ a: { b: s }, c: [1, 2], d: {} }),
+    ];
+    for (const shape of shapes) {
+      const length = max - JSON.stringify(shape("")).length;
+      const exact = shape("x".repeat(length));
+      expect(new TextEncoder().encode(JSON.stringify(exact)).length).toBe(max);
+      expect(parseDbRequest({ op: "set", path: "notes/a", data: exact })).toMatchObject({
+        op: "set",
+      });
+      const over = shape("x".repeat(length + 1));
+      expect(parseDbRequest({ op: "set", path: "notes/a", data: over })).toBe("too_large");
+    }
+  });
+});
