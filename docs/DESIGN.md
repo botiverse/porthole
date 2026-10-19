@@ -685,10 +685,11 @@ it (`leak/mcp/`), in an opaque frame and behind the sandbox proxy.
 
 ### The host-function bridge
 
-`bridge.call(capability, args)` checks, in order: declared → arguments valid
+`bridge.call(capability, args)` checks, in order: declared → its rate limit, before the
+arguments are read (P095: a malformed call costs its rate) → arguments valid
 (`openLink` http(s) only and without credentials in the URL; a prompt
-1..`maxPromptChars` characters) → muted? → rate limit → user activation → `confirm`
-→ the host's handler. Each refusal is a
+1..`maxPromptChars` characters; bounded, P095) → muted? → a runtime method's own rate → user
+activation → `confirm` (at most 10 waiting a display, P095) → the host's handler. Each refusal is a
 `Refusal` and a `refused` display event; the frame gets an error result. After
 `declinesBeforeMute` declines a display stops asking (`muted`) until it runs again.
 

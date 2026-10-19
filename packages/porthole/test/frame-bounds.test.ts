@@ -209,3 +209,35 @@ describe("P095 5: a publish's count and size are known before its files are read
     }
   });
 });
+
+describe("P095 6: every capability's rate before its arguments are read", () => {
+  test("past setModelContext's 30 a minute, a call's arguments aren't read", async () => {
+    const t = bridgeOf({ capabilities: { setModelContext: {} } });
+    for (let index = 0; index < 30; index += 1) {
+      await t.bridge.call("setModelContext", { structuredContent: { index } });
+    }
+    let reads = 0;
+    const args = {
+      get structuredContent() {
+        reads += 1;
+        return {};
+      },
+    };
+    expect(await t.bridge.call("setModelContext", args)).toMatchObject({
+      ok: false,
+      refusal: "rate-limited",
+    });
+    expect(reads).toBe(0);
+  });
+
+  test("a malformed call costs its rate: a flood of them is refused as rate-limited", async () => {
+    const t = bridgeOf({ capabilities: { setModelContext: {} } });
+    const refusals: string[] = [];
+    for (let index = 0; index < 32; index += 1) {
+      const outcome = await t.bridge.call("setModelContext", "not an object");
+      refusals.push(outcome.ok ? "ok" : outcome.refusal);
+    }
+    expect(refusals.slice(0, 30).every((each) => each === "invalid")).toBe(true);
+    expect(refusals.slice(30)).toEqual(["rate-limited", "rate-limited"]);
+  });
+});

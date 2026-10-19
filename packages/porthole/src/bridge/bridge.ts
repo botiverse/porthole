@@ -61,11 +61,11 @@ import type {
 
 /**
  * The host-function bridge: every capability call from a frame passes here, and nowhere else
- * reaches a host handler. In order: declared → arguments well formed → not muted → within its
- * rate → a user gesture, if gated so → the viewer's consent, if gated so → a person's
- * confirmation, if gated so → the handler (or, for a read, a result the host already gave for it,
- * or for a stale-allowed one the host's cache).
- * The runtime's own and an error report are within their rate before their arguments are read.
+ * reaches a host handler. In order: declared → within its host function's rate (before its
+ * arguments are read, P091, P095) → arguments well formed → not muted → its method's own rate →
+ * a user gesture, if gated so → the viewer's consent, if gated so → a person's confirmation, if
+ * gated so → the handler (or, for a read, a result the host already gave for it, or for a
+ * stale-allowed one the host's cache).
  */
 
 export type BridgeEvent =
@@ -121,15 +121,6 @@ const MAX_WAITING_CONFIRMS = 10;
 
 /** The most of an error report the host is told. */
 const MAX_ERROR_CHARS = 2_000;
-
-/**
- * Capabilities whose own rate is counted before their arguments are read: the runtime's own (P091)
- * and an error report, the content's word in any shape (S05, P095).
- */
-const COUNTED_FIRST: ReadonlySet<CapabilityName> = new Set([
-  ...RUNTIME_HOST_FUNCTIONS,
-  "reportError",
-]);
 
 /** An http(s) URL without credentials in it (`https://bank.example@evil.example` reads as a lie). */
 export function linkTarget(value: unknown): string | null {
@@ -436,15 +427,13 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
   }
 
   /**
-   * The cheap checks for the runtime's own, before their arguments are read (after the review: a
-   * malformed call costs nothing but its rate): a method by its `op`, a viewer at its level, its
-   * host function's rate. An error report's rate, before what it says is read (S05, P095).
+   * The cheap checks, before a call's arguments are read (after the review: a malformed call
+   * costs nothing but its rate): for the runtime's own, a method by its `op` and a viewer at its
+   * level; for every capability, its host function's rate (P095: what content says, in any shape,
+   * is read only within it).
    */
   function precheck(capability: CapabilityName, raw: unknown): Refusal | null {
-    if (!COUNTED_FIRST.has(capability)) {
-      return null;
-    }
-    if (capability === "reportError") {
+    if (!RUNTIME_HOST_FUNCTIONS.includes(capability)) {
       return withinOwnRates(capability) ? null : "rate-limited";
     }
     const family = familyOf(capability);
@@ -537,15 +526,7 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
       if (confirms && muted) {
         return refuse<Result>(capability, "muted");
       }
-      // The runtime's own and an error report were counted against their host function's rate
-      // before their arguments were read (`precheck`).
-      if (!COUNTED_FIRST.has(capability)) {
-        for (const gate of own) {
-          if (typeof gate === "object" && !withinRate(capability, gate.rateLimit.perMinute)) {
-            return refuse<Result>(capability, "rate-limited");
-          }
-        }
-      }
+      // Its host function's own rate was counted before its arguments were read (`precheck`).
       // A method's rate counts each time the call runs it, with its direct calls: a batch of
       // three sets is three sets (P094).
       if (family !== null) {

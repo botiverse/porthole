@@ -56,7 +56,7 @@ function setup(
 const accept = () => Promise.resolve(true);
 const decline = () => Promise.resolve(false);
 
-describe("the bridge's order: declared → valid → muted → rate → gesture → confirm → handler", () => {
+describe("the bridge's order: declared → rate → valid → muted → gesture → confirm → handler", () => {
   test("an undeclared capability is refused before anything else", async () => {
     const { bridge, handled, asked } = setup({}, { confirm: accept });
     expect(await bridge.call("sendPrompt", { text: "hi" })).toEqual({
