@@ -55,16 +55,30 @@ function unboxed(kind: string, boxed: object): unknown {
 /** A field whose read threw (a getter, a proxy: what structured clone never delivers). */
 const UNREADABLE: unique symbol = Symbol("unreadable");
 
-/** `value` as bounded text (above); with `indent`, as `JSON.stringify(value, null, indent)` lays it out. */
-export function boundedText(
-  value: unknown,
-  limits: TextLimits = REPORT_TEXT_LIMITS,
-  indent = 0,
-): string {
-  return formatBounded(value, limits, indent).text;
+/** How the text is laid out. */
+export interface TextLayout {
+  /** As `JSON.stringify(value, null, indent)` lays it out; none by default. */
+  readonly indent?: number;
+  /**
+   * An object met again outside itself: `"[Repeated]"` (by default, and not whole), or written
+   * again, as JSON writes it (`"written"`: for data already checked bounded as JSON writes it,
+   * `isJsonData`; each place counts against `nodes`).
+   */
+  readonly repeats?: "marked" | "written";
 }
 
-export function formatBounded(value: unknown, limits: TextLimits, indent = 0): BoundedText {
+/** `value` as bounded text (above). */
+export function boundedText(value: unknown, limits: TextLimits = REPORT_TEXT_LIMITS): string {
+  return formatBounded(value, limits).text;
+}
+
+export function formatBounded(
+  value: unknown,
+  limits: TextLimits,
+  layout: TextLayout = {},
+): BoundedText {
+  const indent = layout.indent ?? 0;
+  const marked = layout.repeats !== "written";
   if (typeof value === "string") {
     const text = cutText(value, limits.chars);
     return { text, whole: text === value };
@@ -132,7 +146,7 @@ export function formatBounded(value: unknown, limits: TextLimits, indent = 0): B
       out += '"[Circular]"';
       return;
     }
-    if (written.has(each)) {
+    if (marked && written.has(each)) {
       whole = false;
       out += '"[Repeated]"';
       return;

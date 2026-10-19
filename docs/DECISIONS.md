@@ -3798,9 +3798,14 @@ Apps, three engines), negative control `report-unbounded`.
     and any placeholder (`[Circular]`, `[Repeated]`, a kind, a BigInt, an Error, `[unreadable]`)
     makes the text not whole. And `callTool`'s arguments, `setModelContext`'s content and
     `downloadFile`'s contents are plain, bounded JSON only (`isJsonData`,
-    `src/bridge/json-data.ts`: no object reached twice, finite numbers, plain prototypes,
-    100,000 values, 64 levels; an `undefined` field as JSON leaves it out): what a handler gets,
-    after a yes or with no confirmation at all (`setModelContext`), is what MCP says it is.
+    `src/bridge/json-data.ts`: no object inside itself, finite numbers, plain prototypes,
+    100,000 values and 64 levels as JSON writes it; an `undefined` field as JSON leaves it out):
+    what a handler gets, after a yes or with no confirmation at all (`setModelContext`), is what
+    MCP says it is. An object in two places is JSON written twice: accepted, each place counted
+    against the budget (after the re-review: apps reuse an object; a shared graph billions of
+    values long as JSON passes the budget and is refused there), and the dialog shows it twice,
+    whole (`formatBounded`'s `repeats: "written"`). A call waiting on consent when its run stops
+    asks no one.
 15. **db's byte bound counts JSON's separators** (the review): one more a non-empty object or
     array refused a document of exactly 1,048,576 bytes.
 16. **A stopped display refuses what waits for a confirmation** (the review; predates this
@@ -3817,8 +3822,8 @@ Apps, three engines), negative control `report-unbounded`.
   a log without `data` is dropped as malformed (the shell adapter reported `"null"`); a malformed
   call of any capability counts against its rate (before, only a well-formed one did); a name or
   path with a lone surrogate is refused; a tool's arguments, model context or a download's
-  contents that aren't plain JSON (an object reached twice, a Date, a Map, NaN, a boxed value) are
-  refused as malformed.
+  contents that aren't plain JSON (a cycle, a Date, a Map, NaN, a boxed value, past 100,000
+  values as JSON) are refused as malformed.
 
 **Why.** The audit's 修复 line: the cheap switch and rate before any deep processing, and a
 formatter bounded in nodes, depth and output that knows repeated references; a try/catch or a cut
@@ -3831,8 +3836,8 @@ after `JSON.stringify` isn't enough. A gate is only one if what it guards hasn't
   extension point) must remember; in the bridge's validator it is one place, after the one gate.
 - `try { JSON.stringify } catch`, then a cut: exponential before the cut; it bounds nothing.
 - Capping confirmations in the React provider's queue only: a host's own `confirm` queues too.
-- Shared references in a tool's arguments, expanded within a budget: db refuses them (P091), and
-  a dialog that shows an object once where the handler gets it twice isn't showing the call.
+- Refusing an object in two places in a tool's arguments, as db does (P091): an app's reused
+  object is valid JSON; counting each place against the budget bounds it as well.
 - A catch-all in the adapters that answers any throw: it would hide the next `URIError`; each
   cause is refused up front instead, with its test.
 **Revisit when** a host needs more of a report than 2,000 characters or 16 levels (raise

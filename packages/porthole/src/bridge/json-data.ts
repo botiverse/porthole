@@ -7,9 +7,11 @@
  * writes its value; a handler gets an object), a Map, a typed array, a Date.
  *
  * Plain data only: null, booleans, finite numbers, strings, arrays and objects whose prototype is
- * Object's or none, each object reached once, at most `nodes` values and `depth` levels. A field
- * left `undefined` is allowed, as JSON leaves it out. Each node is visited once: linear in what
- * was sent, stopped at the budget. Never throws (a value whose read throws is no data).
+ * Object's or none, no object inside itself, at most `nodes` values and `depth` levels as JSON
+ * writes it. An object in two places is JSON written twice, and counts twice (after the
+ * re-review: apps reuse an object; a graph that is billions of values as JSON passes the budget
+ * and stops there). A field left `undefined` is allowed, as JSON leaves it out. Never throws (a
+ * value whose read throws is no data).
  */
 
 export interface JsonDataLimits {
@@ -22,7 +24,8 @@ export const JSON_DATA_LIMITS: JsonDataLimits = { nodes: 100_000, depth: 64 };
 
 export function isJsonData(value: unknown, limits: JsonDataLimits = JSON_DATA_LIMITS): boolean {
   let nodes = limits.nodes;
-  const seen = new WeakSet<object>();
+  /** The objects the walk is inside: one met again is a cycle. */
+  const inside = new WeakSet<object>();
 
   function plain(each: unknown, depth: number): boolean {
     nodes -= 1;
@@ -35,19 +38,27 @@ export function isJsonData(value: unknown, limits: JsonDataLimits = JSON_DATA_LI
     if (typeof each === "number") {
       return Number.isFinite(each);
     }
-    if (typeof each !== "object" || seen.has(each)) {
+    if (typeof each !== "object" || inside.has(each)) {
       return false;
     }
-    seen.add(each);
-    if (Array.isArray(each)) {
-      const list = each as readonly unknown[];
-      for (let index = 0; index < list.length; index += 1) {
-        if (!plain(list[index], depth + 1)) {
-          return false;
-        }
+    inside.add(each);
+    const fits = Array.isArray(each)
+      ? list(each as readonly unknown[], depth)
+      : record(each, depth);
+    inside.delete(each);
+    return fits;
+  }
+
+  function list(each: readonly unknown[], depth: number): boolean {
+    for (let index = 0; index < each.length; index += 1) {
+      if (!plain(each[index], depth + 1)) {
+        return false;
       }
-      return true;
     }
+    return true;
+  }
+
+  function record(each: object, depth: number): boolean {
     const proto: unknown = Object.getPrototypeOf(each);
     if (proto !== Object.prototype && proto !== null) {
       return false;
