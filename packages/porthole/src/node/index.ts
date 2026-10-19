@@ -10,7 +10,7 @@
  *   server.listen(8080, () => content.start());
  */
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
-import { createServer as createHttpServer, request as httpRequest } from "node:http";
+import { createServer as createHttpServer, request as httpRequest, STATUS_CODES } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { LookupFunction } from "node:net";
 import type { Duplex } from "node:stream";
@@ -44,6 +44,8 @@ export interface NodeHost {
 /**
  * The Node request as a fetch `Request`: an absolute-form target kept as it came (P056). `signal`
  * (`nodeHost` gives one, aborted when the client goes away) lets an upstream stop its work.
+ * Throws where fetch can't take the request: a method it can't carry (`TRACE`), a Host or a
+ * target that is no URL. `nodeListener`, `nodeHost` and `nodeServer` answer those 405 and 400.
  */
 export function toRequest(
   request: IncomingMessage,
@@ -73,10 +75,20 @@ export function toRequest(
 }
 
 /**
+ * Whether an answer goes out before its request came in whole (a refusal of a body too big, a
+ * request fetch can't take): its connection then closes once the answer is out, never left
+ * waiting on a body no one reads (S06, P092).
+ */
+const unread = (response: ServerResponse): boolean =>
+  (response.req as IncomingMessage | undefined)?.complete === false;
+
+/**
  * Writes a fetch `Response` to a Node response, cookies one header each (P070): it waits for the
  * socket to drain before reading on (a slow client never makes it buffer the body), cancels the
  * body when the client goes away (an event stream ends with the page that asked for it), and on
- * an error mid-body destroys the response rather than end it looking complete.
+ * an error mid-body destroys the response rather than end it looking complete. A head Node can't
+ * write (a header value fetch takes and Node doesn't) is a 500 (S01, P092): it never rejects. An
+ * answer before the request's body came in whole closes the connection after it.
  */
 export async function sendResponse(response: ServerResponse, answer: Response): Promise<void> {
   const headers: Record<string, string | string[]> = {};
@@ -89,7 +101,16 @@ export async function sendResponse(response: ServerResponse, answer: Response): 
   if (cookies.length > 0) {
     headers["set-cookie"] = cookies;
   }
-  response.writeHead(answer.status, headers);
+  if (unread(response)) {
+    headers.connection = "close";
+  }
+  try {
+    response.writeHead(answer.status, headers);
+  } catch {
+    answer.body?.cancel().catch(() => undefined);
+    answerPlain(response, 500, "The answer couldn't be written.");
+    return;
+  }
   if (answer.body === null) {
     response.end();
     return;
@@ -135,6 +156,99 @@ export async function sendResponse(response: ServerResponse, answer: Response): 
   }
 }
 
+/** The methods a fetch `Request` can't carry (the Fetch standard's forbidden methods). */
+const FORBIDDEN_METHODS = new Set(["CONNECT", "TRACE", "TRACK"]);
+
+/**
+ * `toRequest`, or the status for a request fetch can't take (S01, P092): 405 for a method it
+ * can't carry, 400 for anything else (a Host or a target that is no URL). Never throws: the
+ * conversion runs in a listener, where a throw would end the process.
+ */
+function convert(
+  request: IncomingMessage,
+  scheme: "https" | "http",
+  signal?: AbortSignal,
+): Request | 400 | 405 {
+  try {
+    return toRequest(request, scheme, signal);
+  } catch {
+    return FORBIDDEN_METHODS.has((request.method ?? "").toUpperCase()) ? 405 : 400;
+  }
+}
+
+/**
+ * A plain answer of the adapter's own. A response already started is cut off, never made to look
+ * whole; one already ended is left be. Never throws: it answers from the listeners' catches.
+ */
+function answerPlain(response: ServerResponse, status: number, text: string): void {
+  try {
+    if (response.writableEnded) {
+      return;
+    }
+    if (response.headersSent) {
+      response.destroy();
+      return;
+    }
+    // The reason given: a head Node refused to write leaves its own behind.
+    response.writeHead(status, STATUS_CODES[status], {
+      "content-type": "text/plain; charset=utf-8",
+      ...(unread(response) ? { connection: "close" } : {}),
+    });
+    response.end(text);
+  } catch {
+    response.destroy();
+  }
+}
+
+const REFUSED: Record<400 | 405, string> = {
+  400: "Bad request.",
+  405: "That method isn't served here.",
+};
+
+/**
+ * Writes what a fetch-style handler answers (null: `otherwise`, the app's own listener). Whatever
+ * fails, the handler (thrown or rejected), `otherwise`, or the writing (a header fetch takes and
+ * Node doesn't), answers 500, or cuts off a response already started: nothing escapes (S01, P092).
+ */
+function serve(
+  response: ServerResponse,
+  handle: () => Response | null | Promise<Response | null>,
+  failed: string,
+  otherwise?: () => void,
+): void {
+  new Promise<Response | null>((resolve) => resolve(handle()))
+    .then((answer) => {
+      if (answer === null && otherwise !== undefined) {
+        otherwise();
+        return undefined;
+      }
+      // Anything that isn't a Response (an app's null or undefined) fails here, as a 500.
+      return sendResponse(response, answer as Response);
+    })
+    .catch(() => answerPlain(response, 500, failed));
+}
+
+/**
+ * A fetch-style handler (Hono's `app.fetch`, the app's own) as a Node request listener: what
+ * `toRequest` can't convert is 405 or 400, what the handler throws or the answer's writing fails
+ * is 500; nothing it does ends the process (S01, P092). `scheme` is the requests' URLs' (default
+ * `http`; `https` behind a TLS edge, as `nodeServer`'s).
+ */
+export function nodeListener(
+  app: (request: Request) => Response | Promise<Response>,
+  options: { readonly scheme?: "https" | "http" } = {},
+): RequestListener {
+  const scheme = options.scheme ?? "http";
+  return (incoming, response) => {
+    const asked = convert(incoming, scheme);
+    if (typeof asked === "number") {
+      answerPlain(response, asked, REFUSED[asked]);
+      return;
+    }
+    serve(response, () => app(asked), "Something went wrong.");
+  };
+}
+
 /** Whether a Node request's Host (or absolute-form target) is under the content domain. */
 function forContent<V>(content: ContentHost<V>, request: IncomingMessage): boolean {
   const domain = content.domain;
@@ -151,87 +265,101 @@ function forContent<V>(content: ContentHost<V>, request: IncomingMessage): boole
   return domain.isContentHost(host) || (target !== "" && domain.isContentHost(target));
 }
 
-/** Refuses a WebSocket on the content domain with a plain 404, and closes it. */
-function refuseSocket(socket: Duplex): void {
-  socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+/** Refuses a WebSocket with a plain status (404: on the content domain), and closes it. */
+function refuseSocket(socket: Duplex, status = 404): void {
+  socket.end(
+    `HTTP/1.1 ${status} ${STATUS_CODES[status] ?? ""}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
+  );
 }
 
 export function nodeHost<V>(content: ContentHost<V>, app: NodeHostOptions): NodeHost {
   const scheme = () => content.domain?.scheme ?? "http";
+  // Nothing in either listener throws out of it, the app's own listeners included (S01, P092):
+  // a request ends in an answer, a socket in a refusal or closed.
   return {
     request(request, response) {
-      if (!forContent(content, request)) {
-        app.request(request, response);
-        return;
-      }
-      // Aborted when the client goes away first, so an upstream (a proxied app's event stream)
-      // stops with it.
-      const gone = new AbortController();
-      response.once("close", () => {
-        if (!response.writableFinished) {
-          gone.abort();
+      try {
+        if (!forContent(content, request)) {
+          app.request(request, response);
+          return;
         }
-      });
-      content.fetch(toRequest(request, scheme(), gone.signal)).then(
-        (answer) => {
-          if (answer === null) {
-            // A label the app routes itself.
-            app.request(request, response);
-            return;
+        // Aborted when the client goes away first, so an upstream (a proxied app's event stream)
+        // stops with it.
+        const gone = new AbortController();
+        response.once("close", () => {
+          if (!response.writableFinished) {
+            gone.abort();
           }
-          return sendResponse(response, answer);
-        },
-        () => {
-          if (response.headersSent) {
-            response.destroy();
-            return;
-          }
-          response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
-          response.end("Content couldn't be served.");
-        },
-      );
+        });
+        const asked = convert(request, scheme(), gone.signal);
+        if (typeof asked === "number") {
+          answerPlain(response, asked, REFUSED[asked]);
+          return;
+        }
+        // Null: a label the app routes itself.
+        serve(
+          response,
+          () => content.fetch(asked),
+          "Content couldn't be served.",
+          () => app.request(request, response),
+        );
+      } catch {
+        answerPlain(response, 500, "Something went wrong.");
+      }
     },
     upgrade(request, socket, head) {
-      if (!forContent(content, request)) {
-        if (app.upgrade === undefined) {
-          refuseSocket(socket);
-        } else {
-          app.upgrade(request, socket, head);
-        }
-        return;
-      }
-      const asked = toRequest(request, scheme());
-      // A reserved label's socket is the app's.
-      if (!content.owns(asked)) {
-        if (app.upgrade === undefined) {
-          refuseSocket(socket);
-        } else {
-          app.upgrade(request, socket, head);
-        }
-        return;
-      }
-      const appSocket = app.appSocket;
-      if (appSocket === undefined) {
-        refuseSocket(socket);
-        return;
-      }
-      content.access(asked).then(
-        (access) => {
-          if (access === null) {
+      try {
+        if (!forContent(content, request)) {
+          if (app.upgrade === undefined) {
             refuseSocket(socket);
           } else {
-            // The app's socket never sees Porthole's own cookies, as its HTTP requests don't (P072).
-            const cookie = withoutPortholeCookies(request.headers.cookie);
-            if (cookie === null) {
-              delete request.headers.cookie;
-            } else {
-              request.headers.cookie = cookie;
-            }
-            appSocket(access, request, socket, head);
+            app.upgrade(request, socket, head);
           }
-        },
-        () => refuseSocket(socket),
-      );
+          return;
+        }
+        const asked = convert(request, scheme());
+        if (typeof asked === "number") {
+          refuseSocket(socket, asked);
+          return;
+        }
+        // A reserved label's socket is the app's.
+        if (!content.owns(asked)) {
+          if (app.upgrade === undefined) {
+            refuseSocket(socket);
+          } else {
+            app.upgrade(request, socket, head);
+          }
+          return;
+        }
+        const appSocket = app.appSocket;
+        if (appSocket === undefined) {
+          refuseSocket(socket);
+          return;
+        }
+        content
+          .access(asked)
+          .then(
+            (access) => {
+              if (access === null) {
+                refuseSocket(socket);
+              } else {
+                // The app's socket never sees Porthole's own cookies, as its HTTP requests don't
+                // (P072).
+                const cookie = withoutPortholeCookies(request.headers.cookie);
+                if (cookie === null) {
+                  delete request.headers.cookie;
+                } else {
+                  request.headers.cookie = cookie;
+                }
+                appSocket(access, request, socket, head);
+              }
+            },
+            () => refuseSocket(socket),
+          )
+          .catch(() => socket.destroy());
+      } catch {
+        socket.destroy();
+      }
     },
   };
 }
@@ -321,24 +449,9 @@ export interface NodeServerOptions {
  */
 export function nodeServer(options: NodeServerOptions): Server {
   const scheme = options.scheme ?? "http";
-  const fromFetch = options.app;
   const request: RequestListener | undefined =
     options.request ??
-    (fromFetch === undefined
-      ? undefined
-      : (incoming, response) => {
-          Promise.resolve(fromFetch(toRequest(incoming, scheme))).then(
-            (answer) => sendResponse(response, answer),
-            () => {
-              if (response.headersSent) {
-                response.destroy();
-                return;
-              }
-              response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
-              response.end("Something went wrong.");
-            },
-          );
-        });
+    (options.app === undefined ? undefined : nodeListener(options.app, { scheme }));
   if (request === undefined) {
     throw new TypeError("nodeServer needs the app: app (fetch-style) or request (a Node listener)");
   }
@@ -367,22 +480,31 @@ export function nodeServer(options: NodeServerOptions): Server {
     }
     return adapter;
   };
+  // The host function, the app's listeners: nothing throws out of the server's events (S01).
   const server = createHttpServer((incoming, response) => {
-    const adapter = current();
-    if (adapter === null) {
-      request(incoming, response);
-    } else {
-      adapter.request(incoming, response);
+    try {
+      const adapter = current();
+      if (adapter === null) {
+        request(incoming, response);
+      } else {
+        adapter.request(incoming, response);
+      }
+    } catch {
+      answerPlain(response, 500, "Something went wrong.");
     }
   });
   server.on("upgrade", (incoming: IncomingMessage, socket: Duplex, head: Buffer) => {
-    const adapter = current();
-    if (adapter !== null) {
-      adapter.upgrade(incoming, socket, head);
-    } else if (options.upgrade !== undefined) {
-      options.upgrade(incoming, socket, head);
-    } else {
-      refuseSocket(socket);
+    try {
+      const adapter = current();
+      if (adapter !== null) {
+        adapter.upgrade(incoming, socket, head);
+      } else if (options.upgrade !== undefined) {
+        options.upgrade(incoming, socket, head);
+      } else {
+        refuseSocket(socket);
+      }
+    } catch {
+      socket.destroy();
     }
   });
   server.on("listening", () => {

@@ -3410,3 +3410,73 @@ bound a list a host stored, not one a page sends, and each name is checked as be
 **Revisit when** rules grow beyond read and write by top-level name (nested paths, patterns
 inside a name), or `dbAccess`'s lookup changes (`dbRuleOf` then changes for both); or names stop
 being ASCII.
+
+## P092 · 2026-10-19 · The server's audit findings: a request never ends the Node process, an issue body is bounded · Accepted
+
+Amends P066 (the issue endpoint) and P070 (`nodeHost`, `toRequest`, `sendResponse`). From the
+pre-release audit of 0.7.0 (2026-10-19, baseline 264b12fa), items S01 and S06; each has its
+regression in `test/host-kit.test.ts`, failing before the fix.
+
+**Decision**, by finding:
+1. **S01: nothing a request does throws out of the Node adapter's listeners.** `toRequest` builds a
+   fetch `Request`, which throws for a method fetch can't carry (`CONNECT`, `TRACE`, `TRACK`) and
+   for a Host or target that is no URL (`Host: a b`, an empty Host, `*`, a broken absolute-form
+   target). It ran in the listener, so one unauthenticated `TRACE` ended the process (exit 1,
+   reproduced in a child process, on the content domain and on the app's own hosts alike). And a
+   handler's failure, or a head Node can't write (a header value fetch takes and Node doesn't,
+   `\x01`), rejected inside a `.then`: an unhandled rejection, which also ends a Node process.
+   Now:
+   - the conversion is `convert`: 405 for those methods, 400 for anything else it can't take;
+     never a throw (for requests and for WebSockets on the content domain alike);
+   - a fetch-style handler is written through one path (`serve`): a sync throw, a rejection, a
+     non-Response, or a failed write answers 500, or cuts off a response already started (never
+     made to look whole);
+   - `sendResponse` never rejects: a head Node refuses is a 500, with its own reason phrase;
+   - `nodeHost`'s and `nodeServer`'s listeners catch what is left, the app's own listeners
+     included (a throw answers 500; an upgrade's socket is destroyed), so no path depends on a
+     process-wide `uncaughtException` handler;
+   - **`nodeListener(app, { scheme })`** (new, additive): a fetch-style app as a Node listener with
+     the same guarantee. `nodeServer`'s `app` is it; the reference app (`leak/kit/app.ts`), which
+     did the conversion by hand as adopters do, uses it. `toRequest` and `sendResponse` stay as
+     they were for callers who convert themselves; `toRequest`'s doc says it throws, and
+     ADOPTING says to use `nodeListener` instead.
+   Regression: a server in its own process gets each such request (`TRACE` on both hosts and both
+   adapters, five unconvertible targets, a handler that throws, one that rejects, an unwritable
+   header, an app listener that throws, directly and from a reserved label, WebSocket upgrades),
+   answers each, and still serves the next normal request; its stderr stays empty.
+2. **S06: the issue endpoint reads at most `ISSUE_BODY_BYTES` (64 KiB) of its body.** It read and
+   parsed the whole body (`request.json()`) after `viewerOf`, which may rightly say no one (a
+   public link), and before `access`: an unauthenticated request cost memory and time in its
+   size. The body is now read as it arrives, counting the bytes read: past the limit the read
+   stops, the body is cancelled, and the answer is `413 too-large`. A Content-Length over the limit
+   is refused before the viewer is asked or a byte read (a cheap early refusal); a Content-Length
+   is never the bound (absent, chunked, or under the truth, the bytes read are counted). Bad JSON,
+   an empty body and a body that breaks off stay `400 bad-json`. Anonymous public access is
+   unchanged: the order (viewer, rate limit, body, `instance`, `access`) stays, since `access`
+   needs the instance the body names. On Node, an answer that goes out before its request's body
+   came in whole (the 413, a refused method) says `Connection: close`: the client gets its 413 and
+   the server closes the connection after it, rather than leave it waiting until Node's
+   `requestTimeout` on a body no one reads (measured: 64 MiB sent chunked, about 80 KiB read). A
+   request whose body was read whole keeps its connection.
+
+**Threat it re-opens.** None: both close a way an unauthenticated request could stop or load the
+host. A proposal over 64 KiB is refused where it was taken; the largest real one (an MCP view's
+declared egress) is a few KiB.
+**Why.** Availability is the host's: a library the app mounts on its server must not give any
+client a way to end that server's process (it hosts the app's own business), nor to spend its
+memory before anyone is known to be asking.
+**Rejected.**
+- A process-wide `uncaughtException` / `unhandledRejection` handler: it hides the app's own bugs,
+  is the app's to install, and leaves the process in an unknown state.
+- 501 for `TRACE` (RFC 9110 calls it apt for a method no resource supports): the audit and the
+  fetch adapters we compared (Hono's answers 400 for any request it can't convert) use 4xx; 405
+  goes without `Allow`, since the adapter can't know which methods the app's resource takes.
+- Refusing anonymous issue requests, or asking `access` before reading: public links are an
+  existing feature (P046), and `access` needs the instance the body names.
+- Trusting Content-Length as the bound, or relying on the edge's body limit: a chunked body has
+  no length to check, a client may declare less than it sends, and an edge may set no limit (or
+  one far above 64 KiB).
+- An option for the limit: no proposal comes near it. A constant, named in DESIGN.
+**Revisit when** a document kind carries more than a few KiB in its proposal (then a per-kind limit
+or an option); or an app needs to hear the adapter's own failures (an `onError` on `nodeHost` and
+`nodeServer`; today they answer 500 silently, as `content.fetch`'s rejections did before).

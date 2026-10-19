@@ -122,7 +122,7 @@ width, light and dark, before anyone sees it, and tells the agent what broke in 
 | `@botiverse/porthole` | `createHost`, `presets`, `defineDisplays`, `portholeClient`, `lintContent`, the tools (browser and server) |
 | `@botiverse/porthole/react` | `PortholeProvider`, `PortholeFrame`, `PortholeView` |
 | `@botiverse/porthole/server` | `createContentHost` (`routes`), `contentHostFor`, `prefixedName`, `d1TicketStore` (any runtime) |
-| `@botiverse/porthole/node` | `nodeServer`, `nodeHost`, `nodeProbe` (Node's http server) |
+| `@botiverse/porthole/node` | `nodeServer`, `nodeHost`, `nodeListener`, `nodeProbe` (Node's http server) |
 | `@botiverse/porthole/mcp` | the MCP Apps adapter |
 | `@botiverse/porthole/check` | `checkPage`, `playwrightDriver`, `cdpDriver`: the agent's pre-show check |
 | `@botiverse/porthole/conformance` | `defineHostConformance`: the suite, against your app (Playwright) |

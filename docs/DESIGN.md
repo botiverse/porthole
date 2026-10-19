@@ -434,7 +434,9 @@ Workers, Deno, Bun).** It gives:
   else (404). App ids travel in the document's fields. **The client never chooses an origin**:
   the scope the server maps to does. Then `access` (401 without a viewer, 403 refused), a ticket,
   and `201 FrameLocation`. `503 not-served` while content isn't served; `409` when `/server`
-  refuses the instance; an optional per-viewer rate limit (429).
+  refuses the instance; an optional per-viewer rate limit (429). The body is read to at most
+  `ISSUE_BODY_BYTES` (64 KiB), counted as it arrives: past it the read stops and the answer is
+  `413 too-large`; a Content-Length over it is refused before the viewer is asked (P092).
 - **`authorize(viewerOf)` and `urlOf(scope, path)`: redirect entry** (below).
 - **`meta()`** `{ served, contentSource, health }` for the app's page; **`frameSources`** for
   its CSP (`frame-src`), the authorize route's path included.
@@ -495,8 +497,12 @@ returns a request listener and an upgrade listener for `http.createServer`: cont
 `toRequest`/`sendResponse` convert (P070): the request carries a signal aborted when the client
 goes away (`proxyTo` passes it on, so a proxied event stream ends with its page); the body is
 written as the socket drains and cancelled when the client leaves; an error mid-body destroys
-the response rather than end it looking whole. `nodeProbe()` is the health probe (`*.localhost`
-resolved to loopback, no redirects, 4 KB read). `/server` stays free of Node.
+the response rather than end it looking whole. Nothing a request does throws out of the
+listeners (P092): a request fetch can't take is 405 (`CONNECT`, `TRACE`, `TRACK`) or 400 (a Host
+or a target that is no URL); a handler that throws or rejects, or a head Node can't write, is 500.
+`nodeListener(app, { scheme })` is a fetch-style app's listener with the same guarantee (it is
+`nodeServer`'s `app`). `nodeProbe()` is the health probe (`*.localhost` resolved to loopback, no
+redirects, 4 KB read). `/server` stays free of Node.
 
 **Client** (core). `httpLocator(url, { headers, credentials, onNotServed })` POSTs
 `{ instance }`, passes the abort signal, refuses redirects, and throws a `LocateError` with the

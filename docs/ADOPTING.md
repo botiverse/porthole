@@ -268,7 +268,11 @@ nodeServer({ content, app: async (request) => (await routes(request)) ?? app(req
   yourself as soon as you make it is fine too.
 - **`nodeHost(content, { request })`** is for an app that keeps its own `node:http` server (or a
   framework that owns one): put its `request` and `upgrade` listeners on your server, call
-  `content.start()` once it listens and `content.close()` when it stops.
+  `content.start()` once it listens and `content.close()` when it stops. A fetch-style app's
+  listener there is `nodeListener(app, { scheme })`, not `toRequest` and `sendResponse` by hand:
+  `toRequest` throws for a request fetch can't take (`TRACE`, a Host that is no URL), and a throw
+  in a listener ends a Node process. `nodeListener`, `nodeHost` and `nodeServer` answer those 405
+  and 400, and a handler that fails 500 (P092).
 - **Health:** `health: { probe: nodeProbe(), onServedChange: (served) => … }` checks the content
   domain over the real network and falls back to opaque frames while it doesn't answer.
 
@@ -720,7 +724,7 @@ prints each reason at the end; so does `--reporter=json`.
 | `@botiverse/porthole` (the runtime, 0.7) | `declareCapabilities`, `declarationProblems`, `checkDeclaration`, `dbAccess`, `atLeast`, `methodLevel`, `rosterOf`, `assetNameProblem`, `RUNTIME_CAPABILITIES`, `RUNTIME_TYPES`, `Refused` (`conflict`, `forbidden`, `too_large`); `types/runtime/v1/*.d.ts` |
 | `@botiverse/porthole/react` | `PortholeProvider`, `PortholeFrame`, `PortholeView`, `usePortholeLink`, `cssVariableTheme`, `useRunAgain` |
 | `@botiverse/porthole/server` | `createContentHost` (`routes`, `forget`), `contentHostFor`, `prefixedName`, `memoryTicketStore`, `d1TicketStore`, `upstreamHeaders`, `statusPage`, `conformancePage`, the callbacks' types |
-| `@botiverse/porthole/node` | `nodeServer`, `nodeHost`, `nodeProbe`, `toRequest`, `sendResponse` |
+| `@botiverse/porthole/node` | `nodeServer`, `nodeHost`, `nodeListener`, `nodeProbe`, `toRequest`, `sendResponse` |
 | `@botiverse/porthole/check` | `checkPage`, `playwrightDriver`, `cdpDriver` (`CHECK_ORIGIN`, `CHECK_CONTENT_DOMAIN`: the names a driver of your own answers); `/check/page`, the check page's script (`checkPage` has it already) |
 | `@botiverse/porthole/mcp` | the MCP Apps adapter (views, the sandbox proxy) |
 | `@botiverse/porthole/conformance` | `defineHostConformance`, `conformanceProjects`, `onDemand`, `conformancePage`, `defineRuntimeConformance` (no browser); `/conformance/reporter`, skip reasons |

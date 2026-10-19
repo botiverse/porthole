@@ -449,6 +449,60 @@ const authorizeSource = (url: string): string => {
   return `${parsed.origin}${parsed.pathname}`;
 };
 
+/**
+ * The most an issue request's body may be (S06, P092). `{ instance }` is a few hundred bytes; an
+ * MCP view's declared egress, the largest proposal, a few KiB.
+ */
+export const ISSUE_BODY_BYTES = 65_536;
+
+const tooLarge = () =>
+  refusal(413, "too-large", `The body is { instance }: at most ${ISSUE_BODY_BYTES} bytes`);
+
+/** Whether a request declares a body longer than `limit` (an early refusal; never the bound). */
+const declaresMoreThan = (request: Request, limit: number): boolean => {
+  const declared = request.headers.get("content-length")?.trim() ?? "";
+  return /^\d+$/u.test(declared) && Number(declared) > limit;
+};
+
+/**
+ * A request's body as text, reading at most `limit` bytes (S06, P092): past it the read stops,
+ * the body is cancelled, and the answer is null. The bytes read are counted, whatever the
+ * request's Content-Length says (absent, chunked, or not the truth). Throws where the body can't
+ * be read (the client went away mid-way).
+ */
+async function boundedText(request: Request, limit: number): Promise<string | null> {
+  if (request.body === null) {
+    return "";
+  }
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    if (!(value instanceof Uint8Array)) {
+      reader.cancel().catch(() => undefined);
+      throw new TypeError("A body is bytes");
+    }
+    size += value.byteLength;
+    if (size > limit) {
+      reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  // As `Request.json()` decodes: UTF-8, a byte-order mark dropped.
+  return new TextDecoder().decode(bytes);
+}
+
 /** The default probe: the runtime's `fetch`, no redirects followed, a timeout. */
 const fetchProbe: HealthProbe = async (url, timeoutMs) => {
   const response = await fetch(url, {
@@ -863,6 +917,10 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
               : `Content frames aren't served now: ${view.reason ?? "the content domain is checking"}`,
           );
         }
+        // Before anything is asked or read: the cheap refusal of a body that says it is too big.
+        if (declaresMoreThan(request, ISSUE_BODY_BYTES)) {
+          return tooLarge();
+        }
         let viewer: V | null;
         try {
           viewer = await viewerOf(request);
@@ -877,9 +935,15 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
         if (!withinRate(key)) {
           return refusal(429, "rate-limited", "Too many frames asked for: try again in a minute");
         }
+        // Bounded by the bytes read, never by what the request declares (S06, P092): the viewer
+        // may be no one (a public link), and access is asked only once the body says what of.
         let body: unknown;
         try {
-          body = await request.json();
+          const text = await boundedText(request, ISSUE_BODY_BYTES);
+          if (text === null) {
+            return tooLarge();
+          }
+          body = JSON.parse(text);
         } catch {
           return refusal(400, "bad-json", "The body is JSON: { instance }");
         }
