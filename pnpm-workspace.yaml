@@ -4,3 +4,18 @@ packages:
 allowBuilds:
   esbuild: true
   workerd: true
+
+# Dev-only advisories (P097) whose fix the newest upstream release doesn't take yet. Each line comes
+# off when its upstream ships the fixed version itself (pnpm audit --registry
+# https://registry.npmjs.org says which are left).
+overrides:
+  # miniflare 4.20260730.0, its last 4.x release, pins undici 7.28.0 (15 advisories, fixed by
+  # 7.29.1) and sharp 0.35.2 (2, fixed by 0.35.5); its 5.x betas move to exactly these.
+  miniflare>undici: 7.29.1
+  miniflare>sharp: 0.35.5
+  # The ext-apps example servers 2.0.3 (the latest) pin the MCP SDK 2.0.0, whose client has
+  # GHSA-6qxp-vccf-f47h (fixed by 2.2.0). The SDK's client, server and core release together and
+  # pin one another exactly, so the three move to one release.
+  "@modelcontextprotocol/client": 2.3.1
+  "@modelcontextprotocol/server": 2.3.1
+  "@modelcontextprotocol/core": 2.3.1

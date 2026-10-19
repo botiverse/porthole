@@ -131,4 +131,9 @@ width, light and dark, before anyone sees it, and tells the agent what broke in 
 
 Apache-2.0. `/server` also serves copies of [Chart.js](https://www.chartjs.org) 4.5.1 (MIT) and
 [D3](https://d3js.org) 7.9.0 (ISC) to live widgets (P079), each with its license beside it
-(`/__porthole/lib/<name>@<version>/`), from `src/libraries/files.generated.ts`.
+(`/__porthole/lib/<name>@<version>/`), from `src/libraries/files.generated.ts`; their notices,
+and those of the packages their files bundle, are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Found a vulnerability? Report it privately, as
+[SECURITY.md](https://github.com/botiverse/porthole/blob/main/SECURITY.md) says, never in a public
+issue.

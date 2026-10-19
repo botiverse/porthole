@@ -2,7 +2,16 @@
   "name": "@botiverse/porthole",
   "version": "0.7.0",
   "description": "A host-side sandbox for agent-made HTML: isolation, egress hardening, a themed shell, gated host functions, and the agent manual, from one config.",
+  "homepage": "https://github.com/botiverse/porthole#readme",
+  "bugs": {
+    "url": "https://github.com/botiverse/porthole/issues"
+  },
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/botiverse/porthole.git",
+    "directory": "packages/porthole"
+  },
   "bin": {
     "porthole": "./src/cli.ts"
   },
@@ -12,7 +21,8 @@
     "types/runtime/**/*.d.ts",
     "docs",
     "examples",
-    "README.md"
+    "README.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "type": "module",
   "sideEffects": false,
@@ -92,7 +102,8 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "rolldown": "1.2.11",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "yaml": "2.9.1"
   },
   "peerDependencies": {
     "react": ">=19"

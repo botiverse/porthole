@@ -1,46 +1,308 @@
 name: release
 
-# Publish @botiverse/porthole to npm when a version tag (v*) lands. Auth is npm
-# trusted publishing (OIDC): the job only requests an id-token; no npm token
-# secret exists in this repo. The npm-side trusted-publisher setting for
-# @botiverse/porthole is owner-managed.
+# Publish @botiverse/porthole to npm (P097). Two triggers:
+# - workflow_dispatch from main with a version (`stamp workflow run release.yml --repo
+#   botiverse/porthole -f version=X.Y.Z`; packages/porthole/package.json on main must already say
+#   it): releases main's head, then the `tag` job tags it vX.Y.Z and the `release` job creates the
+#   GitHub release from that version's CHANGELOG.md section. A tag created with GITHUB_TOKEN starts
+#   no workflow, so this path publishes once.
+# - a pushed v* tag, as before: publishes that commit, nothing else.
+# Either way `gate` lets a release through only for a commit on main whose ci.yml run on main (a
+# push's, or one started by hand) passed, with every job in REQUIRED_CI_JOBS among those that
+# passed (the checks, both browser suites and the negative controls on three engines, prod-shape,
+# the examples). A pending run is waited for; anything but a pass stops the release.
+#
+# The gate is in the file it guards: a release.yml dispatched from another branch, or a tag pushed
+# on a branch's commit, runs that commit's own copy. Until the admin settings in P097 are on (a
+# `release` environment for main and v* only, named on the publish job and in npm's
+# trusted-publisher setting; a v* tag ruleset), it stops mistakes, not someone who can push.
+#
+# Auth is npm trusted publishing (OIDC): the publish job only requests an id-token; no npm token
+# secret exists in this repo. The npm-side trusted-publisher setting for @botiverse/porthole names
+# this file and is owner-managed, so publishing stays in this file. `build` runs the project's code
+# with a read-only token and hands `publish` the tarball; `publish`, the only job that can mint the
+# id-token, checks out package.json alone (pnpm's version), installs nothing and runs none of the
+# package's or its dependencies' code. Only `tag` and `release`, which check nothing out, may write
+# to the repository.
+# Every Action is pinned to the commit of the release named beside it (test/release.test.ts).
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, without the v (packages/porthole/package.json on main must already say it)"
+        required: true
+        type: string
 
 permissions:
   contents: read
-  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest
+  gate:
+    runs-on: ubuntu-24.04
+    # Longer than the wait below (CI_WAIT_MINUTES).
+    timeout-minutes: 160
+    permissions:
+      contents: read # whether the tag exists
+      actions: read # ci.yml's runs and jobs for the released commit
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - name: release only a commit of main that passed all of ci.yml
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # How long a pending run is waited for: longer than ci.yml's slowest job, after its queue
+          # (test/release.test.ts checks it against ci.yml's timeouts).
+          CI_WAIT_MINUTES: "150"
+          # ci.yml's jobs as GitHub names them, the one list of them: test/release.test.ts holds it
+          # to ci.yml's jobs, so a job added, renamed or dropped there fails a test.
+          REQUIRED_CI_JOBS: |
+            check
+            loopback (chromium)
+            loopback (webkit)
+            loopback (firefox)
+            controls (chromium)
+            controls (webkit)
+            controls (firefox)
+            examples
+            prod-shape
+        # Every API call is an assignment of its own under `set -euo pipefail`, so an error stops
+        # the gate instead of reading as "no tag" or "no run".
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "not a version: $TAG"; exit 1
+          fi
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            if [ "$GITHUB_REF" != refs/heads/main ]; then
+              echo "dispatch from main only (got $GITHUB_REF)"; exit 1
+            fi
+            existing=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$TAG" --jq ".[] | select(.ref == \"refs/tags/$TAG\") | .ref")
+            if [ -n "$existing" ]; then
+              echo "$TAG already exists: bump the version first"; exit 1
+            fi
+          fi
+          # On main, now or before: never only a branch's (a tag pushed on a branch's commit, or a
+          # tag named main). main by its full ref, so no tag can stand in for it.
+          main=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          position=$(gh api "repos/$GITHUB_REPOSITORY/compare/$main...$GITHUB_SHA" --jq .status)
+          if [ "$position" != identical ] && [ "$position" != behind ]; then
+            echo "$GITHUB_SHA is not on main (main is $main; the commit is $position)"; exit 1
+          fi
+          for attempt in $(seq 1 "$CI_WAIT_MINUTES"); do
+            # The newest ci.yml run on main for this very commit, started by a push or by hand
+            # (`stamp workflow run ci.yml --repo botiverse/porthole`, for a run that flaked or a
+            # commit without one); never a pull request's. A re-run of failed jobs updates its run.
+            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&branch=main&per_page=100" \
+              --jq '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")] | sort_by(.created_at) | last // empty | "\(.id) \(.status) \(.conclusion)"')
+            if [ -z "$runs" ]; then
+              if [ "$attempt" -ge 10 ]; then
+                echo "no ci.yml run on main for $GITHUB_SHA: stamp workflow run ci.yml --repo botiverse/porthole, then release again"; exit 1
+              fi
+              echo "no ci.yml run on main for $GITHUB_SHA yet"
+            else
+              read -r id status conclusion <<< "$runs"
+              echo "ci.yml run $id on $GITHUB_SHA: $status $conclusion"
+              if [ "$status" = completed ]; then
+                if [ "$conclusion" != success ]; then
+                  echo "ci.yml did not pass on $GITHUB_SHA: re-run it (stamp workflow run ci.yml --repo botiverse/porthole), then release again"; exit 1
+                fi
+                # Each job's latest attempt: a job made conditional, skipped or dropped from
+                # ci.yml leaves a run that passed without it.
+                jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?filter=all&per_page=100" \
+                  --jq '[.jobs[] | {name, conclusion, run_attempt}] | group_by(.name) | map(max_by(.run_attempt)) | .[] | "\(.name)\t\(.conclusion)"')
+                failed=0
+                while IFS= read -r job; do
+                  [ -n "$job" ] || continue
+                  if ! grep -qxF "$job"$'\t'success <<< "$jobs"; then
+                    echo "ci.yml job '$job' did not pass in run $id"; failed=1
+                  fi
+                done <<< "$REQUIRED_CI_JOBS"
+                [ "$failed" = 0 ] || exit 1
+                echo "ci.yml passed on $GITHUB_SHA, every required job with it"; exit 0
+              fi
+            fi
+            sleep 60
+          done
+          echo "ci.yml on $GITHUB_SHA did not finish in time"; exit 1
+
+  build:
+    needs: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      # No dependency cache in a release: what it installs comes from the lockfile alone.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24"
-          cache: pnpm
-          registry-url: "https://registry.npmjs.org"
       - run: pnpm install --frozen-lockfile
-      # The tag is the single source of truth: refuse to publish when the
-      # package disagrees with it.
+      # The tag is the single source of truth: refuse to publish when the package disagrees with it.
       - name: verify tag matches the package version
         run: |
           node -e '
             const { readFileSync } = require("node:fs");
-            const tag = process.env.GITHUB_REF_NAME;
+            const tag = process.env.TAG;
             const pkg = JSON.parse(readFileSync("packages/porthole/package.json", "utf8"));
             if (`v${pkg.version}` !== tag) {
               console.error(`tag ${tag} does not match ${pkg.name}@${pkg.version}`);
               process.exit(1);
             }
           '
+      # The GitHub release's notes are this section: refuse a release without one, before npm has
+      # it (a heading that isn't exactly "## X.Y.Z", or nothing under it).
+      - name: verify CHANGELOG.md has the version's section
+        shell: bash
+        run: |
+          set -euo pipefail
+          changelog=$(tr -d '\r' < CHANGELOG.md)
+          if ! grep -qxF "## ${TAG#v}" <<< "$changelog"; then
+            echo "CHANGELOG.md has no '## ${TAG#v}' heading"; exit 1
+          fi
+          notes=$(awk -v head="## ${TAG#v}" '$0 == head { on = 1; next } on && /^## / { exit } on' <<< "$changelog")
+          words=$(tr -d '[:space:]' <<< "$notes")
+          if [ -z "$words" ]; then
+            echo "CHANGELOG.md's '## ${TAG#v}' section is empty"; exit 1
+          fi
       - run: pnpm run check
       - run: pnpm --filter @botiverse/porthole run build
       # Never publish a package a bundler can't take in whole (P075).
       - run: pnpm --filter @botiverse/porthole exec playwright install --with-deps chromium
       - run: pnpm --filter @botiverse/porthole run test:bundle
-      # pnpm publish so publishConfig.exports (dist) replaces the source exports.
-      - run: pnpm --filter @botiverse/porthole publish --access public --no-git-checks
+      # pnpm pack applies publishConfig (dist's exports replace the source's), as pnpm publish does.
+      - run: pnpm --filter @botiverse/porthole pack --pack-destination "$RUNNER_TEMP/package"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: package
+          path: ${{ runner.temp }}/package/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [gate, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing: this job only
+    steps:
+      # package.json alone, for pnpm's version (packageManager): pnpm loads a checkout's
+      # .pnpmfile.cjs and pnpm-workspace.yaml's configDependencies for any command, a publish too.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: /package.json
+          sparse-checkout-cone-mode: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      # The registry, for the scope too (registry=, in the npmrc it writes).
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: package
+          path: ${{ runner.temp }}/package
+      - name: publish the tarball build made, once it is the tag's version
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          tarballs=("$RUNNER_TEMP"/package/*.tgz)
+          if [ "${#tarballs[@]}" -ne 1 ]; then
+            echo "expected one tarball, got ${#tarballs[@]}"; exit 1
+          fi
+          manifest=$(tar -xzOf "${tarballs[0]}" package/package.json)
+          name=$(jq -r .name <<< "$manifest")
+          version=$(jq -r .version <<< "$manifest")
+          if [ "$name" != "@botiverse/porthole" ] || [ "v$version" != "$TAG" ]; then
+            echo "the tarball is $name@$version, not @botiverse/porthole at $TAG"; exit 1
+          fi
+          # A prerelease (a version with a "-") goes out as `next`, never as `latest`.
+          dist_tag=latest
+          if [[ "$version" == *-* ]]; then
+            dist_tag=next
+          fi
+          # pnpm publish (its OIDC exchange, as before), given the tarball: nothing is packed or
+          # run here. `publish` takes no --ignore-pnpmfile; the config key is the same guard.
+          pnpm publish "${tarballs[0]}" --access public --no-git-checks --tag "$dist_tag" --config.ignore-pnpmfile=true
+
+  # After the publish, as Ferry's (D185) and OAR's releases: a dispatched release only. Runs no
+  # project code, checks nothing out, and is idempotent (a tag already on the commit passes), so
+  # "Re-run failed jobs" finishes a release whose publish succeeded. The v* tag ruleset must have
+  # the GitHub Actions integration on its bypass list (P097), or this fails after npm has the
+  # version; a person then re-runs the failed jobs.
+  tag:
+    needs: publish
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # the tag
+    steps:
+      - name: tag the released commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Every API call is an assignment or a command of its own under `set -euo pipefail`: an
+        # error stops the job instead of reading as "no tag".
+        run: |
+          set -euo pipefail
+          found=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$TAG" \
+            --jq ".[] | select(.ref == \"refs/tags/$TAG\") | \"\(.object.type) \(.object.sha)\"")
+          if [ -z "$found" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" > /dev/null
+            echo "tagged $GITHUB_SHA as $TAG"; exit 0
+          fi
+          sha=${found#* }
+          # An annotated tag points at a tag object; its commit is one step further.
+          if [ "${found%% *}" = tag ]; then
+            sha=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$sha" --jq .object.sha)
+          fi
+          if [ "$sha" != "$GITHUB_SHA" ]; then
+            echo "$TAG points at $sha, not $GITHUB_SHA"; exit 1
+          fi
+          echo "$TAG is $GITHUB_SHA"
+
+  release:
+    needs: tag
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # the GitHub release
+    # Checks nothing out and runs no project code. Idempotent, so "Re-run failed jobs" finishes a
+    # release whose publish succeeded. Every API call is an assignment or a command of its own
+    # under `set -euo pipefail`: an error stops the job instead of reading as "no release".
+    steps:
+      - name: create the GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          release=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"$TAG\") | .id")
+          if [ -n "$release" ]; then
+            echo "release $TAG already exists"; exit 0
+          fi
+          # The version's section of CHANGELOG.md, as the released commit has it (build checked it).
+          changelog=$(gh api "repos/$GITHUB_REPOSITORY/contents/CHANGELOG.md?ref=$GITHUB_SHA" -H "Accept: application/vnd.github.raw+json")
+          awk -v head="## ${TAG#v}" '$0 == head { on = 1; next } on && /^## / { exit } on' <<< "${changelog//$'\r'/}" > notes.md
+          if [[ "$TAG" == *-* ]]; then
+            gh release create "$TAG" --title "$TAG" --notes-file notes.md --verify-tag --prerelease
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file notes.md --verify-tag
+          fi

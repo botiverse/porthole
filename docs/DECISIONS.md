@@ -3142,3 +3142,157 @@ a page's updates heard by the next page, code a viewer uploaded made runnable by
 **Revisit when** WebKit sends a cross-site frame's same-origin requests their full `Referer`, or
 keeps partitioned cookies there (then `/_blob/<id>` loads everywhere and `assets.url` is a
 convenience); or a host needs per-collection levels beyond a batch's.
+
+## P097 · 2026-10-19 · A release is a commit of main that passed all of CI; the open-source materials · Accepted
+
+The 2026-10-19 audit's V03 and its licenses-and-materials findings (baseline 264b12fa). Before,
+a pushed `v*` tag published from one job that ran `check`, the build and the Chromium bundle test,
+holding the npm id-token throughout, whatever ci.yml (three engines' loopback and negative
+controls, prod-shape, the examples) said about the same commit, or before it said anything. Each
+change has its regression in `test/release.test.ts` (the workflows) or `test/notices.test.ts`
+(the materials); both failed before (8 of 10, and the module missing).
+
+**Decision**, by finding:
+1. **A release waits for ci.yml on the same commit, every job of it** (V03). release.yml's `gate`
+   job, before anything is built, lets a release through only for a commit on main (`compare`
+   against `git/ref/heads/main`'s commit says `identical` or `behind`: not a branch's commit, not a
+   tag named `main`) whose newest ci.yml run on `main`, started by a push or by hand
+   (`workflow_dispatch`: `stamp workflow run ci.yml --repo botiverse/porthole` re-runs one that
+   flaked, or runs a commit that has none; an agent can't re-run a push's run through Stamp), never
+   a pull request's, completed with success with each job named in `REQUIRED_CI_JOBS` passed in its
+   latest attempt (a job made conditional, skipped or dropped would leave a run that passes without
+   it). A pending run is waited for (`CI_WAIT_MINUTES`, 150: the test holds it 30 above ci.yml's
+   slowest job, and every job of both workflows has a timeout); no run after ten minutes says to
+   start one; anything else stops the release. ci.yml runs on pushes to branches only (`branches:
+   ["**"]`): a tag's run names the tag as its branch (run 39104402120's `head_branch` is `v0.7.0`),
+   and a release tag's commit has had main's run. Every API call in the gate, tag and release jobs
+   is an assignment or a command of its own under `set -euo pipefail`, never inside a test, so an
+   API error stops the job instead of reading as "no tag" (Ferry's review found that fail-open).
+   `REQUIRED_CI_JOBS` is the one list of ci.yml's jobs; the test derives ci.yml's job names as
+   GitHub makes them (a matrix's combinations, `exclude`, `include`, names with `${{ matrix.* }}`)
+   and requires the two equal, so a job added, renamed or dropped there fails a test. ci.yml's jobs
+   are none conditional or allowed to fail. Both triggers go through the gate: `stamp workflow run
+   release.yml --repo botiverse/porthole -f version=X.Y.Z` from main (as OAR's release: refused
+   from another ref or for a tag that exists), and a pushed `v*` tag, as before. `build` refuses a
+   version whose CHANGELOG.md has no `## X.Y.Z` heading (line ends stripped) or an empty section,
+   before anything is published. After `publish`, a dispatched release's `tag` job creates the tag
+   (idempotent: a tag already on the commit passes, one on another commit stops it), and `release`
+   makes the GitHub release from that section, as Ferry's (D185) and OAR's releases: a publish that
+   fails leaves no tag, so a fresh dispatch can try again.
+   `test/release-scripts.test.ts` runs the gate's, build's section check, tag's, publish's and
+   release's scripts against a simulated API (a fake `gh` through the real `jq`): a dispatch run
+   accepted, a pull request's ignored, the newest taken, a commit off main refused, an API error in
+   each lookup exiting 1, CRLF notes, a heading that isn't exact.
+2. **Only the job that publishes can mint the id-token, and it runs no project code.** `build`
+   (contents: read) installs, checks, builds, runs the bundle test and `pnpm pack`s (publishConfig
+   applied, as `pnpm publish` applied it); `publish` (contents: read, id-token: write) downloads
+   that tarball, checks it is `@botiverse/porthole` at the tag's version, and runs `pnpm publish
+   <tarball>` with `--tag next` for a prerelease (a version with a `-`; its GitHub release is
+   marked one), `--tag latest` otherwise: pnpm 11 sends a tarball through the same publish and
+   OIDC path as a directory (`publishPackedPkg`), so npm's trusted-publisher setting, which names
+   release.yml, still matches; the publish stays in this file. Its checkout is `/package.json`
+   alone (sparse, for pnpm's version): pnpm loads a checkout's `.pnpmfile.cjs` (measured: `pnpm
+   publish <tarball>` in a workspace ran one) and pnpm-workspace.yaml's `configDependencies` for
+   any command; neither is checked out, and the publish passes `--config.ignore-pnpmfile=true`
+   (`pnpm publish` refuses `--ignore-pnpmfile` as an unknown option; the config key stops the
+   pnpmfile, measured). `tag` and `release` (contents: write), after it, check nothing out and
+   use the API only. The workflows' token is `contents: read` unless a job says otherwise; no dependency cache
+   in a release (what it installs comes from the lockfile alone).
+- **What the gate doesn't stop.** It is in the file it guards: anyone who can push a branch can
+  dispatch that branch's release.yml (`--ref <branch>`) or push a `v*` tag on a branch's commit,
+  and that commit's copy runs, without this gate if it says so; npm's trusted-publisher setting,
+  with no environment named, accepts that job's id-token. Until the admin settings below are on,
+  the gate stops mistakes (a red or pending CI, a commit off main, a stale tag), not someone with
+  push access. The fix is a `release` environment that only `main` and `v*` tags may deploy to,
+  named on the publish job and in npm's setting, and the `v*` tag ruleset. `environment: release`
+  is not on the publish job yet: GitHub creates a missing environment on first use (in a private
+  repository only on GitHub Team or Pro; Free configures environments for public ones only,
+  docs.github.com "Managing environments for deployment"), npm's documentation says the field is
+  optional but not what it does with a token whose environment it doesn't name, and a guide
+  (uncited) says npm then refuses it ("environment claim mismatch"); unverifiable without a
+  publish, and an environment without its rules adds nothing. So the three go on together, by an
+  admin: the environment with its rules, the line on the job, and the name in npm's setting.
+3. **Actions are reviewed commits.** Every `uses:` is a full commit SHA with its release in a
+   comment: the commits the floating `v4` tags named on 2026-10-19, which CI had been running
+   (checkout 4.4.0, setup-node 4.4.0, upload-artifact 4.6.2, download-artifact 4.3.0,
+   pnpm/action-setup 4.3.0), checked against the release tags. Every checkout is
+   `persist-credentials: false`, so no job's later steps find the token in `.git/config`.
+4. **Third-party notices.** The package ships Chart.js and D3 (P079) and each one's license, but
+   their files bundle more: `@kurkle/color` (in Chart.js), and in D3 its thirty modules,
+   `internmap`, `delaunator` and `robust-predicates`, with GeographicLib's notice in d3-geo,
+   Robert Penner's in d3-ease and ColorBrewer's in d3-scale-chromatic. `scripts/notices.ts`
+   writes `packages/porthole/THIRD_PARTY_NOTICES.md` from the installed packages (each library's
+   dependency tree, less what its file doesn't bundle: d3-dsv's command-line tools'
+   dependencies), license texts verbatim; the test runs it as `--check`, and the package's `files`
+   ship it. The leak suite's committed Vite build (`leak/fixtures/vite-react/out`, never in the
+   package) bundles React, ReactDOM 18.3.1 and Scheduler 0.23.2 with their license comments
+   stripped: `THIRD_PARTY_NOTICES.md` beside it carries their MIT text, and Vite's and rolldown's
+   for the preload polyfill and module runtime the build adds; the test holds it to the fixture's
+   `package.json` and the bundle's React version.
+5. **The license in the package.** `npm pack` takes LICENSE only from the package's own directory
+   (pnpm copies the root's when there is none, which is how 0.7.0 had it): `packages/porthole/LICENSE`
+   is the root's, byte for byte (tested).
+6. **SECURITY.md**: private reports through GitHub's private vulnerability reporting, never a
+   public issue (the channel, said plainly); fixes in the latest release only (pre-1.0, no
+   backports); an acknowledgement aimed at within three business days, the failing test first, an advisory and credit; the scope, and the boundaries
+   decisions accept (P047's same-site siblings, P083's sealed address as a bearer credential,
+   P079's fallback without the Navigation API). Both READMEs point to it.
+7. **README and npm metadata**: the status says what is true (pre-1.0, on npm, phase 1's core
+   milestones done, CI on three engines), not "Private. Phase 1 in progress"; the package names its
+   `repository` (with `directory`, which npm's provenance checks once the repository is public),
+   `bugs` and `homepage`.
+8. **Dev-dependency advisories**: `pnpm audit --registry https://registry.npmjs.org` found 18 (6
+   high, 9 moderate, 3 low; `--prod` 0), all in test tooling: undici 7.28.0 and sharp 0.35.2
+   through miniflare, @modelcontextprotocol/client 2.0.0 through the ext-apps example servers. The
+   newest releases upstream still pin them (miniflare 4.20260730.0 is its last 4.x; the example
+   servers 2.0.3 pin the SDK 2.0.0), so pnpm-workspace.yaml overrides them, each line until its
+   upstream ships the fix: undici 7.29.1 and sharp 0.35.5 under miniflare (what its 5.x betas
+   pin), and the SDK's client, server and core together at 2.3.1 (they pin one another exactly).
+   After: 0 and 0. `yaml` 2.9.1 is a new devDependency, for the workflow test.
+- **Not in the repository** (an admin's settings; none applied here): a ruleset on `main`
+  (pull requests only, ci.yml's jobs as required checks, no force push or deletion); a ruleset
+  on `v*` tags (no update or deletion; creation restricted, and the GitHub Actions integration (actor
+  15368) on its bypass list, which GitHub allows in an organization's repository, as botiverse's
+  is: without it the `tag` job's GITHUB_TOKEN is refused after npm has published the version, and a
+  person then finishes the release by re-running the failed jobs, since an agent can't through
+  Stamp and a fresh dispatch fails at the publish); a `release` environment with a required reviewer and deployments from
+  `main` and `v*` only, then `environment: release` on the publish job and the same environment in
+  npm's trusted-publisher setting, the three at once (npm then accepts no other job's token); on npm, "require two-factor
+  authentication and disallow tokens" for the package; secret scanning with push protection;
+  Dependabot alerts and security updates (and, if wanted, a `.github/dependabot.yml` for
+  `github-actions`, which bumps pinned SHAs with their comments); private vulnerability reporting
+  (SECURITY.md's form 404s until it is on); Actions: the workflow token read-only by default, no
+  pull request creation or approval by Actions, only GitHub's and pnpm's Actions allowed, SHA
+  pinning required, approval for outside contributors' workflows; code scanning (CodeQL) once
+  public. The audit's scope notes stand: unreachable objects, other refs, LFS, issue and Actions
+  logs and earlier npm tarballs weren't scanned for secrets before the repository opens.
+
+**Threat it re-opens.** None: each change narrows what a release can publish or who can mint the
+token. A release now waits on ci.yml; a flaky job blocks it until it is re-run (`stamp workflow
+run ci.yml`), and a tag on a commit off main no longer publishes. If the version is published and
+tagging then fails, a person re-runs the failed jobs (`tag` and `release` are idempotent).
+**Why.** The audit's V03: a release could publish while the commit's security suites were
+pending or red; the id-token sat in a job running every dependency's install scripts and the test
+suite; tags of Actions can move. And the open-source checklist: notices the licenses require for
+what the repository and the package redistribute, a private channel for reports, metadata npm
+and readers look for.
+**Rejected.**
+- `workflow_run` on ci.yml's completion: it runs the workflow file from the default branch, not
+  the released commit, and needs its own filtering of branches and events; the gate reads the same
+  API and keeps the publish where npm's setting expects it.
+- ci.yml calling the release (one workflow, `needs:`): npm's trusted-publisher setting names the
+  workflow file that publishes, so the publish would move into ci.yml, which runs on every push.
+- `npm publish <tarball>` in the publish job: npm's own OIDC path would also work, but pnpm's is
+  what published 0.7.0 (its npm user is `npm-oidc-no-reply@github.com`) and needs no change of
+  tool.
+- The run's conclusion alone: a skipped or dropped job leaves a run that passed.
+- Upgrading to miniflare 5 (a beta of a new major) or to the newest Action majors (checkout 7,
+  setup-node 7, upload-artifact 7, download-artifact 8, action-setup 6): each is a change of
+  behavior to verify on its own, not a fix.
+- Rebuilding the fixture with its license comments kept: a new build is new test data for the
+  leak suite; a notice beside the committed build covers it.
+**Revisit when** a stable miniflare pins undici ≥ 7.29.1 and sharp ≥ 0.35.5, or the example
+servers pin the MCP SDK ≥ 2.2.0 (drop that override); when the admin creates the `release`
+environment (add it to the publish job and npm's setting together); when ci.yml gains, renames or
+drops a job (REQUIRED_CI_JOBS follows; the test says so); or when a vendored library or the
+fixture changes (rerun `node scripts/notices.ts`, update the fixture's notices).
