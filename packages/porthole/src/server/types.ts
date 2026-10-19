@@ -163,7 +163,9 @@ export interface StoredAsset {
   /**
    * Whether it may run as code (P089, after the review): a script, stylesheet or WebAssembly an
    * admin uploaded where uploaded code may run (the upload's `trusted`). Any other code-typed
-   * asset is served as a download, whatever the config says now.
+   * asset is served as a download, whatever the config says now; a trusted one too, once the
+   * config no longer lets uploaded code run (P103: asked at every request; in bearer mode, every
+   * artifact config the server has must).
    */
   readonly trusted?: boolean;
   /** Its file name (its extension types it). */

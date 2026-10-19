@@ -1037,7 +1037,7 @@ export function createServer(options: ServerOptions): PortholeServer {
     if (store.bearer === true) {
       const asset = await store.get(id, null);
       return scoped(asset)
-        ? serveAsset({ request, asset, frameAncestors, code: asset.trusted === true })
+        ? serveAsset({ request, asset, frameAncestors, code: runsAsCode(asset, null) })
         : none();
     }
     const accesses = await assetAccessesOf(request, label);
@@ -1082,9 +1082,28 @@ export function createServer(options: ServerOptions): PortholeServer {
     if (refusal !== null) {
       return refusal;
     }
-    const config = compiledFor(access.instance)?.config;
-    const code = asset.trusted === true && config !== undefined && assetCodeRuns(config);
-    return serveAsset({ request, asset, frameAncestors, code });
+    return serveAsset({ request, asset, frameAncestors, code: runsAsCode(asset, access) });
+  }
+
+  /**
+   * Whether a code-typed asset goes out as code (P089, P103): only where it was trusted when it
+   * was uploaded and the config its artifact's page is served under still lets uploaded code
+   * run, asked at every request, so a stricter config wins at once. An access names that config.
+   * By id alone (bearer mode) the server can't tell which of its artifact configs the page is
+   * under: the strictest it might be decides (every one must let uploaded code run).
+   */
+  function runsAsCode(asset: StoredAsset, access: Access | null): boolean {
+    if (asset.trusted !== true) {
+      return false;
+    }
+    if (access !== null) {
+      const config = compiledFor(access.instance)?.config;
+      return config !== undefined && assetCodeRuns(config);
+    }
+    const artifacts = [...compiled.values()]
+      .map((each) => each.config)
+      .filter((config) => config.mode === "artifact" && config.isolation === "domain");
+    return artifacts.length > 0 && artifacts.every((config) => assetCodeRuns(config));
   }
 
   /**

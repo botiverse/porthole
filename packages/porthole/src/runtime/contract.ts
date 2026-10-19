@@ -234,9 +234,13 @@ export function methodsOfCall(serves: CapabilityName, args: unknown): readonly s
 
 /**
  * Whether a config's asset uploads are its admins' alone (`assets.upload` at admin or above,
- * P089): only then may scripts and styles an admin uploaded run from the library.
+ * P089): only then may scripts and styles an admin uploaded run from the library. Never where
+ * the config serves no assets (P103: a config that dropped them runs nothing of its library).
  */
 export function assetCodeRuns(config: PortholeConfig): boolean {
+  if (config.capabilities.assets === undefined) {
+    return false;
+  }
   const level = methodLevel(config, "assets", "upload");
   return level !== null && atLeast(level, "admin");
 }

@@ -58,11 +58,17 @@ export interface PresetOptions {
   readonly runtime?: RuntimeVersion;
 }
 
+/** What a live widget may say about a capability (P103): anything but origins of its own. */
+export type LiveCapabilityConfig = Omit<CapabilityConfig, "connect" | "resource">;
+
 /**
  * The live widget's options (P079): a widget's, less egress, which stays closed (Porthole's own
- * libraries come with domain isolation). A host adds capabilities, or changes the data ones' gates.
+ * libraries come with domain isolation), and less a capability's own origins, which are egress
+ * too (P103). A host adds capabilities, or changes the data ones' gates.
  */
-export type LiveWidgetOptions = Omit<PresetOptions, "egress">;
+export type LiveWidgetOptions = Omit<PresetOptions, "egress" | "capabilities"> & {
+  readonly capabilities?: { readonly [N in CapabilityName]?: LiveCapabilityConfig | false };
+};
 
 /** The url preset's options: where the app is served, and the embedding page's extra frames. */
 export interface UrlPresetOptions {
@@ -226,12 +232,13 @@ export const presets = {
 
   /**
    * A widget that shows its host's data, live, and has no network of its own (P079): an inline
-   * widget whose egress stays closed (no option opens it). It reads the host's data (`readData`,
-   * MCP `resources/read`) and subscribes to it (`subscribeData`, `resources/subscribe`), each
-   * behind the viewer's consent (the host's `consent`, asked once per display) and a rate. In
-   * domain isolation its scripts load from Porthole's own libraries on its origin
-   * (`egress.libraries`: Chart.js, D3), and nowhere else. A host adds what any widget may have (a
-   * link, a copy button), or changes the data capabilities' gates.
+   * widget whose egress stays closed (no option opens it: neither `egress` nor a capability's own
+   * `connect` or `resource`, P103). It reads the host's data (`readData`, MCP `resources/read`)
+   * and subscribes to it (`subscribeData`, `resources/subscribe`), each behind the viewer's
+   * consent (the host's `consent`, asked once per display) and a rate. In domain isolation its
+   * scripts load from Porthole's own libraries on its origin (`egress.libraries`: Chart.js, D3),
+   * and nowhere else. A host adds what any widget may have (a link, a copy button), or changes the
+   * data capabilities' gates.
    */
   liveWidget: (options: LiveWidgetOptions = {}): PortholeConfig => {
     if ((options as PresetOptions).egress !== undefined) {
@@ -239,6 +246,17 @@ export const presets = {
         "options.egress",
         "a live widget has no network of its own: its egress stays closed (P079)",
       );
+    }
+    // A capability's own origins join the CSP as egress does (P103): none for a live widget.
+    for (const [name, value] of Object.entries((options as PresetOptions).capabilities ?? {})) {
+      for (const field of ["connect", "resource"] as const) {
+        if (typeof value === "object" && value !== null && value[field] !== undefined) {
+          throw new ConfigError(
+            `options.capabilities.${name}.${field}`,
+            "a live widget has no network of its own: no capability opens origins for it (P079, P103)",
+          );
+        }
+      }
     }
     return build(
       "inline",

@@ -332,7 +332,7 @@ Porthole draws).
 **Revisit when** a host needs URL-mode frames to talk to it (then that is a
 protocol, through an adapter).
 
-## P021 · 2026-10-11 · Gates are a list that all must pass, safe by default, failing closed · Accepted
+## P021 · 2026-10-11 · Gates are a list that all must pass, safe by default, failing closed · Accepted; amended by P103
 
 **Decision.** A capability's gates are a list (`user-activation`, `confirm`,
 `{ rateLimit }`); every one must pass. A config that names no gates gets the
@@ -2213,7 +2213,7 @@ refused, and reported as a problem, on every engine (`leak/check.spec.ts`).
 loads (its follow-up) proposes more hosts, such as mirrors reachable from mainland China.
 
 
-## P079 · 2026-10-15 · Live widgets: no network of their own, Porthole's libraries on their origin, the host's data behind the viewer's consent, and frames that never navigate away · Accepted; amended by P084, P094
+## P079 · 2026-10-15 · Live widgets: no network of their own, Porthole's libraries on their origin, the host's data behind the viewer's consent, and frames that never navigate away · Accepted; amended by P084, P094, P103
 
 **Decision.** Content that shows its host's data, current, read as the person viewing it (a
 dashboard tile, a kept widget) gets a preset of its own and the mechanisms it needs. 0.5.0.
@@ -2964,7 +2964,7 @@ control `db-private` (the owner check taken out of `dbAccess`) → that case on 
 **Revisit when** a host needs transactions across documents beyond a batch, field-level deletes, or
 live presence (a `room` capability).
 
-## P089 · 2026-10-18 · An artifact's asset library at `/_blob/<id>` on its own origin; scripts and styles from it only where uploads are the admins' · Accepted; amended by P091
+## P089 · 2026-10-18 · An artifact's asset library at `/_blob/<id>` on its own origin; scripts and styles from it only where uploads are the admins' · Accepted; amended by P091, P103
 
 Amends P022 and P082 (a page's CSP gains a source on its own origin) and P050 (a running page's own
 loads of its assets skip the host's per-request check).
@@ -3846,3 +3846,72 @@ after `JSON.stringify` isn't enough. A gate is only one if what it guards hasn't
 `REPORT_TEXT_LIMITS`, keep it bounded), or a page needs more than 10 confirmations waiting or 50
 resources followed (raise the caps, not lift them); or MCP Apps gives `notifications/message` a
 schema for `data` the SDK enforces (then strings and plain JSON only, and the walk is a check).
+
+## P103 · 2026-10-19 · A live widget takes no capability's origins; a trusted asset runs only while the config says so, bearer mode too; `callTool` has a rate · Accepted
+
+Three findings the threat model's writer made checking the docs' claims against the code at
+a92adac. Amends P021 (`callTool`'s default gates), P079 (what a live widget's options may say) and
+P089 (when an asset goes out as code). Each has its regression, which failed before:
+`test/live-data.test.ts` "refuses a capability's own origins too", `test/assets.test.ts` "code
+only while the current config lets uploaded code run, in bearer mode too",
+`test/bridge.test.ts` "callTool is rate limited by default", with two in `test/agreement.test.ts`.
+
+**Decision**, by finding:
+1. **No option opens a live widget's network, a capability's own origins included.** P079 said
+   none did, but `CapabilityConfig.connect` and `.resource` join the CSP as `egress` does
+   (`egressOrigins`): `presets.liveWidget({ capabilities: { readData: { connect: [...] } } })`
+   opened `connect-src` to it. `presets.liveWidget` now refuses either field on any capability, a
+   `ConfigError` naming it (`options.capabilities.readData.connect`), as it refuses `egress`; its
+   options' type says so (`LiveCapabilityConfig`, a capability's config less both). Gates, levels
+   and a capability's own manual entry stay the host's to change. Nothing adopter-facing used it:
+   no example, test or doc gives a live widget a capability's origins (capability origins appear
+   only on MCP Apps views and inline widgets).
+2. **A trusted code asset runs only while the current config lets uploaded code run, asked at
+   every request** (P089, P091.9 said so; bearer mode skipped it). In bearer mode `/server` served
+   a `trusted` script as code on the upload's word alone, whatever the config said now. Now one
+   check decides for both paths (`runsAsCode`): trusted, and the config its artifact's page is
+   served under lets uploaded code run. An access names that config; by id alone the server can't
+   tell which of its artifact configs (artifact mode, domain isolation) the page is under, so the
+   strictest it might be decides: every one must let uploaded code run, and with none, nothing
+   runs. And `assetCodeRuns` is false for a config that declares no `assets` (it was true, the
+   contract's admin level standing in for a capability the config dropped): a config that stops
+   serving assets runs nothing of its library. What it closes is the second of P091's two walls:
+   the page's own CSP already followed the current config (`assetCspDirectives` opens
+   `/_blob/` for scripts only where code runs), so the script ran only in a page whose CSP still
+   opened `/_blob/` for scripts: in bearer mode, any page on the scope's origin under another
+   artifact config.
+3. **`callTool` has a rate by default: 30 a minute**, with its confirmation (`["confirm", { rateLimit:
+   { perMinute: 30 } }]`), counted before the person is asked. It needs no gesture (an MCP view's
+   gesture is the host's to check), so a page could call it on load or on a timer; a host whose
+   `confirm` says yes by itself (for its app's own tools, say) had no bound at all (P095 caps the
+   confirmations waiting at once, not the calls). 30 is what
+   the host actions with an effect have (`copyText`, `comments`, `assets`, `setModelContext`);
+   reads have more (`readData` 120). A host's own `gates` replace the defaults, as for every
+   capability (`callTool: { gates: ["confirm", { rateLimit: { perMinute: 120 } }] }`, or `[]`).
+   The manual says "At most 30 a minute." (generated from the gates; the agreement test holds it),
+   and a new agreement case holds the class: every capability a page may call without a gesture
+   has a rate by default, `resize` alone excepted (it carries nothing out).
+
+**Threat it re-opens.** None: each change narrows. A live widget given a capability's origins was
+a quiet hole, now a config error at startup. In bearer mode a server with several artifact
+configs, one of which doesn't let uploaded code run (or declares no `assets`), serves every
+trusted script as a download: such a host's bearer libraries hold no running code until each
+config lets it run. A view that calls tools faster than 30 a minute under the default gates is
+refused (`rate_limited`) until its host names its own gates.
+**Why.** Each was a claim the docs make that the code didn't hold: P079's "no option opens it",
+P091.9's "only when the artifact's config still lets uploaded code run", and gates that bound a
+page's calls (PRINCIPLE 1).
+**Rejected.**
+- For 1, documenting what opens a live widget's network instead of refusing it: the preset's one
+  promise is no network of its own, and no adopter-facing feature needs the exception; a widget
+  that needs an origin is an inline widget with that egress.
+- For 2, a config name on each stored asset (`StoredAsset.preset`, as `ServedDocument.preset`):
+  exact for a host with several artifact configs, but new contract for the host's store to keep
+  right; the strictest-config rule needs nothing from it and fails closed. Never serving code in
+  bearer mode: breaks a public artifact's library for no gain where its config lets code run.
+- For 3, a gesture on `callTool`: an MCP view's gesture is the host's to check (the shell doesn't
+  speak for one), and views call tools to refresh their data; a rate bounds a loop without
+  changing what a view may do.
+**Revisit when** a host with several artifact configs needs bearer-mode code assets under a mix of
+them (then the asset names its config); or MCP Apps hosts report views that legitimately call
+tools faster than 30 a minute under default gates.

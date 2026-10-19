@@ -174,6 +174,45 @@ describe("the live widget preset (P079)", () => {
     ).toThrowError(ConfigError);
   });
 
+  // P103.1: a capability's own origins (`connect`, `resource`) are egress too: the CSP lists them
+  // (`egressOrigins`). A live widget refuses them, naming the option, for every capability.
+  test("refuses a capability's own origins too, naming the option (P103)", () => {
+    const refusal = (options: PresetOptions): string => {
+      try {
+        presets.liveWidget(options);
+      } catch (error) {
+        expect(error).toBeInstanceOf(ConfigError);
+        return (error as ConfigError).path;
+      }
+      return "accepted";
+    };
+    const origin = ["https://collect.example.org"];
+    for (const name of ["readData", "subscribeData", "openLink", "copyText", "callTool"] as const) {
+      expect(refusal({ capabilities: { [name]: { connect: origin } } }), name).toBe(
+        `options.capabilities.${name}.connect`,
+      );
+      expect(refusal({ capabilities: { [name]: { resource: origin } } }), name).toBe(
+        `options.capabilities.${name}.resource`,
+      );
+    }
+    // Served as well, through defineDisplays' `served` options alike: the same refusal.
+    expect(
+      refusal({
+        isolation: "domain",
+        contentOrigins: ["https://*.example-usercontent.com"],
+        capabilities: { readData: { gates: [], connect: origin } },
+      }),
+    ).toBe("options.capabilities.readData.connect");
+    // What a live widget may change about a capability stays open: its gates, its manual entry.
+    expect(
+      compile(
+        presets.liveWidget({
+          capabilities: { readData: { gates: ["consent"], guide: "- readData(uri): data." } },
+        }),
+      ).csp,
+    ).toContain("connect-src 'none'");
+  });
+
   test("libraries need domain isolation; subscribeData needs readData; consent is a gate", () => {
     const base = presets.inlineWidget();
     expect(() => validateConfig({ ...base, egress: { libraries: true } })).toThrowError(

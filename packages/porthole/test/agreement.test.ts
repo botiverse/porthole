@@ -447,6 +447,39 @@ describe("changing the config changes the CSP, the shell and the manual together
     expect(manual(declared)).toContain("https://tools.example.com");
   });
 
+  // P103.3: callTool has a rate by default, which the manual teaches; the host's gates replace it.
+  test("callTool's default rate is in the manual, and a host's own gates replace it (P103)", () => {
+    const tools = (config: PortholeConfig) =>
+      manual(compile(config))
+        .split("\n")
+        .find((line) => line.startsWith("- Tools:")) ?? "";
+    expect(effectiveGates(presets.mcpApp({ capabilities: { callTool: {} } }), "callTool")).toEqual([
+      "confirm",
+      { rateLimit: { perMinute: 30 } },
+    ]);
+    expect(tools(presets.mcpApp({ capabilities: { callTool: {} } }))).toContain(
+      "nothing happens unless they confirm. At most 30 a minute.",
+    );
+    const own = presets.mcpApp({ capabilities: { callTool: { gates: ["confirm"] } } });
+    expect(tools(own)).toContain("unless they confirm.");
+    expect(tools(own)).not.toContain("a minute");
+  });
+
+  // And the class: whatever a page may call without a gesture (on load, on a timer) is bounded
+  // by a rate unless the host says otherwise; only its size, which carries nothing, isn't.
+  test("every capability a page may call without a gesture has a rate by default (P103)", () => {
+    for (const name of CAPABILITY_NAMES) {
+      const gates = capabilitySpec(name).defaultGates;
+      if (name === "resize" || gates.includes("user-activation")) {
+        continue;
+      }
+      expect(
+        gates.some((gate) => typeof gate === "object"),
+        `${name}: ${JSON.stringify(gates)}`,
+      ).toBe(true);
+    }
+  });
+
   test("dropping a capability removes its global from the shell and the manual", () => {
     const withPrompt = compile(presets.inlineWidget({ capabilities: { sendPrompt: {} } }));
     const without = compile(presets.inlineWidget());

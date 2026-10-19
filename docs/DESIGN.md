@@ -108,7 +108,7 @@ no `components` field (P015).
 | `sendPrompt` | user-activation, confirm | handler | `sendPrompt(text)` | `ui/message` (`app.sendMessage`) |
 | `openLink` | user-activation, confirm | handler | `openLink(url)` | `ui/open-link` (`app.openLink`) |
 | `downloadFile` | user-activation, confirm | handler | — | `ui/download-file` (`app.downloadFile`) |
-| `callTool` | confirm | handler | — | `tools/call` (`app.callServerTool`) |
+| `callTool` | confirm, 30/min (P103) | handler | — | `tools/call` (`app.callServerTool`) |
 | `readData` | 120/min | handler | `readData(uri)` | `resources/read` (`app.readServerResource`) |
 | `subscribeData` | 60/min (needs `readData`) | handler (`changed`, `signal`) | `subscribeData(uri, onData, onError)` | `resources/subscribe`, `resources/unsubscribe`; the host's `notifications/resources/updated` (MCP's own; none in MCP Apps, P079) |
 | `setModelContext` | 30/min | handler | — | `ui/update-model-context` (`app.updateModelContext`) |
@@ -133,7 +133,8 @@ asking nothing, and their capabilities need no handler (P080). A refused request
 error carries why, `data: { code, message }` (`consent_required`, `denied`,
 `rate_limited`, `not_allowed`, `failed`; the host's `Refused` words its own, P080). `presets.liveWidget` declares `readData` and
 `subscribeData` with `consent` and its rate, and keeps egress closed (no option opens
-it); served, it loads Porthole's libraries from its origin (`egress.libraries`).
+it: it refuses `egress` and a capability's own `connect` or `resource`, P103); served, it loads
+Porthole's libraries from its origin (`egress.libraries`).
 
 ## What the compiler derives
 
@@ -839,7 +840,8 @@ if (db) {
   cookie, a framed set's sealed address as `Referer`, or `assets.url(id)`'s
   `<sealed base>__porthole/blob/<id>`), then the host's check, then `AssetStore.get(id, access)`;
   revalidated (`no-cache`, ETag); code-typed only where trusted and the config lets uploaded code
-  run; by id alone only in bearer mode.
+  run, asked at each load (in bearer mode, every artifact config must, P103); by id alone only in
+  bearer mode.
 - **The manual**: under a runtime, topic `interactive` lists `porthole.use`'s methods with levels and
   gates, and topic `capabilities` teaches declaring, levels, errors, where state goes, and each
   offered capability's `.d.ts`. 0.6's globals stay defined (`shell/legacy.ts`) and untaught.
@@ -851,8 +853,9 @@ if (db) {
   The phase-1 workhorse.
 - **Live widget** (`presets.liveWidget`, P079). An inline widget that shows the
   host's data, current, as the viewer may see it: `readData` and `subscribeData`
-  behind the viewer's consent, no network of its own, and, served, Porthole's
-  Chart.js and D3 from its own origin.
+  behind the viewer's consent, no network of its own (no option opens it, a
+  capability's own origins included, P103), and, served, Porthole's Chart.js and D3
+  from its own origin.
 - **Artifact page** (`presets.artifact`). A whole document: written into an opaque
   frame by the shell where the host has it (the first host's "show an HTML file"),
   or served on its own origin (domain isolation), CSP in headers, versioned. It
@@ -965,7 +968,7 @@ for that to lapse and click with raw input.
 | Live data: a kept result is a read (P094) | a result the host pushed (`changed(result)`), or read after a stale answer, answers the frame's next read only past every gate a read has (level, names, rate, gesture, consent, confirm), with no new upstream call | `test/audit-gates.test.ts`; `leak/served/runtime.spec.ts`: "a read above the viewer's level: a result the host pushed is refused as a cold read is" | `live-held-read` → that case (all three) |
 | The runtime: per-user data (P088) | `dbAccess`: `me` is the host's id; another's `data/users/<id>`, or anything else under `data`, refused at every level, in the bridge and the host | `test/runtime.test.ts`; `leak/served/runtime.spec.ts`: "a person's own data is theirs" | `db-private` → that case (all three) |
 | The runtime: comments write-only (P090) | the bridge answers `comments` with `true` only for a handler's `true`; no read method | `test/runtime.test.ts`; `leak/served/runtime.spec.ts`: "comments are write-only" | `comments-result` → that case (all three) |
-| The asset library (P089, P091) | `/_blob/<id>` (or the frame's `<sealed base>__porthole/blob/<id>`) for an access to its artifact (a cookie, a sealed `Referer`, the sealed path), then the host's check, the store asked with it; typed by name, never a page, code only where trusted and uploaded code may run, inert CSP, CORP, revalidated; the page's CSP opens `<origin>/_blob/` for images, media, fonts and data, for scripts and styles only where uploads are the admins' | `test/assets.test.ts` (a forged same-origin claim: 401; another artifact's session: 404; revoked: 403; bearer mode); `leak/served/runtime.spec.ts`: an upload loads in its frame; a set's page loads it; static `/_blob/` in a frame by `Referer` (Chromium, Firefox; WebKit sends only the origin: measured); "a script asset runs as code only if an admin uploaded it"; "scripts load from /_blob/ only where uploads are the admins'"; "an asset reaches only its own artifact's pages"; "an asset opened on its own runs nothing" | `blob-trusted` → the trusted-code case; `blob-script,blob-trusted` (two walls) → that case and the tab's CSP case; `blob-inert` → the opened-on-its-own case (all three; `scripts/controls.ts`) |
+| The asset library (P089, P091) | `/_blob/<id>` (or the frame's `<sealed base>__porthole/blob/<id>`) for an access to its artifact (a cookie, a sealed `Referer`, the sealed path), then the host's check, the store asked with it; typed by name, never a page, code only where trusted and uploaded code may run (asked at each load; by id alone, every artifact config must, P103), inert CSP, CORP, revalidated; the page's CSP opens `<origin>/_blob/` for images, media, fonts and data, for scripts and styles only where uploads are the admins' | `test/assets.test.ts` (a forged same-origin claim: 401; another artifact's session: 404; revoked: 403; bearer mode; a stricter config turns trusted code into a download, bearer mode too); `leak/served/runtime.spec.ts`: an upload loads in its frame; a set's page loads it; static `/_blob/` in a frame by `Referer` (Chromium, Firefox; WebKit sends only the origin: measured); "a script asset runs as code only if an admin uploaded it"; "scripts load from /_blob/ only where uploads are the admins'"; "an asset reaches only its own artifact's pages"; "an asset opened on its own runs nothing" | `blob-trusted` → the trusted-code case; `blob-script,blob-trusted` (two walls) → that case and the tab's CSP case; `blob-inert` → the opened-on-its-own case (all three; `scripts/controls.ts`) |
 | Workers (P044, P045) | no Node module in `/server`; D1 tickets taken by one `DELETE … RETURNING` | `test/workers.test.ts` (workerd, no `nodejs_compat`, real D1: once per ticket, a race, anonymous, a revocation, flat names, reserved namespaces) | — |
 
 ### The clipboard, and copy buttons
