@@ -62,11 +62,16 @@ import type {
 
 /**
  * The host-function bridge: every capability call from a frame passes here, and nowhere else
- * reaches a host handler. In order: declared → within its host function's rate (before its
- * arguments are read, P091, P095) → arguments well formed → not muted → its method's own rate →
- * a user gesture, if gated so → the viewer's consent, if gated so → a person's confirmation, if
- * gated so → the handler (or, for a read, a result the host already gave for it, or for a
- * stale-allowed one the host's cache).
+ * reaches a host handler. In order (`call`): the run not stopped (`close`) → declared by the
+ * config → declared by the page, where it has a declaration (P086) → before the arguments are
+ * read (`precheck`): for the runtime's own, a method by its `op` and the viewer's level, then for
+ * every capability its host function's own rate (P091, P095) → arguments well formed and within
+ * their limits → who may (P087: the level of each method the call runs for the viewer, a page's
+ * named data with or without a viewer, db's rules) → not muted, if confirm-gated → the own rate
+ * of each method it runs (P094: a batch's writes count each) → a user gesture, if gated so → the
+ * viewer's consent, if gated so → a person's confirmation, if gated so (at most 10 waiting) → the
+ * handler (or, for a read, a result the host already gave for it, or for a stale-allowed one the
+ * host's cache).
  */
 
 export type BridgeEvent =

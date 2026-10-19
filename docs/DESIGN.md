@@ -685,11 +685,19 @@ it (`leak/mcp/`), in an opaque frame and behind the sandbox proxy.
 
 ### The host-function bridge
 
-`bridge.call(capability, args)` checks, in order: declared → its rate limit, before the
-arguments are read (P095: a malformed call costs its rate) → arguments valid
-(`openLink` http(s) only and without credentials in the URL; a prompt
-1..`maxPromptChars` characters; bounded, P095) → muted? → a runtime method's own rate → user
-activation → `confirm` (at most 10 waiting a display, P095) → the host's handler. Each refusal is a
+`bridge.call(capability, args)` checks, in order: the display's run not stopped (a restart or
+its end closes its bridge, P095) → declared by the config → declared by the page, where it has
+a declaration (P086) → before the arguments are read: for the runtime's own host functions, a
+method by its `op` and the viewer's level for it, then for every capability its host function's
+own rate (P091, P095: a malformed call costs its rate) → arguments valid and within their
+limits (`openLink` http(s) only and without credentials in the URL; a prompt
+1..`maxPromptChars` characters; a tool's arguments, model context and a download's contents
+plain, bounded JSON, P095) → who may (P087: the level of each method the call runs for the
+viewer, the data a page named with or without a viewer (P094), db's rules) → muted, if
+confirm-gated → the own rate of each method it runs (`methodGates`; P094: a batch's writes count
+each) → user activation → the viewer's `consent` → `confirm` (at most 10 waiting a display, P095)
+→ the host's handler (or, for a read, a result the host already gave for it (P094), or for a read
+allowed stale, the host's cache). Each refusal is a
 `Refusal` and a `refused` display event; the frame gets an error result. After
 `declinesBeforeMute` declines a display stops asking (`muted`) until it runs again.
 
