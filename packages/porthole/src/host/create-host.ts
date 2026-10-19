@@ -203,7 +203,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         ) {
           return;
         }
-        const type = REPORTS[raw.method];
+        // Its own entries only: `constructor` or `toString` is no report (P095).
+        const type = Object.hasOwn(REPORTS, raw.method) ? REPORTS[raw.method] : undefined;
         if (type === undefined) {
           return;
         }

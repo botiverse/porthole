@@ -366,6 +366,15 @@ describe("a navigation the shell stopped reaches the host (#12, P080)", () => {
     expect(t.events.navigationBlocked).toHaveLength(10);
   });
 
+  test("P095 8: a method named after Object.prototype's own is no report: nothing is called", async () => {
+    const t = show(presets.inlineWidget({ capabilities: { annotate: {} } }));
+    for (const method of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+      t.say({ method, params: {} });
+    }
+    await t.settle();
+    expect(t.events.refused).toBeUndefined();
+  });
+
   test("a malformed one is dropped as invalid", async () => {
     const t = show(presets.inlineWidget());
     for (const url of [7, "", "x".repeat(5_000)]) {
