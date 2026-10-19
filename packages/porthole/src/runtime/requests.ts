@@ -15,9 +15,16 @@ type Parsed<T> = T | "too_large" | null;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
-/** A short text of the content's: a string of `1..max` characters, no control characters. */
+/**
+ * A short text of the content's: a string of `1..max` characters, no control characters, and
+ * well-formed Unicode (P095: a lone surrogate makes `encodeURIComponent` throw, and is no text).
+ */
 const shortText = (value: unknown, max: number): value is string =>
-  typeof value === "string" && value.trim() !== "" && value.length <= max && !/\p{Cc}/u.test(value);
+  typeof value === "string" &&
+  value.trim() !== "" &&
+  value.length <= max &&
+  value.isWellFormed() &&
+  !/\p{Cc}/u.test(value);
 
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/u;
 
@@ -238,6 +245,7 @@ export function assetNameProblem(name: unknown): string | null {
     typeof name !== "string" ||
     name.trim() === "" ||
     name.length > 255 ||
+    !name.isWellFormed() ||
     /[/\\\p{Cc}\p{Cf}]/u.test(name)
   ) {
     return "an asset's name is a file name: 1 to 255 characters, no / or \\";

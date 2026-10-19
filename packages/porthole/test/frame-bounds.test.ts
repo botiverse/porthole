@@ -5,6 +5,13 @@ import { createBridge, type BridgeEvent } from "../src/bridge/bridge.ts";
 import type { ConfirmAnswer, ConfirmRequest } from "../src/bridge/types.ts";
 import { presets, type PresetOptions } from "../src/index.ts";
 import { ConfirmDialog } from "../src/react/index.ts";
+import { filePathProblem } from "../src/files/paths.ts";
+import {
+  assetNameProblem,
+  downloadContents,
+  parseArtifactRequest,
+  parseCommentRequest,
+} from "../src/runtime/requests.ts";
 
 /**
  * P095, after S05: the rest of its class. What a frame sends is processed only within bounds, after
@@ -115,5 +122,24 @@ describe("P095 2: confirmations waiting at once are capped", () => {
     t.asked[10]?.(true);
     expect(await next).toMatchObject({ ok: true });
     expect(t.events.some((event) => event.type === "muted")).toBe(false);
+  });
+});
+
+describe("P095 3: what a page names things is well-formed Unicode, refused up front if not", () => {
+  const lone = "a\uD800b";
+  test("a download's name, an asset's, a file's path, a comment's anchor", () => {
+    expect(() => downloadContents({ name: `${lone}.txt`, text: "x" })).not.toThrow();
+    expect(downloadContents({ name: `${lone}.txt`, text: "x" })).toBeNull();
+    expect(assetNameProblem(`${lone}.png`)).not.toBeNull();
+    expect(filePathProblem(`${lone}.html`)).not.toBeNull();
+    expect(parseCommentRequest({ anchor: { name: lone } })).toBeNull();
+    expect(
+      parseArtifactRequest(
+        { op: "publish", base: "1", files: { "a.html": { text: "x" } }, label: lone },
+        {},
+      ),
+    ).toBeNull();
+    // A pair is a character: fine.
+    expect(downloadContents({ name: "\u{1F600}.txt", text: "x" })).not.toBeNull();
   });
 });

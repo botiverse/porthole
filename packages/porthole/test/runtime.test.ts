@@ -610,6 +610,23 @@ const opaque = (capabilities: PortholeConfig["capabilities"]) =>
   presets.inlineWidget({ runtime: "1", capabilities });
 
 describe("over the wire: porthole/call, watches, the roster (P085)", () => {
+  test("P095 3: a file name that isn't well-formed Unicode is refused, and answered", async () => {
+    const t = show(opaque({ downloadFile: {} }), { declaration: null });
+    const answer = await t.ask("porthole/call", {
+      capability: "downloads",
+      method: "save",
+      args: { file: { name: "a\uD800.txt", text: "x" } },
+    });
+    // Refused as malformed (`invalid`, told as not_allowed), where a well-formed name goes.
+    expect(answer.error?.data?.code).toBe("not_allowed");
+    const fine = await t.ask("porthole/call", {
+      capability: "downloads",
+      method: "save",
+      args: { file: { name: "a.txt", text: "x" } },
+    });
+    expect(fine.error).toBeUndefined();
+  });
+
   test("the handshake carries what this page may use, in MCP Apps' experimental capabilities", async () => {
     const t = show(opaque({ copyText: {}, db: {}, user: {} }), {
       declaration: declared({ db: {} }),
