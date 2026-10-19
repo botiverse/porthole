@@ -23,6 +23,7 @@ interface Job {
   readonly name?: string;
   readonly needs?: string | readonly string[];
   readonly if?: string;
+  readonly "timeout-minutes"?: number;
   readonly permissions?: Readonly<Record<string, string>>;
   readonly strategy?: { readonly matrix?: Readonly<Record<string, unknown>> };
   readonly steps?: readonly Step[];
@@ -41,27 +42,78 @@ const ci = workflow("ci.yml");
 const needs = (job: Job | undefined): readonly string[] =>
   job?.needs === undefined ? [] : typeof job.needs === "string" ? [job.needs] : job.needs;
 
-/** ci.yml's jobs as GitHub names them: a matrix job once per engine, `<id> (<engine>)`. */
-function ciJobNames(): string[] {
-  const names: string[] = [];
-  for (const [id, job] of Object.entries(ci.jobs)) {
-    const matrix = job.strategy?.matrix;
-    const keys = Object.keys(matrix ?? {});
-    expect(
-      keys.every((key) => key === "engine"),
-      `${id}: a matrix of engines only`,
-    ).toBe(true);
-    const engines = (matrix?.["engine"] ?? []) as readonly string[];
-    const name = job.name ?? id;
-    if (engines.length === 0) {
-      names.push(name);
-    }
-    for (const engine of engines) {
-      names.push(`${name} (${engine})`);
+type Combination = Readonly<Record<string, unknown>>;
+
+/** A matrix's combinations as GitHub makes them: its lists' product, less `exclude`, with `include`. */
+function combinations(matrix: Readonly<Record<string, unknown>>): Combination[] {
+  const {
+    include = [],
+    exclude = [],
+    ...axes
+  } = matrix as { include?: Combination[]; exclude?: Combination[] };
+  const matches = (each: Combination, pattern: Combination): boolean =>
+    Object.entries(pattern).every(([key, value]) => each[key] === value);
+  let all: Combination[] = Object.keys(axes).length === 0 ? [] : [{}];
+  for (const [key, values] of Object.entries(axes)) {
+    // A list made at run time (`${{ fromJSON(…) }}`) can't be expanded here: name its jobs.
+    expect(Array.isArray(values), `matrix.${key} is a list`).toBe(true);
+    all = all.flatMap((each) => (values as unknown[]).map((value) => ({ ...each, [key]: value })));
+  }
+  all = all.filter((each) => !exclude.some((pattern) => matches(each, pattern)));
+  const extra: Combination[] = [];
+  for (const entry of include) {
+    // Added to every combination whose own values it keeps; a combination of its own otherwise.
+    const own = Object.fromEntries(
+      Object.entries(entry).filter(([key]) => Object.hasOwn(axes, key)),
+    );
+    let added = false;
+    all = all.map((each) => {
+      if (!matches(each, own)) {
+        return each;
+      }
+      added = true;
+      return { ...each, ...entry };
+    });
+    if (!added) {
+      extra.push({ ...entry });
     }
   }
-  return names;
+  // Only the lists' combinations take what an `include` adds; one it made is its own.
+  return [...all, ...extra];
 }
+
+/**
+ * ci.yml's jobs as GitHub names them: a job's `name` or id; a matrix job once per combination,
+ * its name with `${{ matrix.<key> }}` filled in, or else followed by the combination's values.
+ */
+function ciJobNames(): string[] {
+  return Object.entries(ci.jobs).flatMap(([id, job]) => {
+    const name = job.name ?? id;
+    const matrix = job.strategy?.matrix;
+    if (matrix === undefined) {
+      expect(name, `${id}: a name without expressions`).not.toContain("${{");
+      return [name];
+    }
+    return combinations(matrix).map((each) => {
+      if (!name.includes("${{")) {
+        return `${name} (${Object.values(each).map(String).join(", ")})`;
+      }
+      const named = name.replace(/\$\{\{\s*matrix\.([\w-]+)\s*\}\}/gu, (_, key: string) =>
+        String(each[key]),
+      );
+      expect(named, `${id}: a name made of matrix values only`).not.toContain("${{");
+      return named;
+    });
+  });
+}
+
+const gate = release.jobs["gate"];
+const gateEnv = (gate?.steps ?? []).find((step) => step.env !== undefined)?.env ?? {};
+/** The gate's list of ci.yml's jobs (REQUIRED_CI_JOBS), its one place. */
+const requiredCiJobs = (gateEnv["REQUIRED_CI_JOBS"] ?? "")
+  .split("\n")
+  .map((each) => each.trim())
+  .filter((each) => each !== "");
 
 describe("V03: Actions are reviewed commits", () => {
   it("every `uses:` names a full commit SHA, with the release it is in a comment", () => {
@@ -103,7 +155,6 @@ describe("V03: Actions are reviewed commits", () => {
 });
 
 describe("V03: a release waits for ci.yml on the same commit", () => {
-  const gate = release.jobs["gate"];
   const gateScript = (gate?.steps ?? []).map((step) => step.run ?? "").join("\n");
 
   it("is a commit of main, gated before anything is built", () => {
@@ -122,38 +173,71 @@ describe("V03: a release waits for ci.yml on the same commit", () => {
         gated.add(id);
       }
     }
-    // ci.yml's run for this very commit, from a push to main.
-    expect(gateScript).toContain(
-      "actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&branch=main&event=push",
-    );
+    // ci.yml's runs on main for this very commit, a push's or one started by hand, never a pull
+    // request's (test/release-scripts.test.ts runs the script against each).
+    expect(gateScript).toContain("actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&branch=main");
+    expect(gateScript).toContain('select(.event == "push" or .event == "workflow_dispatch")');
     expect(gateScript).toContain('"$GITHUB_REF" != refs/heads/main');
   });
 
-  it("requires every one of ci.yml's jobs by name, not only the run's conclusion", () => {
-    const required = (gate?.steps ?? [])
-      .map((step) => step.env?.["REQUIRED_CI_JOBS"])
-      .find((each) => each !== undefined);
-    expect(required, "REQUIRED_CI_JOBS").toBeDefined();
-    const names = (required ?? "")
-      .split("\n")
-      .map((each) => each.trim())
-      .filter((each) => each !== "");
-    expect(names.sort()).toEqual(ciJobNames().sort());
+  it("requires every one of ci.yml's jobs by name, as GitHub names them", () => {
+    // A job added to, renamed in or dropped from ci.yml fails here, not at release time.
+    expect([...requiredCiJobs].sort()).toEqual(ciJobNames().sort());
+    expect(new Set(requiredCiJobs).size, "each once").toBe(requiredCiJobs.length);
     // The security suites are among them.
     for (const engine of ["chromium", "webkit", "firefox"]) {
-      expect(names).toContain(`loopback (${engine})`);
-      expect(names).toContain(`controls (${engine})`);
+      expect(requiredCiJobs).toContain(`loopback (${engine})`);
+      expect(requiredCiJobs).toContain(`controls (${engine})`);
     }
-    expect(names).toContain("prod-shape");
-    expect(names).toContain("examples");
+    expect(requiredCiJobs).toContain("prod-shape");
+    expect(requiredCiJobs).toContain("examples");
   });
 
-  it("ci.yml runs every job on every push: none is skipped or allowed to fail", () => {
-    const on = ci.on as { push?: unknown };
-    expect(on.push ?? null, "every push, unfiltered").toBeNull();
+  it("names jobs as GitHub does: matrix values in parentheses, or filled into the name", () => {
+    expect(combinations({ engine: ["a", "b"], os: ["x"], exclude: [{ engine: "b" }] })).toEqual([
+      { engine: "a", os: "x" },
+    ]);
+    expect(
+      combinations({ engine: ["a"], include: [{ engine: "a", extra: 1 }, { engine: "c" }] }),
+    ).toEqual([{ engine: "a", extra: 1 }, { engine: "c" }]);
+    expect(combinations({ include: [{ control: "x" }, { control: "y" }] })).toEqual([
+      { control: "x" },
+      { control: "y" },
+    ]);
+  });
+
+  it("waits for a pending run longer than ci.yml's slowest job, inside its own timeout", () => {
+    const wait = Number(gateEnv["CI_WAIT_MINUTES"]);
+    const slowest = Math.max(...Object.values(ci.jobs).map((job) => job["timeout-minutes"] ?? 0));
+    expect(wait).toBeGreaterThanOrEqual(slowest + 30);
+    expect(gate?.["timeout-minutes"] ?? 0).toBeGreaterThanOrEqual(wait + 5);
+  });
+
+  it("ci.yml runs on pushes and by hand, and none of its jobs is skipped or allowed to fail", () => {
+    const on = ci.on as Record<string, unknown>;
+    expect(Object.hasOwn(on, "push")).toBe(true);
+    // `stamp workflow run ci.yml` for a run that flaked, or a commit without one.
+    expect(Object.hasOwn(on, "workflow_dispatch")).toBe(true);
     for (const [id, job] of Object.entries(ci.jobs)) {
       expect(job.if, id).toBeUndefined();
       expect((job as { "continue-on-error"?: unknown })["continue-on-error"], id).toBeUndefined();
+    }
+  });
+
+  it("calls the API only as an assignment or a command of its own, never inside a test", () => {
+    for (const id of ["gate", "release"]) {
+      for (const step of release.jobs[id]?.steps ?? []) {
+        const script = step.run ?? "";
+        expect(script.startsWith("set -euo pipefail\n"), id).toBe(true);
+        for (const line of script.split("\n")) {
+          if (/^\s*#/u.test(line) || !/\bgh (?:api|release)\b/u.test(line)) {
+            continue;
+          }
+          expect(line, id).toMatch(
+            /^\s*(?:[a-z_]+=\$\(gh (?:api|release)\b|gh (?:api|release)\b)/u,
+          );
+        }
+      }
     }
   });
 });

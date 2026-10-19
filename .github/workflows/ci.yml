@@ -3,12 +3,14 @@ name: ci
 # Every push: the checks (types, lint, format, unit tests with /server in workerd), the browser
 # suites on loopback on each engine Porthole supports, and the prod-shape profile (P066): the
 # host kit behind a TLS edge with real DNS, on same-site sibling origins, in docker compose.
-# release.yml publishes a commit only once this passed on it from a push to main, every job below
-# by name (its REQUIRED_CI_JOBS; test/release.test.ts holds the two together). Every Action is
-# pinned to the commit of the release named beside it (P097).
+# release.yml publishes a commit only once this passed on it on main, every job below by name (its
+# REQUIRED_CI_JOBS; test/release.test.ts holds the two together). A run that flaked, or a commit
+# without one, is run again by hand: `stamp workflow run ci.yml --repo botiverse/porthole`. Every
+# Action is pinned to the commit of the release named beside it (P097).
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -42,17 +42,21 @@ env:
 jobs:
   gate:
     runs-on: ubuntu-24.04
-    # ci.yml's longest job (prod-shape) has 60 minutes, after its queue.
-    timeout-minutes: 100
+    # Longer than the wait below (CI_WAIT_MINUTES).
+    timeout-minutes: 160
     permissions:
       contents: read # whether the tag exists
-      actions: read # ci.yml's run and jobs for the released commit
+      actions: read # ci.yml's runs and jobs for the released commit
     steps:
       - name: release only a commit of main that passed all of ci.yml
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          # ci.yml's jobs as GitHub names them; test/release.test.ts holds this list to ci.yml.
+          # How long a pending run is waited for: longer than ci.yml's slowest job, after its queue
+          # (test/release.test.ts checks it against ci.yml's timeouts).
+          CI_WAIT_MINUTES: "150"
+          # ci.yml's jobs as GitHub names them, the one list of them: test/release.test.ts holds it
+          # to ci.yml's jobs, so a job added, renamed or dropped there fails a test.
           REQUIRED_CI_JOBS: |
             check
             loopback (chromium)
@@ -63,6 +67,8 @@ jobs:
             controls (firefox)
             examples
             prod-shape
+        # Every API call is an assignment of its own under `set -euo pipefail`, so an error stops
+        # the gate instead of reading as "no tag" or "no run".
         run: |
           set -euo pipefail
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
@@ -72,30 +78,28 @@ jobs:
             if [ "$GITHUB_REF" != refs/heads/main ]; then
               echo "dispatch from main only (got $GITHUB_REF)"; exit 1
             fi
-            # Its own assignment, so a failed call stops the gate instead of reading as "no tag".
             existing=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$TAG" --jq ".[] | select(.ref == \"refs/tags/$TAG\") | .ref")
             if [ -n "$existing" ]; then
               echo "$TAG already exists: bump the version first"; exit 1
             fi
           fi
-          for attempt in $(seq 1 90); do
-            # The newest ci.yml run for this very commit from a push to main (a re-run of its
-            # failed jobs updates the same run).
-            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&branch=main&event=push&per_page=1" \
-              --jq '.workflow_runs[0] // empty | "\(.id) \(.status) \(.conclusion)"')
-            if [ -z "$run" ]; then
-              # ci.yml runs on every push: a commit without a run after ten minutes was never
-              # main's head. Release main's head, or tag one that was.
+          for attempt in $(seq 1 "$CI_WAIT_MINUTES"); do
+            # The newest ci.yml run on main for this very commit, started by a push or by hand
+            # (`stamp workflow run ci.yml --repo botiverse/porthole`, for a run that flaked or a
+            # commit without one); never a pull request's. A re-run of failed jobs updates its run.
+            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&branch=main&per_page=100" \
+              --jq '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")] | sort_by(.created_at) | last // empty | "\(.id) \(.status) \(.conclusion)"')
+            if [ -z "$runs" ]; then
               if [ "$attempt" -ge 10 ]; then
-                echo "no ci.yml run on main for $GITHUB_SHA"; exit 1
+                echo "no ci.yml run on main for $GITHUB_SHA: stamp workflow run ci.yml --repo botiverse/porthole, then release again"; exit 1
               fi
               echo "no ci.yml run on main for $GITHUB_SHA yet"
             else
-              read -r id status conclusion <<< "$run"
+              read -r id status conclusion <<< "$runs"
               echo "ci.yml run $id on $GITHUB_SHA: $status $conclusion"
               if [ "$status" = completed ]; then
                 if [ "$conclusion" != success ]; then
-                  echo "ci.yml did not pass on $GITHUB_SHA"; exit 1
+                  echo "ci.yml did not pass on $GITHUB_SHA: re-run it (stamp workflow run ci.yml --repo botiverse/porthole), then release again"; exit 1
                 fi
                 # Each job's latest attempt: a job made conditional, skipped or dropped from
                 # ci.yml leaves a run that passed without it.
@@ -195,9 +199,14 @@ jobs:
           if [ "$name" != "@botiverse/porthole" ] || [ "v$version" != "$TAG" ]; then
             echo "the tarball is $name@$version, not @botiverse/porthole at $TAG"; exit 1
           fi
+          # A prerelease (a version with a "-") goes out as `next`, never as `latest`.
+          dist_tag=latest
+          if [[ "$version" == *-* ]]; then
+            dist_tag=next
+          fi
           # pnpm publish (its OIDC exchange, as before), given the tarball: nothing is packed or
           # run here.
-          pnpm publish "${tarballs[0]}" --access public --no-git-checks
+          pnpm publish "${tarballs[0]}" --access public --no-git-checks --tag "$dist_tag"
 
   release:
     needs: publish
@@ -207,7 +216,8 @@ jobs:
     permissions:
       contents: write # the tag and the GitHub release
     # Checks nothing out and runs no project code. Idempotent, so "Re-run failed jobs" finishes a
-    # release whose publish succeeded.
+    # release whose publish succeeded. Every API call is an assignment of its own (or a command)
+    # under `set -euo pipefail`: an error stops the job instead of reading as "no tag".
     steps:
       - name: tag the released commit and create its GitHub release
         shell: bash
@@ -231,11 +241,15 @@ jobs:
               echo "$TAG points at $sha, not $GITHUB_SHA"; exit 1
             fi
           fi
-          if gh release view "$TAG" > /dev/null 2>&1; then
+          release=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"$TAG\") | .id")
+          if [ -n "$release" ]; then
             echo "release $TAG already exists"; exit 0
           fi
           # The version's section of CHANGELOG.md, as the released commit has it.
-          gh api "repos/$GITHUB_REPOSITORY/contents/CHANGELOG.md?ref=$GITHUB_SHA" \
-            -H "Accept: application/vnd.github.raw+json" \
-            | awk -v head="## ${TAG#v}" '$0 == head { on = 1; next } on && /^## / { exit } on' > notes.md
-          gh release create "$TAG" --title "$TAG" --notes-file notes.md --verify-tag
+          changelog=$(gh api "repos/$GITHUB_REPOSITORY/contents/CHANGELOG.md?ref=$GITHUB_SHA" -H "Accept: application/vnd.github.raw+json")
+          awk -v head="## ${TAG#v}" '$0 == head { on = 1; next } on && /^## / { exit } on' <<< "$changelog" > notes.md
+          if [[ "$TAG" == *-* ]]; then
+            gh release create "$TAG" --title "$TAG" --notes-file notes.md --verify-tag --prerelease
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file notes.md --verify-tag
+          fi

@@ -3154,14 +3154,23 @@ change has its regression in `test/release.test.ts` (the workflows) or `test/not
 
 **Decision**, by finding:
 1. **A release waits for ci.yml on the same commit, every job of it** (V03). release.yml's `gate`
-   job, before anything is built, lets a release through only when ci.yml's newest run for
-   `GITHUB_SHA` from a push to `main` completed with success and each job named in
-   `REQUIRED_CI_JOBS` passed in its latest attempt (a job made conditional, skipped or dropped
-   would leave a run that passes without it); a pending run is waited for (100 minutes, ci.yml's
-   prod-shape has 60), no run after ten minutes means the commit was never main's head, anything
-   else stops the release. The test holds `REQUIRED_CI_JOBS` to ci.yml's jobs (a matrix job once
-   per engine), and ci.yml to running every job on every push, none conditional or allowed to
-   fail. Both triggers go through it: `stamp workflow run release.yml --repo botiverse/porthole
+   job, before anything is built, lets a release through only when ci.yml's newest run on `main`
+   for `GITHUB_SHA`, started by a push or by hand (`workflow_dispatch`: `stamp workflow run ci.yml
+   --repo botiverse/porthole` re-runs one that flaked, or runs a commit that has none; an agent
+   can't re-run a push's run through Stamp), never a pull request's, completed with success and
+   each job named in `REQUIRED_CI_JOBS` passed in its latest attempt (a job made conditional,
+   skipped or dropped would leave a run that passes without it); a pending run is waited for
+   (`CI_WAIT_MINUTES`, 150: the test holds it 30 above ci.yml's slowest job timeout), no run after
+   ten minutes says to start one, anything else stops the release. Every API call in the gate and
+   the release job is an assignment or a command of its own under `set -euo pipefail`, never
+   inside a test, so an API error stops the job instead of reading as "no tag" (Ferry's review
+   found that fail-open). `REQUIRED_CI_JOBS` is the one list of ci.yml's jobs; the test derives
+   ci.yml's job names as GitHub makes them (a matrix's combinations, `exclude`, `include`, names
+   with `${{ matrix.* }}`) and requires the two equal, so a job added, renamed or dropped there
+   fails a test. ci.yml's jobs are none conditional or allowed to fail.
+   `test/release-scripts.test.ts` runs the gate's, publish's and release's scripts against a
+   simulated API (a fake `gh` through the real `jq`): a dispatch run accepted, a pull request's
+   ignored, the newest taken, an API error in each lookup exiting 1. Both triggers go through it: `stamp workflow run release.yml --repo botiverse/porthole
    -f version=X.Y.Z` from main (as OAR's release: refused from another ref or for a tag that
    exists; the `release` job then tags the commit and makes the GitHub release from the version's
    CHANGELOG.md section), and a pushed `v*` tag, as before, which publishes only.
@@ -3169,7 +3178,8 @@ change has its regression in `test/release.test.ts` (the workflows) or `test/not
    (contents: read) installs, checks, builds, runs the bundle test and `pnpm pack`s (publishConfig
    applied, as `pnpm publish` applied it); `publish` (contents: read, id-token: write) downloads
    that tarball, checks it is `@botiverse/porthole` at the tag's version, and runs `pnpm publish
-   <tarball>`: pnpm 11 sends a tarball through the same publish and OIDC path as a directory
+   <tarball>` with `--tag next` for a prerelease (a version with a `-`; its GitHub release is
+   marked one), `--tag latest` otherwise: pnpm 11 sends a tarball through the same publish and OIDC path as a directory
    (`publishPackedPkg`), so npm's trusted-publisher setting, which names release.yml, still
    matches; the publish stays in this file. `release` (contents: write) checks nothing out and
    uses the API only. The workflows' token is `contents: read` unless a job says otherwise; no
