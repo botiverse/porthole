@@ -259,7 +259,9 @@ export function methodLevel(
   }
   const host = config.capabilities[spec.serves]?.levels?.[name];
   const base = host === undefined ? spec.level : higher(host, spec.floor);
-  const page = declared?.levels?.[name];
+  // The page's own names only (P093): a declaration a host passes unchecked may be a plain object.
+  const levels = declared?.levels;
+  const page = levels !== undefined && Object.hasOwn(levels, name) ? levels[name] : undefined;
   return page === undefined ? base : higher(base, page);
 }
 

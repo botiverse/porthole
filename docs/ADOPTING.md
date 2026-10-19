@@ -378,7 +378,9 @@ handlers: {
   order against one state, and refuse a moved base or version with `new Refused("conflict")`;
   check and admit the merged version as any (`checkFileSet`, `admitFiles`).
 - **Per version**: store each version's declaration with it (`declareCapabilities` at its publish)
-  and mount a version with `intersectDeclarations(version's, current)`.
+  and mount a version with `intersectDeclarations(version's, current)`; your API's rules for that
+  version are the same intersection's (whatever it allows, both declarations allow; a stored
+  declaration that isn't one's shape is a `TypeError`).
 - **Who the page may know**: `Grant.user.id` is one path segment, never `me`; give
   `pseudonymFor(secret, artifact, person)` where pages shouldn't link a person across artifacts.
 - **Assets**: `createContentHost({ assets: (id, access) => myStore.asset(id, access) })` answers

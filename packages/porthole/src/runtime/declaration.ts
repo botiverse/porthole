@@ -6,9 +6,10 @@ import {
   isRuntimeVersion,
   offeredCapabilities,
   runtimeCapability,
+  type RuntimeCapabilityName,
   type RuntimeVersion,
 } from "./contract.ts";
-import { dbRulesProblem, type DbRules } from "./db.ts";
+import { dbRuleOf, dbRulesProblem, type DbRule, type DbRules } from "./db.ts";
 import { higher, isViewerLevel, type ViewerLevel } from "./levels.ts";
 
 /**
@@ -116,8 +117,7 @@ export function declarationProblems(
       });
       continue;
     }
-    const spec = runtimeCapability(name);
-    if (spec.builtIn) {
+    if (runtimeCapability(name).builtIn) {
       problems.push({ path, message: "is built in: use it without declaring it" });
       continue;
     }
@@ -125,51 +125,62 @@ export function declarationProblems(
       problems.push({ path, message: "isn't offered here" });
       continue;
     }
-    if (!isRecord(value)) {
-      problems.push({ path, message: "must be an object ({} for none of its own)" });
-      continue;
+    configProblems(name, value, path, problems);
+  }
+  return problems;
+}
+
+/** The problems with one capability's config, its shape alone (no host's offer needed). */
+function configProblems(
+  name: RuntimeCapabilityName,
+  value: unknown,
+  path: string,
+  problems: DeclarationProblem[],
+): void {
+  const spec = runtimeCapability(name);
+  if (!isRecord(value)) {
+    problems.push({ path, message: "must be an object ({} for none of its own)" });
+    return;
+  }
+  const allowed = KEYS[name] ?? ["levels"];
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) {
+      problems.push({ path: `${path}.${key}`, message: `is not a field of ${name}'s config` });
     }
-    const allowed = KEYS[name] ?? ["levels"];
-    for (const key of Object.keys(value)) {
-      if (!allowed.includes(key)) {
-        problems.push({ path: `${path}.${key}`, message: `is not a field of ${name}'s config` });
-      }
-    }
-    if (value.levels !== undefined) {
-      if (!isRecord(value.levels)) {
-        problems.push({ path: `${path}.levels`, message: "must be an object of levels by method" });
-      } else {
-        for (const [method, level] of Object.entries(value.levels)) {
-          if (!Object.hasOwn(spec.methods, method)) {
-            problems.push({
-              path: `${path}.levels.${method}`,
-              message: `is not a method of ${name} (${Object.keys(spec.methods).join(", ")})`,
-            });
-          } else if (!isViewerLevel(level)) {
-            problems.push({
-              path: `${path}.levels.${method}`,
-              message: "must be view, interact, admin or owner",
-            });
-          }
+  }
+  if (value.levels !== undefined) {
+    if (!isRecord(value.levels)) {
+      problems.push({ path: `${path}.levels`, message: "must be an object of levels by method" });
+    } else {
+      for (const [method, level] of Object.entries(value.levels)) {
+        if (!Object.hasOwn(spec.methods, method)) {
+          problems.push({
+            path: `${path}.levels.${method}`,
+            message: `is not a method of ${name} (${Object.keys(spec.methods).join(", ")})`,
+          });
+        } else if (!isViewerLevel(level)) {
+          problems.push({
+            path: `${path}.levels.${method}`,
+            message: "must be view, interact, admin or owner",
+          });
         }
       }
     }
-    if (name === "data") {
-      if (value.resources !== undefined) {
-        names(value.resources, `${path}.resources`, problems);
-      }
-      if (value.tools !== undefined) {
-        names(value.tools, `${path}.tools`, problems);
-      }
+  }
+  if (name === "data") {
+    if (value.resources !== undefined) {
+      names(value.resources, `${path}.resources`, problems);
     }
-    if (name === "db" && value.rules !== undefined) {
-      const problem = dbRulesProblem(value.rules);
-      if (problem !== null) {
-        problems.push({ path: `${path}.rules`, message: problem });
-      }
+    if (value.tools !== undefined) {
+      names(value.tools, `${path}.tools`, problems);
     }
   }
-  return problems;
+  if (name === "db" && value.rules !== undefined) {
+    const problem = dbRulesProblem(value.rules);
+    if (problem !== null) {
+      problems.push({ path: `${path}.rules`, message: problem });
+    }
+  }
 }
 
 /** A declaration checked (a host's stored one, given to `mount`); throws a `TypeError` naming its problems. */
@@ -255,7 +266,8 @@ export function declareCapabilities(options: {
   if (problems.length > 0) {
     return { ok: false, problems };
   }
-  const declaration = { capabilities: given as CapabilityDeclaration, runtime };
+  // Its own copy, without prototypes (P093): what was checked, not the caller's object.
+  const declaration = { capabilities: copied(given) as CapabilityDeclaration, runtime };
   return {
     ok: true,
     declaration,
@@ -285,18 +297,28 @@ export function declaredMatch(list: readonly string[] | undefined, name: string)
   );
 }
 
-/** The stricter of two declared level maps. */
+/**
+ * An object without a prototype (P093): a name the page wrote (`__proto__`, a collection's) is an
+ * own key of it when set, never a prototype's setter or a prototype's name when read.
+ */
+const bare = <T>(): Record<string, T> => Object.create(null) as Record<string, T>;
+
+/** The stricter of two declared level maps (absent: the contract's, everywhere). */
 function stricterLevels(
   a: Readonly<Record<string, ViewerLevel>> | undefined,
   b: Readonly<Record<string, ViewerLevel>> | undefined,
 ): Readonly<Record<string, ViewerLevel>> | undefined {
-  if (a === undefined || b === undefined) {
-    return a ?? b;
+  if (a === undefined && b === undefined) {
+    return undefined;
   }
-  const out: Record<string, ViewerLevel> = { ...a };
-  for (const [method, level] of Object.entries(b)) {
-    const other = Object.hasOwn(out, method) ? out[method] : undefined;
-    out[method] = other === undefined ? level : higher(other, level);
+  const out = bare<ViewerLevel>();
+  for (const method of new Set([...Object.keys(a ?? {}), ...Object.keys(b ?? {})])) {
+    const x = a !== undefined && Object.hasOwn(a, method) ? a[method] : undefined;
+    const y = b !== undefined && Object.hasOwn(b, method) ? b[method] : undefined;
+    const level = x === undefined ? y : y === undefined ? x : higher(x, y);
+    if (level !== undefined) {
+      out[method] = level;
+    }
   }
   return out;
 }
@@ -307,7 +329,7 @@ function bothNames(
   b: readonly string[] | undefined,
 ): readonly string[] | undefined {
   if (a === undefined || b === undefined) {
-    return a ?? b;
+    return a === undefined ? b?.slice() : a.slice();
   }
   return [
     ...new Set([
@@ -317,29 +339,61 @@ function bothNames(
   ];
 }
 
-/** The stricter of two pages' rules, by collection. */
-function stricterRules(a: DbRules | undefined, b: DbRules | undefined): DbRules | undefined {
-  if (a === undefined || b === undefined) {
-    return a ?? b;
-  }
-  const out: Record<string, { read?: ViewerLevel; write?: ViewerLevel }> = {};
-  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
-    const x = Object.hasOwn(a, key) ? a[key] : undefined;
-    const y = Object.hasOwn(b, key) ? b[key] : undefined;
-    const read =
-      x?.read === undefined ? y?.read : y?.read === undefined ? x.read : higher(x.read, y.read);
-    const write =
-      x?.write === undefined
-        ? y?.write
-        : y?.write === undefined
-          ? x.write
-          : higher(x.write, y.write);
-    out[key] = {
-      ...(read === undefined ? {} : { read }),
-      ...(write === undefined ? {} : { write }),
-    };
+/** The stricter of two rules, read and write each (absent: the contract's level). */
+function stricterRule(x: DbRule | undefined, y: DbRule | undefined): DbRule {
+  const out = Object.create(null) as { read?: ViewerLevel; write?: ViewerLevel };
+  for (const field of ["read", "write"] as const) {
+    const p = x?.[field];
+    const q = y?.[field];
+    const level = p === undefined ? q : q === undefined ? p : higher(p, q);
+    if (level !== undefined) {
+      out[field] = level;
+    }
   }
   return out;
+}
+
+/**
+ * The stricter of two pages' rules, by collection (P093, the 2026-10-19 audit's S02): each name
+ * either side's rules give, and `*`, is under the stricter of the rule EACH side puts it under, as
+ * `dbAccess` reads that side (`dbRuleOf`: the name's own rule object, else `*`'s). A collection
+ * neither names is under both sides' `*`, the output's `*`. So the output allows a level exactly
+ * what both allow it: an old version's `public` doesn't outlive the current `*`, nor the other way.
+ */
+function stricterRules(a: DbRules | undefined, b: DbRules | undefined): DbRules | undefined {
+  if (a === undefined && b === undefined) {
+    return undefined;
+  }
+  const out = bare<DbRule>();
+  for (const name of new Set([...Object.keys(a ?? {}), ...Object.keys(b ?? {})])) {
+    out[name] = stricterRule(dbRuleOf(a, name), dbRuleOf(b, name));
+  }
+  return out;
+}
+
+/** A `TypeError` for a declaration that isn't one: read as allowing anything, it could loosen the other. */
+function checkedShape(declaration: unknown, which: string): PageDeclaration {
+  const problems: DeclarationProblem[] = [];
+  if (!isRecord(declaration) || !isRecord(declaration.capabilities)) {
+    problems.push({ path: "capabilities", message: "must be an object: { name: config }" });
+  } else {
+    if (!isRuntimeVersion(declaration.runtime)) {
+      problems.push({ path: "runtime", message: "is not a runtime version Porthole serves" });
+    }
+    for (const [name, value] of Object.entries(declaration.capabilities)) {
+      if (isRuntimeCapabilityName(name)) {
+        configProblems(name, value, `capabilities.${name}`, problems);
+      } else {
+        problems.push({ path: `capabilities.${name}`, message: "is not a capability" });
+      }
+    }
+  }
+  if (problems.length > 0) {
+    throw new TypeError(
+      `The ${which} declaration isn't one: ${problems.map((each) => `${each.path} ${each.message}`).join("; ")}`,
+    );
+  }
+  return declaration as PageDeclaration;
 }
 
 /**
@@ -348,31 +402,50 @@ function stricterRules(a: DbRules | undefined, b: DbRules | undefined): DbRules 
  * it (`declareCapabilities` at its publish) and mounts a version with this, so an old version
  * never keeps what the artifact has since revoked, nor gains what it declared later. Each
  * capability only where both declare it, at the stricter levels, the narrower `data` names and
- * the stricter `db` rules; the version's own pinned runtime.
+ * the stricter `db` rules (each side read as `dbAccess` reads it, P093); the version's own pinned
+ * runtime. Whatever the result allows, each side allows alone. Objects without a prototype; a
+ * `TypeError` for either side that isn't a declaration's shape (P093).
  */
 export function intersectDeclarations(
   version: PageDeclaration,
   current: PageDeclaration,
 ): PageDeclaration {
-  const capabilities: Record<string, DeclaredCapability & DeclaredData & DeclaredDb> = {};
-  const a = version.capabilities as Readonly<Record<string, DeclaredData & DeclaredDb>>;
-  const b = current.capabilities as Readonly<Record<string, DeclaredData & DeclaredDb>>;
+  const a = checkedShape(version, "version's").capabilities as Readonly<
+    Record<string, DeclaredData & DeclaredDb>
+  >;
+  const b = checkedShape(current, "current").capabilities as Readonly<
+    Record<string, DeclaredData & DeclaredDb>
+  >;
+  const capabilities = bare<DeclaredCapability & DeclaredData & DeclaredDb>();
   for (const name of Object.keys(a)) {
     if (!Object.hasOwn(b, name)) {
       continue;
     }
     const x = a[name] ?? {};
     const y = b[name] ?? {};
+    const out = Object.create(null) as {
+      levels?: Readonly<Record<string, ViewerLevel>>;
+      resources?: readonly string[];
+      tools?: readonly string[];
+      rules?: DbRules;
+    };
     const levels = stricterLevels(x.levels, y.levels);
     const resources = bothNames(x.resources, y.resources);
     const tools = bothNames(x.tools, y.tools);
     const rules = stricterRules(x.rules, y.rules);
-    capabilities[name] = {
-      ...(levels === undefined ? {} : { levels }),
-      ...(resources === undefined ? {} : { resources }),
-      ...(tools === undefined ? {} : { tools }),
-      ...(rules === undefined ? {} : { rules }),
-    };
+    if (levels !== undefined) {
+      out.levels = levels;
+    }
+    if (resources !== undefined) {
+      out.resources = resources;
+    }
+    if (tools !== undefined) {
+      out.tools = tools;
+    }
+    if (rules !== undefined) {
+      out.rules = rules;
+    }
+    capabilities[name] = out;
   }
   return { capabilities, runtime: version.runtime };
 }

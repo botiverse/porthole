@@ -3296,3 +3296,60 @@ servers pin the MCP SDK ≥ 2.2.0 (drop that override); when the admin creates t
 environment (add it to the publish job and npm's setting together); when ci.yml gains, renames or
 drops a job (REQUIRED_CI_JOBS follows; the test says so); or when a vendored library or the
 fixture changes (rerun `node scripts/notices.ts`, update the fixture's notices).
+
+## P093 · 2026-10-19 · A version within the current declaration: each side's rules as `dbAccess` reads them, in objects without a prototype · Accepted
+
+Amends P086 and P091 ("a version is shown with what it and the artifact both declare"). The
+2026-10-19 audit (baseline 264b12fa), S02 (high): `intersectDeclarations` merged `db.rules` name
+by name, comparing only the names both wrote, while `dbAccess` puts a collection under its own
+rule object, else under `*`. A version's `public: { read: view, write: interact }` within the
+current `"*": { read: owner, write: owner }` kept the version's `public`, so a viewer at `view`
+read `public/item`, which the current declaration refuses. The same merge wrote into a plain `{}`:
+a collection named `__proto__` (a legal segment) set the output's prototype instead of being a
+rule, and fell to `*` or the contract's levels. Regressions: `test/declaration-intersection.test.ts`.
+
+**Decision**, by finding:
+1. **Each side as `dbAccess` reads it.** For each name either side's rules give, and `*`, the
+   output's rule is the stricter (read and write each) of the rule each side puts that name
+   under: its own rule object if it names it, else its `*`, whole; never field by field (a side's
+   `public: {}` is the contract's levels, whatever its `*` says). A name neither gives falls to
+   the output's `*`, the stricter of both `*`s. So the output allows each level exactly what both
+   sides allow it. One lookup, `dbRuleOf` (db.ts), serves `dbAccess` and the intersection, so the
+   two can't drift.
+2. **No prototypes.** Every object the intersection makes (capabilities, each capability, levels,
+   rules, each rule) is without a prototype, and its lists are copies. `declareCapabilities`
+   returns its own copy as `checkDeclaration` has since P091, not the caller's object.
+   `methodLevel` reads a page's levels by its own names only. The rest of the runtime was checked
+   for the pattern: the other keyed writes take names from the config or from a fixed list.
+3. **A side that isn't a declaration is an error.** `higher` with a level that isn't one returns
+   the other, so a malformed stricter side would loosen the result in silence. Either side whose
+   shape is wrong (a level that isn't one, a rule that isn't an object, a name with `*` inside,
+   an unknown capability, a runtime Porthole doesn't serve) throws a `TypeError`. These are
+   `declarationProblems`' own shape checks (`configProblems`), without the offer: the
+   intersection has no config, and the mount checks the result against the config, as before.
+4. **The acceptance is a property.** Over every pair of declarations built from `*` and one
+   collection (each absent, `{}`, or one of six rules), and 1,500 seeded random pairs (rules on
+   `*`, `__proto__`, `constructor`, `toString`, `data`; levels; `data` names; a capability absent
+   on either side; plain or prototype-less input, as a store or a mount has it): for every viewer
+   level and every db, `data` and `artifact` call, the intersection allows exactly what both
+   sides allow, both as returned and as a mount checks it. "At most" is S02; "at least" means an
+   old version keeps whatever nothing revoked. The audit's case is also run through the bridge.
+
+**API.** Compatible. `intersectDeclarations` throws a `TypeError` for an input that isn't a
+declaration's shape (before, the result was undefined). Its output and `declareCapabilities`' are
+objects without a prototype, which JSON, structured clone and `toEqual` treat as before.
+**Threat it re-opens.** None: it narrows what an old version may do to what both declarations
+allow.
+**Rejected.**
+- A field-by-field fallback (a name's `read`, else `*`'s `read`). `dbAccess` doesn't read rules
+  that way, so for a `{}` rule the result would be stricter than both sides (an old version
+  losing access nothing revoked), and there would be a second semantics to keep in step.
+- Changing `dbAccess` to read field by field: that changes what every stored page's rules mean.
+- Dropping the version's names the current doesn't give: the current's `*` would then govern
+  alone, looser than the version's own rule.
+- Refusing `__proto__` or `constructor` as collection names: they are legal segments (P091 kept
+  `__proto__` as a path), and an object without a prototype holds them.
+- Checking the inputs against the config inside the intersection: it has no config, and the
+  mount checks the result.
+**Revisit when** rules grow beyond read and write by top-level name (nested paths, patterns
+inside a name), or `dbAccess`'s lookup changes. `dbRuleOf` then changes for both.

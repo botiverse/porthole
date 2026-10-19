@@ -379,9 +379,25 @@ export function parseDbRequest(args: unknown): Parsed<DbRequest> {
  * the least level that may read and write it. They only raise the contract's (read: view, write:
  * interact); the host evaluates them again on its side (`dbAccess`).
  */
-export type DbRules = Readonly<
-  Record<string, { readonly read?: ViewerLevel; readonly write?: ViewerLevel }>
->;
+export type DbRules = Readonly<Record<string, DbRule>>;
+
+/** One collection's rule: the least level that may read it, and write it (absent: the contract's). */
+export interface DbRule {
+  readonly read?: ViewerLevel;
+  readonly write?: ViewerLevel;
+}
+
+/**
+ * The rule a top-level collection is under (P086, P093): its own rule object if the rules name it,
+ * else `*`'s, whole; never field by field (a collection's `{}` is the contract's levels, whatever
+ * `*` says). Own names only: a collection named `constructor` or `__proto__` is no rule unless
+ * the rules name it (P091). `dbAccess` and `intersectDeclarations` both read rules through this.
+ */
+export function dbRuleOf(rules: DbRules | undefined, collection: string): DbRule | undefined {
+  const own = (key: string) =>
+    rules !== undefined && Object.hasOwn(rules, key) ? rules[key] : undefined;
+  return own(collection) ?? own("*");
+}
 
 /** A rules object's problem, or null. */
 export function dbRulesProblem(value: unknown): string | null {
@@ -452,11 +468,7 @@ function ownPath(path: string, viewer: ViewerInfo | undefined): string | null {
 /** The least level a rule asks for `path`. */
 function ruleLevel(rules: DbRules | undefined, path: string, write: boolean): ViewerLevel {
   const base: ViewerLevel = write ? "interact" : "view";
-  const top = path.split("/")[0] ?? "";
-  // Own rules only: a collection named `constructor` or `__proto__` is no rule (after the review).
-  const own = (key: string) =>
-    rules !== undefined && Object.hasOwn(rules, key) ? rules[key] : undefined;
-  const rule = own(top) ?? own("*");
+  const rule = dbRuleOf(rules, path.split("/")[0] ?? "");
   const asked = write ? rule?.write : rule?.read;
   return asked === undefined ? base : higher(base, asked);
 }
