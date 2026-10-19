@@ -472,3 +472,37 @@ describe("review 3: a stopped bridge refuses what waits for a confirmation", () 
     expect(ran).toBe(0);
   });
 });
+
+describe("re-review: a call waiting on consent when its bridge closes asks no one", () => {
+  test("consent answered after close: no confirmation is asked, the call is refused", async () => {
+    const consents: ((answer: boolean) => void)[] = [];
+    let asked = 0;
+    let ran = 0;
+    const bridge = createBridge({
+      config: presets.inlineWidget({
+        capabilities: { callTool: { gates: ["consent", "confirm"] } },
+      }),
+      display,
+      handlers: {
+        callTool: () => {
+          ran += 1;
+          return { content: [] };
+        },
+      },
+      consent: () => new Promise<boolean>((resolve) => consents.push(resolve)),
+      confirm: () => {
+        asked += 1;
+        return Promise.resolve(true);
+      },
+      onEvent: () => {},
+    });
+    const call = bridge.call("callTool", { name: "t", arguments: {} });
+    await settle();
+    expect(consents).toHaveLength(1);
+    bridge.close();
+    consents[0]?.(true);
+    expect(await call).toMatchObject({ ok: false, refusal: "failed" });
+    expect(asked).toBe(0);
+    expect(ran).toBe(0);
+  });
+});

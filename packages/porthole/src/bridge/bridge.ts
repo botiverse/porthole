@@ -614,6 +614,10 @@ export function createBridge(options: BridgeOptions): DisplayBridge {
           return refuse<Result>(capability, "denied");
         }
       }
+      // The run may have stopped while the viewer's consent was awaited: then no one is asked.
+      if (closed) {
+        return refuse<Result>(capability, "failed", STOPPED);
+      }
       // The effect, run once: when the person's "yes" calls `proceed` (inside its own click, so an
       // effect that needs a gesture gets one), or after `confirm` resolves accepted.
       let effect: Promise<CallOutcome<Result>> | null = null;
