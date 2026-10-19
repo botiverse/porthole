@@ -393,7 +393,7 @@ describe.skipIf(!runnable)("V03: the tag job, against a simulated API", () => {
     );
   });
 
-  it("passes a tag already on the commit (a pushed tag, or a re-run), annotated or not", () => {
+  it("passes a tag already on the commit (a re-run), annotated or not", () => {
     const light = simulate(
       "tag",
       { "refs.json": [{ ref: "refs/tags/v0.7.1", object: { type: "commit", sha: "c0ffee" } }] },

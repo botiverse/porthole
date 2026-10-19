@@ -184,13 +184,13 @@ describe("V03: a release waits for ci.yml on the same commit", () => {
     expect(gateScript).toContain("compare/$main...$GITHUB_SHA");
   });
 
-  it("tags before it publishes, so a tag the repository refuses stops the release first", () => {
+  it("tags after it publishes, a dispatched release only, as Ferry's and OAR's releases", () => {
     const tag = release.jobs["tag"];
-    expect(needs(tag)).toEqual(["build"]);
-    expect(tag?.if, "on both triggers").toBeUndefined();
+    expect(needs(release.jobs["publish"])).toEqual(["gate", "build"]);
+    expect(needs(tag)).toEqual(["publish"]);
+    expect(tag?.if).toBe("github.event_name == 'workflow_dispatch'");
     expect(tag?.permissions).toEqual({ contents: "write" });
-    expect(needs(release.jobs["publish"])).toEqual(["gate", "build", "tag"]);
-    expect(needs(release.jobs["release"])).toEqual(["publish"]);
+    expect(needs(release.jobs["release"])).toEqual(["tag"]);
   });
 
   it("checks the GitHub release's notes are there in build, before npm has the version", () => {

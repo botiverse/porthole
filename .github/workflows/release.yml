@@ -3,9 +3,9 @@ name: release
 # Publish @botiverse/porthole to npm (P097). Two triggers:
 # - workflow_dispatch from main with a version (`stamp workflow run release.yml --repo
 #   botiverse/porthole -f version=X.Y.Z`; packages/porthole/package.json on main must already say
-#   it): releases main's head; the `tag` job tags it vX.Y.Z before anything is published, and the
-#   `release` job creates the GitHub release from that version's CHANGELOG.md section. A tag
-#   created with GITHUB_TOKEN starts no workflow, so this path publishes once.
+#   it): releases main's head, then the `tag` job tags it vX.Y.Z and the `release` job creates the
+#   GitHub release from that version's CHANGELOG.md section. A tag created with GITHUB_TOKEN starts
+#   no workflow, so this path publishes once.
 # - a pushed v* tag, as before: publishes that commit, nothing else.
 # Either way `gate` lets a release through only for a commit on main whose ci.yml run on main (a
 # push's, or one started by hand) passed, with every job in REQUIRED_CI_JOBS among those that
@@ -190,42 +190,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Runs no project code; idempotent. Before the publish, so a tag the repository refuses (a
-  # ruleset without the GitHub Actions integration in its bypass list) stops the release before
-  # npm has it. A pushed tag is already there: this checks it names the commit.
-  tag:
-    needs: build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write # the tag
-    steps:
-      - name: tag the released commit
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        # Every API call is an assignment or a command of its own under `set -euo pipefail`: an
-        # error stops the job instead of reading as "no tag".
-        run: |
-          set -euo pipefail
-          found=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$TAG" \
-            --jq ".[] | select(.ref == \"refs/tags/$TAG\") | \"\(.object.type) \(.object.sha)\"")
-          if [ -z "$found" ]; then
-            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" > /dev/null
-            echo "tagged $GITHUB_SHA as $TAG"; exit 0
-          fi
-          sha=${found#* }
-          # An annotated tag points at a tag object; its commit is one step further.
-          if [ "${found%% *}" = tag ]; then
-            sha=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$sha" --jq .object.sha)
-          fi
-          if [ "$sha" != "$GITHUB_SHA" ]; then
-            echo "$TAG points at $sha, not $GITHUB_SHA"; exit 1
-          fi
-          echo "$TAG is $GITHUB_SHA"
-
   publish:
-    needs: [gate, build, tag]
+    needs: [gate, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -273,8 +239,45 @@ jobs:
           # run here. `publish` takes no --ignore-pnpmfile; the config key is the same guard.
           pnpm publish "${tarballs[0]}" --access public --no-git-checks --tag "$dist_tag" --config.ignore-pnpmfile=true
 
-  release:
+  # After the publish, as Ferry's (D185) and OAR's releases: a dispatched release only. Runs no
+  # project code, checks nothing out, and is idempotent (a tag already on the commit passes), so
+  # "Re-run failed jobs" finishes a release whose publish succeeded. The v* tag ruleset must have
+  # the GitHub Actions integration on its bypass list (P097), or this fails after npm has the
+  # version; a person then re-runs the failed jobs.
+  tag:
     needs: publish
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # the tag
+    steps:
+      - name: tag the released commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Every API call is an assignment or a command of its own under `set -euo pipefail`: an
+        # error stops the job instead of reading as "no tag".
+        run: |
+          set -euo pipefail
+          found=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$TAG" \
+            --jq ".[] | select(.ref == \"refs/tags/$TAG\") | \"\(.object.type) \(.object.sha)\"")
+          if [ -z "$found" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" > /dev/null
+            echo "tagged $GITHUB_SHA as $TAG"; exit 0
+          fi
+          sha=${found#* }
+          # An annotated tag points at a tag object; its commit is one step further.
+          if [ "${found%% *}" = tag ]; then
+            sha=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$sha" --jq .object.sha)
+          fi
+          if [ "$sha" != "$GITHUB_SHA" ]; then
+            echo "$TAG points at $sha, not $GITHUB_SHA"; exit 1
+          fi
+          echo "$TAG is $GITHUB_SHA"
+
+  release:
+    needs: tag
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
