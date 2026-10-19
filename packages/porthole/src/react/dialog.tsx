@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState, type ReactElement } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactElement } from "react";
+import { formatBounded, type TextLimits } from "../bridge/bounded-text.ts";
 import type { ConfirmRequest } from "../bridge/types.ts";
 
 /**
@@ -35,7 +36,22 @@ interface Words {
   readonly note?: string;
 }
 
-const json = (value: unknown): string => JSON.stringify(value, null, 2) ?? "";
+/**
+ * What a call carries, as JSON laid out, within bounds (P095): a frame's arguments come
+ * structured-cloned, so a cycle, a BigInt, or a graph billions of nodes long as a tree. Past the
+ * bounds the dialog says it shows only part.
+ */
+const DIALOG_TEXT_LIMITS: TextLimits = { chars: 20_000, nodes: 2_000, depth: 24 };
+
+function carried(heading: string, accept: string, value: unknown, before = ""): Words {
+  const { text, whole } = formatBounded(value, DIALOG_TEXT_LIMITS, 2);
+  return {
+    heading,
+    accept,
+    detail: `${before}${text}`,
+    ...(whole ? {} : { note: "Only part of it is shown: it is more than this dialog shows." }),
+  };
+}
 
 /** How many of one kind of write the summary names before it counts the rest. */
 const MOST_PATHS = 10;
@@ -85,19 +101,11 @@ function words(request: ConfirmRequest): Words {
       };
     }
     case "downloadFile":
-      return {
-        heading: "Download this file?",
-        accept: "Download",
-        detail: json(request.args.contents),
-      };
+      return carried("Download this file?", "Download", request.args.contents);
     case "callTool":
-      return {
-        heading: "Run this tool?",
-        accept: "Run",
-        detail: `${request.args.name}\n${json(request.args.arguments)}`,
-      };
+      return carried("Run this tool?", "Run", request.args.arguments, `${request.args.name}\n`);
     case "setModelContext":
-      return { heading: "Share this with the agent?", accept: "Share", detail: json(request.args) };
+      return carried("Share this with the agent?", "Share", request.args);
     case "readData":
       return { heading: "Let it read this?", accept: "Allow", detail: request.args.uri };
     case "subscribeData":
@@ -121,7 +129,7 @@ function words(request: ConfirmRequest): Words {
               .join("\n"),
             note: `From version ${request.args.base}${request.args.label === undefined ? "" : `: ${request.args.label}`}.`,
           }
-        : { heading: "Allow this?", accept: "Allow", detail: json(request.args) };
+        : carried("Allow this?", "Allow", request.args);
     case "assets":
       return request.args.op === "upload"
         ? {
@@ -136,7 +144,7 @@ function words(request: ConfirmRequest): Words {
               accept: "Remove",
               detail: request.args.id,
             }
-          : { heading: "Allow this?", accept: "Allow", detail: json(request.args) };
+          : carried("Allow this?", "Allow", request.args);
     // The page's shared data (P088): a change leads with what asked for the yes (P094).
     case "db": {
       const args = request.args;
@@ -147,16 +155,14 @@ function words(request: ConfirmRequest): Words {
             ? [args]
             : null;
       return writes === null
-        ? { heading: "Allow this?", accept: "Allow", detail: json(args) }
+        ? carried("Allow this?", "Allow", args)
         : {
-            heading: "Change this page's shared data?",
-            accept: "Change",
+            ...carried("Change this page's shared data?", "Change", args),
             summary: writesSummary(writes, request.askedBy ?? []),
-            detail: json(args),
           };
     }
     default:
-      return { heading: "Allow this?", accept: "Allow", detail: json(request.args) };
+      return carried("Allow this?", "Allow", request.args);
   }
 }
 
@@ -197,7 +203,7 @@ export function ConfirmDialog({ request, onAnswer, className }: ConfirmDialogPro
     return () => clearTimeout(timer);
   }, [request]);
 
-  const said = request === null ? null : words(request);
+  const said = useMemo(() => (request === null ? null : words(request)), [request]);
   return (
     <dialog
       ref={dialog}

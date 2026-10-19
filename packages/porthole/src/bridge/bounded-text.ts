@@ -28,29 +28,55 @@ export interface TextLimits {
 /** An error report's: read past what the bridge keeps (2,000 characters, after the scrub). */
 export const REPORT_TEXT_LIMITS: TextLimits = { chars: 8_000, nodes: 1_000, depth: 16 };
 
+/** The text, and whether it is all of the value (nothing cut, stopped or left below the depth). */
+export interface BoundedText {
+  readonly text: string;
+  readonly whole: boolean;
+}
+
 /** A BigInt past this has more digits than a report shows; its decimal text is superlinear. */
 const BIGGEST = 10n ** 2_000n;
 
 /** A field whose read threw (a getter, a proxy: what structured clone never delivers). */
 const UNREADABLE: unique symbol = Symbol("unreadable");
 
-export function boundedText(value: unknown, limits: TextLimits = REPORT_TEXT_LIMITS): string {
+/** `value` as bounded text (above); with `indent`, as `JSON.stringify(value, null, indent)` lays it out. */
+export function boundedText(
+  value: unknown,
+  limits: TextLimits = REPORT_TEXT_LIMITS,
+  indent = 0,
+): string {
+  return formatBounded(value, limits, indent).text;
+}
+
+export function formatBounded(value: unknown, limits: TextLimits, indent = 0): BoundedText {
   if (typeof value === "string") {
-    return cutText(value, limits.chars);
+    const text = cutText(value, limits.chars);
+    return { text, whole: text === value };
   }
   let out = "";
   let nodes = limits.nodes;
   let stopped = false;
+  let whole = true;
   const written = new WeakSet<object>();
   const inside = new WeakSet<object>();
-  const quoted = (text: string) =>
-    JSON.stringify(cutText(text, Math.max(0, limits.chars - out.length)));
+  const colon = indent > 0 ? ": " : ":";
+  const quoted = (text: string) => {
+    const room = Math.max(0, limits.chars - out.length);
+    if (text.length > room) {
+      whole = false;
+    }
+    return JSON.stringify(cutText(text, room));
+  };
+  /** Where a nested value starts, at `depth`: a new line, indented, when laid out. */
+  const line = (depth: number) => (indent > 0 ? `\n${" ".repeat(indent * depth)}` : "");
 
   /** Whether there is room for another value; if not, `…` once (after `separator`), then none. */
   const room = (separator: string): boolean => {
     nodes -= 1;
     if (!stopped && (nodes < 0 || out.length >= limits.chars)) {
       stopped = true;
+      whole = false;
       out += `${separator}…`;
     }
     return !stopped;
@@ -72,7 +98,12 @@ export function boundedText(value: unknown, limits: TextLimits = REPORT_TEXT_LIM
         out += each ? "true" : "false";
         return;
       case "bigint":
-        out += each < BIGGEST && each > -BIGGEST ? `"${String(each)}n"` : '"[BigInt]"';
+        if (each < BIGGEST && each > -BIGGEST) {
+          out += `"${String(each)}n"`;
+        } else {
+          whole = false;
+          out += '"[BigInt]"';
+        }
         return;
       case "object":
         break;
@@ -95,17 +126,23 @@ export function boundedText(value: unknown, limits: TextLimits = REPORT_TEXT_LIM
     written.add(each);
     if (Array.isArray(each)) {
       if (depth >= limits.depth) {
+        whole = false;
         out += '"[Array]"';
         return;
       }
       const list = each as readonly unknown[];
       inside.add(list);
       out += "[";
-      for (let index = 0; index < list.length && room(index === 0 ? "" : ","); index += 1) {
-        out += index === 0 ? "" : ",";
+      const inner = line(depth + 1);
+      for (
+        let index = 0;
+        index < list.length && room(index === 0 ? inner : `,${inner}`);
+        index += 1
+      ) {
+        out += index === 0 ? inner : `,${inner}`;
         guarded(list[index], depth + 1);
       }
-      out += "]";
+      out += list.length === 0 ? "]" : `${line(depth)}]`;
       inside.delete(list);
       return;
     }
@@ -128,14 +165,17 @@ export function boundedText(value: unknown, limits: TextLimits = REPORT_TEXT_LIM
       return;
     }
     if (depth >= limits.depth) {
+      whole = false;
       out += '"[Object]"';
       return;
     }
     inside.add(each);
     out += "{";
+    const inner = line(depth + 1);
     let first = true;
     for (const key of Object.keys(each)) {
-      if (!room(first ? "" : ",")) {
+      if (!room(first ? inner : `,${inner}`)) {
+        first = false;
         break;
       }
       let field: unknown;
@@ -147,11 +187,11 @@ export function boundedText(value: unknown, limits: TextLimits = REPORT_TEXT_LIM
       if (field !== UNREADABLE && unwritten(field)) {
         continue;
       }
-      out += `${first ? "" : ","}${quoted(key)}:`;
+      out += `${first ? inner : `,${inner}`}${quoted(key)}${colon}`;
       first = false;
       guarded(field, depth + 1);
     }
-    out += "}";
+    out += first ? "}" : `${line(depth)}}`;
     inside.delete(each);
   }
 
@@ -165,11 +205,14 @@ export function boundedText(value: unknown, limits: TextLimits = REPORT_TEXT_LIM
     try {
       write(each, depth);
     } catch {
+      whole = false;
       out = `${out.slice(0, before)}"[unreadable]"`;
     }
   }
 
   nodes -= 1;
   guarded(value, 0);
-  return cutText(out, limits.chars);
+  // Cut past the length, it still ends in `…`.
+  const text = out.length <= limits.chars ? out : `${cutText(out, limits.chars - 1)}…`;
+  return { text, whole: whole && text === out };
 }
