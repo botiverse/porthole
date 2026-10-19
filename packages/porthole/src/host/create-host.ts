@@ -5,7 +5,12 @@ import {
   type AnnotationReport,
 } from "../annotate/types.ts";
 import { annotateMode, checkMarks, parseReport } from "../annotate/validate.ts";
-import { createBridge, onceConsent, type BridgeEvent } from "../bridge/bridge.ts";
+import {
+  createBridge,
+  onceConsent,
+  type BridgeEvent,
+  type DisplayBridge,
+} from "../bridge/bridge.ts";
 import type { HostFunctionBridge } from "../bridge/types.ts";
 import { compile } from "../compile/compile.ts";
 import { servesFiles } from "../files/paths.ts";
@@ -151,6 +156,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       let height = mount.initialHeightPx ?? 0;
       let surface: Surface | null = null;
       let connection: C | null = null;
+      let bridge: DisplayBridge | null = null;
       let destroyed = false;
       let restarts = 0;
       // Until when the frame's next load is another page of its own set, as its content said (P084).
@@ -354,6 +360,10 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       };
 
       const stop = () => {
+        // The run's bridge refuses what still waits for a confirmation: a yes to it runs nothing
+        // (P095, after the review), and the next run's bridge starts its count again.
+        bridge?.close();
+        bridge = null;
         handshaken = false;
         pageOfSetUntil = 0;
         abort?.abort();
@@ -404,7 +414,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         // The host's access at issue says who is viewing (P087); else the mount's word.
         const viewer =
           (source.kind === "url" ? source.viewer : undefined) ?? mountViewer ?? undefined;
-        const bridge = createBridge({
+        const opening = createBridge({
           config,
           display: {
             id: mount.displayId,
@@ -421,13 +431,14 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           ...(viewer === undefined ? {} : { viewer }),
         });
         if (annotates) {
-          created.transport.listen((raw) => onAnnotation(raw, bridge));
+          created.transport.listen((raw) => onAnnotation(raw, opening));
         }
+        bridge = opening;
         const opened = adapter.connect({
           display: { id: mount.displayId, title: mount.title },
           compiled,
           transport: created.transport,
-          bridge,
+          bridge: opening,
           hostInfo,
           hostContext,
           emit: (event) => {

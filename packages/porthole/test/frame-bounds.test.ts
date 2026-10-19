@@ -4,7 +4,7 @@ import { describe, expect, test, vi } from "vitest";
 import { createBridge, type BridgeEvent } from "../src/bridge/bridge.ts";
 import { formatBounded } from "../src/bridge/bounded-text.ts";
 import type { ConfirmAnswer, ConfirmRequest } from "../src/bridge/types.ts";
-import { presets, type PresetOptions } from "../src/index.ts";
+import { createHost, presets, type PlatformHost, type PresetOptions } from "../src/index.ts";
 import { ConfirmDialog } from "../src/react/index.ts";
 import { filePathProblem } from "../src/files/paths.ts";
 import { liveData } from "../src/protocol/live-data.ts";
@@ -384,5 +384,85 @@ describe("review 2: a db document of exactly its bytes is within them", () => {
       const over = shape("x".repeat(length + 1));
       expect(parseDbRequest({ op: "set", path: "notes/a", data: over })).toBe("too_large");
     }
+  });
+});
+
+describe("review 3: a stopped bridge refuses what waits for a confirmation", () => {
+  test("its waiting calls are refused at once, and a late yes runs nothing", async () => {
+    const t = bridgeOf({ capabilities: { callTool: {} } });
+    const calls = Array.from({ length: 3 }, () =>
+      t.bridge.call("callTool", { name: "t", arguments: {} }),
+    );
+    await settle();
+    expect(t.asked).toHaveLength(3);
+    t.bridge.close();
+    for (const outcome of await Promise.all(calls)) {
+      expect(outcome).toMatchObject({ ok: false });
+    }
+    t.proceeds[0]?.();
+    t.asked[1]?.(true);
+    await settle();
+    expect(t.ran()).toBe(0);
+    // And a stopped bridge takes no new call.
+    expect(await t.bridge.call("callTool", { name: "t", arguments: {} })).toMatchObject({
+      ok: false,
+    });
+    expect(t.asked).toHaveLength(3);
+  });
+
+  test("a display that stops (a restart, its end) refuses its waiting calls: a late yes runs nothing", async () => {
+    const listeners = new Set<(message: unknown) => void>();
+    const platform: PlatformHost = {
+      name: "stand-in",
+      createSurface: () => ({
+        transport: {
+          send: () => {},
+          listen: (listener) => {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+          },
+          close: () => listeners.clear(),
+        },
+        element: null,
+        setHeight: () => {},
+        setColorScheme: () => {},
+        userActivation: () => true,
+        onNavigated: () => () => {},
+        onLoad: () => () => {},
+        destroy: () => {},
+      }),
+    };
+    const container = {
+      ownerDocument: { defaultView: { location: { origin: "https://app.example" } } },
+      getBoundingClientRect: () => ({ width: 600 }),
+    } as unknown as HTMLElement;
+    let ran = 0;
+    const answers: ((answer: ConfirmAnswer) => void)[] = [];
+    const proceeds: (() => void)[] = [];
+    const shown = createHost(presets.inlineWidget({ capabilities: { callTool: {} } }), {
+      handlers: {
+        callTool: () => {
+          ran += 1;
+          return { content: [] };
+        },
+      },
+      platform,
+      confirm: (_, proceed) =>
+        new Promise<ConfirmAnswer>((resolve) => {
+          answers.push(resolve);
+          proceeds.push(proceed);
+        }),
+    }).mount(container, { displayId: "d1", title: "T", scheme: "light" });
+    for (const listener of listeners) {
+      listener({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "t" } });
+      listener({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "t" } });
+    }
+    await settle();
+    expect(answers).toHaveLength(2);
+    shown.destroy();
+    proceeds[0]?.();
+    answers[1]?.(true);
+    await settle();
+    expect(ran).toBe(0);
   });
 });

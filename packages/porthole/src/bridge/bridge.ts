@@ -316,7 +316,19 @@ function declaredOf(
     : undefined;
 }
 
-export function createBridge(options: BridgeOptions): HostFunctionBridge {
+/** A display's bridge: `close()` when its run stops (a restart, its end; P095, after the review). */
+export interface DisplayBridge extends HostFunctionBridge {
+  /**
+   * The run is over: every call waiting for a confirmation is refused at once, a yes that comes
+   * later (or its `proceed`) runs nothing, and no new call is taken.
+   */
+  close(): void;
+}
+
+/** What a stopped display's calls are refused with (the host's words; its frame is gone). */
+const STOPPED = "the display stopped before this was answered";
+
+export function createBridge(options: BridgeOptions): DisplayBridge {
   const { config, display, handlers, onEvent } = options;
   const now = options.now ?? (() => Date.now());
   const calls = new Map<string, number[]>();
@@ -324,6 +336,9 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
   let muted = false;
   /** Confirmations asked and not yet answered: a frame's calls can't queue without end (P095). */
   let waiting = 0;
+  /** Closed (`close`): its run stopped. What each waiting confirmation's wait is ended by. */
+  let closed = false;
+  const ending = new Set<() => void>();
 
   const refuse = <T>(
     capability: CapabilityName,
@@ -471,6 +486,13 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
   }
 
   return {
+    close() {
+      closed = true;
+      for (const end of [...ending]) {
+        end();
+      }
+    },
+
     declared: (capability) => config.capabilities[capability] !== undefined,
 
     roster: () =>
@@ -487,6 +509,9 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
       callOptions?: CallOptions,
     ): Promise<CallOutcome<CapabilityResults[N]>> {
       type Result = CapabilityResults[N];
+      if (closed) {
+        return refuse<Result>(capability, "failed", STOPPED);
+      }
       if (config.capabilities[capability] === undefined) {
         return refuse<Result>(capability, "not-declared");
       }
@@ -586,8 +611,11 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
       // The effect, run once: when the person's "yes" calls `proceed` (inside its own click, so an
       // effect that needs a gesture gets one), or after `confirm` resolves accepted.
       let effect: Promise<CallOutcome<Result>> | null = null;
+      // Never once the bridge is closed: a yes to a stopped run's request does nothing.
       const run = (): Promise<CallOutcome<Result>> =>
-        (effect ??= perform(capability, args, callOptions));
+        (effect ??= closed
+          ? Promise.resolve(refuse<Result>(capability, "failed", STOPPED))
+          : perform(capability, args, callOptions));
       if (confirms) {
         if (options.confirm === undefined) {
           return refuse<Result>(capability, "no-confirm");
@@ -598,8 +626,13 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
             message: "Too many confirmations are waiting: try again once they are answered.",
           });
         }
-        let answer: ConfirmAnswer = false;
+        let answer: ConfirmAnswer | typeof STOPPED = false;
         waiting += 1;
+        let end = () => {};
+        const ended = new Promise<typeof STOPPED>((resolve) => {
+          end = () => resolve(STOPPED);
+          ending.add(end);
+        });
         try {
           // Which of the methods the call runs asked for this yes (P094): a batch's gated writes.
           const askedBy =
@@ -608,19 +641,26 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
               : [...new Set(methodsOfCall(capability, args))].filter((each) =>
                   methodGates(config, family.name, each).includes("confirm"),
                 );
-          answer = await options.confirm(
-            {
-              capability,
-              args,
-              display,
-              ...(askedBy.length === 0 ? {} : { askedBy }),
-            } as ConfirmRequest,
-            () => void run(),
-          );
+          answer = await Promise.race([
+            options.confirm(
+              {
+                capability,
+                args,
+                display,
+                ...(askedBy.length === 0 ? {} : { askedBy }),
+              } as ConfirmRequest,
+              () => void run(),
+            ),
+            ended,
+          ]);
         } catch {
           answer = effect === null ? false : "accepted";
         } finally {
           waiting -= 1;
+          ending.delete(end);
+        }
+        if (closed && effect === null) {
+          return refuse<Result>(capability, "failed", STOPPED);
         }
         if (effect === null && answer !== true && answer !== "accepted") {
           if (answer === "redirected") {
