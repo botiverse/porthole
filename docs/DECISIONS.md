@@ -3719,8 +3719,10 @@ mode or a runtime capability is added (it gets a scenario or a row).
 ## P095 · 2026-10-19 · What content says is read after its gate, into bounded text; nothing it sends throws out of an adapter · Accepted
 
 Amends P091 (finding 2: the rate before the arguments, now for error reports too). From the
-2026-10-19 audit, S05, with the rest of its class found in the adapters. Regressions:
-`test/log-bounds.test.ts` (both adapters over the real bridge), `14.error-shapes` (inline and MCP
+2026-10-19 audit, S05, with the rest of its class (untrusted frame data processed without bounds
+before a gate, or a throw that leaves no answer) found after it. Regressions:
+`test/log-bounds.test.ts` (both adapters over the real bridge), `test/frame-bounds.test.ts` (6–12),
+`test/runtime.test.ts` and `test/refusals.test.ts` ("P095 …"), `14.error-shapes` (inline and MCP
 Apps, three engines), negative control `report-unbounded`.
 
 **Decision**, by finding:
@@ -3757,12 +3759,45 @@ Apps, three engines), negative control `report-unbounded`.
 5. **A request named after `Object.prototype`'s own.** The shell adapter looked requests up in a
    plain object: `constructor` or `toString` threw (`mapped.args is not a function`), an unhandled
    rejection and no answer. `Object.hasOwn` first: answered "not offered".
+6. **The confirm dialog shows a call's arguments bounded.** Its `json()` was
+   `JSON.stringify(args, null, 2)` at every render: a cycle or a BigInt in `callTool`'s arguments,
+   `setModelContext` or a download threw during render; a 16-level shared graph rendered 8.6 MB.
+   Now `formatBounded` (the same formatter) laid out as `JSON.stringify`'s two-space form, 20,000
+   characters, 2,000 values, 24 levels, once per request, with "Only part of it is shown" when
+   it is cut. Plain JSON shows as it did.
+7. **At most 10 confirmations wait per display.** `callTool`'s default gate is `confirm` alone:
+   a frame could queue confirmations without end (the React provider's queue grew by one a
+   call). The bridge refuses the 11th at once as `rate-limited` (`rate_limited`, "Too many
+   confirmations are waiting"), asking no one and counting no decline: every host's `confirm`
+   gets the cap, not only the default dialog.
+8. **A page's names are well-formed Unicode.** `downloads.save` with a lone surrogate in a name
+   threw `URIError` in `encodeURIComponent` before the bridge: an unhandled rejection and no
+   answer. Short texts (download names, comment anchors, labels), asset names and file paths
+   (`filePathProblem`) need `isWellFormed()`; the call is answered as malformed.
+9. **db sizes are known before writing out.** `jsonBytes` was `JSON.stringify` then `TextEncoder`
+   before the size check, and `plainJson` doesn't bound strings: a document of 1M control
+   characters was 6 MB of JSON before it was refused. A lower bound from the checked structure
+   (each string's and key's length, a byte a scalar) refuses it first; the exact count runs only
+   within the limit (`jsonBytes(value, max)`).
+10. **A publish's count and sizes before its files are read or encoded.** `Object.entries` read
+    every file before the count check, and every text was encoded before the version's total
+    was checked: one file object under 255 paths is one object to send, 255 encodings (6.4 GB at
+    the defaults). Now the keys' count first, each text too large by its length against the
+    running total before it is encoded, the total as it grows.
+11. **Every capability's rate before its arguments.** `precheck` counts each host function's own
+    rate gates first for every capability, not only the runtime's own and `reportError`: past
+    its rate a call's arguments are never read, and a malformed call costs its rate. A runtime
+    method's own gates (`methodGates`) still follow its arguments, which name the method.
+12. **A frame follows at most 50 resources** (`resources/subscribe`, as the runtime's 50
+    watches): past it refused as `too-large` without asking the host; ending one frees a place.
+13. **createHost's annotation reports by own key**: `constructor` was an annotate call.
 - **Changed assertion**: `test/mcp.test.ts`'s fake bridge now sees `{ message: { reason: "boom" } }`
   where it saw the adapter's JSON: the bridge formats now; the text the host gets is the same
   (`test/log-bounds.test.ts`).
 - What the host is told for JSON data is unchanged (byte for byte `JSON.stringify`, cut). Changed:
   a log without `data` is dropped as malformed (the shell adapter reported `"null"`); a malformed
-  error report counts against the rate (before, only a well formed one did).
+  call of any capability counts against its rate (before, only a well-formed one did); a name or
+  path with a lone surrogate is refused.
 
 **Why.** The audit's 修复 line: the cheap switch and rate before any deep processing, and a
 formatter bounded in nodes, depth and output that knows repeated references; a try/catch or a cut
@@ -3774,9 +3809,10 @@ after `JSON.stringify` isn't enough. A gate is only one if what it guards hasn't
   calls that must agree, a rate counted twice or not at all, and every adapter (a host's own is an
   extension point) must remember; in the bridge's validator it is one place, after the one gate.
 - `try { JSON.stringify } catch`, then a cut: exponential before the cut; it bounds nothing.
-- Counting every capability's rate before its arguments: `sendPrompt`, `openLink` and the rest
-  validate shallowly or bounded already, and their malformed calls would start to cost their rate;
-  a change of every gate's order for no finding.
+- Capping confirmations in the React provider's queue only: a host's own `confirm` queues too.
+- A catch-all in the adapters that answers any throw: it would hide the next `URIError`; each
+  cause is refused up front instead, with its test.
 **Revisit when** a host needs more of a report than 2,000 characters or 16 levels (raise
-`REPORT_TEXT_LIMITS`, keep it bounded); or MCP Apps gives `notifications/message` a schema for
-`data` the SDK enforces (then strings and plain JSON only, and the walk is a check).
+`REPORT_TEXT_LIMITS`, keep it bounded), or a page needs more than 10 confirmations waiting or 50
+resources followed (raise the caps, not lift them); or MCP Apps gives `notifications/message` a
+schema for `data` the SDK enforces (then strings and plain JSON only, and the walk is a check).
