@@ -14,6 +14,16 @@ import type { PortholeConfig } from "../config/schema.ts";
 const SEALED = /(?:https?:\/\/[^\s"'<>/]+)?\/__porthole\/f\/[A-Za-z0-9_-]{20,}\//gu;
 export const withoutSealedAddresses = (text: string): string => text.replace(SEALED, "./");
 
+/** A sealed address's access, cut off by the end of the text: no longer one `SEALED` matches. */
+const UNFINISHED = /\/__porthole\/f\/[A-Za-z0-9_-]*$/u;
+
+/**
+ * `text`, at most `max` characters (S05, P095): a cut inside a sealed address's access drops what
+ * of it is left, so a text cut before it is scrubbed tells no part of one.
+ */
+export const cutText = (text: string, max: number): string =>
+  text.length <= max ? text : text.slice(0, max).replace(UNFINISHED, "");
+
 /** An address without what could carry data: an http(s) one's origin and path, else its scheme. */
 export function addressWithoutQuery(url: string): string {
   // A page's own file (P084), as the shell names it: its path, without query or fragment.

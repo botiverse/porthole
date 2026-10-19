@@ -3715,3 +3715,68 @@ untrusted HTML shouldn't have to take on the app runtime's concepts and duties t
 and its row says merged); `defineDisplays` checks which kinds share a page, or a mount checks the
 page's `frame-src` (S7, S1); the content domain's Public Suffix List entry lands (S3); a preset, a
 mode or a runtime capability is added (it gets a scenario or a row).
+
+## P095 · 2026-10-19 · What content says is read after its gate, into bounded text; nothing it sends throws out of an adapter · Accepted
+
+Amends P091 (finding 2: the rate before the arguments, now for error reports too). From the
+2026-10-19 audit, S05, with the rest of its class found in the adapters. Regressions:
+`test/log-bounds.test.ts` (both adapters over the real bridge), `14.error-shapes` (inline and MCP
+Apps, three engines), negative control `report-unbounded`.
+
+**Decision**, by finding:
+1. **S05: an error log was serialized before its gate.** Both adapters ran
+   `JSON.stringify(params.data)` while building `reportError`'s arguments: before the declared check
+   and the rate, so a frame without `reportError`, or past its 10 a minute, still cost the host the
+   whole walk; a cycle or a BigInt threw out of the transport's listener; a graph of 13 objects
+   each holding the next twice was 53,237 characters (the audit's), of 40 more than a host ever
+   finishes (structured clone keeps shared references, as P091 found for `db`). Now the adapters hand the bridge what content said as it
+   came (`{ message: params.data }`), and the bridge counts reportError's own rate in `precheck`,
+   before its arguments are read (as P091 did for the runtime's own); only then does its validator
+   read it, with `boundedText` (`src/bridge/bounded-text.ts`), the one formatter, for every
+   adapter: a string as it is; anything else as JSON writes it, each object read once
+   (`"[Circular]"` inside itself, `"[Repeated]"` written already), at most 1,000 values and 16
+   levels (`"[Object]"`, `"[Array]"` below, `…` where it stops) and 8,000 characters; a BigInt as
+   `"5n"` (`"[BigInt]"` past 2,000 digits: its decimal text is superlinear), a Date its time, an
+   Error its name and message, another object its kind (`"[Map]"`, `"[Uint8Array]"`, never its
+   bytes), anything whose read throws `"[unreadable]"`. Never throws. Then the scrub of sealed
+   addresses (P083), then the 2,000 characters the host is told.
+2. **A cut before the scrub tells no part of an access.** The scrub needs a whole address, and the
+   text is now cut before it (8,000 characters, so the regex runs on a bounded string; before, the
+   shell adapter's strings were scrubbed whole, and every other shape was cut to 2,000 before the
+   bridge scrubbed it). `cutText` (`src/bridge/navigation.ts`) drops an unfinished
+   `/__porthole/f/<access>` at a cut's end; every cut in the formatter and the bridge is it.
+3. **The log's level is a string or nothing.** The shell adapter's `String(params.level)` threw on
+   `{ toString: 0 }` (a property structured clone carries): `typeof` first, as the MCP adapter did.
+4. **The same class in the adapters: a `ui/message`'s text.** Both joined every content block
+   before any gate: a sparse array of length 2^32 − 1 clones in no time, and its walk is minutes of
+   the host's thread (10^8 holes took 3.4 s here, Node 24); one 100 KB block referenced a
+   thousand times joined to 100 MB. `messageText`
+   (`src/protocol/message-text.ts`), shared: at most 1,000 blocks (more is malformed), read until
+   the text passes `limits.maxPromptChars` (then `max + 1` characters, which the bridge refuses as
+   it did).
+5. **A request named after `Object.prototype`'s own.** The shell adapter looked requests up in a
+   plain object: `constructor` or `toString` threw (`mapped.args is not a function`), an unhandled
+   rejection and no answer. `Object.hasOwn` first: answered "not offered".
+- **Changed assertion**: `test/mcp.test.ts`'s fake bridge now sees `{ message: { reason: "boom" } }`
+  where it saw the adapter's JSON: the bridge formats now; the text the host gets is the same
+  (`test/log-bounds.test.ts`).
+- What the host is told for JSON data is unchanged (byte for byte `JSON.stringify`, cut). Changed:
+  a log without `data` is dropped as malformed (the shell adapter reported `"null"`); a malformed
+  error report counts against the rate (before, only a well formed one did).
+
+**Why.** The audit's 修复 line: the cheap switch and rate before any deep processing, and a
+formatter bounded in nodes, depth and output that knows repeated references; a try/catch or a cut
+after `JSON.stringify` isn't enough. A gate is only one if what it guards hasn't already run.
+**Rejected.**
+- Strings only (drop anything else): an SDK view's `sendLog` sends any JSON, and hosts read
+  `{"reason":…}` today.
+- Formatting in each adapter after asking the bridge (`declared`, a separate rate probe): two
+  calls that must agree, a rate counted twice or not at all, and every adapter (a host's own is an
+  extension point) must remember; in the bridge's validator it is one place, after the one gate.
+- `try { JSON.stringify } catch`, then a cut: exponential before the cut; it bounds nothing.
+- Counting every capability's rate before its arguments: `sendPrompt`, `openLink` and the rest
+  validate shallowly or bounded already, and their malformed calls would start to cost their rate;
+  a change of every gate's order for no finding.
+**Revisit when** a host needs more of a report than 2,000 characters or 16 levels (raise
+`REPORT_TEXT_LIMITS`, keep it bounded); or MCP Apps gives `notifications/message` a schema for
+`data` the SDK enforces (then strings and plain JSON only, and the walk is a check).

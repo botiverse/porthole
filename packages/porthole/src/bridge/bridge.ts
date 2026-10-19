@@ -9,7 +9,8 @@ import type { AnnotationReport } from "../annotate/types.ts";
 import { parseReport } from "../annotate/validate.ts";
 import type { PortholeConfig } from "../config/schema.ts";
 import { callGates, effectiveGates } from "../compile/policy.ts";
-import { blockedNavigationMessage, withoutSealedAddresses } from "./navigation.ts";
+import { boundedText } from "./bounded-text.ts";
+import { blockedNavigationMessage, cutText, withoutSealedAddresses } from "./navigation.ts";
 import {
   RUNTIME_HOST_FUNCTIONS,
   familyOf,
@@ -64,6 +65,7 @@ import type {
  * rate → a user gesture, if gated so → the viewer's consent, if gated so → a person's
  * confirmation, if gated so → the handler (or, for a read, a result the host already gave for it,
  * or for a stale-allowed one the host's cache).
+ * The runtime's own and an error report are within their rate before their arguments are read.
  */
 
 export type BridgeEvent =
@@ -110,6 +112,18 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
 const MAX_URL = 4_096;
+
+/** The most of an error report the host is told. */
+const MAX_ERROR_CHARS = 2_000;
+
+/**
+ * Capabilities whose own rate is counted before their arguments are read: the runtime's own (P091)
+ * and an error report, the content's word in any shape (S05, P095).
+ */
+const COUNTED_FIRST: ReadonlySet<CapabilityName> = new Set([
+  ...RUNTIME_HOST_FUNCTIONS,
+  "reportError",
+]);
 
 /** An http(s) URL without credentials in it (`https://bank.example@evil.example` reads as a lie). */
 export function linkTarget(value: unknown): string | null {
@@ -205,10 +219,14 @@ const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
       const url = withoutSealedAddresses(blocked);
       return { message: blockedNavigationMessage(url, config), navigationBlocked: url };
     }
+    // What content said (S05, P095): any value, read only now, after its rate (`precheck`), into
+    // bounded text, then scrubbed, then cut to what the host is told.
     const message = isRecord(args) ? args.message : undefined;
-    return typeof message === "string" && message !== ""
-      ? { message: withoutSealedAddresses(message).slice(0, 2_000) }
-      : null;
+    if (message === undefined) {
+      return null;
+    }
+    const text = cutText(withoutSealedAddresses(boundedText(message)), MAX_ERROR_CHARS);
+    return text === "" ? null : { message: text };
   },
   copyText: (args) => {
     const text = isRecord(args) ? args.text : undefined;
@@ -412,11 +430,14 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
   /**
    * The cheap checks for the runtime's own, before their arguments are read (after the review: a
    * malformed call costs nothing but its rate): a method by its `op`, a viewer at its level, its
-   * host function's rate.
+   * host function's rate. An error report's rate, before what it says is read (S05, P095).
    */
   function precheck(capability: CapabilityName, raw: unknown): Refusal | null {
-    if (!RUNTIME_HOST_FUNCTIONS.includes(capability)) {
+    if (!COUNTED_FIRST.has(capability)) {
       return null;
+    }
+    if (capability === "reportError") {
+      return withinOwnRates(capability) ? null : "rate-limited";
     }
     const family = familyOf(capability);
     const method = methodOf(capability, raw);
@@ -433,12 +454,17 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
     if (viewer === undefined || (needed !== null && !atLeast(viewer.level, needed))) {
       return "level";
     }
+    return withinOwnRates(capability) ? null : "rate-limited";
+  }
+
+  /** Whether a call is within its host function's own rates, each counted. */
+  function withinOwnRates(capability: CapabilityName): boolean {
     for (const gate of effectiveGates(config, capability)) {
       if (typeof gate === "object" && !withinRate(capability, gate.rateLimit.perMinute)) {
-        return "rate-limited";
+        return false;
       }
     }
-    return null;
+    return true;
   }
 
   return {
@@ -503,9 +529,9 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
       if (confirms && muted) {
         return refuse<Result>(capability, "muted");
       }
-      // The runtime's own were counted against their host function's rate before their arguments
-      // were read (`precheck`).
-      if (!RUNTIME_HOST_FUNCTIONS.includes(capability)) {
+      // The runtime's own and an error report were counted against their host function's rate
+      // before their arguments were read (`precheck`).
+      if (!COUNTED_FIRST.has(capability)) {
         for (const gate of own) {
           if (typeof gate === "object" && !withinRate(capability, gate.rateLimit.perMinute)) {
             return refuse<Result>(capability, "rate-limited");

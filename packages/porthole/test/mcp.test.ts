@@ -430,9 +430,11 @@ describe("notifications from the view", () => {
     });
     t.view({ method: "notifications/message", params: { level: "info", data: "fine" } });
     await t.settle();
+    // What the view said goes as it came: the bridge reads it after reportError's rate, into
+    // bounded text (S05, P095; test/log-bounds.test.ts).
     expect(t.calls.map((call) => [call.capability, call.args])).toEqual([
       ["resize", { height: 120, width: 300 }],
-      ["reportError", { message: '{"reason":"boom"}' }],
+      ["reportError", { message: { reason: "boom" } }],
     ]);
   });
 

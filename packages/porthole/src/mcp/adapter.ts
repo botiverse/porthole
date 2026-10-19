@@ -20,6 +20,7 @@ import {
   NAVIGATION_BLOCKED_METHOD,
 } from "../protocol/mcp-apps.ts";
 import { liveData } from "../protocol/live-data.ts";
+import { messageText } from "../protocol/message-text.ts";
 import { reasonFor } from "../bridge/refusal.ts";
 
 /**
@@ -94,15 +95,6 @@ export function viewHostContext(
     out.toolInfo = toolInfo;
   }
   return out;
-}
-
-/** The text of a `ui/message`'s content: its text blocks, in order (the spec's examples send one). */
-function messageText(content: unknown): string | null {
-  const blocks = Array.isArray(content) ? content : [content];
-  const texts = blocks.flatMap((block) =>
-    isRecord(block) && block.type === "text" && typeof block.text === "string" ? [block.text] : [],
-  );
-  return texts.length === 0 ? null : texts.join("\n\n");
 }
 
 /** Whether the host page has a live user gesture (a gesture in a frame activates its ancestors). */
@@ -248,7 +240,16 @@ function connect(session: AdapterSession, options: McpAppsAdapterOptions): McpAp
         answer(request.id, {});
         return;
       case MCP_APPS_METHODS.message: {
-        const text = params.role === "user" ? messageText(params.content) : null;
+        // Its text blocks, in order (the spec's examples send one), read bounded (P095).
+        const content = params.content;
+        const text =
+          params.role === "user"
+            ? messageText(
+                Array.isArray(content) ? content : [content],
+                "\n\n",
+                session.compiled.config.limits.maxPromptChars,
+              )
+            : null;
         if (text === null) {
           invalid('needs role "user" and text content');
           return;
@@ -393,14 +394,10 @@ function connect(session: AdapterSession, options: McpAppsAdapterOptions): McpAp
         return;
       }
       case MCP_APPS_METHODS.log:
+        // What the view said, as it came (S05, P095): the bridge reads it only within
+        // reportError's declaration and rate, into bounded text, and nothing in it throws here.
         if (typeof params.level === "string" && ERROR_LEVELS.has(params.level)) {
-          const data = params.data;
-          void bridge.call("reportError", {
-            message: (typeof data === "string" ? data : (JSON.stringify(data) ?? "")).slice(
-              0,
-              2_000,
-            ),
-          });
+          void bridge.call("reportError", { message: params.data });
         }
         return;
       case NAVIGATION_BLOCKED_METHOD:

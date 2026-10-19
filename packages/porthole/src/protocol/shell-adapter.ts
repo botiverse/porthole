@@ -1,4 +1,5 @@
 import type { CapabilityName } from "../config/capabilities.ts";
+import type { PortholeConfig } from "../config/schema.ts";
 import type { CallOutcome } from "../bridge/types.ts";
 import type { AdapterSession, ProtocolAdapter, ShellConnection } from "./adapter.ts";
 import {
@@ -18,6 +19,7 @@ import {
   type HostContext,
 } from "./mcp-apps.ts";
 import { liveData } from "./live-data.ts";
+import { messageText } from "./message-text.ts";
 import { runtimeCalls } from "./runtime-calls.ts";
 import {
   RUNTIME_CALL_METHOD,
@@ -34,25 +36,24 @@ import {
 
 const LOG_ERRORS = new Set(["error", "critical", "alert", "emergency"]);
 
-/** Requests that are capability calls, and how their params become the capability's args. */
+/**
+ * Requests that are capability calls, and how their params become the capability's args: shallow,
+ * or bounded (`messageText`), since they run before any gate (S05's class, P095).
+ */
 const REQUESTS: Readonly<
-  Record<string, { capability: CapabilityName; args: (params: Record<string, unknown>) => unknown }>
+  Record<
+    string,
+    {
+      capability: CapabilityName;
+      args: (params: Record<string, unknown>, config: PortholeConfig) => unknown;
+    }
+  >
 > = {
   [M.message]: {
     capability: "sendPrompt",
-    args: (params) => ({
+    args: (params, config) => ({
       text: Array.isArray(params.content)
-        ? params.content
-            .map((part: unknown) => {
-              const block = part as { type?: unknown; text?: unknown } | null;
-              return block !== null &&
-                typeof block === "object" &&
-                block.type === "text" &&
-                typeof block.text === "string"
-                ? block.text
-                : "";
-            })
-            .join("")
+        ? (messageText(params.content, "", config.limits.maxPromptChars) ?? "")
         : undefined,
     }),
   },
@@ -252,7 +253,8 @@ export const shellAdapter: ProtocolAdapter<ShellConnection> = {
         }
         return;
       }
-      const mapped = REQUESTS[request.method];
+      // Its own entries only: `constructor` or `toString` is no request (S05's class, P095).
+      const mapped = Object.hasOwn(REQUESTS, request.method) ? REQUESTS[request.method] : undefined;
       if (mapped === undefined) {
         respond(request.id, {
           error: {
@@ -262,7 +264,10 @@ export const shellAdapter: ProtocolAdapter<ShellConnection> = {
         });
         return;
       }
-      const outcome = await bridge.call(mapped.capability, mapped.args(params));
+      const outcome = await bridge.call(
+        mapped.capability,
+        mapped.args(params, session.compiled.config),
+      );
       if (!closed) {
         respond(request.id, answer(mapped.capability, outcome));
       }
@@ -281,12 +286,10 @@ export const shellAdapter: ProtocolAdapter<ShellConnection> = {
           void bridge.call("resize", { height: params.height, width: params.width });
           return;
         case M.log:
-          if (LOG_ERRORS.has(String(params.level))) {
-            const data = params.data;
-            void bridge.call("reportError", {
-              message:
-                typeof data === "string" ? data : JSON.stringify(data ?? null).slice(0, 2_000),
-            });
+          // What content said, as it came (S05, P095): the bridge reads it only within
+          // reportError's declaration and rate, into bounded text, and nothing in it throws here.
+          if (typeof params.level === "string" && LOG_ERRORS.has(params.level)) {
+            void bridge.call("reportError", { message: params.data });
           }
           return;
         case NAVIGATION_BLOCKED_METHOD:

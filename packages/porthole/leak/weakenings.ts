@@ -12,6 +12,8 @@ export interface Edit {
 const RUNTIME = "src/shell/runtime.ts";
 const POLICY = "src/compile/policy.ts";
 const BRIDGE = "src/bridge/bridge.ts";
+const SHELL_ADAPTER = "src/protocol/shell-adapter.ts";
+const MCP_ADAPTER = "src/mcp/adapter.ts";
 /**
  * Each weakening: edits to the core's sources (served to the browser as they are stripped or
  * bundled), or a name the leak server (`embedder-csp`) or the served harness (`harness`) acts on.
@@ -264,6 +266,22 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "blob-inert": "harness",
   // An asset that wasn't trusted when it was uploaded, served as the script its name says.
   "blob-trusted": "harness",
+  // An error log formatted as it came, before the bridge's gate, as before P095 (S05): a cycle
+  // or a BigInt throws out of the adapter, a shared graph is written as a tree.
+  "report-unbounded": [
+    {
+      file: SHELL_ADAPTER,
+      find: '            void bridge.call("reportError", { message: params.data });',
+      replace:
+        '            void bridge.call("reportError", { message: JSON.stringify(params.data) });',
+    },
+    {
+      file: MCP_ADAPTER,
+      find: '          void bridge.call("reportError", { message: params.data });',
+      replace:
+        '          void bridge.call("reportError", { message: JSON.stringify(params.data) });',
+    },
+  ],
   // The shell's clipboard walls (P051): the async API, the copy and cut commands, copy events.
   clipboard: [
     {
