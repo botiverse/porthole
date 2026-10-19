@@ -51,7 +51,7 @@ message from content that makes the host's page do unbounded work.
 
 Out of scope, as [docs/THREAT_MODEL.md § Out of scope](docs/THREAT_MODEL.md#5-out-of-scope) says:
 availability in the viewer's browser (content that loops or exhausts memory), bugs in the
-browser's own walls and engines the leak suite doesn't run, side channels between processes, a
+browser's own walls and engines the leak suite doesn't run, side channels (timing, Spectre-class), a
 chat's own rendering of model text (markdown images), deceptive or wrong content, hostile text in
 a prompt a person confirmed, and whether an action a person confirmed was wise. The threat model
 also says, for each way of using Porthole, what it guarantees and what is left to the host.
