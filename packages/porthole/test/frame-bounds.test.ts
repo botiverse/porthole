@@ -6,6 +6,7 @@ import type { ConfirmAnswer, ConfirmRequest } from "../src/bridge/types.ts";
 import { presets, type PresetOptions } from "../src/index.ts";
 import { ConfirmDialog } from "../src/react/index.ts";
 import { filePathProblem } from "../src/files/paths.ts";
+import { liveData } from "../src/protocol/live-data.ts";
 import { DB_LIMITS, parseDbRequest } from "../src/runtime/db.ts";
 import {
   assetNameProblem,
@@ -239,5 +240,34 @@ describe("P095 6: every capability's rate before its arguments are read", () => 
     }
     expect(refusals.slice(0, 30).every((each) => each === "invalid")).toBe(true);
     expect(refusals.slice(30)).toEqual(["rate-limited", "rate-limited"]);
+  });
+});
+
+describe("P095 7: a frame follows at most 50 resources at once", () => {
+  test("past 50, a subscription is refused without reaching the host; ending one frees a place", async () => {
+    const asked: string[] = [];
+    const live = liveData(
+      {
+        roster: () => ({}),
+        declared: () => true,
+        call: (capability, args) => {
+          asked.push(`${capability} ${(args as { uri: string }).uri}`);
+          return Promise.resolve({ ok: true, value: undefined } as never);
+        },
+      },
+      () => {},
+    );
+    for (let index = 0; index < 50; index += 1) {
+      expect(await live.subscribe(`ui://r/${index}`)).toMatchObject({ ok: true });
+    }
+    const late = await live.subscribe("ui://r/50");
+    expect(late).toMatchObject({ ok: false, refusal: "too-large" });
+    expect(late.ok ? null : late.reason?.code).toBe("too_large");
+    expect(asked).toHaveLength(50);
+    // Again for one it follows already: a no-op, as before.
+    expect(await live.subscribe("ui://r/0")).toMatchObject({ ok: true });
+    live.unsubscribe("ui://r/0");
+    expect(await live.subscribe("ui://r/50")).toMatchObject({ ok: true });
+    expect(asked).toHaveLength(51);
   });
 });
