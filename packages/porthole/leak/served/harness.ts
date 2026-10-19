@@ -224,6 +224,16 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
     }
     return runtimes.get(options.key);
   };
+  // The host's side of each subscription to the runtime's services, by key and URI: a case pushes
+  // a result through it, as a host's changed(result) does (P094).
+  const pushes = (window.runtimePushes = new Map());
+  const withPushes = (key, handlers) => ({
+    ...handlers,
+    subscribeData: (args, context) => {
+      pushes.set(key + " " + args.uri, context.changed);
+      return handlers.subscribeData(args, context);
+    },
+  });
   // A host's data for live widgets (P079): resources by URI as JSON, their subscribers, the
   // viewer's consent (asked once per display) and a cache of last values.
   const liveData = (window.liveData = {
@@ -280,7 +290,7 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
         // The runtime's services, a person who says yes to every confirmation and consent.
         ...(runtime === null
           ? {}
-          : { handlers: runtime.handlers, confirm: async () => true, consent: () => true }),
+          : { handlers: withPushes(options.runtime.key, runtime.handlers), confirm: async () => true, consent: () => true }),
         // "refused": a page where live data never runs: consent a Refused, no handlers (P080).
         ...(options.live === "refused"
           ? { consent: new Refused("not_allowed", "Live data shows on the dashboard.") }

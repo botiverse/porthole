@@ -101,6 +101,13 @@ export type ConfirmRequest = {
     readonly capability: N;
     readonly args: CapabilityArgs[N];
     readonly display: ConfirmDisplay;
+    /**
+     * A confirmation only (never a consent's request): the runtime methods whose own gates
+     * (`CapabilityConfig.methodGates`, the contract's) asked for it, of those the call runs (P094):
+     * a db batch's writes' ops that need a yes, so a dialog can lead with them. Absent where only
+     * the host function's own gates ask.
+     */
+    readonly askedBy?: readonly string[];
   };
 }[CapabilityName];
 
@@ -182,6 +189,14 @@ export interface CallOptions {
   readonly subscription?: Pick<SubscriptionContext, "changed" | "signal">;
   /** `readData`: the host's cache may answer, marked stale (the content subscribes to it). */
   readonly stale?: boolean;
+  /**
+   * `readData`: a result the host already gave for this read (a subscription's `changed(result)`,
+   * the fresh read after a stale answer), and the URI it was given for. It answers the read after
+   * every gate a read has, without the handler or the cache (P094: a kept result is never a way
+   * past the read's gates); a `uri` that isn't the read's is refused (`invalid`). Ignored for any
+   * capability but `readData`.
+   */
+  readonly held?: { readonly uri: string; readonly value: unknown };
 }
 
 /** What adapters call; one per display. */

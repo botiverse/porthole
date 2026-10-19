@@ -106,6 +106,9 @@ export function runtimeCalls(
       watches.set(id, controller);
       const outcome = await bridge.call(mapped.serves, mapped.args, {
         subscription: {
+          // Each update is the watch's answer, gated as its read when it started (P091, P094):
+          // nothing that check read changes while it lives (the frame's viewer and declaration,
+          // the display's kept consent), and a new page or frame ends it. So no gate per update.
           changed: (data?: unknown) => {
             if (!controller.signal.aborted) {
               notify(RUNTIME_EVENT_METHOD, { watch: id, data: data ?? null });

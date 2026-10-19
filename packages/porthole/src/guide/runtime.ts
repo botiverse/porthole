@@ -166,6 +166,15 @@ export function runtimeEntries(config: PortholeConfig): string[] {
             : `${method === "watch" ? "onSnapshot" : method}: ${gateWords(gates, "it")}`;
         })
         .filter((each): each is string => each !== null);
+      // A batch is its writes, a watch its read: their gates too (P094).
+      const gated = (each: string) =>
+        methods.includes(each) && methodGates(config, name, each).length > 0;
+      if (name === "db" && ["set", "update", "delete"].some(gated)) {
+        own.push("db.batch(writes) needs what each of its writes needs.");
+      }
+      if (name === "db" && ["get", "query"].some(gated)) {
+        own.push("db.onSnapshot needs what get (a document) or query (a collection) needs.");
+      }
       entries.push(
         `- ${calls.join(", ")}: ${what}.${refusals} ${declare} ${levelWords(config, name, methods)} ${gateWords(effectiveGates(config, serves), "it")} ${own.join(" ")}`
           .replace(/ {2,}/gu, " ")

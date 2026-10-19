@@ -24,6 +24,11 @@ export interface ConfirmDialogProps {
 interface Words {
   readonly heading: string;
   readonly accept: string;
+  /**
+   * What asked for the yes, above the detail (which scrolls): a db batch's writes whose gates
+   * asked, however late in the batch they come (P094).
+   */
+  readonly summary?: string;
   /** What the person is shown in full. */
   readonly detail: string;
   /** A line under it (the link's host). */
@@ -31,6 +36,35 @@ interface Words {
 }
 
 const json = (value: unknown): string => JSON.stringify(value, null, 2) ?? "";
+
+/** How many of one kind of write the summary names before it counts the rest. */
+const MOST_PATHS = 10;
+
+/**
+ * A db change in a line (P094): the writes whose own gates asked for the yes, by kind ("Delete
+ * n/x, n/y; and 48 other writes."), or every write by kind where none of them asked (the host
+ * function's own confirmation); at most `MOST_PATHS` paths a kind, then a count.
+ */
+function writesSummary(
+  writes: readonly { readonly op: string; readonly path: string }[],
+  askedBy: readonly string[],
+): string {
+  const asked = writes.filter((each) => askedBy.includes(each.op));
+  const lead = asked.length === 0 ? writes : asked;
+  const kinds = new Map<string, string[]>();
+  for (const each of lead) {
+    kinds.set(each.op, [...(kinds.get(each.op) ?? []), each.path]);
+  }
+  const said = [...kinds]
+    .map(
+      ([op, paths]) =>
+        `${op} ${paths.slice(0, MOST_PATHS).join(", ")}${paths.length > MOST_PATHS ? ` and ${paths.length - MOST_PATHS} more` : ""}`,
+    )
+    .join("; ");
+  const others = writes.length - lead.length;
+  const text = `${said}${others === 0 ? "" : `; and ${others} other write${others === 1 ? "" : "s"}`}.`;
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
 
 function words(request: ConfirmRequest): Words {
   switch (request.capability) {
@@ -103,6 +137,24 @@ function words(request: ConfirmRequest): Words {
               detail: request.args.id,
             }
           : { heading: "Allow this?", accept: "Allow", detail: json(request.args) };
+    // The page's shared data (P088): a change leads with what asked for the yes (P094).
+    case "db": {
+      const args = request.args;
+      const writes =
+        args.op === "batch"
+          ? args.writes
+          : args.op === "set" || args.op === "update" || args.op === "delete"
+            ? [args]
+            : null;
+      return writes === null
+        ? { heading: "Allow this?", accept: "Allow", detail: json(args) }
+        : {
+            heading: "Change this page's shared data?",
+            accept: "Change",
+            summary: writesSummary(writes, request.askedBy ?? []),
+            detail: json(args),
+          };
+    }
     default:
       return { heading: "Allow this?", accept: "Allow", detail: json(request.args) };
   }
@@ -112,6 +164,7 @@ const STYLE = `.porthole-confirm{color-scheme:light dark;color:CanvasText;backgr
 .porthole-confirm::backdrop{background:rgb(0 0 0 / .4)}
 .porthole-confirm h2{font-size:1.05em;margin:0 0 4px}
 .porthole-confirm [data-porthole-source],.porthole-confirm [data-porthole-note]{opacity:.72;font-size:.9em;margin:0 0 12px}
+.porthole-confirm [data-porthole-summary]{font-weight:600;overflow-wrap:anywhere;max-height:20vh;overflow:auto;margin:0 0 12px}
 .porthole-confirm [data-porthole-detail]{white-space:pre-wrap;overflow-wrap:anywhere;max-height:40vh;overflow:auto;padding:10px 12px;border-radius:8px;background:color-mix(in srgb,CanvasText 7%,transparent);margin:0 0 12px;font:inherit}
 .porthole-confirm menu{display:flex;justify-content:flex-end;gap:8px;margin:16px 0 0;padding:0}
 .porthole-confirm button{font:inherit;min-height:36px;padding:0 14px;border-radius:8px;border:1px solid color-mix(in srgb,CanvasText 25%,transparent);background:transparent;color:inherit;cursor:pointer}
@@ -163,6 +216,7 @@ export function ConfirmDialog({ request, onAnswer, className }: ConfirmDialogPro
         <>
           <h2 id={heading}>{said.heading}</h2>
           <p data-porthole-source="">{`From “${request.display.title}”`}</p>
+          {said.summary === undefined ? null : <p data-porthole-summary="">{said.summary}</p>}
           <div data-porthole-detail="">{said.detail}</div>
           {said.note === undefined ? null : <p data-porthole-note="">{said.note}</p>}
           <menu>
