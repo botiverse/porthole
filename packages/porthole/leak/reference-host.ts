@@ -13,6 +13,7 @@ import type {
 interface Reference {
   launch(spec: LaunchSpec): Promise<number>;
   calls(id: number): RecordedCall[];
+  shown(id: number): ConfirmRequest[];
   events(id: number): RecordedEvent[];
   errors(id: number): string[];
   pendingConfirmations(id: number): number;
@@ -128,6 +129,8 @@ export function referenceHostWith(setup: {
         },
         calls: () =>
           page.evaluate((each) => (window as unknown as WithReference).reference.calls(each), id),
+        shown: () =>
+          page.evaluate((each) => (window as unknown as WithReference).reference.shown(each), id),
         errors: () =>
           page.evaluate((each) => (window as unknown as WithReference).reference.errors(each), id),
         events: () =>

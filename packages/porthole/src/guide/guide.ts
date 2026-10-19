@@ -20,7 +20,7 @@ import { shellPlan } from "../shell/plan.ts";
 import { themeDefault } from "../theme/variables.ts";
 import { GUIDE_EXAMPLES } from "./examples.ts";
 import { manualLimits, sizeWords } from "./limits.ts";
-import { gateWords } from "./gates.ts";
+import { gateWords, modelContextWords } from "./gates.ts";
 import { capabilitiesTopic, runtimeEntries, runtimeToolWords } from "./runtime.ts";
 
 /**
@@ -435,8 +435,8 @@ const ENTRIES: { readonly [N in CapabilityName]: (c: Context, gates: readonly Ga
       c.global("subscribeData")
         ? `- subscribeData(uri, onData, onError): keeps the ${c.noun} current. It calls onData(value, { stale }) with the data at uri now, and again each time it changes; the first value may be the app's last copy (stale: true), with the current one right after. It returns a function that stops it. onError(error) hears a refusal, with the same code and message as readData's. ${gateWords(gates, "the request")} Draw from onData every time; don't poll.`
         : `- Live data: the MCP request resources/subscribe with { uri }; the app then sends notifications/resources/updated with { uri } each time it changes: read it again (resources/read). resources/unsubscribe stops it. ${gateWords(gates, "the request")}`,
-    setModelContext: (_c, gates) =>
-      `- Context for the agent: the MCP Apps request ui/update-model-context (with the App SDK, app.updateModelContext). ${gateWords(gates, "it")}`,
+    setModelContext: (c, gates) =>
+      `- Context for the agent: the MCP Apps request ui/update-model-context (with the App SDK, app.updateModelContext) with { content, structuredContent } ${modelContextWords(c.noun)}. ${gateWords(gates, "every update in full")}`,
     copyText: (c, gates) =>
       c.global("copyText")
         ? `- copyText(text): copies text to the person's clipboard (at most ${MAX_COPY_CHARS.toLocaleString("en-US")} characters), and the app shows them what was copied. Use it for every copy button: nothing else in the ${c.noun} can write the clipboard. ${gateWords(gates, "the text")} It returns a promise: true if it was copied.`

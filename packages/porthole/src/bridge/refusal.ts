@@ -123,6 +123,7 @@ const CODES: { readonly [R in Refusal]: RefusalCode } = {
   redirected: "denied",
   muted: "denied",
   "no-consent": "not_allowed",
+  "no-show": "not_allowed",
   denied: "denied",
   "rate-limited": "rate_limited",
   failed: "failed",

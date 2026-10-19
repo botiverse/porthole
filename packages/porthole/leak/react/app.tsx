@@ -27,6 +27,8 @@ const CONFIGS: Readonly<Record<string, PortholeConfig>> = {
   capped: presets.inlineWidget({ limits: { maxLiveFrames: 3 } }),
   artifact: presets.artifact(),
   copy: presets.inlineWidget({ capabilities: { copyText: {} } }),
+  // Model context, its default gates (the show gate, P100).
+  context: presets.inlineWidget({ capabilities: { setModelContext: {} } }),
   notes: presets.artifact({ capabilities: { annotate: {} } }),
   // Declares a capability the test app serves no handler for: a display that can't be made.
   unserved: presets.inlineWidget({ capabilities: { callTool: {} } }),
@@ -145,6 +147,13 @@ function render(state: AppState): void {
             const opened = window.open(url, "_blank") !== null;
             record(frame.displayId, "openLink", { url, opened });
             return opened;
+          },
+          setModelContext: (update) => {
+            // Whether the person had been shown it by now (P100): the notice is drawn.
+            const drawn = document.querySelector(
+              `[data-porthole-context-display="${frame.displayId}"]`,
+            );
+            record(frame.displayId, "setModelContext", { update, drawn: drawn !== null });
           },
         },
         onInitialized: () => record(frame.displayId, "initialized"),

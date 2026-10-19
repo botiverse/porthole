@@ -55,11 +55,15 @@ export type CapabilityName = (typeof CAPABILITY_NAMES)[number];
  *   call of any of its consent-gated capabilities, whether this content may have them (a viewer
  *   allowing a widget to read their data). A no refuses every such call for the display's life;
  *   no `consent` function refuses them all (fail closed).
+ * - `show` (P100): the host's `show` function puts the call's whole effect in front of the person,
+ *   outside the frame, before the handler has it; it asks nothing. No `show` function, or one that
+ *   throws, means the call is refused (fail closed).
  */
 export type Gate =
   | "user-activation"
   | "confirm"
   | "consent"
+  | "show"
   | { readonly rateLimit: { readonly perMinute: number } };
 
 export interface CapabilitySpec {
@@ -84,6 +88,12 @@ const rate = (perMinute: number): Gate => ({ rateLimit: { perMinute } });
 
 /** The most text one `copyText` call carries. */
 export const MAX_COPY_CHARS = 20_000;
+
+/**
+ * The most one `setModelContext` update carries (P100): its text blocks' characters and its
+ * structured content's JSON, together. What the person is shown is all of it.
+ */
+export const MAX_CONTEXT_CHARS = 20_000;
 
 export const CAPABILITIES = {
   sendPrompt: {
@@ -126,8 +136,12 @@ export const CAPABILITIES = {
     global: "subscribeData",
     request: { method: "resources/subscribe" },
   },
+  /**
+   * Text for the model's next turns (P100): the content's own words, which the person never typed.
+   * Shown to them first by default (`show`), so nothing reaches the model they couldn't see.
+   */
   setModelContext: {
-    defaultGates: [rate(30)],
+    defaultGates: [rate(30), "show"],
     served: "handler",
     request: { method: "ui/update-model-context", sdk: "app.updateModelContext" },
   },
@@ -177,8 +191,12 @@ export interface CapabilityArgs {
   };
   readonly readData: { readonly uri: string };
   readonly subscribeData: { readonly uri: string };
+  /**
+   * Text blocks only (the modality the host offers), each rebuilt as `{ type, text }`; structured
+   * content plain JSON (P100). At most `MAX_CONTEXT_CHARS` together.
+   */
   readonly setModelContext: {
-    readonly content?: readonly unknown[];
+    readonly content?: readonly { readonly type: "text"; readonly text: string }[];
     readonly structuredContent?: Readonly<Record<string, unknown>>;
   };
   /**

@@ -630,6 +630,57 @@ test("when the host's page couldn't write, the toast shows the text and the pers
   expect(await pasted(page)).toBe("npm test -- --run");
 });
 
+/** A widget that tells the agent what the person is looking at, as the App SDK does (P100). */
+const CONTEXT = `<p>signups</p>
+<script>
+  parent.postMessage({ jsonrpc: "2.0", id: "ctx-1", method: "ui/update-model-context", params: { content: [{ type: "text", text: "The person is looking at March." }], structuredContent: { month: "March" } } }, "*");
+</script>`;
+
+test("the default context notice: what content tells the agent, the person is shown whole, before the handler has it (S5, P100)", async ({
+  page,
+}) => {
+  await open(page, {
+    provider: "default",
+    frames: [frame({ displayId: "ctx", title: "Signups", config: "context", content: CONTEXT })],
+  });
+  const notice = page.locator('[data-porthole-context-display="ctx"]');
+  await expect(notice.locator("[data-porthole-source]")).toHaveText("from “Signups”");
+  await expect(notice.locator("[data-porthole-context-text]")).toHaveText(
+    `The person is looking at March.\n\n${JSON.stringify({ month: "March" }, null, 2)}`,
+  );
+  await expect
+    .poll(() => events(page, "ctx", "setModelContext"))
+    .toEqual([
+      {
+        display: "ctx",
+        event: "setModelContext",
+        detail: {
+          update: {
+            content: [{ type: "text", text: "The person is looking at March." }],
+            structuredContent: { month: "March" },
+          },
+          drawn: true,
+        },
+      },
+    ]);
+  await notice.locator("[data-porthole-hide]").click();
+  await expect(notice).toHaveCount(0);
+});
+
+test("without a provider nothing can show the person an update, so it never reaches the handler (S5, P100)", async ({
+  page,
+}) => {
+  await open(page, {
+    provider: "none",
+    frames: [frame({ displayId: "ctx", title: "Signups", config: "context", content: CONTEXT })],
+  });
+  await expect
+    .poll(() => events(page, "ctx", "refused"))
+    .toEqual([{ display: "ctx", event: "refused", detail: "setModelContext:no-show" }]);
+  expect(await events(page, "ctx", "setModelContext")).toEqual([]);
+  await expect(page.locator("[data-porthole-context-display]")).toHaveCount(0);
+});
+
 const NOTES = `<!doctype html><html><head><title>Notes</title></head><body>
 <h2 id="revenue">Revenue grew 12%</h2><p>Costs fell by 3%.</p></body></html>`;
 

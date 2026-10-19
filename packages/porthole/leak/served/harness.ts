@@ -290,7 +290,12 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
         // The runtime's services, a person who says yes to every confirmation and consent.
         ...(runtime === null
           ? {}
-          : { handlers: withPushes(options.runtime.key, runtime.handlers), confirm: async () => true, consent: () => true }),
+          : {
+              handlers: withPushes(options.runtime.key, runtime.handlers),
+              confirm: async () => true,
+              consent: () => true,
+              show: () => {},
+            }),
         // "refused": a page where live data never runs: consent a Refused, no handlers (P080).
         ...(options.live === "refused"
           ? { consent: new Refused("not_allowed", "Live data shows on the dashboard.") }

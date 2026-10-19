@@ -182,6 +182,8 @@ const check = {
       confirm: () => Promise.resolve("declined"),
       // A viewer who doesn't allow a live widget their data (P079): its calls are refused.
       consent: () => false,
+      // Model context goes to a surface nobody reads here (P100): the check has no person.
+      show: () => {},
       // A served config's instance, issued by the check's own server on this page's origin.
       locator: {
         locate: async (instance) =>

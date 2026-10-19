@@ -28,6 +28,7 @@ import type {
   DataCache,
   Proceed,
   Refusal,
+  Show,
 } from "../bridge/types.ts";
 import { isRefused, reasonOf, Refused, type RefusalReason } from "../bridge/refusal.ts";
 import type { CapabilityName } from "../config/capabilities.ts";
@@ -37,6 +38,7 @@ import { createHost } from "../host/create-host.ts";
 import type { DisplayEvents, DisplayHandle, FrameOutcome, HostErrorKind } from "../host/types.ts";
 import type { InstanceLocator, InstanceRef } from "../isolation/types.ts";
 import { ConfirmDialog } from "./dialog.tsx";
+import { ContextNotice, type ContextUpdate } from "./context-notice.tsx";
 import { createLiveFrames, type FrameState, type LiveFrames } from "./live.ts";
 import { CopyToast, type CopyNotice } from "./toast.tsx";
 import type { PortholeClient } from "../host/client.ts";
@@ -77,6 +79,8 @@ interface PageState {
   readonly locate?: InstanceLocator["locate"];
   /** The default `copyText`: copies on the host's page and shows the toast (P052). */
   readonly copyText?: CapabilityHandler<"copyText">;
+  /** Who shows the person `show`-gated calls: the provider's own, or its notice (P100). */
+  readonly show?: Show;
 }
 
 /** Without a provider: one registry for the page, and no one to confirm (gated calls refused). */
@@ -136,6 +140,13 @@ export interface PortholeProviderProps {
    * refuses them all with its reason, and their handlers may be left out (P080).
    */
   readonly consent?: Consent | Refused;
+  /**
+   * Shows the person each `show`-gated call, outside every frame, before its handler has it
+   * (P100): by default, a frame's model context update (`setModelContext`), the content's text for
+   * the agent's next turn. Omitted: Porthole's `ContextNotice`. A host that shows it its own way (a
+   * chip by its composer) passes this; the update replaces the display's last.
+   */
+  readonly show?: Show;
   /** What the host last had for a resource, answered stale first (P079). */
   readonly cached?: DataCache;
   /** How the host names itself in the handshake. */
@@ -146,6 +157,8 @@ export interface PortholeProviderProps {
   readonly dialogClassName?: string;
   /** A class for the default copy toast, to restyle it. */
   readonly toastClassName?: string;
+  /** A class for the default model context notice, to restyle it. */
+  readonly contextClassName?: string;
   /**
    * The page's CSP nonce, where its `script-src` is nonce-based: opaque frames inherit the page's
    * policy, so their shell carries it (P054). `"auto"`: read from the page (a `<meta
@@ -240,6 +253,44 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
     return copied;
   }, []);
   const closeNotice = useCallback(() => setNotice(null), []);
+  // The default show (P100): each display's latest model context update, in the notice, outside
+  // every frame; the host's own `show` replaces it.
+  const [contexts, setContexts] = useState<readonly ContextUpdate[]>([]);
+  // Each show waiting for its notice to be on the page: the next commit has drawn it.
+  const drawn = useRef<(() => void)[]>([]);
+  useLayoutEffect(() => {
+    for (const resolve of drawn.current.splice(0)) {
+      resolve();
+    }
+  });
+  const ownShow = useRef(props.show);
+  useLayoutEffect(() => {
+    ownShow.current = props.show;
+  });
+  const show = useCallback<Show>((request) => {
+    if (ownShow.current !== undefined) {
+      return ownShow.current(request);
+    }
+    if (request.capability !== "setModelContext") {
+      // The notice words model context only: anything else it would show unworded, so it isn't
+      // shown, and doesn't go (fail closed).
+      throw new Error(`Porthole's notice shows model context only, not ${request.capability}`);
+    }
+    const shown: ContextUpdate = {
+      displayId: request.display.id,
+      title: request.display.title,
+      update: request.args,
+    };
+    // The call goes once the notice is on the page, so the handler never has it first.
+    return new Promise<void>((resolve) => {
+      drawn.current.push(resolve);
+      setContexts((each) => [...each.filter((one) => one.displayId !== shown.displayId), shown]);
+    });
+  }, []);
+  const hideContext = useCallback(
+    (displayId: string) => setContexts((each) => each.filter((one) => one.displayId !== displayId)),
+    [],
+  );
   // Compared by value, and read when used: an inline hostInfo or locator doesn't start every
   // frame again on each render.
   const hostInfo = useByValue(props.hostInfo);
@@ -297,6 +348,7 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
       heights,
       confirm,
       copyText,
+      show,
       ...(consents ? { consent } : {}),
       ...(refusesAll === undefined ? {} : { refusesAll }),
       ...(caches ? { cached } : {}),
@@ -314,6 +366,7 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
       heights,
       confirm,
       copyText,
+      show,
       consents,
       consent,
       refusesAll,
@@ -366,6 +419,13 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
           }}
         />
       ) : null}
+      {props.show !== undefined ? null : (
+        <ContextNotice
+          updates={contexts}
+          onHide={hideContext}
+          {...(props.contextClassName === undefined ? {} : { className: props.contextClassName })}
+        />
+      )}
       {props.notify !== undefined ? null : (
         <CopyToast
           notice={notice}
@@ -696,6 +756,7 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
     copyText: pageCopyText,
     confirm: pageConfirm,
     consent: pageConsent,
+    show: pageShow,
     cached: pageCached,
     hostInfo,
     locate,
@@ -828,6 +889,16 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
                 },
               }
             : {}),
+        // Shown as the latest props name the display (P100).
+        ...(pageShow === undefined
+          ? {}
+          : {
+              show: (request: ConfirmRequest) =>
+                pageShow({
+                  ...request,
+                  display: { ...request.display, id: latest().displayId, title: latest().title },
+                }),
+            }),
         ...(caches
           ? {
               cached: (args: { readonly uri: string }, context: CallContext) =>
@@ -895,6 +966,7 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
     pageCopyText,
     pageConfirm,
     pageConsent,
+    pageShow,
     pageCached,
     refusesAll,
     hostInfo,

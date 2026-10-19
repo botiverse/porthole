@@ -16,6 +16,7 @@ import {
   NAVIGATION_BLOCKED_METHOD,
   MCP_APPS_METHODS as M,
   MCP_APPS_PROTOCOL_VERSION,
+  MODEL_CONTEXT_OFFERED,
   type HostContext,
 } from "./mcp-apps.ts";
 import { liveData } from "./live-data.ts";
@@ -123,7 +124,7 @@ export function hostCapabilities(
     offered.serverResources = declared("subscribeData") ? { subscribe: true } : {};
   }
   if (declared("setModelContext")) {
-    offered.updateModelContext = { text: {} };
+    offered.updateModelContext = MODEL_CONTEXT_OFFERED;
   }
   if (declared("reportError")) {
     offered.logging = {};

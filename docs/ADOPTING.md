@@ -206,6 +206,33 @@ counts nor resets the count). The request names the display (`request.display`: 
 `title`, and the `instance` you gave the frame, served or opaque), so the dialog can say what it
 is from your own records. It stays on your side: an opaque frame never gets the instance. `useRunAgain()` gives a "run again" button.
 
+### Context for the agent (`setModelContext`)
+
+A widget or an MCP Apps view may tell the agent what the person is looking at
+(`ui/update-model-context`, the App SDK's `app.updateModelContext`). That is the content's text,
+in your model's next turn, so by default the person is shown every update first (the `show` gate,
+[P100](DECISIONS.md#p100--2026-10-19--what-content-tells-the-model-the-person-is-shown-first-the-show-gate-on-by-default-for-setmodelcontext--accepted)): pass `show`. It gets the whole update (`request.args`: text blocks and
+structured content, at most `MAX_CONTEXT_CHARS` together) and the display, before your handler,
+and draws it outside the frame: the latest per display, since each replaces the last. Without
+`show` every update is refused (fail closed). React: `PortholeProvider` draws `ContextNotice`
+unless you pass your own `show`.
+
+```js
+createHost(config, {
+  handlers: { setModelContext: (update, { displayId }) => modelContext.set(displayId, update) },
+  // Before the handler has it: the person sees what the agent will read.
+  show: ({ args, display }) => composer.contextChip(display.id, display.title, args),
+});
+```
+
+- **Give it to the model as the content's words** ("the view “Signups” says: …"), never as the
+  person's message or as instructions. The manual tells the agent the same.
+- **Send it with the person's next message** (MCP Apps lets a host defer it), so they have seen it
+  before the model reads it. If your agent takes turns on its own, add `"confirm"` to the gates.
+- **Opting out**: `setModelContext: { gates: [{ rateLimit: { perMinute: 30 } }] }` names the
+  gates without `show`. Do it only where your handler itself puts the text in front of the person
+  (or the content is your own): otherwise the content writes into your model's turns unseen.
+
 ## 4. Served pages: the host kit
 
 ### Local development

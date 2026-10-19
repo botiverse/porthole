@@ -121,6 +121,7 @@ export function defineRuntimeConformance(
       // Gates the person answers are the app's UI: a yes here, so the services are what's tested.
       confirm: () => Promise.resolve(true),
       consent: () => true,
+      show: () => {},
       userActivation: () => true,
       onEvent: () => {},
     });

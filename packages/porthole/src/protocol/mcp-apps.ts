@@ -43,6 +43,13 @@ export const MCP_APPS_METHODS = {
 export type McpAppsMethod = (typeof MCP_APPS_METHODS)[keyof typeof MCP_APPS_METHODS];
 
 /**
+ * What a host that declares `setModelContext` says it takes (`hostCapabilities.updateModelContext`),
+ * in both adapters: text blocks and structured content, exactly what the bridge accepts and the
+ * person is shown (P100). Images and other blocks aren't offered, and are refused.
+ */
+export const MODEL_CONTEXT_OFFERED = { text: {}, structuredContent: {} } as const;
+
+/**
  * What the shell's `tool-input(-partial)` carries: the content to draw. Porthole's own argument
  * names, since the shell is the only view that reads them.
  */

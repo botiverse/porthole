@@ -272,12 +272,20 @@ function positive(value: unknown, path: string, max = Number.MAX_SAFE_INTEGER): 
 }
 
 function gate(value: unknown, path: string): asserts value is Gate {
-  if (value === "user-activation" || value === "confirm" || value === "consent") {
+  if (
+    value === "user-activation" ||
+    value === "confirm" ||
+    value === "consent" ||
+    value === "show"
+  ) {
     return;
   }
   const limit = isObject(value) && isObject(value.rateLimit) ? value.rateLimit : null;
   if (limit === null || Object.keys(value as object).length !== 1) {
-    fail(path, 'must be "user-activation", "confirm", "consent" or { rateLimit: { perMinute } }');
+    fail(
+      path,
+      'must be "user-activation", "confirm", "consent", "show" or { rateLimit: { perMinute } }',
+    );
     return;
   }
   only(limit, ["perMinute"], `${path}.rateLimit`);

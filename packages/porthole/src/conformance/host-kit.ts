@@ -240,6 +240,7 @@ export function hostConformance(options: HostConformanceOptions): HostConformanc
           return request;
         },
         calls: () => invoke(page, "calls", id),
+        shown: () => invoke(page, "shown", id),
         errors: () => invoke(page, "errors", id),
         events: () => invoke(page, "events", id),
         destroy: () => invoke(page, "destroy", id),

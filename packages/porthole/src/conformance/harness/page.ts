@@ -19,6 +19,8 @@ interface Shown {
   readonly calls: RecordedCall[];
   readonly events: RecordedEvent[];
   readonly confirmations: { request: ConfirmRequest; resolve: (accepted: boolean) => void }[];
+  /** What the host put in front of the person (`show`, P100). */
+  readonly disclosed: ConfirmRequest[];
   readonly received: unknown[];
   origin: string | null;
   /** Why the instance couldn't be located (the issue endpoint's refusal). */
@@ -114,6 +116,7 @@ const harness = {
     const container = box(id, spec.widthPx ?? 600, spec.heightPx);
     const calls: RecordedCall[] = [];
     const confirmations: Shown["confirmations"] = [];
+    const disclosed: ConfirmRequest[] = [];
     const host = createHost(spec.config, {
       handlers: recorder(calls),
       ...(spec.confirms === false
@@ -122,6 +125,9 @@ const harness = {
             confirm: (request: ConfirmRequest) =>
               new Promise<boolean>((resolve) => confirmations.push({ request, resolve })),
           }),
+      ...(spec.shows === false
+        ? {}
+        : { show: (request: ConfirmRequest) => void disclosed.push(request) }),
       theme: (scheme) => spec.hostTheme?.[scheme] ?? {},
       hostInfo: { name: "porthole-conformance", version: "1" },
       ...(nonce === undefined ? {} : { nonce }),
@@ -132,18 +138,19 @@ const harness = {
       scheme: spec.scheme ?? "light",
       ...(spec.document === undefined ? {} : { document: spec.document }),
     });
-    const shown: Shown = {
+    const display: Shown = {
       handle,
       calls,
       events: [],
       confirmations,
+      disclosed,
       received: [],
       origin: null,
       failure: null,
       frame: null,
     };
     const initialized = new Promise<void>((resolve) => handle.on("initialized", () => resolve()));
-    watch(id, shown);
+    watch(id, display);
     if (spec.document === undefined) {
       await Promise.race([initialized, pause(5_000)]);
       for (const partial of spec.partials ?? []) {
@@ -178,6 +185,7 @@ const harness = {
       calls,
       events: [],
       confirmations: [],
+      disclosed: [],
       received: [],
       origin: null,
       failure: null,
@@ -240,6 +248,7 @@ const harness = {
     displays.get(id)?.handle.setContent(html, { partial });
   },
   calls: (id: number) => displays.get(id)?.calls ?? [],
+  shown: (id: number) => displays.get(id)?.disclosed ?? [],
   events: (id: number) => displays.get(id)?.events ?? [],
   errors: (id: number) =>
     (displays.get(id)?.events ?? []).flatMap((event) =>

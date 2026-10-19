@@ -7,6 +7,7 @@
 export {
   CAPABILITIES,
   CAPABILITY_NAMES,
+  MAX_CONTEXT_CHARS,
   MAX_COPY_CHARS,
   capabilitySpec,
   isCapabilityName,
@@ -268,6 +269,7 @@ export type {
   Proceed,
   HostFunctionBridge,
   Refusal,
+  Show,
   SubscriptionContext,
   DbContext,
 } from "./bridge/types.ts";

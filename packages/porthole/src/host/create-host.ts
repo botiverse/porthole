@@ -449,6 +449,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           handlers,
           ...(options.confirm === undefined ? {} : { confirm: options.confirm }),
           ...(consent === undefined ? {} : { consent }),
+          ...(options.show === undefined ? {} : { show: options.show }),
           ...(options.cached === undefined ? {} : { cached: options.cached }),
           userActivation: () => created.userActivation(),
           onEvent: onBridge,
