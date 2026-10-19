@@ -113,6 +113,12 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const MAX_URL = 4_096;
 
+/**
+ * The most confirmations one display has waiting at once (P095): past it a call is refused as
+ * rate-limited, asking no one (and counted as no decline).
+ */
+const MAX_WAITING_CONFIRMS = 10;
+
 /** The most of an error report the host is told. */
 const MAX_ERROR_CHARS = 2_000;
 
@@ -319,6 +325,8 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
   const calls = new Map<string, number[]>();
   let declines = 0;
   let muted = false;
+  /** Confirmations asked and not yet answered: a frame's calls can't queue without end (P095). */
+  let waiting = 0;
 
   const refuse = <T>(
     capability: CapabilityName,
@@ -597,7 +605,14 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
         if (options.confirm === undefined) {
           return refuse<Result>(capability, "no-confirm");
         }
+        if (waiting >= MAX_WAITING_CONFIRMS) {
+          return refuse<Result>(capability, "rate-limited", undefined, {
+            code: "rate_limited",
+            message: "Too many confirmations are waiting: try again once they are answered.",
+          });
+        }
         let answer: ConfirmAnswer = false;
+        waiting += 1;
         try {
           // Which of the methods the call runs asked for this yes (P094): a batch's gated writes.
           const askedBy =
@@ -617,6 +632,8 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
           );
         } catch {
           answer = effect === null ? false : "accepted";
+        } finally {
+          waiting -= 1;
         }
         if (effect === null && answer !== true && answer !== "accepted") {
           if (answer === "redirected") {
