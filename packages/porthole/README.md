@@ -112,6 +112,8 @@ width, light and dark, before anyone sees it, and tells the agent what broke in 
   CSP, Workers, local development, the agent's tools, conformance, troubleshooting.
 - [Choosing egress](docs/ADOPTING.md#choosing-egress): what content may load (closed, library
   CDNs, passive media from any https site), what each level opens and the risk it re-opens.
+- [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md): what Porthole protects and from whom; for each
+  use, what it guarantees, what is left to you, and what isn't covered.
 - [docs/DESIGN.md](docs/DESIGN.md): how it works. [docs/DECISIONS.md](docs/DECISIONS.md): why,
   by P-number (the code cites them).
 

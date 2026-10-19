@@ -2,7 +2,9 @@
 
 This describes the layers, their contracts, the flows and trust boundaries, and
 the extension points. It is meant to stay stable while concrete APIs change; the
-phase-1 API lives in [DESIGN.md](DESIGN.md).
+phase-1 API lives in [DESIGN.md](DESIGN.md). What the boundaries protect, from whom,
+and what each use guarantees and leaves to the host is in
+[THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## The core abstraction
 
@@ -16,7 +18,8 @@ Porthole renders **agent-drawn HTML plus a declared set of host functions.**
   needs** (origins it must reach), and its **guide entry** (how the manual
   describes it).
 
-A page published as an artifact may be an app: under the **capability runtime** it reaches its
+A page published as an artifact may be an app: under the **capability runtime**, an optional
+layer over the display (THREAT_MODEL.md says what each guarantees), it reaches its
 host through one global, `porthole.use(name)`, for the capabilities it declared and its viewer's
 level allows. The runtime is how content reaches host functions, not new ones: each of its
 methods is served by a host function the config declares, and the bridge alone decides each call
@@ -212,6 +215,9 @@ No shell and no protocol: the app is someone else's. The embedding page frames
 only the declared content origins.
 
 ## Trust boundaries
+
+The attackers each boundary faces, what is out of scope, and the composition rule for
+several displays on one page are in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 1. **Host ↔ content.** The hard boundary. The content runs on an origin that is
    never the host's, so same-origin policy denies it the host's DOM, storage,

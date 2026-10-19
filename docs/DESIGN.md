@@ -9,7 +9,9 @@ below like `leak/…` and `ops/…` are Porthole's own repository, not the packa
 
 ## Threat model
 
-Two classes of attacker, handled by different layers (ARCHITECTURE § Trust
+The whole of it, use by use (who attacks, what is out of scope, what each scenario
+guarantees and leaves to the host), is [THREAT_MODEL.md](THREAT_MODEL.md). In short:
+two classes of attacker, handled by different layers (ARCHITECTURE § Trust
 boundaries):
 
 1. **Attacking the host** — steal the host's credentials or data, act as the
