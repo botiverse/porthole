@@ -384,8 +384,8 @@ if (shown && !shown.ok) return <VersionError problems={shown.problems} />;   // 
   and mount a version with `tryIntersectDeclarations(version's, current)` (`intersectDeclarations`
   throws its problems as a `TypeError`); your API's rules for that version are the same
   intersection's (whatever it allows, both declarations allow).
-- **Rules hold in any case**: `dbAccess` puts `Votes/a` under the rule for `votes` (any ASCII
-  case, the strictest where a page from before P093 named a collection in two), so a store that
+- **Rules hold in any case**: `dbAccess` holds `Votes/a` to its exact name's rule (else `*`'s)
+  and to the rule for `votes` too (any rule naming it in another ASCII case), so a store that
   folds case is safe with it; paths reach your handler as the page wrote them (Porthole never
   lowercases them), and a publish that names a collection twice in different cases is refused.
 - **Objects without a prototype**: checked declarations (`checkDeclaration`, `declareCapabilities`,

@@ -3336,9 +3336,10 @@ contract's levels. The independent review of the first cut added findings 5 to 9
    capability absent on either side; plain or prototype-less input, as a store or a mount has
    it); and pairs at the publish limits (100 rule names and 200 `data` names a side, names in
    another case across sides): for every viewer level and every db, `data` and `artifact` call,
-   the intersection allows exactly what both sides allow, both as returned and as a mount checks
-   it (the mount takes it). "At most" is S02; "at least" means an old version keeps whatever
-   nothing revoked. The audit's case is also run through the bridge.
+   the intersection allows at most what both sides allow, both as returned and as a mount checks
+   it (the mount takes it), and exactly that where the sides spell each collection alike (6).
+   "At most" is S02; "at least" means an old version keeps whatever nothing revoked. The audit's
+   case is also run through the bridge.
 5. **An intersection fits a mount** (review, medium). The union of two pages' names can pass the
    publish limits (51 + 51 collections are 102 > 100; `data` names 200 + 151), which the mount
    refused, so an author who renamed collections across publishes had no older version shown.
@@ -3352,13 +3353,22 @@ contract's levels. The independent review of the first cut added findings 5 to 9
 6. **Rules hold for a collection's name in any case** (review, medium; older than this entry).
    Under `{ votes: { write: owner } }` an interact viewer was refused `votes/a` and allowed
    `Votes/a`, which a store that folds case takes for the same document (P091 folded `data` only).
-   `dbRuleOf` folds ASCII case: the strictest of the rules that name the collection in any case,
-   else `*`. That only tightens, and only where a page already names a collection in two cases; a
-   publish that does is refused (`dbRulesProblem`), while a stored one from before is still shown.
-   The intersection gives one name for each name in any case and stays exact, both sides read
-   through `dbRuleOf`. Paths are passed as the page wrote them: lowercasing them would change what
-   0.7.0's data under camelCase collections means. `defineRuntimeConformance` checks an app's own
-   wall for `Config/main` and `CONFIG/main`.
+   `dbRuleOf` takes the exact-case rule (the name's own, else `*`), then makes it stricter by
+   every rule that names the collection in another ASCII case. It is never looser than the
+   exact-case lookup, and the same where nothing names the collection in another case (a test
+   compares the two over `*`, `votes` and `Votes`, each absent or one of six rules, every spelling,
+   level and op). The first cut ignored `*` where only a variant was named: under
+   `{ "*": { write: owner }, Votes: { write: interact } }` an interact viewer wrote `votes/x`,
+   which `*` had refused; the re-review caught it, and `*` now counts whenever the exact name is
+   absent. A publish that names a collection in two cases is refused (`dbRulesProblem`), while a
+   stored one from before is still shown. The intersection gives one name for each name in any
+   case, spelled as the version spells it: exact where both sides spell each collection alike;
+   where they spell one differently (an old version's `Votes`, the current `votes`), it may be
+   stricter than both (another spelling also counts `*`), never looser. Accepted: a page that
+   renames a collection's case across publishes is rare, and a stricter old version is safe.
+   Paths are passed as the page wrote them: lowercasing them would change what 0.7.0's data under
+   camelCase collections means. `defineRuntimeConformance` checks an app's own wall for
+   `Config/main` and `CONFIG/main`.
 7. **A form that doesn't throw** (review, low). `tryIntersectDeclarations` answers `{ ok: true,
    declaration }` or `{ ok: false, problems }`, as `declareCapabilities` does, and
    `intersectDeclarations` is it with a `TypeError`. ADOPTING's snippet calls it before render

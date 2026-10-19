@@ -174,14 +174,28 @@ function decisions(declaration: PageDeclaration): readonly boolean[] {
   return out;
 }
 
+/** Whether the two sides spell each collection their rules name in any case the same way. */
+function spelledAlike(version: PageDeclaration, current: PageDeclaration): boolean {
+  const spellings = new Map<string, Set<string>>();
+  for (const side of [version, current]) {
+    for (const name of Object.keys(side.capabilities.db?.rules ?? {})) {
+      const folded = name.toLowerCase();
+      spellings.set(folded, (spellings.get(folded) ?? new Set()).add(name));
+    }
+  }
+  return [...spellings.values()].every((each) => each.size === 1);
+}
+
 /**
- * The property: the intersection (as returned, and as a mount checks and copies it) allows
- * exactly what both sides allow. "At most" is the security property (S02); "at least" keeps an
- * old version working where nothing was revoked.
+ * The property: the intersection (as returned, and as a mount checks and copies it) allows at
+ * most what both sides allow (S02), and exactly that where the sides spell each collection alike
+ * ("at least" keeps an old version working where nothing was revoked). Where they spell one
+ * differently (`Votes`, `votes`), it may be stricter than both (P093, after its re-review).
  */
 function expectBoth(version: PageDeclaration, current: PageDeclaration, orders = 2): void {
   const v = decisions(version);
   const c = decisions(current);
+  const exact = spelledAlike(version, current);
   const pairs = [
     [version, current],
     [current, version],
@@ -192,7 +206,7 @@ function expectBoth(version: PageDeclaration, current: PageDeclaration, orders =
       const s = decisions(shown);
       CHECKS.forEach(({ asked }, index) => {
         const expected = v[index] === true && c[index] === true;
-        if (s[index] !== expected) {
+        if (exact ? s[index] !== expected : s[index] === true && !expected) {
           throw new Error(
             `${asked}: the intersection ${s[index] === true ? "allows" : "refuses"}, the version ${v[index] === true ? "allows" : "refuses"}, the current ${c[index] === true ? "allows" : "refuses"}\nversion ${JSON.stringify(version)}\ncurrent ${JSON.stringify(current)}\nshown ${JSON.stringify(shown)}`,
           );
@@ -507,7 +521,8 @@ describe("P093 review", () => {
       return next() < 0.5 ? made : mounted(made);
     };
     for (let round = 0; round < 12; round += 1) {
-      expectBoth(side(false), side(true));
+      // Even rounds spell alike (exact); odd ones in another case across sides (at most).
+      expectBoth(side(false), side(round % 2 === 1));
     }
   }, 30_000);
 
@@ -543,14 +558,85 @@ describe("P093 review", () => {
     ]);
     const as = (level: ViewerLevel, request: DbRequest) =>
       dbAccess(request, { level, id: ID }, variants).ok;
-    expect(as("interact", { op: "get", path: "VOTES/a" })).toBe(false);
-    expect(as("admin", { op: "get", path: "vOtes/a" })).toBe(true);
+    expect(as("interact", { op: "get", path: "votes/a" })).toBe(false);
+    expect(as("admin", { op: "get", path: "votes/a" })).toBe(true);
+    // A spelling the rules don't give exactly is under `*` too (the re-review), and the variants.
+    expect(as("admin", { op: "get", path: "vOtes/a" })).toBe(false);
+    expect(as("owner", { op: "get", path: "vOtes/a" })).toBe(true);
     expect(as("admin", { op: "set", path: "votes/a", data: {} })).toBe(false);
     expect(as("owner", { op: "set", path: "votes/a", data: {} })).toBe(true);
     expect(as("admin", { op: "get", path: "other/a" })).toBe(false);
     // The path reaches the handler as the page wrote it (0.7.0's data keeps its names).
     const access = dbAccess({ op: "get", path: "Votes/a" }, { level: "owner", id: ID }, variants);
     expect(access).toEqual({ ok: true, request: { op: "get", path: "Votes/a" } });
+  });
+
+  test("2 (re-review): the folded lookup is never looser than the exact-case one, nor different without variants", () => {
+    // The exact-case lookup, as before P093's review: the name's own rule, else `*`.
+    const exact = (
+      rules: Record<string, Rule>,
+      collection: string,
+      write: boolean,
+    ): ViewerLevel => {
+      const rule = Object.hasOwn(rules, collection) ? rules[collection] : rules["*"];
+      const asked = write ? rule?.write : rule?.read;
+      const base: ViewerLevel = write ? "interact" : "view";
+      return asked === undefined || !atLeast(asked, base) ? base : asked;
+    };
+    // The reviewer's case: `votes` was under `*` (owner), and must stay there.
+    const reviewed = own<Rule>([
+      ["*", { write: "owner" }],
+      ["Votes", { write: "interact" }],
+    ]);
+    expect(
+      dbAccess({ op: "set", path: "votes/x", data: {} }, { level: "interact", id: ID }, reviewed)
+        .ok,
+    ).toBe(false);
+    expect(
+      dbAccess({ op: "set", path: "votes/x", data: {} }, { level: "admin", id: ID }, reviewed).ok,
+    ).toBe(false);
+    const options: (Rule | undefined)[] = [
+      undefined,
+      {},
+      { write: "owner" },
+      { write: "interact" },
+      { read: "admin" },
+      { read: "view", write: "admin" },
+    ];
+    const spellings = ["votes", "Votes", "VOTES"];
+    let compared = 0;
+    for (const wildcard of options) {
+      for (const lower of options) {
+        for (const upper of options) {
+          const entries: [string, Rule][] = [];
+          if (wildcard !== undefined) entries.push(["*", wildcard]);
+          if (lower !== undefined) entries.push(["votes", lower]);
+          if (upper !== undefined) entries.push(["Votes", upper]);
+          const rules = own(entries);
+          const named = entries.filter(([name]) => name !== "*").map(([name]) => name);
+          for (const collection of spellings) {
+            for (const write of [false, true]) {
+              for (const level of VIEWER_LEVELS) {
+                const request: DbRequest = write
+                  ? { op: "set", path: `${collection}/x`, data: {} }
+                  : { op: "get", path: `${collection}/x` };
+                const folded = dbAccess(request, { level, id: ID }, rules).ok;
+                const before = atLeast(level, exact(rules, collection, write));
+                const what = `${JSON.stringify(rules)} ${level} ${write ? "writes" : "reads"} ${collection}`;
+                // Never looser than the exact-case lookup.
+                expect(!folded || before, what).toBe(true);
+                // Where the rules name it in no other case, the same as before.
+                if (named.every((name) => name === collection)) {
+                  expect(folded, what).toBe(before);
+                }
+                compared += 1;
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(compared).toBe(6 * 6 * 6 * 3 * 2 * 4);
   });
 
   test("2: names that differ only in case are refused at publish, still shown from a store", () => {

@@ -424,29 +424,37 @@ export function stricterDbRule(x: DbRule | undefined, y: DbRule | undefined): Db
 }
 
 /**
- * The rule a top-level collection is under (P086, P093): the rule object the rules give its name,
- * in any ASCII case (the strictest, where a page from before P093 gave it in more than one case),
- * else `*`'s, whole; never field by field (a collection's `{}` is the contract's levels, whatever
- * `*` says). Own names only: a collection named `constructor` or `__proto__` is no rule unless
- * the rules name it (P091). `dbAccess` and `intersectDeclarations` both read rules through this.
+ * The rule a top-level collection is under (P086, P093): the rule object the rules give its exact
+ * name, else `*`'s, whole; never field by field (a collection's `{}` is the contract's levels,
+ * whatever `*` says). Then made stricter by every rule that names it in another ASCII case (a
+ * store that folds case keeps `Votes` where `votes` is): never looser than the exact name's
+ * lookup, and the same where nothing names it in another case. Own names only: a collection
+ * named `constructor` or `__proto__` is no rule unless the rules name it (P091). `dbAccess` and
+ * `intersectDeclarations` both read rules through this.
  */
 export function dbRuleOf(rules: DbRules | undefined, collection: string): DbRule | undefined {
   if (rules === undefined) {
     return undefined;
   }
-  const wildcard = Object.hasOwn(rules, "*") ? rules["*"] : undefined;
+  const own = (key: string) => (Object.hasOwn(rules, key) ? rules[key] : undefined);
+  // After the re-review: `*` counts whenever the exact name is absent, variants or not.
+  let rule = own(collection) ?? own("*");
   if (collection === "*") {
-    return wildcard;
+    return rule;
   }
   const folded = foldCollection(collection);
-  let found: DbRule | undefined;
   for (const name of Object.keys(rules)) {
-    const rule = rules[name];
-    if (name !== "*" && typeof rule === "object" && foldCollection(name) === folded) {
-      found = found === undefined ? rule : stricterDbRule(found, rule);
+    const each = rules[name];
+    if (
+      name !== "*" &&
+      name !== collection &&
+      typeof each === "object" &&
+      foldCollection(name) === folded
+    ) {
+      rule = stricterDbRule(rule, each);
     }
   }
-  return found ?? wildcard;
+  return rule;
 }
 
 /**

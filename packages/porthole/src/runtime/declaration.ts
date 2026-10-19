@@ -375,12 +375,12 @@ function bothNames(
 /**
  * The stricter of two pages' rules, by collection (P093, the 2026-10-19 audit's S02): each name
  * either side's rules give, in any case, and `*`, is under the stricter of the rule EACH side
- * puts it under, as `dbAccess` reads that side (`dbRuleOf`: the name's own rule object in any
- * ASCII case, else `*`'s). A collection neither names is under both sides' `*`, the output's `*`.
- * So the output allows a level exactly what both allow it: an old version's `public` doesn't
- * outlive the current `*`, nor the other way. One name for each name in any case (as the first
- * side spells it); none for a name whose rule is the output's `*`'s (after the review: it says
- * nothing `*` doesn't).
+ * puts it under, as `dbAccess` reads that side (`dbRuleOf`). A collection neither names is under
+ * both sides' `*`, the output's `*`. So the output allows a level at most what both allow it (an
+ * old version's `public` doesn't outlive the current `*`, nor the other way), and exactly that
+ * where both spell each collection alike; where they spell one differently it may be stricter
+ * (after the re-review). One name for each name in any case (as the first side spells it); none
+ * for a name whose rule is the output's `*`'s (after the review: it says nothing `*` doesn't).
  */
 function stricterRules(a: DbRules | undefined, b: DbRules | undefined): DbRules | undefined {
   if (a === undefined && b === undefined) {
