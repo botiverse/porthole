@@ -100,7 +100,13 @@ function bridgeOf(options: PresetOptions) {
   const bridge = createBridge({
     config: presets.inlineWidget(options),
     display,
-    handlers: { callTool: handled, setModelContext: handled, downloadFile: () => true },
+    handlers: {
+      callTool: handled,
+      setModelContext: () => {
+        ran += 1;
+      },
+      downloadFile: () => true,
+    },
     confirm: (_, proceed) =>
       new Promise<ConfirmAnswer>((resolve) => {
         asked.push(resolve);
@@ -342,7 +348,7 @@ describe("review 1: what a call carries is plain JSON, and the dialog never hide
         ["setModelContext", { content: [value] }],
         ["downloadFile", { contents: [value] }],
       ] as const) {
-        expect(await t.bridge.call(capability, args), `${capability}`).toMatchObject({
+        expect(await t.bridge.call(capability, args), capability).toMatchObject({
           ok: false,
           refusal: "invalid",
         });

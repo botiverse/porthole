@@ -200,7 +200,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
        * A report from the frame: checked, taken only while the host asked for it (a selection
        * only in select mode, results only for its own marks), then through the bridge's gates.
        */
-      const onAnnotation = (raw: unknown, bridge: HostFunctionBridge) => {
+      const onAnnotation = (raw: unknown, through: HostFunctionBridge) => {
         if (
           !isRecord(raw) ||
           raw.jsonrpc !== "2.0" ||
@@ -216,7 +216,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         }
         let report = parseReport({ ...(isRecord(raw.params) ? raw.params : {}), type });
         if (report === null) {
-          void bridge.call("annotate", null);
+          void through.call("annotate", null);
           return;
         }
         switch (report.type) {
@@ -254,7 +254,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             break;
           }
         }
-        void bridge.call("annotate", report);
+        void through.call("annotate", report);
       };
       const needsAnnotate = (operation: string) => {
         if (!annotates) {

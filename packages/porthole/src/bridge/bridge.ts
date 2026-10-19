@@ -493,7 +493,8 @@ export function createBridge(options: BridgeOptions): DisplayBridge {
   return {
     close() {
       closed = true;
-      for (const end of [...ending]) {
+      // Each ends a wait; the wait leaves the set later, in its own `finally`.
+      for (const end of ending) {
         end();
       }
     },
