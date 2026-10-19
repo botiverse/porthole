@@ -3791,13 +3791,34 @@ Apps, three engines), negative control `report-unbounded`.
 12. **A frame follows at most 50 resources** (`resources/subscribe`, as the runtime's 50
     watches): past it refused as `too-large` without asking the host; ending one frees a place.
 13. **createHost's annotation reports by own key**: `constructor` was an annotate call.
+14. **What a call carries is plain JSON, and the dialog hides nothing** (the review). The dialog
+    wrote a boxed `String` as `"[String]"` and called its text whole: `tools/call` with
+    `{ command: new String("curl … | sh") }` showed `"[String]"`, no note, while the handler got
+    the string. `formatBounded` unwraps boxed primitives as JSON does (each prototype's `valueOf`),
+    and any placeholder (`[Circular]`, `[Repeated]`, a kind, a BigInt, an Error, `[unreadable]`)
+    makes the text not whole. And `callTool`'s arguments, `setModelContext`'s content and
+    `downloadFile`'s contents are plain, bounded JSON only (`isJsonData`,
+    `src/bridge/json-data.ts`: no object reached twice, finite numbers, plain prototypes,
+    100,000 values, 64 levels; an `undefined` field as JSON leaves it out): what a handler gets,
+    after a yes or with no confirmation at all (`setModelContext`), is what MCP says it is.
+15. **db's byte bound counts JSON's separators** (the review): one more a non-empty object or
+    array refused a document of exactly 1,048,576 bytes.
+16. **A stopped display refuses what waits for a confirmation** (the review; predates this
+    entry): each restart made a new bridge with its count at 0 (up to 40 waiting), and a yes to a
+    stopped run's request ran its handler. `createBridge` gives `close()` (`DisplayBridge`):
+    waiting calls are refused at once, a later yes or `proceed` runs nothing, no new call is
+    taken; `createHost`'s `stop()` (a restart, the end) closes the run's bridge. A host's own
+    dialog for such a request stays open until answered (the `confirm` contract has no way to
+    withdraw one); its answer does nothing.
 - **Changed assertion**: `test/mcp.test.ts`'s fake bridge now sees `{ message: { reason: "boom" } }`
   where it saw the adapter's JSON: the bridge formats now; the text the host gets is the same
   (`test/log-bounds.test.ts`).
 - What the host is told for JSON data is unchanged (byte for byte `JSON.stringify`, cut). Changed:
   a log without `data` is dropped as malformed (the shell adapter reported `"null"`); a malformed
   call of any capability counts against its rate (before, only a well-formed one did); a name or
-  path with a lone surrogate is refused.
+  path with a lone surrogate is refused; a tool's arguments, model context or a download's
+  contents that aren't plain JSON (an object reached twice, a Date, a Map, NaN, a boxed value) are
+  refused as malformed.
 
 **Why.** The audit's 修复 line: the cheap switch and rate before any deep processing, and a
 formatter bounded in nodes, depth and output that knows repeated references; a try/catch or a cut
@@ -3810,6 +3831,8 @@ after `JSON.stringify` isn't enough. A gate is only one if what it guards hasn't
   extension point) must remember; in the bridge's validator it is one place, after the one gate.
 - `try { JSON.stringify } catch`, then a cut: exponential before the cut; it bounds nothing.
 - Capping confirmations in the React provider's queue only: a host's own `confirm` queues too.
+- Shared references in a tool's arguments, expanded within a budget: db refuses them (P091), and
+  a dialog that shows an object once where the handler gets it twice isn't showing the call.
 - A catch-all in the adapters that answers any throw: it would hide the next `URIError`; each
   cause is refused up front instead, with its test.
 **Revisit when** a host needs more of a report than 2,000 characters or 16 levels (raise
