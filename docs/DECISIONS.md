@@ -3661,10 +3661,10 @@ met the whole platform's concepts and responsibilities.
    for each use, S1 inline widgets, S2 live widgets, S3 private artifacts, S4 public links and
    pages that are apps, S5 third-party MCP Apps, S6 url-mode previews, S7 several displays on one
    page, what Porthole guarantees, what the host must do, and what is not guaranteed. Every claim
-   was checked against the code of `main` with P093 (5c4ed50); the citations are in the pull
-   request, not the doc, so the doc doesn't rot with line numbers. A gap with a planned fix says
-   "open until P0xx", and §8 lists those decisions (P092–P103) with what each closes, so each merge
-   turns its notes into guarantees.
+   was checked against the code of `main` with P092, P093 and P094 (9ace866); the citations are in
+   the pull request, not the doc, so the doc doesn't rot with line numbers. A gap with a planned
+   fix says "open until P0xx", and §8 lists those decisions (P092–P103) with what each closes, so
+   each merge turns its notes into guarantees.
 2. **Two layers, the display first.** The display layer (the presets, isolation, egress, the shell,
    the gated host functions, the manual: P001's mechanisms and presets together) is what most hosts
    need. The app runtime is an optional layer over it, off unless a config sets `runtime`, and it
