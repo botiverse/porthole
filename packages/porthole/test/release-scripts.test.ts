@@ -21,10 +21,13 @@ interface Step {
 const workflow = parse(
   readFileSync(path.resolve(import.meta.dirname, "../../../.github/workflows/release.yml"), "utf8"),
 ) as { jobs: Record<string, { steps: Step[] }> };
-const step = (job: string): Step => {
-  const found = workflow.jobs[job]?.steps.findLast((each) => each.run !== undefined);
+/** A job's step by its name, or its last script. */
+const step = (job: string, name?: string): Step => {
+  const found = workflow.jobs[job]?.steps.findLast(
+    (each) => each.run !== undefined && (name === undefined || each.name === name),
+  );
   if (found === undefined) {
-    throw new Error(`no script in ${job}`);
+    throw new Error(`no script ${name ?? ""} in ${job}`);
   }
   return found;
 };
@@ -74,6 +77,8 @@ case "$api" in
     n=$(( $(cat "$SIM/runs.count" 2>/dev/null || echo 0) + 1 )); echo $n > "$SIM/runs.count"
     if [ -f "$SIM/runs.$n.json" ]; then cat "$SIM/runs.$n.json"; else answer runs.json '{"workflow_runs":[]}'; fi | jq -r "$filter" ;;
   */actions/runs/*/jobs*) answer jobs.json '{"jobs":[]}' | jq -r "$filter" ;;
+  */git/ref/heads/main) answer main.json '{"object":{"sha":"ma1n"}}' | jq -r "$filter" ;;
+  */compare/*) answer compare.json '{"status":"behind"}' | jq -r "$filter" ;;
   */git/refs) echo '{}' ;;
   */git/tags/*) answer tag.json '{}' | jq -r "$filter" ;;
   */releases*) answer releases.json '[]' | jq -r "$filter" ;;
@@ -92,8 +97,16 @@ interface Run {
   readonly calls: string[];
   readonly dir: string;
 }
-/** Runs `job`'s script with `files` as the API's answers and `env` as the run's context. */
-function simulate(job: string, files: Record<string, unknown>, env: Record<string, string>): Run {
+/**
+ * Runs `job`'s script (its step `stepName`, or its last) with `files` as the API's answers and
+ * `env` as the run's context.
+ */
+function simulate(
+  job: string,
+  files: Record<string, unknown>,
+  env: Record<string, string>,
+  stepName?: string,
+): Run {
   const dir = path.join(root, `case-${(cases += 1)}`);
   mkdirSync(dir);
   for (const [name, content] of Object.entries(files)) {
@@ -103,8 +116,8 @@ function simulate(job: string, files: Record<string, unknown>, env: Record<strin
     );
   }
   const script = path.join(dir, `${job}.sh`);
-  writeFileSync(script, step(job).run ?? "");
-  const { GH_TOKEN: _, ...stepEnv } = step(job).env ?? {};
+  writeFileSync(script, step(job, stepName).run ?? "");
+  const { GH_TOKEN: _, ...stepEnv } = step(job, stepName).env ?? {};
   const result = spawnSync("bash", [script], {
     cwd: dir,
     encoding: "utf8",
@@ -221,7 +234,13 @@ describe.skipIf(!runnable)("V03: the gate, against a simulated API", () => {
   });
 
   it("stops on an API error in any lookup, never reading it as no tag or no run", () => {
-    for (const fail of ["matching-refs/tags", "ci.yml/runs", "/jobs"]) {
+    for (const fail of [
+      "matching-refs/tags",
+      "git/ref/heads/main",
+      "/compare/",
+      "ci.yml/runs",
+      "/jobs",
+    ]) {
       const result = simulate("gate", { ...passed, fail }, DISPATCH);
       expect(result.out, fail).toContain("HTTP 502");
       expect(result.out, fail).not.toContain("ci.yml passed");
@@ -276,16 +295,37 @@ describe.skipIf(!runnable)("V03: the gate, against a simulated API", () => {
     );
     expect(pending.calls.filter((call) => call === "sleep 60")).toHaveLength(2);
     expect(pending.status).toBe(0);
+    // Three minutes, not the gate's 150, so the case runs in well under vitest's 5 s.
     const never = simulate(
       "gate",
       { "runs.json": runs(run("push", null, "2026-10-19T10:00:00Z")) },
-      PUSH,
+      { ...PUSH, CI_WAIT_MINUTES: "3" },
     );
-    expect(never.calls.filter((call) => call === "sleep 60")).toHaveLength(
-      Number(step("gate").env?.["CI_WAIT_MINUTES"]),
-    );
+    expect(never.calls.filter((call) => call === "sleep 60")).toHaveLength(3);
     expect(never.out).toContain("did not finish in time");
     expect(never.status).toBe(1);
+  });
+
+  it("refuses a commit that isn't on main (a branch's tag, or a tag named main)", () => {
+    for (const status of ["ahead", "diverged"]) {
+      const result = simulate("gate", { ...passed, "compare.json": { status } }, PUSH);
+      expect(result.out, status).toContain(
+        `c0ffee is not on main (main is ma1n; the commit is ${status})`,
+      );
+      expect(result.status, status).toBe(1);
+      expect(
+        result.calls.some((call) => call.includes("ci.yml/runs")),
+        status,
+      ).toBe(false);
+    }
+    for (const status of ["identical", "behind"]) {
+      const result = simulate("gate", { ...passed, "compare.json": { status } }, PUSH);
+      expect(result.status, status).toBe(0);
+    }
+    // main by its full ref, and the commit against main's head.
+    const calls = simulate("gate", passed, PUSH).calls;
+    expect(calls).toContain("gh api repos/botiverse/porthole/git/ref/heads/main --jq .object.sha");
+    expect(calls).toContain("gh api repos/botiverse/porthole/compare/ma1n...c0ffee --jq .status");
   });
 
   it("refuses a dispatch from another ref, a tag that exists, and what isn't a version", () => {
@@ -317,18 +357,102 @@ describe.skipIf(!runnable)("V03: the gate, against a simulated API", () => {
 });
 
 const CHANGELOG = "# Changelog\n\n## 0.7.1\n\nThe fix.\n\n## 0.7.0\n\nThe runtime.\n";
+const SECTION_STEP = "verify CHANGELOG.md has the version's section";
 
-describe.skipIf(!runnable)("V03: the release job, against a simulated API", () => {
-  it("tags the commit and makes the release from the version's CHANGELOG.md section", () => {
-    const result = simulate("release", { "CHANGELOG.md": CHANGELOG }, { TAG: "v0.7.1" });
+describe.skipIf(!runnable)(
+  "V03: the build's CHANGELOG.md check, before anything is published",
+  () => {
+    it("passes a version with its own section, Windows line ends or not", () => {
+      for (const text of [CHANGELOG, CHANGELOG.replaceAll("\n", "\r\n")]) {
+        const result = simulate("build", { "CHANGELOG.md": text }, { TAG: "v0.7.1" }, SECTION_STEP);
+        expect(result.status, JSON.stringify(text)).toBe(0);
+      }
+    });
+
+    it("stops a release whose heading isn't exactly `## X.Y.Z`, or whose section is empty", () => {
+      for (const [text, says] of [
+        ["# Changelog\n\n## v0.7.1\n\nThe fix.\n", "no '## 0.7.1' heading"],
+        ["# Changelog\n\n## 0.7.1 (2026-10-19)\n\nThe fix.\n", "no '## 0.7.1' heading"],
+        ["# Changelog\n\n## 0.7.1\n\n  \n## 0.7.0\n\nThe runtime.\n", "section is empty"],
+        ["# Changelog\n\n## 0.7.0\n\nThe runtime.\n", "no '## 0.7.1' heading"],
+      ]) {
+        const result = simulate("build", { "CHANGELOG.md": text }, { TAG: "v0.7.1" }, SECTION_STEP);
+        expect(result.out, text).toContain(says);
+        expect(result.status, text).toBe(1);
+      }
+    });
+  },
+);
+
+describe.skipIf(!runnable)("V03: the tag job, against a simulated API", () => {
+  it("tags the commit when the tag isn't there", () => {
+    const result = simulate("tag", {}, { TAG: "v0.7.1" });
     expect(result.status).toBe(0);
-    expect(result.calls).toContain(
+    expect(result.calls.at(-1)).toBe(
       "gh api repos/botiverse/porthole/git/refs -f ref=refs/tags/v0.7.1 -f sha=c0ffee",
     );
-    expect(readFileSync(path.join(result.dir, "notes.md"), "utf8")).toBe("\nThe fix.\n\n");
-    expect(result.calls.at(-1)).toBe(
-      "gh release create v0.7.1 --title v0.7.1 --notes-file notes.md --verify-tag",
+  });
+
+  it("passes a tag already on the commit (a pushed tag, or a re-run), annotated or not", () => {
+    const light = simulate(
+      "tag",
+      { "refs.json": [{ ref: "refs/tags/v0.7.1", object: { type: "commit", sha: "c0ffee" } }] },
+      { TAG: "v0.7.1" },
     );
+    const annotated = simulate(
+      "tag",
+      {
+        "refs.json": [{ ref: "refs/tags/v0.7.1", object: { type: "tag", sha: "7a9" } }],
+        "tag.json": { object: { type: "commit", sha: "c0ffee" } },
+      },
+      { TAG: "v0.7.1" },
+    );
+    for (const result of [light, annotated]) {
+      expect(result.out).toContain("v0.7.1 is c0ffee");
+      expect(result.calls.some((call) => call.includes("git/refs -f"))).toBe(false);
+      expect(result.status).toBe(0);
+    }
+  });
+
+  it("refuses a tag on another commit", () => {
+    const result = simulate(
+      "tag",
+      { "refs.json": [{ ref: "refs/tags/v0.7.1", object: { type: "commit", sha: "beef" } }] },
+      { TAG: "v0.7.1" },
+    );
+    expect(result.out).toContain("v0.7.1 points at beef, not c0ffee");
+    expect(result.status).toBe(1);
+  });
+
+  it("stops on an API error in a lookup, before creating anything", () => {
+    for (const [fail, files] of [
+      ["matching-refs/tags", {}],
+      [
+        "git/tags/",
+        { "refs.json": [{ ref: "refs/tags/v0.7.1", object: { type: "tag", sha: "7a9" } }] },
+      ],
+    ] as const) {
+      const result = simulate("tag", { ...files, fail }, { TAG: "v0.7.1" });
+      expect(result.out, fail).toContain("HTTP 502");
+      expect(
+        result.calls.some((call) => call.includes("git/refs -f")),
+        fail,
+      ).toBe(false);
+      expect(result.status, fail).toBe(1);
+    }
+  });
+});
+
+describe.skipIf(!runnable)("V03: the release job, against a simulated API", () => {
+  it("makes the release from the version's CHANGELOG.md section, Windows line ends or not", () => {
+    for (const text of [CHANGELOG, CHANGELOG.replaceAll("\n", "\r\n")]) {
+      const result = simulate("release", { "CHANGELOG.md": text }, { TAG: "v0.7.1" });
+      expect(result.status).toBe(0);
+      expect(readFileSync(path.join(result.dir, "notes.md"), "utf8")).toBe("\nThe fix.\n\n");
+      expect(result.calls.at(-1)).toBe(
+        "gh release create v0.7.1 --title v0.7.1 --notes-file notes.md --verify-tag",
+      );
+    }
   });
 
   it("marks a prerelease's GitHub release as one", () => {
@@ -337,8 +461,8 @@ describe.skipIf(!runnable)("V03: the release job, against a simulated API", () =
     expect(result.calls.at(-1)).toContain("--prerelease");
   });
 
-  it("stops on an API error in the tag, release or CHANGELOG lookup, before creating anything", () => {
-    for (const fail of ["matching-refs/tags", "/releases", "contents/CHANGELOG.md"]) {
+  it("stops on an API error in the release or CHANGELOG lookup, before creating anything", () => {
+    for (const fail of ["/releases", "contents/CHANGELOG.md"]) {
       const result = simulate("release", { "CHANGELOG.md": CHANGELOG, fail }, { TAG: "v0.7.1" });
       expect(result.out, fail).toContain("HTTP 502");
       expect(
@@ -349,20 +473,10 @@ describe.skipIf(!runnable)("V03: the release job, against a simulated API", () =
     }
   });
 
-  it("refuses a tag on another commit, and finishes a release whose tag and release exist", () => {
-    const other = simulate(
-      "release",
-      { "refs.json": [{ ref: "refs/tags/v0.7.1", object: { type: "commit", sha: "beef" } }] },
-      { TAG: "v0.7.1" },
-    );
-    expect(other.out).toContain("v0.7.1 points at beef, not c0ffee");
-    expect(other.status).toBe(1);
+  it("finishes a release that exists already", () => {
     const done = simulate(
       "release",
-      {
-        "refs.json": [{ ref: "refs/tags/v0.7.1", object: { type: "commit", sha: "c0ffee" } }],
-        "releases.json": [{ id: 3, tag_name: "v0.7.1" }],
-      },
+      { "releases.json": [{ id: 3, tag_name: "v0.7.1" }] },
       { TAG: "v0.7.1" },
     );
     expect(done.out).toContain("release v0.7.1 already exists");
@@ -400,14 +514,14 @@ describe.skipIf(!runnable)("V03: the publish step, against a simulated pnpm", ()
     const result = publish("0.7.1", "v0.7.1");
     expect(result.status).toBe(0);
     expect(result.calls.at(-1)).toMatch(
-      /^pnpm publish .+botiverse-porthole-0\.7\.1\.tgz --access public --no-git-checks --tag latest$/u,
+      /^pnpm publish .+botiverse-porthole-0\.7\.1\.tgz --access public --no-git-checks --tag latest --config\.ignore-pnpmfile=true$/u,
     );
   });
 
   it("publishes a prerelease as `next`, never as `latest`", () => {
     const result = publish("0.8.0-rc.1", "v0.8.0-rc.1");
     expect(result.status).toBe(0);
-    expect(result.calls.at(-1)).toMatch(/--tag next$/u);
+    expect(result.calls.at(-1)).toMatch(/ --tag next /u);
     expect(result.calls.join("\n")).not.toContain("--tag latest");
   });
 

@@ -5,9 +5,9 @@ A way past any of its walls is a vulnerability, and we fix it before anything el
 
 ## Reporting a vulnerability
 
-Report it privately, through GitHub's private vulnerability reporting:
+GitHub's private vulnerability reporting is the channel for reports:
 <https://github.com/botiverse/porthole/security/advisories/new> (the repository's Security tab,
-"Report a vulnerability").
+"Report a vulnerability"). Only the maintainers see what you send there.
 
 Please don't open a public issue, pull request or discussion about it, and don't publish details
 until a fix is released. If the form isn't available to you, open an issue that says only that you
@@ -30,7 +30,8 @@ backports, so upgrading is how a host gets a fix.
 
 ## What happens to a report
 
-1. We acknowledge it within three business days, and tell you whether we can reproduce it.
+1. We aim to acknowledge it within three business days, and to tell you whether we can reproduce
+   it.
 2. We fix it in private (a draft GitHub security advisory and its temporary private fork): first
    the test that fails (a leak probe or a unit test), then the fix, with a decision entry in
    [docs/DECISIONS.md](docs/DECISIONS.md) where a boundary changes.

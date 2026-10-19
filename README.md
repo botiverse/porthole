@@ -47,14 +47,16 @@ that proves the isolation holds.
 with `/react`, `/mcp`, `/conformance`, `/server`, `/node` and `/check` subpaths; its versions and
 what each changed are in [CHANGELOG.md](CHANGELOG.md) (until 1.0 a minor version may change the API,
 and says how). Phase 1's core milestones (M1–M5, DESIGN.md § Milestones) are done; CI runs the leak
-suite on Chromium, WebKit and Firefox for every change, and npm gets only a commit that passed all
-of CI (P097). Since 0.2.0 the host kit (`createContentHost`) is the whole host side an app needs
-around served content: it writes its policy (DESIGN.md § The host kit). Since 0.6.0 a served page
-may be many files (a build's output, a report with its images), each served from its version's
-manifest under that version's own address (P081–P084). Since 0.7.0 a page is an app: it reaches its
-host through one global, `porthole.use(name)`, for what it declared and its viewer's level allows
-(`user`, `comments`, `artifact`, `assets`, `db`, and 0.6's host functions), under a contract pinned
-per artifact (P085–P090). Read, in order:
+suite on Chromium, WebKit and Firefox for every change, and the release workflow publishes only a
+commit of main that passed all of CI (P097: until the repository's release settings are on, that
+guards against mistakes, not against someone who can push). Since 0.2.0 the host kit
+(`createContentHost`) is the whole host side an app needs around served content: it writes its
+policy (DESIGN.md § The host kit). Since 0.6.0 a served page may be many files (a build's output, a
+report with its images), each served from its version's manifest under that version's own address
+(P081–P084). Since 0.7.0 a page is an app: it reaches its host through one global,
+`porthole.use(name)`, for what it declared and its viewer's level allows (`user`, `comments`,
+`artifact`, `assets`, `db`, and 0.6's host functions), under a contract pinned per artifact
+(P085–P090). Read, in order:
 
 1. [docs/PRINCIPLES.md](docs/PRINCIPLES.md) — the rules decisions are made by.
 2. [docs/OBJECTIVES.md](docs/OBJECTIVES.md) — what Porthole is for, with success criteria and non-goals.

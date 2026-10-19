@@ -14,6 +14,7 @@ const repo = path.resolve(import.meta.dirname, "../../..");
 const workflows = path.join(repo, ".github/workflows");
 
 interface Step {
+  readonly name?: string;
   readonly uses?: string;
   readonly run?: string;
   readonly with?: Readonly<Record<string, unknown>>;
@@ -178,6 +179,27 @@ describe("V03: a release waits for ci.yml on the same commit", () => {
     expect(gateScript).toContain("actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&branch=main");
     expect(gateScript).toContain('select(.event == "push" or .event == "workflow_dispatch")');
     expect(gateScript).toContain('"$GITHUB_REF" != refs/heads/main');
+    // The commit on main itself, against main by its full ref (no tag can stand in for it).
+    expect(gateScript).toContain("git/ref/heads/main");
+    expect(gateScript).toContain("compare/$main...$GITHUB_SHA");
+  });
+
+  it("tags before it publishes, so a tag the repository refuses stops the release first", () => {
+    const tag = release.jobs["tag"];
+    expect(needs(tag)).toEqual(["build"]);
+    expect(tag?.if, "on both triggers").toBeUndefined();
+    expect(tag?.permissions).toEqual({ contents: "write" });
+    expect(needs(release.jobs["publish"])).toEqual(["gate", "build", "tag"]);
+    expect(needs(release.jobs["release"])).toEqual(["publish"]);
+  });
+
+  it("checks the GitHub release's notes are there in build, before npm has the version", () => {
+    const build = release.jobs["build"]?.steps ?? [];
+    const section = build.findIndex(
+      (each) => each.name === "verify CHANGELOG.md has the version's section",
+    );
+    expect(section).toBeGreaterThanOrEqual(0);
+    expect(section).toBeLessThan(build.findIndex((each) => each.run?.includes(" pack ") === true));
   });
 
   it("requires every one of ci.yml's jobs by name, as GitHub names them", () => {
@@ -206,16 +228,25 @@ describe("V03: a release waits for ci.yml on the same commit", () => {
     ]);
   });
 
+  it("gives every job of every workflow a timeout (GitHub's default is six hours)", () => {
+    for (const name of files) {
+      for (const [id, job] of Object.entries(workflow(name).jobs)) {
+        expect(job["timeout-minutes"], `${name}: ${id}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
   it("waits for a pending run longer than ci.yml's slowest job, inside its own timeout", () => {
     const wait = Number(gateEnv["CI_WAIT_MINUTES"]);
-    const slowest = Math.max(...Object.values(ci.jobs).map((job) => job["timeout-minutes"] ?? 0));
+    const slowest = Math.max(...Object.values(ci.jobs).map((job) => job["timeout-minutes"] ?? 360));
     expect(wait).toBeGreaterThanOrEqual(slowest + 30);
     expect(gate?.["timeout-minutes"] ?? 0).toBeGreaterThanOrEqual(wait + 5);
   });
 
-  it("ci.yml runs on pushes and by hand, and none of its jobs is skipped or allowed to fail", () => {
+  it("ci.yml runs on pushes to branches and by hand, and none of its jobs is skipped or allowed to fail", () => {
     const on = ci.on as Record<string, unknown>;
-    expect(Object.hasOwn(on, "push")).toBe(true);
+    // Branches, never tags: a tag's run names the tag as its branch (a tag named main).
+    expect(on["push"]).toEqual({ branches: ["**"] });
     // `stamp workflow run ci.yml` for a run that flaked, or a commit without one.
     expect(Object.hasOwn(on, "workflow_dispatch")).toBe(true);
     for (const [id, job] of Object.entries(ci.jobs)) {
@@ -225,7 +256,7 @@ describe("V03: a release waits for ci.yml on the same commit", () => {
   });
 
   it("calls the API only as an assignment or a command of its own, never inside a test", () => {
-    for (const id of ["gate", "release"]) {
+    for (const id of ["gate", "tag", "release"]) {
       for (const step of release.jobs[id]?.steps ?? []) {
         const script = step.run ?? "";
         expect(script.startsWith("set -euo pipefail\n"), id).toBe(true);
@@ -270,6 +301,24 @@ describe("V03: only the job that publishes can mint an id-token", () => {
     for (const step of publish?.steps ?? []) {
       expect(step.with?.["cache"], step.uses).toBeUndefined();
     }
+  });
+
+  it("checks out package.json alone, and publishes with the pnpmfile ignored", () => {
+    // pnpm loads a checkout's .pnpmfile.cjs and pnpm-workspace.yaml's configDependencies for any
+    // command, a publish of a tarball too: neither is in this job's checkout.
+    const checkouts = (publish?.steps ?? []).filter(
+      (step) => step.uses?.startsWith("actions/checkout@") === true,
+    );
+    expect(checkouts.map((step) => step.with)).toEqual([
+      {
+        "persist-credentials": false,
+        "sparse-checkout": "/package.json",
+        "sparse-checkout-cone-mode": false,
+      },
+    ]);
+    const scripts = (publish?.steps ?? []).map((step) => step.run ?? "").join("\n");
+    // `pnpm publish` refuses --ignore-pnpmfile; the config key is the same guard.
+    expect(scripts).toMatch(/pnpm publish .*--config\.ignore-pnpmfile=true/u);
   });
 
   it("writes to the repository only from a job that checks nothing out", () => {

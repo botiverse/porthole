@@ -7,8 +7,11 @@ name: ci
 # REQUIRED_CI_JOBS; test/release.test.ts holds the two together). A run that flaked, or a commit
 # without one, is run again by hand: `stamp workflow run ci.yml --repo botiverse/porthole`. Every
 # Action is pinned to the commit of the release named beside it (P097).
+# Branches only: a tag's run would name the tag as its branch (a tag named main would pass for it),
+# and a release tag's commit has had main's run already.
 on:
   push:
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
 
@@ -22,6 +25,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
