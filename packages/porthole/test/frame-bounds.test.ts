@@ -56,7 +56,7 @@ describe("P095 1: the confirm dialog shows what a call carries, bounded", () => 
       createElement(ConfirmDialog, {
         request: {
           capability: "setModelContext",
-          args: { structuredContent: shared(16) },
+          args: { structuredContent: shared(16) as Record<string, unknown> },
           display,
         },
         onAnswer: () => {},
