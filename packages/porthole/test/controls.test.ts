@@ -9,6 +9,8 @@ import {
   controlsTable,
   judge,
   names,
+  shard,
+  summarize,
   type Control,
   type Run,
 } from "../leak/controls.ts";
@@ -371,6 +373,47 @@ describe("P096's review: a control that fails nothing says why (item 2)", () => 
   });
 });
 
+describe("CI's shards of the registry (P096)", () => {
+  test("every control is in exactly one shard, whatever the count, and none is empty", () => {
+    for (const count of [1, 2, 3, 4, 6]) {
+      const all = Array.from({ length: count }, (_, at) => shard(at + 1, count));
+      expect(all.flat().toSorted(), `${count}`).toEqual(Object.keys(CONTROLS).toSorted());
+      for (const one of all) {
+        expect(one.length, `${count}`).toBeGreaterThan(0);
+      }
+    }
+    // Stable: the same registry splits the same way.
+    expect(shard(2, 4)).toEqual(shard(2, 4));
+  });
+
+  test("the summary fails a control that failed, or that no shard ran on an engine", () => {
+    const registered = Object.keys(CONTROLS);
+    const held = (engine: string, only = registered) => ({
+      engines: [engine],
+      shard: null,
+      controls: Object.fromEntries(only.map((name) => [name, { ok: true, problems: [] }])),
+    });
+    expect(
+      summarize(
+        ENGINES.map((engine) => held(engine)),
+        ENGINES,
+      ),
+    ).toEqual([]);
+    const [first, ...rest] = registered;
+    expect(summarize([held("chromium", rest), held("webkit"), held("firefox")], ENGINES)).toEqual([
+      `[chromium] ${first} never ran`,
+    ]);
+    const broken = {
+      ...held("webkit"),
+      controls: { ...held("webkit").controls, [first!]: { ok: false, problems: ["x"] } },
+    };
+    expect(summarize([held("chromium"), broken, held("firefox")], ENGINES)).toEqual([
+      `[webkit] ${first} failed`,
+    ]);
+    expect(summarize([], ["chromium"]).length).toBe(registered.length);
+  });
+});
+
 // ---------------------------------------------------------------------------------------------
 // The registry: every weakening is run, each control as DESIGN.md says (V02).
 
@@ -426,12 +469,22 @@ describe("V02: one registry of the negative controls", () => {
     expect([...named].filter((name) => CONTROLS[name] === undefined)).toEqual([]);
   });
 
-  test("CI runs every control, on every engine", () => {
+  test("CI runs every control, on every engine, in shards whose summary checks them all", () => {
     const pkg = JSON.parse(read("package.json")) as { scripts: Record<string, string> };
     expect(pkg.scripts["test:controls"]).toBe("node scripts/controls.ts");
     const ci = read("../../.github/workflows/ci.yml");
-    const job = ci.slice(ci.indexOf("\n  controls:"), ci.indexOf("\n  examples:"));
+    const job = ci.slice(ci.indexOf("\n  controls-shard:"), ci.indexOf("\n  controls:"));
     expect(job).toContain("engine: [chromium, webkit, firefox]");
-    expect(job).toMatch(/run: pnpm --filter @botiverse\/porthole run test:controls\n/);
+    const shards = /shard: \[([\d, ]+)\]/.exec(job)?.[1]?.split(", ").map(Number) ?? [];
+    expect(shards).toEqual(Array.from({ length: shards.length }, (_, at) => at + 1));
+    expect(job).toContain(
+      `run: pnpm --filter @botiverse/porthole exec node scripts/controls.ts --shard \${{ matrix.shard }}/${shards.length}\n`,
+    );
+    expect(job).toContain("timeout-minutes: 60");
+    const summary = ci.slice(ci.indexOf("\n  controls:"), ci.indexOf("\n  examples:"));
+    expect(summary).toContain("needs: controls-shard");
+    expect(summary).toContain(
+      "run: node packages/porthole/scripts/controls.ts --summary .dev/shards",
+    );
   });
 });

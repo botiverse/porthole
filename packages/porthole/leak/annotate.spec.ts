@@ -251,32 +251,47 @@ test("marks: drawn over their anchors, one brought into view, an unfound one orp
   expect(await display.annotate("show", marks)).toBeNull();
   const shown = await next(display, "anchored");
   const byId = new Map<string, AnchorResult>(shown.results.map((each) => [each.id, each]));
-  expect(byId.get("far")?.state).toBe("attached");
-  expect(byId.get("hello")?.state).toBe("attached");
-  expect(byId.get("gone")).toEqual({ id: "gone", state: "orphaned" });
+  expect(byId.get("far")?.state, "probe: the far mark is drawn over its anchor").toBe("attached");
+  expect(byId.get("hello")?.state, "probe: the text mark is drawn over its anchor").toBe(
+    "attached",
+  );
+  expect(byId.get("gone"), "probe: the unfound mark is orphaned").toEqual({
+    id: "gone",
+    state: "orphaned",
+  });
   // Below the frame's viewport: on its bottom edge, of no height (the host clamps every box to
   // the frame, P104).
   const viewport = await frame.evaluate(() => window.innerHeight);
-  expect(byId.get("far")?.rect?.y).toBe(viewport);
-  expect(byId.get("far")?.rect?.height).toBe(0);
+  expect(byId.get("far")?.rect?.y, "probe: a box below the frame is on its bottom edge").toBe(
+    viewport,
+  );
+  expect(byId.get("far")?.rect?.height, "probe: a box below the frame is of no height").toBe(0);
 
   const count = (await reports(display)).length;
   expect(await display.annotate("focus", "far")).toBeNull();
   const focused = await next(display, "anchored", count);
-  expect(focused.results).toHaveLength(1);
+  expect(focused.results, "probe: focus reports the one mark brought into view").toHaveLength(1);
   const rect = focused.results[0]?.rect;
-  expect(rect?.y).toBeGreaterThanOrEqual(0);
-  expect((rect?.y ?? 0) + (rect?.height ?? 0)).toBeLessThanOrEqual(viewport);
-  expect(await frame.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  expect(rect?.y, "probe: the focused mark's top is in the viewport").toBeGreaterThanOrEqual(0);
+  expect(
+    (rect?.y ?? 0) + (rect?.height ?? 0),
+    "probe: the focused mark's bottom is in the viewport",
+  ).toBeLessThanOrEqual(viewport);
+  expect(
+    await frame.evaluate(() => window.scrollY),
+    "probe: the frame scrolled to the focused mark",
+  ).toBeGreaterThan(0);
 
   const marked = await look(page, frame, "#far");
   expect(await display.annotate("clear")).toBeNull();
   await expect
     .poll(async () => (await look(page, frame, "#far")).equals(marked), {
-      message: "the marks are gone",
+      message: "probe: the marks are gone",
     })
     .toBe(false);
-  expect(await display.annotate("focus", "far")).toMatch(/no mark/u);
+  expect(await display.annotate("focus", "far"), "probe: no mark is left to focus").toMatch(
+    /no mark/u,
+  );
 });
 
 const VERSION_1 = `<!doctype html><html><head><title>Notes</title></head><body>
@@ -674,22 +689,32 @@ test("markers: a mark with a count gets a numbered bubble; its click is reported
   ]);
   if (browserName === "chromium") {
     // The number, "99+" past 99, the bubble alone for 0; a mark without a count has none.
-    await expect.poll(() => markerLabels(page, frame)).toEqual(["", "3", "99+"]);
+    await expect
+      .poll(() => markerLabels(page, frame), {
+        message: "probe: each mark with a count has its numbered bubble, the others none",
+      })
+      .toEqual(["", "3", "99+"]);
   }
 
   // A click on the text's marker: reported with its box; nothing of the content's hears it.
   const fell = await textMarkerPoint(frame, "#p1 b");
   await page.mouse.click(fell.x, fell.y);
   const activated = await next(display, "activated");
-  expect(activated.id).toBe("fell");
+  expect(activated.id, "probe: the text marker's click is reported for its mark").toBe("fell");
   // Its box is the marker's, in the frame's viewport: around where it was clicked.
   const frameBox = await (await frame.frameElement()).boundingBox();
   const left = activated.rect.x + (frameBox?.x ?? 0);
   const top = activated.rect.y + (frameBox?.y ?? 0);
-  expect(left).toBeLessThanOrEqual(fell.x);
-  expect(left + activated.rect.width).toBeGreaterThanOrEqual(fell.x);
-  expect(top).toBeLessThanOrEqual(fell.y);
-  expect(top + activated.rect.height).toBeGreaterThanOrEqual(fell.y);
+  expect(left, "probe: the reported box is around the click").toBeLessThanOrEqual(fell.x);
+  expect(
+    left + activated.rect.width,
+    "probe: the reported box is around the click",
+  ).toBeGreaterThanOrEqual(fell.x);
+  expect(top, "probe: the reported box is around the click").toBeLessThanOrEqual(fell.y);
+  expect(
+    top + activated.rect.height,
+    "probe: the reported box is around the click",
+  ).toBeGreaterThanOrEqual(fell.y);
   for (const attribute of [
     "data-pointerdown",
     "data-pointerup",
@@ -698,7 +723,7 @@ test("markers: a mark with a count gets a numbered bubble; its click is reported
     "data-click",
     "data-after",
   ]) {
-    expect(await frame.locator("body").getAttribute(attribute), attribute).toBeNull();
+    expect(await frame.locator("body").getAttribute(attribute), `probe: ${attribute}`).toBeNull();
   }
 
   // The element's marker sits on its top right corner; the numbers make each wider.
@@ -710,15 +735,22 @@ test("markers: a mark with a count gets a numbered bubble; its click is reported
   let count = (await reports(display)).length;
   await page.mouse.click(more.x + more.width, more.y);
   const wide = await next(display, "activated", count);
-  expect(wide.id).toBe("more");
+  expect(wide.id, "probe: the element marker's click is reported for its mark").toBe("more");
   count = (await reports(display)).length;
   // The title spans the frame: its marker is kept inside it.
   await page.mouse.click(title.x + title.width - 10, title.y);
   const bare = await next(display, "activated", count);
-  expect(bare.id).toBe("title");
-  expect(bare.rect.width).toBeLessThan(activated.rect.width);
-  expect(activated.rect.width).toBeLessThan(wide.rect.width);
-  expect(await frame.locator("body").getAttribute("data-click")).toBeNull();
+  expect(bare.id, "probe: the bare marker's click is reported for its mark").toBe("title");
+  expect(bare.rect.width, "probe: a bubble with a number is wider than one without").toBeLessThan(
+    activated.rect.width,
+  );
+  expect(activated.rect.width, "probe: a longer number makes a wider bubble").toBeLessThan(
+    wide.rect.width,
+  );
+  expect(
+    await frame.locator("body").getAttribute("data-click"),
+    "probe: no marker's click reached the content",
+  ).toBeNull();
 
   // A mark without a count: its anchor is marked, but no marker takes the click there.
   expect((await look(page, frame, "#p2")).equals(plainBefore)).toBe(false);
@@ -727,9 +759,10 @@ test("markers: a mark with a count gets a numbered bubble; its click is reported
   await page.mouse.click(plain.x, plain.y);
   await expect(frame.locator("body")).toHaveAttribute("data-after2", "yes");
   await page.waitForTimeout(400);
-  expect((await reports(display)).slice(count).filter((each) => each.type === "activated")).toEqual(
-    [],
-  );
+  expect(
+    (await reports(display)).slice(count).filter((each) => each.type === "activated"),
+    "probe: a mark without a count has no marker to click",
+  ).toEqual([]);
 
   // While the person picks an element, markers step aside: the click picks what lies under one.
   await display.annotate("start", { elements: true, text: false });
@@ -789,34 +822,49 @@ test("following: once a scroll settles, one report with only the marks that move
         (each): each is Extract<AnnotationReport, { type: "anchored" }> => each.type === "anchored",
       );
   await expect
-    .poll(async () => {
-      const last = (await anchoredSince(count)).at(-1);
-      const top = last?.results.find((each) => each.id === "top")?.rect?.y;
-      return top === undefined ? null : Math.round((before.get("top")?.y ?? 0) - top);
-    })
+    .poll(
+      async () => {
+        const last = (await anchoredSince(count)).at(-1);
+        const top = last?.results.find((each) => each.id === "top")?.rect?.y;
+        return top === undefined ? null : Math.round((before.get("top")?.y ?? 0) - top);
+      },
+      { message: "probe: once the scroll settles, a report tells the marks that moved" },
+    )
     .toBe(400);
   await page.waitForTimeout(600);
   const run = await anchoredSince(count);
   // At most one per settle, and one a second (P104): pauses within a second of the last report
   // are told together.
-  expect(run.length).toBeGreaterThanOrEqual(1);
+  expect(run.length, "probe: a settled scroll is reported").toBeGreaterThanOrEqual(1);
   expect(
     run.length,
-    `at most one per settle (steps ${gaps.map(Math.round).join(", ")} ms apart)`,
+    `probe: at most one per settle (steps ${gaps.map(Math.round).join(", ")} ms apart)`,
   ).toBeLessThanOrEqual(1 + gaps.filter((gap) => gap >= 130).length);
   for (const report of run) {
-    expect(report.results.map((each) => each.id).sort()).toEqual(["far", "near", "top"]);
+    expect(
+      report.results.map((each) => each.id).sort(),
+      "probe: only the marks that moved are reported, the pinned one never",
+    ).toEqual(["far", "near", "top"]);
   }
   const viewport = await frame.evaluate(() => window.innerHeight);
   for (const each of run.at(-1)?.results ?? []) {
-    expect(each.state).toBe("attached");
+    expect(each.state, "probe: a moved mark is reported attached").toBe("attached");
     if (each.id === "far") {
       // It was below the viewport (told on its bottom edge, of no height), and is now in it.
-      expect(before.get("far")).toMatchObject({ y: viewport, height: 0 });
-      expect(each.rect?.height).toBeGreaterThan(0);
-      expect((each.rect?.y ?? 0) + (each.rect?.height ?? 0)).toBeLessThanOrEqual(viewport);
+      expect(
+        before.get("far"),
+        "probe: a box below the frame was told on its bottom edge, of no height",
+      ).toMatchObject({ y: viewport, height: 0 });
+      expect(each.rect?.height, "probe: the far mark is now in the viewport").toBeGreaterThan(0);
+      expect(
+        (each.rect?.y ?? 0) + (each.rect?.height ?? 0),
+        "probe: the far mark is now in the viewport",
+      ).toBeLessThanOrEqual(viewport);
     } else {
-      expect((before.get(each.id)?.y ?? 0) - (each.rect?.y ?? 0)).toBeCloseTo(400, 0);
+      expect(
+        (before.get(each.id)?.y ?? 0) - (each.rect?.y ?? 0),
+        "probe: a moved mark's box moved with the scroll",
+      ).toBeCloseTo(400, 0);
     }
   }
 
@@ -835,14 +883,17 @@ test("following: once a scroll settles, one report with only the marks that move
   );
   await page.waitForTimeout(600);
   if (apart < 130) {
-    expect(await anchoredSince(told)).toEqual([]);
+    expect(await anchoredSince(told), "probe: nothing moved, so nothing is reported").toEqual([]);
   }
   await frame.evaluate(() => window.scrollTo(0, 0));
   await expect
-    .poll(async () => {
-      const last = (await anchoredSince(told)).at(-1);
-      return last?.results.find((each) => each.id === "top")?.rect?.y;
-    })
+    .poll(
+      async () => {
+        const last = (await anchoredSince(told)).at(-1);
+        return last?.results.find((each) => each.id === "top")?.rect?.y;
+      },
+      { message: "probe: scrolled back, the moved marks are reported where they were" },
+    )
     .toBeCloseTo(before.get("top")?.y ?? 0, 0);
 });
 
@@ -866,7 +917,7 @@ test("a hostile page fakes a marker's click: the host takes it only for a mark i
   // No marks: nothing taken.
   await fake({ id: "fell", rect });
   await page.waitForTimeout(400);
-  expect(await reports(display)).toEqual([]);
+  expect(await reports(display), "probe: the host took a marker's click with no marks").toEqual([]);
 
   await display.annotate("show", [textMark("fell", "fell", 3), textMark("plain", "Nothing")]);
   await next(display, "anchored");
@@ -877,14 +928,22 @@ test("a hostile page fakes a marker's click: the host takes it only for a mark i
   await fake({ id: "fell" });
   await fake({ id: "fell", rect: { ...rect, width: -1 } });
   await expect
-    .poll(async () => (await refusals(display)).filter((each) => each === "annotate:invalid"))
+    .poll(async () => (await refusals(display)).filter((each) => each === "annotate:invalid"), {
+      message: "probe: the two malformed clicks were refused",
+    })
     .toHaveLength(2);
   await page.waitForTimeout(400);
-  expect((await reports(display)).slice(count)).toEqual([]);
+  expect(
+    (await reports(display)).slice(count),
+    "probe: the host took a click for a mark it doesn't show with a marker",
+  ).toEqual([]);
 
   // A well-formed fake for a mark with a marker gets through, rebuilt: a UI hint only.
   await fake({ id: "fell", rect, delete: true });
-  expect(await next(display, "activated", count)).toEqual({ type: "activated", id: "fell", rect });
+  expect(
+    await next(display, "activated", count),
+    "probe: the click was rebuilt from known fields only",
+  ).toEqual({ type: "activated", id: "fell", rect });
 
   // Content's own synthetic click on the shell's layer reports nothing.
   const after = (await reports(display)).length;
@@ -900,7 +959,7 @@ test("a hostile page fakes a marker's click: the host takes it only for a mark i
     );
   });
   await page.waitForTimeout(400);
-  expect((await reports(display)).length).toBe(after);
+  expect((await reports(display)).length, "probe: the host took content's own click").toBe(after);
 });
 
 test("following: a change of the content that moves a mark, but loses none, reports the moved marks once quiet", async ({
@@ -962,13 +1021,19 @@ test("a marker's press, of any kind, moves nothing of the content's: no handler,
   expect(await select(frame, "#p2", "words to select")).toBe(true);
   await page.mouse.click(at.x, at.y);
   await expect.poll(activations).toBe(1);
-  expect(await frame.evaluate(() => String(getSelection()))).toBe("words to select");
+  expect(
+    await frame.evaluate(() => String(getSelection())),
+    "probe: the selection stays as it was",
+  ).toBe("words to select");
 
   // Focus stays where it was.
   await frame.locator("#field").focus();
   await page.mouse.click(at.x, at.y);
   await expect.poll(activations).toBe(2);
-  expect(await frame.evaluate(() => document.activeElement?.id)).toBe("field");
+  expect(
+    await frame.evaluate(() => document.activeElement?.id),
+    "probe: focus stays where it was",
+  ).toBe("field");
 
   // A double click is two clicks to the host and nothing to the content; a right or middle
   // click is nothing to either.
@@ -979,8 +1044,14 @@ test("a marker's press, of any kind, moves nothing of the content's: no handler,
   await page.mouse.move(at.x + 4, at.y + 2, { steps: 4 });
   await page.waitForTimeout(400);
   expect(await activations()).toBe(4);
-  expect(await frame.evaluate(() => (window as unknown as { seen: string[] }).seen)).toEqual([]);
-  expect(await frame.evaluate(() => document.activeElement?.id)).toBe("field");
+  expect(
+    await frame.evaluate(() => (window as unknown as { seen: string[] }).seen),
+    "probe: no handler of the content's heard a marker's press",
+  ).toEqual([]);
+  expect(
+    await frame.evaluate(() => document.activeElement?.id),
+    "probe: focus stays where it was",
+  ).toBe("field");
 });
 
 test("an honest scroll session, long, leaves room for a marker's click: follow-ups at most one a second", async ({
@@ -1114,11 +1185,21 @@ test("a hostile page reports a box outside its frame: the host gets it clamped t
   let count = (await reports(display)).length;
   await fake({ x: -5_000, y: -5_000, width: 1_000_000, height: 1_000_000 });
   const covering = await next(display, "activated", count);
-  expect(covering.rect).toEqual({ x: 0, y: 0, width: size.width, height: size.height });
+  expect(covering.rect, "probe: a box over the whole app is clamped to the frame").toEqual({
+    x: 0,
+    y: 0,
+    width: size.width,
+    height: size.height,
+  });
   count = (await reports(display)).length;
   await fake({ x: 9_000_000, y: 9_000_000, width: 40, height: 18 });
   const outside = await next(display, "activated", count);
-  expect(outside.rect).toEqual({ x: size.width, y: size.height, width: 0, height: 0 });
+  expect(outside.rect, "probe: a box outside the frame is clamped to its edge").toEqual({
+    x: size.width,
+    y: size.height,
+    width: 0,
+    height: 0,
+  });
   // A selection's box and a mark's are held the same way.
   await display.annotate("start", { elements: false, text: true });
   count = (await reports(display)).length;
@@ -1139,7 +1220,10 @@ test("a hostile page reports a box outside its frame: the host gets it clamped t
       "*",
     ),
   );
-  expect((await next(display, "selected", count)).rect).toEqual({
+  expect(
+    (await next(display, "selected", count)).rect,
+    "probe: a selection's box is clamped to the frame",
+  ).toEqual({
     x: 0,
     y: 10,
     width: 0,
@@ -1160,7 +1244,10 @@ test("a hostile page reports a box outside its frame: the host gets it clamped t
       "*",
     ),
   );
-  expect((await next(display, "anchored", count)).results).toEqual([
+  expect(
+    (await next(display, "anchored", count)).results,
+    "probe: a mark's box is clamped to the frame",
+  ).toEqual([
     { id: "fell", state: "attached", rect: { x: 10, y: 0, width: 20, height: size.height } },
   ]);
 });

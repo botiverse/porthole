@@ -74,6 +74,7 @@ const RUNTIME = "leak/served/runtime.spec.ts";
 const FILES = "leak/served/files.spec.ts";
 const SERVED = "leak/served/served.spec.ts";
 const TAB = "leak/served/tab.spec.ts";
+const ANNOTATE = "leak/annotate.spec.ts";
 
 /** What the CSP sandbox alone holds on a tab (P099), every engine. */
 const TAB_SANDBOX = [
@@ -111,6 +112,8 @@ const PUSHED_READ =
   "a read above the viewer's level: a result the host pushed is refused as a cold read is";
 const TRUSTED_CODE =
   "a script asset runs as code only if an admin uploaded it where uploads are the admins'";
+const FAKED_MARKER_CLICK =
+  "a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker";
 const IN_SET_LINKS = [
   "a link to another page of the set opens it in the frame; the display goes on",
   "a link to another page of the set opens it in the frame when the leaving page's notice is dropped (P098)",
@@ -255,9 +258,31 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     others: "fail",
   },
   "annotation-checks": {
-    specs: ["leak/annotate.spec.ts"],
+    specs: [ANNOTATE],
     fails: all(
       "a hostile page fakes reports: the host takes none it didn't ask for, nothing malformed, and not a flood",
+    ),
+  },
+  // A marker's click (P104): the host's check of its id and count, and the shell keeping it from
+  // content, trusted only.
+  "annotation-activated": { specs: [ANNOTATE], fails: all(FAKED_MARKER_CLICK) },
+  "annotation-activated-count": { specs: [ANNOTATE], fails: all(FAKED_MARKER_CLICK) },
+  "marker-trusted": { specs: [ANNOTATE], fails: all(FAKED_MARKER_CLICK) },
+  "marker-click": {
+    specs: [ANNOTATE],
+    fails: all(
+      "markers: a mark with a count gets a numbered bubble; its click is reported and never reaches the content",
+      "a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection",
+    ),
+  },
+  // The host clamps every reported box to the frame (P104); the two cases that read a mark below
+  // the viewport see its box on the edge only through it.
+  "annotation-rect-clamp": {
+    specs: [ANNOTATE],
+    fails: all(
+      "a hostile page reports a box outside its frame: the host gets it clamped to the frame's viewport",
+      "marks: drawn over their anchors, one brought into view, an unfound one orphaned, all cleared",
+      "following: once a scroll settles, one report with only the marks that moved",
     ),
   },
   // Served content (leak/served/).
@@ -717,6 +742,126 @@ export function judge(control: Control, engines: readonly Engine[], run: Run): V
     problems.push(`the run exited ${String(run.status)}, not ${wanted}`);
   }
   return { ok: problems.length === 0, summary: counts.join(", "), problems };
+}
+
+// ---------------------------------------------------------------------------------------------
+// CI's shards: a job runs one shard of the registry on one engine, and a last job checks that
+// every control ran and held on every engine (a whole engine's controls outlast a job's timeout).
+
+/**
+ * Each control's run, measured (seconds, the three engines at once on the shared box, 2026-10-20):
+ * a weight for splitting the registry into shards, nothing more. A control not here weighs the
+ * median.
+ */
+const MEASURED: Readonly<Record<string, number>> = {
+  "connect-src": 90,
+  webrtc: 86,
+  "frame-guard": 87,
+  "attach-shadow": 85,
+  "sync-guard": 85,
+  "frame-guard,sync-guard": 91,
+  "attach-shadow,sync-guard": 87,
+  "declarative-shadow": 87,
+  "parser-entry-points": 98,
+  "embedder-csp": 116,
+  "embedder-self": 88,
+  sandbox: 103,
+  "base-uri": 90,
+  self: 90,
+  "style-split": 90,
+  "draft-inert": 87,
+  "document-theme": 88,
+  "confirm-gate": 97,
+  "shell-gesture": 89,
+  "host-gesture": 93,
+  "model-context-show": 88,
+  "link-scheme": 88,
+  clipboard: 89,
+  "report-unbounded": 169,
+  nonce: 670,
+  "annotation-checks": 18,
+  authorize: 19,
+  "url-permissions": 7,
+  "navigate-guard": 56,
+  "tab-sandbox": 38,
+  "window-open": 37,
+  "tab-sandbox,window-open": 43,
+  "navigate-ask": 44,
+  "link-rule": 37,
+  "link-rule,navigate-guard": 32,
+  "permissions-policy": 38,
+  "device-locks": 37,
+  "permissions-policy,device-locks": 38,
+  "url-origin": 19,
+  "service-worker": 20,
+  "file-corp": 22,
+  "file-self": 22,
+  "runtime-declaration": 20,
+  "runtime-level": 20,
+  "runtime-data-names": 19,
+  "live-held-read": 19,
+  "db-private": 20,
+  "comments-result": 19,
+  "blob-script": 17,
+  "blob-trusted": 20,
+  "blob-script,blob-trusted": 21,
+  "blob-inert": 23,
+  "annotation-activated": 20,
+  "annotation-activated-count": 20,
+  "marker-trusted": 20,
+  "marker-click": 20,
+  "annotation-rect-clamp": 20,
+};
+
+/**
+ * The controls of shard `index` (1 to `count`): the registry split by weight, heaviest first, each
+ * to the lightest shard so far (ties to the lower shard), in the registry's order. The same
+ * registry always splits the same way, and every control is in exactly one shard.
+ */
+export function shard(index: number, count: number): string[] {
+  const registered = Object.keys(CONTROLS);
+  const weights = registered.map((name) => MEASURED[name]).filter((one) => one !== undefined);
+  const median = weights.toSorted((a, b) => a - b)[Math.floor(weights.length / 2)] ?? 1;
+  const weight = (name: string): number => MEASURED[name] ?? median;
+  const totals = Array.from({ length: count }, () => 0);
+  const of = new Map<string, number>();
+  for (const name of registered.toSorted((a, b) => weight(b) - weight(a) || (a < b ? -1 : 1))) {
+    const lightest = totals.indexOf(Math.min(...totals));
+    of.set(name, lightest);
+    totals[lightest] = (totals[lightest] ?? 0) + weight(name);
+  }
+  return registered.filter((name) => of.get(name) === index - 1);
+}
+
+/** What a run of controls left for the summary: each control's verdict, on the engines it ran. */
+export interface Verdicts {
+  readonly engines: readonly string[];
+  readonly shard: string | null;
+  readonly controls: Readonly<
+    Record<string, { readonly ok: boolean; readonly problems: readonly string[] }>
+  >;
+}
+
+/**
+ * Every shard's verdicts, put together: each control of the registry must have run and held on
+ * every engine. A control no shard ran on an engine (a job cancelled, a shard that lost one) is a
+ * problem as much as one that failed.
+ */
+export function summarize(runs: readonly Verdicts[], engines: readonly Engine[]): string[] {
+  const problems: string[] = [];
+  for (const engine of engines) {
+    for (const name of Object.keys(CONTROLS)) {
+      const seen = runs.filter(
+        (run) => run.engines.includes(engine) && run.controls[name] !== undefined,
+      );
+      if (seen.length === 0) {
+        problems.push(`[${engine}] ${name} never ran`);
+      } else if (seen.some((run) => run.controls[name]?.ok !== true)) {
+        problems.push(`[${engine}] ${name} failed`);
+      }
+    }
+  }
+  return problems;
 }
 
 // ---------------------------------------------------------------------------------------------

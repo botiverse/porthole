@@ -1331,7 +1331,10 @@ control that fails nothing on an engine says why: another wall holds, shown by a
 control that takes both out and fails something there, or no probe can see the wall; one
 that fails "every other test" takes out what all of them stand on (`nonce`: the shell),
 and none of them may pass. No control runs `kit.spec.ts`: the kit's reference app runs
-Porthole in Node, where no weakening reaches (`UNWEAKENED`). The table is the registry's
+Porthole in Node, where no weakening reaches (`UNWEAKENED`). In CI a whole engine's controls
+outlast a job, so each job runs one of four shards of the registry (`--shard k/4`, split by
+measured weight, stable for a registry), and the `controls` job checks every shard's verdicts
+(`--summary`): every control ran and held on every engine. The table is the registry's
 (`node scripts/controls.ts --table` prints it; `test/controls.test.ts` holds them equal,
 every weakening to a control, every control that fails nothing to its reason, and every
 control the tables above name to the registry):
@@ -1364,6 +1367,11 @@ control the tables above name to the registry):
 | `report-unbounded` | `leak.spec.ts`, `strict-csp.spec.ts` | `[14.error-shapes]`, `[14.silent]` | — | — |
 | `nonce` | `strict-csp.spec.ts` | `the shell runs on a host page whose script-src is its nonce alone (P054)`, and every other test | — | — |
 | `annotation-checks` | `annotate.spec.ts` | `a hostile page fakes reports: the host takes none it didn't ask for, nothing malformed, and not a flood` | — | — |
+| `annotation-activated` | `annotate.spec.ts` | `a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker` | — | — |
+| `annotation-activated-count` | `annotate.spec.ts` | `a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker` | — | — |
+| `marker-trusted` | `annotate.spec.ts` | `a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker` | — | — |
+| `marker-click` | `annotate.spec.ts` | `markers: a mark with a count gets a numbered bubble; its click is reported and never reaches the content`, `a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection` | — | — |
+| `annotation-rect-clamp` | `annotate.spec.ts` | `a hostile page reports a box outside its frame: the host gets it clamped to the frame's viewport`, `marks: drawn over their anchors, one brought into view, an unfound one orphaned, all cleared`, `following: once a scroll settles, one report with only the marks that moved` | — | — |
 | `authorize` | `served/authorize.spec.ts` | `a revoked subject's ticket opens nothing: a page and an app are denied, and the host is told`, `in a tab of its own, a revoked app and page are denied from the next request on` | Chromium, Firefox: `a framed app mid-session: its next request after revocation is denied, and its next load tells the host`, `a framed page mid-session: its next load after revocation is denied where the engine keeps its cookie` | — |
 | `url-permissions` | `served/permissions.spec.ts` | `a url-mode frame gets no clipboard writes or full screen unless the host delegates them` | — | — |
 | `navigate-guard` | `served/live.spec.ts`, `served/files.spec.ts`, `served/served.spec.ts`, `served/tab.spec.ts` | `served.domain.self-navigation`, `served.domain.tab-navigation`, `served.domain.tab-links`, `can't navigate itself away (location): to a site, or to another content origin`, `can't navigate itself away (replace): to a site, or to another content origin`, `can't navigate itself away (open-self): to a site, or to another content origin`, `can't navigate itself away (navigation-api): to a site, or to another content origin`, `a link to another page of the set opens it in the frame; the display goes on`, `a link to another page of the set opens it in the frame when the leaving page's notice is dropped (P098)`, `a link to another page of the set opens it in the frame when the leaving page's notice is late (P098)`, `a page opens nothing else: not a file that isn't a page, not another path of its origin`, `no report, content error or blocked navigation names the frame's sealed address (P083)` | — | — |

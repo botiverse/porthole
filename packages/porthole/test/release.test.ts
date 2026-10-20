@@ -209,8 +209,12 @@ describe("V03: a release waits for ci.yml on the same commit", () => {
     // The security suites are among them.
     for (const engine of ["chromium", "webkit", "firefox"]) {
       expect(requiredCiJobs).toContain(`loopback (${engine})`);
-      expect(requiredCiJobs).toContain(`controls (${engine})`);
+      // The controls, in shards (P096: a whole engine's outlast a job), and their summary.
+      for (const shard of [1, 2, 3, 4]) {
+        expect(requiredCiJobs).toContain(`controls (${engine}, ${shard}/4)`);
+      }
     }
+    expect(requiredCiJobs).toContain("controls");
     expect(requiredCiJobs).toContain("prod-shape");
     expect(requiredCiJobs).toContain("examples");
   });

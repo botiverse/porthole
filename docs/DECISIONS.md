@@ -4830,10 +4830,17 @@ P097's CI triggers. From the audit of 2026-10-19 (V01, V02).
    WebKit, which keeps no framed cookie); the test checks the cover. (c) Entries named a part of a
    title; now a probe's `[id]`, a served case's id before its colon, or a test's whole title. (d)
    A test declared to fail (`test.fail`) that passes fails the control, unless it is a target.
+6. **CI runs the controls in shards.** One engine's 57 controls outlasted a 90-minute job on CI's
+   runners (all three cancelled). Each engine now runs four shards, `controls (<engine>, k/4)`,
+   60 minutes each (`--shard k/4`: the registry split by each control's measured weight, heaviest
+   first to the lightest shard, so `nonce` shares its shard with small ones; stable for a
+   registry), each uploading its reports and `verdicts.json`; the `controls` job puts them
+   together (`--summary`) and fails if any control failed or never ran on an engine. A job's
+   name changed, so release.yml's REQUIRED_CI_JOBS lists the twelve shards and `controls`.
 
 **Why.** PRINCIPLE 6: a wall never seen to fail proves nothing, and a check that says a wall was
 seen to fail when its run never happened is worse than no check. CI's "every control" was 7 of
-the 38 there were (52 now, with P094's, P095's, P099's, P100's and P101's); the rest ran by hand,
+the 38 there were (57 now, with P094's, P095's, P099's, P100's, P101's and P104's); the rest ran by hand,
 when someone remembered, and what DESIGN.md said they fail had drifted from what they do.
 **Rejected.**
 - Requiring exit 0, or exit 1, alone: either is what a broken run can give.
