@@ -246,6 +246,56 @@ createHost(config, {
   Myanmar (Persian's می‌خواهم). Subdivision flags (tag characters) don't. Your own `show` resolves only once that very update is visible: if a later update of
   the display replaces it before it is drawn, reject, and it doesn't go.
 
+### Annotations: comments on a display
+
+With `annotate` declared (`capabilities: { annotate: {} }`), a host lets people point at a
+display and keeps its comments beside it ([P053](DECISIONS.md), P104). Everything the frame
+reports is the page's word: a hint where to draw, never a permission. A mark's `count` puts a
+numbered marker beside its words; a click on one is `activated`.
+
+```js
+display.annotations.show(comments.map((c) => ({ id: c.markId, anchor: c.anchor, count: c.replies })));
+display.annotations.start({ elements: false, text: true }); // comment mode: the person selects words
+display.on("annotation", (report) => {
+  if (report.type === "selected") composer.openBeside(frame, report.rect, report.anchor);
+  if (report.type === "activated") bubble.openBeside(frame, report.rect, report.id);
+  if (report.type === "anchored") bubble.follow(report.results);
+});
+```
+
+- **Ids say nothing, and a count only where the page may know it**: the content reads every
+  `show`. Who wrote what stays in your view, outside the frame.
+- **The content chooses when your view opens and where** (it can post `activated` for a mark you
+  show, on the person's own press in the content, under their pointer, P105), so a view that a
+  report opens or moves takes no press for 500 ms after it appears or moves, ignores a press that
+  began before that, opens beside the frame rather than over `rect` where the layout allows, takes
+  no focus, and has no destructive action (resolve, delete) one click away:
+
+  ```js
+  // Call placed() each time the view appears or moves; a click counts only if its press began on
+  // the view at least 500 ms after that.
+  function guardPresses(view) {
+    let from = Infinity;
+    let began = -Infinity;
+    view.addEventListener("pointerdown", () => (began = performance.now()), true);
+    view.addEventListener("click", (event) => {
+      if (event.detail !== 0 && began < from) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }, true);
+    return { placed: () => ((from = performance.now() + 500), (began = -Infinity)) };
+  }
+  ```
+
+- **Boxes are in the frame's CSS px**, clamped to its viewport (P104): add the frame element's
+  position. A frame you scale or transform (a thumbnail, a zoomed preview) needs the box mapped
+  through that transform too (`frame.getBoundingClientRect().width / frame.clientWidth` for a
+  plain scale), or your view lands off by the difference.
+- **Labels and quotes are the page's text**: shown only as text. Porthole takes out of a label what
+  the person can't see; a quote (`exact`) keeps it, to be found again. Hand either to a model only
+  as the page's words.
+
 ## 4. Served pages: the host kit
 
 ### Local development
