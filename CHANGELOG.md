@@ -3,6 +3,74 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## 0.8.0
+
+The fixes from the security review of 0.7.0 (2026-10-19): P092–P095, P098–P101 and P103, each
+with its regression; a release that waits for its commit's CI (P097); and a threat model (P102).
+Most of it refuses more than 0.7 did. What a host must act on when it upgrades comes first.
+
+- **Act on these when upgrading:**
+  - `callTool` defaults to a confirmation and 30 a minute; it was a confirmation alone (P103). A
+    host whose `confirm` says yes by itself, for a view that polls a tool more often than every
+    2 s, gives `callTool` its own `gates`.
+  - `setModelContext` defaults to 30 a minute and the new `show` gate (P100): the host shows the
+    person each update, whole, before it goes. Give `createHost` a `show` (`HostOptions.show`), or
+    the call is refused (`no-show`); the React provider shows updates with `ContextNotice` unless
+    `PortholeProvider.show` replaces it. A config that names its gates without `show` says so with
+    `withoutShow: true` (else it is warned of).
+  - Behind a proxy, set `rateLimit.trustedProxies` (how many proxies append to
+    `X-Forwarded-For`) or `rateLimit.key`. The issue endpoint's rate limit no longer reads
+    `X-Forwarded-For` by default: it keys an anonymous request by the socket's peer on Node and
+    `CF-Connecting-IP` on Workers, so without either setting every anonymous request through a
+    proxy shares that proxy's limit (P092).
+  - `callTool`'s arguments, `setModelContext`'s update and `downloadFile`'s contents are bounded
+    plain JSON or refused as malformed: an object reached twice, a `Date`, a `Map`, `NaN` or a
+    boxed value no longer passes (P095). A model-context update is text blocks and plain JSON, at
+    most 20,000 characters (`MAX_CONTEXT_CHARS`), with no invisible characters (P100).
+  - Under https Porthole's cookies are only its exact `__Host-porthole-` names: a `porthole-*`
+    cookie (which any sibling label can plant) is no longer read; loopback keeps its unprefixed
+    names (P101).
+  - A url-mode app answers its own origin only: a request with another `Origin`, or with
+    `Sec-Fetch-Site` `same-site` or `cross-site` that isn't a GET or HEAD navigation, is a 403, on
+    HTTP and on the socket path (`content.access`) alike (P101).
+  - Every served page carries its frame's sandbox in its CSP header and a `Permissions-Policy`
+    that denies what its frame's `allow` doesn't grant, on a tab as in a frame; on a tab the shell
+    opens no window (P099). An edge that rewrites headers keeps both.
+  - `presets.liveWidget` refuses a capability's `connect` or `resource` origins, and its config
+    is frozen (P103).
+  - New: `nodeListener(app, { scheme, onError })` (a fetch-style app as a Node listener) and
+    `onError` on `nodeHost`, `nodeServer` and `nodeListener` (P092); `tryIntersectDeclarations`,
+    which answers its problems instead of throwing (P093). The objects `intersectDeclarations`
+    returns have no prototype (P093).
+- **The fixes:**
+  - **P092**: no request ends the Node process (a method fetch can't carry is a 405, anything
+    else it can't take a 400, a handler's failure a 500); the issue endpoint reads at most 64 KiB
+    of a body (`ISSUE_BODY_BYTES`); the rate limit's key is an address the client can't set.
+  - **P093**: `intersectDeclarations` reads each side as `dbAccess` does, wildcards included, so a
+    version keeps nothing the current declaration refuses; a collection named `__proto__` is a
+    rule.
+  - **P094**: a page's declared `data` names hold without a viewer; a result pushed with
+    `changed(result)` is a read, past `readData`'s gates; a `db` batch runs under its writes'
+    `methodGates` and a watch under its read's (`ConfirmRequest.askedBy` says which).
+  - **P095**: what content sends is read after its gate, into bounded text, and nothing it sends
+    throws out of an adapter; at most 10 confirmations wait per display.
+  - **P098**: a page of a file set whose notice arrives late is taken as the set's, not as a
+    navigation away (red on Chromium since 0.6.0); tests that waited a fixed time now wait for
+    what they check.
+  - **P099**: a served page on a tab of its own is sandboxed like its frame.
+  - **P100**: what content tells the model is shown to the person first, and what is shown is
+    what is sent; the manual calls it the content's unconfirmed text, never instructions.
+  - **P101**: siblings on the content domain: only `__Host-` names, an entered mark bound to its
+    label, and a url-mode app that answers its own origin.
+  - **P103**: a live widget takes no capability's origins; a trusted asset runs as code only while
+    the current config lets uploaded code run, in bearer mode too; `callTool` has a rate.
+- **Release** (P097): a release is a commit of main whose CI passed, every job of it; the job
+  that publishes runs no project code; Actions are pinned to reviewed commits; third-party notices
+  for the vendored libraries and the leak suite's fixture.
+- **Docs**: [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) (P102) says, use by use, what Porthole
+  guarantees, what the host must do, and what is out of scope; [SECURITY.md](SECURITY.md) says how
+  to report a vulnerability privately, which versions get fixes, and what happens next.
+
 ## 0.7.0
 
 The capability runtime (P085–P090): a page published as an artifact is an app, and reaches its host
