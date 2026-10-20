@@ -95,14 +95,15 @@ export const CONTROLS: Readonly<Record<string, { spec: string; fails: readonly E
     spec: "leak/served/tab.spec.ts",
     fails: [...TAB_SANDBOX_FAILS, "served.domain.tab-window-open"],
   },
-  // Its devices, location and full screen (P099): the Permissions-Policy header, and the shell's
-  // locks behind it (the only wall where the header isn't applied: WebKit, Firefox).
-  // navigation.navigate() asks the guard's rule before it starts (P099): WebKit sends its request
-  // though the navigate event cancels it; Chromium and Firefox hold by the event alone.
+  // navigation.navigate() and a tab's links ask the guard's rule before they start (P099): WebKit
+  // sends their request though the navigate event cancels it; Chromium and Firefox hold by the
+  // event alone.
   "navigate-ask": {
     spec: "leak/served/tab.spec.ts",
     fails: [{ title: "served.domain.tab-navigation", on: ["webkit"] }],
   },
+  // Its devices, location and full screen (P099): the Permissions-Policy header, and the shell's
+  // locks behind it (the only wall where the header isn't applied: WebKit, Firefox).
   "permissions-policy,device-locks": {
     spec: "leak/served/tab.spec.ts",
     fails: [
