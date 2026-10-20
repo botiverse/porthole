@@ -18,8 +18,15 @@
   content changes has settled (150 ms), `anchored` reports only the marks that moved since the
   host was last told, at most once a second. A host that gives no counts hears exactly what 0.8
   told it.
-- Negative controls `annotation-activated`, `annotation-activated-count`, `marker-trusted` and
-  `marker-click`, in `scripts/controls.ts`.
+- **Reported boxes are clamped to the frame** (P104): every `rect` in `selected`, `activated`
+  and `anchored` reaches the host held to the frame's viewport as it is then; one wholly outside
+  becomes a box of no size on the nearest edge. A page can no longer make a host place its own UI
+  outside the frame. Act on this when upgrading: a mark scrolled out of the viewport is now told
+  on the edge it went past (below: `y` equals the viewport's height, `height` 0), not at its
+  place beyond it. A custom `PlatformHost` gives its surfaces `viewport()` (the new optional
+  `Surface.viewport`), or every box reaches the host as nothing at the frame's corner.
+- Negative controls `annotation-rect-clamp`, `annotation-activated`, `annotation-activated-count`,
+  `marker-trusted` and `marker-click`, in `scripts/controls.ts`.
 
 ## 0.8.0
 

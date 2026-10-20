@@ -106,6 +106,26 @@ export function parseRect(value: unknown): AnnotationRect | null {
   return { x, y, width, height };
 }
 
+/**
+ * A box the frame reported, clamped to the frame's viewport (`width` by `height`, CSS px, P104):
+ * each side is held within it, so what overlaps the viewport keeps the part inside, and what lies
+ * wholly outside becomes a box of no size on the nearest edge. Where the viewport isn't known, a
+ * box of no size at the frame's corner. The page still chooses any point inside its own frame.
+ */
+export function clampRect(
+  rect: AnnotationRect,
+  viewport: { readonly width: number; readonly height: number } | undefined,
+): AnnotationRect {
+  const width = viewport !== undefined && Number.isFinite(viewport.width) ? viewport.width : 0;
+  const height = viewport !== undefined && Number.isFinite(viewport.height) ? viewport.height : 0;
+  const within = (value: number, most: number) => Math.min(Math.max(value, 0), Math.max(0, most));
+  const left = within(rect.x, width);
+  const top = within(rect.y, height);
+  const right = within(rect.x + rect.width, width);
+  const bottom = within(rect.y + rect.height, height);
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
 const markId = (value: unknown): value is string => text(value, LIMITS.id, 1);
 
 function results(value: unknown): AnchorResult[] | null {

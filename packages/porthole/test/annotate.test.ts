@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   annotateMode,
   checkMarks,
+  clampRect,
   parseAnchor,
   parseRect,
   parseReport,
@@ -229,6 +230,7 @@ describe("a marker's click (P104), on createHost over a stand-in platform", () =
         setHeight: () => {},
         setColorScheme: () => {},
         userActivation: () => undefined,
+        viewport: () => ({ width: 600, height: 400 }),
         onNavigated: () => () => {},
         onLoad: () => () => {},
         destroy: () => {},
@@ -272,10 +274,90 @@ describe("a marker's click (P104), on createHost over a stand-in platform", () =
     // Malformed: refused as invalid, never delivered.
     await t.activate({ id: "c1" });
     expect(t.refused).toEqual(["invalid"]);
+    // Its box is held to the frame's viewport (600 by 400): the page places nothing outside.
+    await t.activate({ id: "c1", rect: { x: -5_000, y: 390, width: 1_000_000, height: 50 } });
+    expect(t.reports.at(-1)).toEqual({
+      type: "activated",
+      id: "c1",
+      rect: { x: 0, y: 390, width: 600, height: 10 },
+    });
     // Once cleared, no mark is shown: its id is no longer taken.
     t.display.annotations.clear();
     await t.activate({ id: "c1", rect });
-    expect(t.reports).toHaveLength(1);
+    expect(t.reports).toHaveLength(2);
+  });
+});
+
+describe("a reported box, clamped to the frame's viewport (P104)", () => {
+  const viewport = { width: 600, height: 400 };
+  test("inside, it is as it was; overlapping, the part inside", () => {
+    const inside = { x: 10, y: 20, width: 30, height: 18 };
+    expect(clampRect(inside, viewport)).toEqual(inside);
+    expect(clampRect({ x: 0, y: 0, width: 600, height: 400 }, viewport)).toEqual({
+      x: 0,
+      y: 0,
+      width: 600,
+      height: 400,
+    });
+    expect(clampRect({ x: -20, y: 390, width: 50, height: 30 }, viewport)).toEqual({
+      x: 0,
+      y: 390,
+      width: 30,
+      height: 10,
+    });
+    expect(clampRect({ x: -1e7, y: -1e7, width: 2e7, height: 2e7 }, viewport)).toEqual({
+      x: 0,
+      y: 0,
+      width: 600,
+      height: 400,
+    });
+  });
+
+  test("wholly outside, a box of no size on the nearest edge", () => {
+    expect(clampRect({ x: -5_000, y: 50, width: 10, height: 10 }, viewport)).toEqual({
+      x: 0,
+      y: 50,
+      width: 0,
+      height: 10,
+    });
+    expect(clampRect({ x: 9_000_000, y: 9_000_000, width: 10, height: 10 }, viewport)).toEqual({
+      x: 600,
+      y: 400,
+      width: 0,
+      height: 0,
+    });
+    expect(clampRect({ x: 100, y: -300, width: 10, height: 10 }, viewport)).toEqual({
+      x: 100,
+      y: 0,
+      width: 10,
+      height: 0,
+    });
+  });
+
+  test("where the viewport isn't known, or isn't a size, nothing at the corner", () => {
+    const rect = { x: 10, y: 20, width: 30, height: 18 };
+    const nothing = { x: 0, y: 0, width: 0, height: 0 };
+    expect(clampRect(rect, undefined)).toEqual(nothing);
+    expect(clampRect(rect, { width: Number.NaN, height: Infinity })).toEqual(nothing);
+    expect(clampRect(rect, { width: -5, height: -5 })).toEqual(nothing);
+  });
+
+  test("every result is finite, inside, and not negative, for any box parseRect takes", () => {
+    const values = [-1e7, -1, -0.5, 0, 0.25, 1, 299.5, 400, 600, 601, 1e7];
+    for (const x of values) {
+      for (const y of values) {
+        for (const size of [0, 0.5, 10, 1e7]) {
+          const out = clampRect({ x, y, width: size, height: size }, viewport);
+          for (const value of [out.x, out.y, out.width, out.height]) {
+            expect(Number.isFinite(value)).toBe(true);
+            expect(value).toBeGreaterThanOrEqual(0);
+          }
+          expect(out.x + out.width).toBeLessThanOrEqual(600);
+          expect(out.y + out.height).toBeLessThanOrEqual(400);
+          expect(parseRect(out)).toEqual(out);
+        }
+      }
+    }
   });
 });
 

@@ -542,6 +542,12 @@ its realm with the content, so:
   each report only for what it asked for and its own shown ids, rebuilt within
   `ANNOTATION_LIMITS`, at 120 a minute; `activated` for a mark without a marker, or an id it
   doesn't show, is dropped (negative control `annotation-activated`).
+- *Boxes.* Every box a report carries (`selected`, `activated`, `anchored`) is the page's word.
+  Porthole clamps each to the frame's viewport as it is when the report arrives, before the host
+  hears it: the part inside is kept, and a box wholly outside becomes one of no size on the
+  nearest edge (control `annotation-rect-clamp`). So a page can't make the host place its own UI
+  over the rest of the app. It still chooses any point inside its own frame: a box is a
+  positioning hint, never a fact about the content.
 - *What holds.* A real press or click on a marker reaches none of the content's handlers (the
   shell's first listener stops it; control `marker-click`), so content can't act on it or cancel
   it. But content can tell that a marker was pressed, and roughly where: the pointer leaving its

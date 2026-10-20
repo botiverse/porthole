@@ -1048,6 +1048,9 @@ chooses), and the annotation runtime is in the shell only then.
   selector is an id, or it has no words), else the element holding its words. What
   can't be found is `orphaned`, said so; a host keeps the comment and shows it apart.
 - **Rects** are in the frame's viewport, CSS px: add the frame element's position.
+  They are the page's word: `createHost` clamps each to the frame's viewport before
+  the host hears it (P104); a box wholly outside becomes one of no size on the
+  nearest edge (a mark below the fold: `y` at the viewport's height, no height).
 - **Markers** (P104). A mark with a `count` gets a bubble glyph and its number ("99+"
   above 99; 0 the bubble alone) at the end of a text anchor's last line, raised, or on
   an element's top right corner, inside the frame's width; its element mark is then a

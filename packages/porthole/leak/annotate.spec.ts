@@ -231,8 +231,11 @@ test("marks: drawn over their anchors, one brought into view, an unfound one orp
   expect(byId.get("far")?.state).toBe("attached");
   expect(byId.get("hello")?.state).toBe("attached");
   expect(byId.get("gone")).toEqual({ id: "gone", state: "orphaned" });
+  // Below the frame's viewport: on its bottom edge, of no height (the host clamps every box to
+  // the frame, P104).
   const viewport = await frame.evaluate(() => window.innerHeight);
-  expect(byId.get("far")?.rect?.y).toBeGreaterThan(viewport);
+  expect(byId.get("far")?.rect?.y).toBe(viewport);
+  expect(byId.get("far")?.rect?.height).toBe(0);
 
   const count = (await reports(display)).length;
   expect(await display.annotate("focus", "far")).toBeNull();
@@ -702,10 +705,12 @@ test("markers: a mark with a count gets a numbered bubble; its click is reported
 
 const SCROLLING = `<!doctype html><html><head><title>Long</title></head><body style="margin: 0">
 <div id="pinned" style="position: fixed; top: 0; right: 0; padding: 4px">Pinned note</div>
+<div style="height: 450px">spacer</div>
 <h1 id="top" style="margin: 40px 8px">Report</h1>
 <p id="near" style="margin: 8px">The near paragraph.</p>
-<div style="height: 1600px">spacer</div>
+<div style="height: 300px">spacer</div>
 <p id="far" style="margin: 8px">The far paragraph says hello to everyone.</p>
+<div style="height: 1200px">spacer</div>
 </body></html>`;
 
 test("following: once a scroll settles, one report with only the marks that moved", async ({
@@ -766,9 +771,17 @@ test("following: once a scroll settles, one report with only the marks that move
   for (const report of run) {
     expect(report.results.map((each) => each.id).sort()).toEqual(["far", "near", "top"]);
   }
+  const viewport = await frame.evaluate(() => window.innerHeight);
   for (const each of run.at(-1)?.results ?? []) {
     expect(each.state).toBe("attached");
-    expect((before.get(each.id)?.y ?? 0) - (each.rect?.y ?? 0)).toBeCloseTo(400, 0);
+    if (each.id === "far") {
+      // It was below the viewport (told on its bottom edge, of no height), and is now in it.
+      expect(before.get("far")).toMatchObject({ y: viewport, height: 0 });
+      expect(each.rect?.height).toBeGreaterThan(0);
+      expect((each.rect?.y ?? 0) + (each.rect?.height ?? 0)).toBeLessThanOrEqual(viewport);
+    } else {
+      expect((before.get(each.id)?.y ?? 0) - (each.rect?.y ?? 0)).toBeCloseTo(400, 0);
+    }
   }
 
   // Down and back in the next frame: nothing moved since the host was last told, so nothing is.
@@ -1036,4 +1049,82 @@ test("a marker on an element at the frame's top edge is drawn whole, and takes i
   const activated = await next(display, "activated");
   expect(activated.id).toBe("edge");
   expect(activated.rect.y).toBeGreaterThanOrEqual(0);
+});
+
+test("a hostile page reports a box outside its frame: the host gets it clamped to the frame's viewport", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, { config: annotated(), content: MARKED });
+  const frame = await display.frame();
+  await expect(frame.locator("#more")).toBeVisible();
+  await display.annotate("show", [textMark("fell", "fell", 3)]);
+  await next(display, "anchored");
+  const size = await (
+    await frame.frameElement()
+  ).evaluate((element) => ({
+    width: (element as HTMLElement).clientWidth,
+    height: (element as HTMLElement).clientHeight,
+  }));
+  const fake = (rect: unknown) =>
+    frame.evaluate(
+      (given) =>
+        parent.postMessage(
+          { jsonrpc: "2.0", method: "porthole/annotate.activated", params: given },
+          "*",
+        ),
+      { id: "fell", rect },
+    );
+  // Over the whole app, and wholly outside the frame, far right and below.
+  let count = (await reports(display)).length;
+  await fake({ x: -5_000, y: -5_000, width: 1_000_000, height: 1_000_000 });
+  const covering = await next(display, "activated", count);
+  expect(covering.rect).toEqual({ x: 0, y: 0, width: size.width, height: size.height });
+  count = (await reports(display)).length;
+  await fake({ x: 9_000_000, y: 9_000_000, width: 40, height: 18 });
+  const outside = await next(display, "activated", count);
+  expect(outside.rect).toEqual({ x: size.width, y: size.height, width: 0, height: 0 });
+  // A selection's box and a mark's are held the same way.
+  await display.annotate("start", { elements: false, text: true });
+  count = (await reports(display)).length;
+  await frame.evaluate(() =>
+    parent.postMessage(
+      {
+        jsonrpc: "2.0",
+        method: "porthole/annotate.selected",
+        params: {
+          anchor: {
+            kind: "text",
+            selectors: [{ type: "TextQuoteSelector", exact: "fell" }],
+            label: "fell",
+          },
+          rect: { x: -100, y: 10, width: 50, height: 20 },
+        },
+      },
+      "*",
+    ),
+  );
+  expect((await next(display, "selected", count)).rect).toEqual({
+    x: 0,
+    y: 10,
+    width: 0,
+    height: 20,
+  });
+  count = (await reports(display)).length;
+  await frame.evaluate(() =>
+    parent.postMessage(
+      {
+        jsonrpc: "2.0",
+        method: "porthole/annotate.anchored",
+        params: {
+          results: [
+            { id: "fell", state: "attached", rect: { x: 10, y: -50, width: 20, height: 9e6 } },
+          ],
+        },
+      },
+      "*",
+    ),
+  );
+  expect((await next(display, "anchored", count)).results).toEqual([
+    { id: "fell", state: "attached", rect: { x: 10, y: 0, width: 20, height: size.height } },
+  ]);
 });

@@ -4653,6 +4653,19 @@ outline plain and unclear on its own.
    `contain`, and is set again at each draw; the pointer's moves over a marker are stopped too;
    a marker near the frame's top is kept below it. Each of these narrows; none closes what Trust
    says the content can still do.
+8. **Every reported box is clamped to the frame** (after the review of 43768be). A box in
+   `selected`, `activated` or an `anchored` result is the page's word, and `parseRect` checked only
+   that it was finite and not negative in size: a hostile page could report one far outside its
+   frame, and a host placing its own bubble by it would draw the host's UI wherever the page chose
+   over the rest of the app (misdirection, though the page reads nothing). Now `createHost` clamps
+   each, before the host hears it, to the frame's viewport as it is then (`Surface.viewport()`: the
+   web platform's frame element's content box): each side is held within it, so a box overlapping
+   it keeps the part inside, and one wholly outside becomes a box of no size on the nearest edge.
+   Kept, not dropped: a mark scrolled out of view is still told, on the edge it went past (below
+   the viewport: `y` at its height, of no height), which is what a host needs to point at it. A
+   platform that can't tell the frame's size (no `viewport`) gets every box as nothing at the
+   frame's corner: fail closed. This changes what 0.8 told for a mark outside the viewport. The
+   page still chooses any point inside its own frame: a box is a positioning hint.
 
 **Trust.** Unchanged in kind from P053: the shell shares the content's realm.
 - What content can now learn: each mark's `count`. Everything in a `show` (ids, anchors, counts)
@@ -4660,7 +4673,7 @@ outline plain and unclear on its own.
   where the page may know how many there are, and ids that say nothing (never a person's name or a
   comment's words). Who commented, and what, stays in the host's own bubble outside the frame.
 - What content can fake: an `activated` report for any mark the host shows with a count, without
-  a click, and with any `rect` it likes; and look-alike markers drawn by its own elements (which
+  a click, and with any `rect` inside its frame (point 8); and look-alike markers drawn by its own elements (which
   report nothing unless it fakes one), or elements laid over Porthole's markers. The host takes a
   fake only for its own shown ids, at the bridge's rate. So `activated` opens the host's own view
   of that mark, placed near the rect within the frame's box, and never acts (no resolve, delete,
@@ -4690,7 +4703,14 @@ against the steps' measured pauses (P098), and a scroll down and back in the nex
 a line inserted above one mark gives a report with that mark only, once quiet;
 a hostile page faking `activated` (no marks, an unknown id, a mark without a count, malformed: none
 taken; well-formed for a shown marker: taken, rebuilt), and its synthetic click on the layer
-reports nothing. After the review: a marker's double, right and middle click and the pointer's
+reports nothing. After the review of 43768be: `clampRect`'s math (inside kept; overlapping, the
+part inside; wholly outside, no size on the nearest edge; an unknown or non-finite viewport,
+nothing at the corner; every result finite, inside and passing `parseRect`, over a grid of
+negative, fractional and huge inputs), the stand-in host clamping an `activated` box to its
+600 by 400 viewport, and a hostile page's `activated` boxes (over the whole app; wholly outside),
+`selected` and `anchored` boxes reaching the host clamped to the frame's viewport; negative
+control `annotation-rect-clamp` (the clamp out) fails that case and the two that see a mark below
+the viewport on its edge. After the review of b19e2e8: a marker's double, right and middle click and the pointer's
 moves over it reach none of the content's listeners, and a selection and the focused input are as
 they were after its clicks; 140 wheel turns 200 ms apart (more than 120 settles) give at most 45
 follow-ups and no refusal, and a marker's click after them is reported (with one report per settle
@@ -4717,7 +4737,9 @@ all three engines.
 - A host-side id per marker distinct from the mark's: the mark's id is already the host's own, and
   already in the frame.
 
-**Revisit when** a host needs markers reachable by keyboard inside the frame (then a focus model
+**Revisit when** a host needs a mark's box outside the viewport as it is (then a separate,
+named field, still never a place for the host's UI), a host needs markers reachable by keyboard
+inside the frame (then a focus model
 the content can't steal, likely the host's own overlay), a bubble must follow during a scroll (a
 coarser report, or the host drawing markers itself from `anchored`), or MCP Apps defines
 annotations.

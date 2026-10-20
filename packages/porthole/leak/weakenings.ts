@@ -261,6 +261,15 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "            if (id === null) {",
     },
   ],
+  // A reported box held to the frame's viewport (P104): the page places the host's UI nowhere
+  // outside its frame.
+  "annotation-rect-clamp": [
+    {
+      file: "src/host/create-host.ts",
+      find: '        void through.call("annotate", withinFrame(report));',
+      replace: '        void through.call("annotate", report);',
+    },
+  ],
   // A marker's click (P104): only for a mark shown with a marker (the id check stays).
   "annotation-activated-count": [
     {

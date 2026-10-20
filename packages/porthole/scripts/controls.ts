@@ -84,6 +84,16 @@ export const CONTROLS: Readonly<Record<string, { spec: string; fails: readonly E
     spec: "leak/annotate.spec.ts",
     fails: ["a hostile page fakes a marker's click"],
   },
+  // The host clamps every reported box to the frame (P104); the two cases that read a mark below
+  // the viewport see its box on the edge only through it.
+  "annotation-rect-clamp": {
+    spec: "leak/annotate.spec.ts",
+    fails: [
+      "a hostile page reports a box outside its frame",
+      "marks: drawn over their anchors",
+      "following: once a scroll settles",
+    ],
+  },
   "annotation-activated-count": {
     spec: "leak/annotate.spec.ts",
     fails: ["a hostile page fakes a marker's click"],

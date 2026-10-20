@@ -84,6 +84,16 @@ export const webPlatform: PlatformHost = {
       setColorScheme(scheme: ColorScheme) {
         frame.style.colorScheme = scheme;
       },
+      viewport() {
+        const style = view.getComputedStyle(frame);
+        const width =
+          frame.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+        const height =
+          frame.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+        return Number.isFinite(width) && Number.isFinite(height)
+          ? { width: Math.max(0, width), height: Math.max(0, height) }
+          : undefined;
+      },
       userActivation() {
         const activation = (
           view.navigator as Navigator & { userActivation?: { isActive: boolean } }

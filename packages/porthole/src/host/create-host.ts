@@ -4,7 +4,7 @@ import {
   type AnnotationMark,
   type AnnotationReport,
 } from "../annotate/types.ts";
-import { annotateMode, checkMarks, parseReport } from "../annotate/validate.ts";
+import { annotateMode, checkMarks, clampRect, parseReport } from "../annotate/validate.ts";
 import {
   createBridge,
   onceConsent,
@@ -195,6 +195,29 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         }
       };
       /**
+       * Every box a report carries, clamped to the frame's viewport as it is now (P104): the page
+       * places the host's own UI nowhere outside its frame.
+       */
+      const withinFrame = (report: AnnotationReport): AnnotationReport => {
+        const viewport = surface?.viewport?.();
+        switch (report.type) {
+          case "selected":
+          case "activated":
+            return { ...report, rect: clampRect(report.rect, viewport) };
+          case "anchored":
+            return {
+              type: "anchored",
+              results: report.results.map((result) =>
+                result.rect === undefined
+                  ? result
+                  : { ...result, rect: clampRect(result.rect, viewport) },
+              ),
+            };
+          default:
+            return report;
+        }
+      };
+      /**
        * A report from the frame: checked, taken only while the host asked for it (a selection
        * only in select mode, results only for its own marks, a marker's click only for a mark it
        * shows with one), then through the bridge's gates.
@@ -260,7 +283,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             break;
           }
         }
-        void through.call("annotate", report);
+        void through.call("annotate", withinFrame(report));
       };
       const needsAnnotate = (operation: string) => {
         if (!annotates) {
