@@ -4258,7 +4258,11 @@ manual line said "unconfirmed"), the leak probe `12.model-context`, and two case
      showed "Weather: sunny" while the handler had a hidden instruction. An update is refused
      (`invalid`) if its text, or any string of its structured content, a value or a key, holds a
      format character (`\p{Cf}`), a variation selector (U+FE00–FE0F, U+E0100–E01EF), a
-     private-use character, a lone surrogate, or a control other than `\n` and `\t`. Refused, not
+     private-use character, a lone surrogate, any default-ignorable code point
+     (`\p{Default_Ignorable_Code_Point}`, after the re-check: U+034F, Mongolian's free variation
+     selectors U+180B–180F, the Hangul fillers U+115F, U+1160, U+3164 and U+FFA0, Khmer's inherent
+     vowels U+17B4–17B5 drew as nothing between Latin letters and passed), or a control other than
+     `\n` and `\t`; the emoji and shaping allowances below are taken out first. Refused, not
      escaped: an escaped update reads to the model differently from what the person saw. The
      manual says so. Real emoji pass (the re-review: "Weather: ☀️" is ordinary widget text): U+FE0E
      or U+FE0F directly after an `\p{Extended_Pictographic}` character, or after a keycap base
@@ -4274,18 +4278,20 @@ manual line said "unconfirmed"), the leak probe `12.model-context`, and two case
      Tamil, Telugu, Kannada, Malayalam, Sinhala and Myanmar (a conjunct, a half form, a ligature),
      after Unicode's notes on the joiners; anywhere else (between Latin or Greek letters, beside a
      space or a digit, first, last, doubled, between two scripts' letters) they are refused. Their
-     bound: one joiner per letter boundary of those scripts, between letters the person sees, and
-     where the letters join or form a conjunct it changes how they look, so it is seen. Where they
-     wouldn't (after an Arabic letter that never joins to the left, between consonants without a
-     virama) it changes nothing, and is one choice of three at that boundary: never letters a
-     model reads, as it reads tags. Tested: Persian with its non-joiner, Hindi with a joiner and a
+     bound, exactly: one of three at each letter boundary of those scripts (nothing, U+200C or
+     U+200D), log2(3) ≈ 1.6 bits per boundary, between letters the person sees; where the letters
+     join or form a conjunct it changes how they look, so it is seen; where they wouldn't (after an
+     Arabic letter that never joins to the left, between consonants without a virama) it changes
+     nothing, and those 1.6 bits are the hidden channel: never letters a model reads, as it reads
+     tags. Tested: Persian with its non-joiner, Hindi with a joiner and a
      non-joiner, each script once; the misplacements above; 2,000 random strings, where every
      joiner that passes sits between two of those scripts' letters or marks. Atomic chillus
      replaced Malayalam's word-final joiner (Unicode 5.1); a joiner at a word's end is refused.
-     **The emoji bound:** what that allowance lets through is at most two
-     code points per visible emoji (a selector there or not, a joiner there or not): a bit or two
-     of choice beside something the person sees, never characters a model reads as letters, as it
-     reads tag characters. A hidden instruction of 40 letters would need hundreds of emoji in a
+     **The emoji bound, exactly:** at most two hidden code points per pictograph: a selector choice
+     (nothing, U+FE0E, U+FE0F) times a joiner after it or not, at most log2(6) ≈ 2.6 bits per
+     pictograph (less in fact: a joiner after U+FE0E is refused, so five of the six); a keycap's
+     selector choice, log2(3) ≈ 1.6 bits per keycap. Choice beside something the person sees,
+     never characters a model reads as letters, as it reads tag characters. A hidden instruction of 40 letters would need hundreds of emoji in a
      row, in view, and a model that decodes a bit pattern it was never taught. Tested: 500 joined
      emoji pass with at most two hidden per visible; one more joiner or selector anywhere is
      refused; 2,000 strings drawn from emoji, letters, digits, selectors, joiners, keycaps and
@@ -4331,7 +4337,11 @@ host's own wording of it in the model's turn (ADOPTING.md: the content's words, 
 person's message). Opt out only where the handler itself puts the text in front of the person, or
 the content is the host's own.
 
-**What stays open.** Shown isn't read: a person may not look, or may not see an injection for what
+**What stays open.** The visible-blank residual: characters that draw as a blank, not as
+nothing, pass (U+00A0, the spaces U+2000–200A, U+202F, U+205F, U+3000, the braille blank U+2800):
+each space in an update may be any of them, a few bits per space (log2 of about a dozen, under
+4), seen as a space, and read by a model as whitespace or nearly. Refusing them would refuse
+ordinary text (a no-break space in "10 km"); the bound is the length limit. Shown isn't read: a person may not look, or may not see an injection for what
 it is; the manual's words are the second wall. A host whose agent takes turns on its own (no next
 message to wait for) gives the person no time: it should add `confirm` (ADOPTING.md says so).
 Porthole doesn't word the update for the model; the host's prompt does. Images in model context

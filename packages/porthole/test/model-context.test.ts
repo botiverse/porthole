@@ -375,6 +375,33 @@ describe("review of P100, 1b: real emoji sequences pass; selectors and joiners c
   });
 });
 
+describe("review of P100, 1d: default-ignorable code points draw as nothing, so they are refused", () => {
+  test.each([
+    ["a combining grapheme joiner (U+034F)", "\u034F"],
+    ["a Mongolian free variation selector (U+180B)", "\u180B"],
+    ["a Mongolian free variation selector (U+180C)", "\u180C"],
+    ["a Mongolian free variation selector (U+180D)", "\u180D"],
+    ["a Mongolian vowel separator (U+180E)", "\u180E"],
+    ["a Mongolian free variation selector (U+180F)", "\u180F"],
+    ["a Hangul choseong filler (U+115F)", "\u115F"],
+    ["a Hangul jungseong filler (U+1160)", "\u1160"],
+    ["a Hangul filler (U+3164)", "\u3164"],
+    ["a halfwidth Hangul filler (U+FFA0)", "\uFFA0"],
+    ["a Khmer inherent vowel (U+17B4)", "\u17B4"],
+    ["a Khmer inherent vowel (U+17B5)", "\u17B5"],
+  ])("%s between Latin letters is refused", async (_name, ignorable) => {
+    const { bridge, shown } = setup(declared());
+    const text = `sun${ignorable}ny`;
+    expect(
+      await bridge.call("setModelContext", { content: [{ type: "text", text }] }),
+    ).toMatchObject({ ok: false, refusal: "invalid" });
+    expect(
+      await bridge.call("setModelContext", { structuredContent: { [text]: text } }),
+    ).toMatchObject({ ok: false, refusal: "invalid" });
+    expect(shown).toEqual([]);
+  });
+});
+
 describe("review of P100, 1c: joiners that shape a script's letters pass; anywhere else they are refused", () => {
   const many = () => setup(declared({ gates: [{ rateLimit: { perMinute: 10_000 } }, "show"] }));
   const goes = async (text: string) => {

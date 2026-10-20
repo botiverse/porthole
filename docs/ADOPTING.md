@@ -233,8 +233,10 @@ createHost(config, {
   names the gates without `show`, and says so on purpose. Do it only where your handler itself puts
   the text in front of the person (or the content is your own): otherwise the content writes into
   your model's turns unseen. Gates named without `show` and without `withoutShow` (a 0.7 config
-  that set its own rate) earn a warning: Porthole logs nothing itself, so log
-  `host.compiled.warnings` (or `compile(config).warnings`, `configWarnings(config)`) at startup.
+  that set its own rate) earn the warning `model-context-unshown`, which you see only if you read
+  it: Porthole logs nothing, anywhere. Read `host.compiled.warnings` (or `compile(config).warnings`,
+  `configWarnings(config)`) at startup, or pass `validateConfig(config, { onWarning })`, and log
+  or fail on what you find; otherwise nothing tells you.
 - **What can't be seen is refused**: an update with an invisible character (zero-width ones, bidi
   controls, variation selectors, tag or private-use characters, controls other than new lines and
   tabs), in its text or any string of its structured content, never reaches `show` or your

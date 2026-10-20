@@ -168,11 +168,13 @@ const MAX_CONTEXT_BLOCKS = 100;
 /**
  * What a person can't see but a model reads (the review of P100): format characters (zero-width
  * ones, bidi controls, the tags U+E0000–E007F, a soft hyphen, a byte-order mark), variation
- * selectors (U+FE00–FE0F, U+E0100–E01EF), private-use characters, lone surrogates, and controls
- * other than a new line and a tab. An update with any is refused, never escaped: an escaped one
+ * selectors (U+FE00–FE0F, U+E0100–E01EF), private-use characters, lone surrogates, every
+ * default-ignorable code point (the re-check: U+034F, Mongolian's free variation selectors, the
+ * Hangul fillers, Khmer's inherent vowels), and controls other than a new line and a tab. An update with any is refused, never escaped: an escaped one
  * reads to the model differently from what the person was shown.
  */
-const UNSEEN = /[\p{Cf}\p{Co}\p{Cs}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}]|[^\P{Cc}\n\t]/u;
+const UNSEEN =
+  /[\p{Cf}\p{Co}\p{Cs}\p{Default_Ignorable_Code_Point}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}]|[^\P{Cc}\n\t]/u;
 
 /**
  * The parts of real emoji that draw as nothing alone, allowed only where an emoji has them (the
