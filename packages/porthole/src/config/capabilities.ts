@@ -104,7 +104,8 @@ export const CAPABILITIES = {
     request: { method: "ui/download-file", sdk: "app.downloadFile" },
   },
   callTool: {
-    defaultGates: ["confirm"],
+    // A rate as well (P103): it needs no gesture, and a host's `confirm` may say yes by itself.
+    defaultGates: ["confirm", rate(30)],
     served: "handler",
     request: { method: "tools/call", sdk: "app.callServerTool" },
   },

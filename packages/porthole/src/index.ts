@@ -140,6 +140,7 @@ export {
   LIBRARY_CDNS,
   presets,
   type PresetName,
+  type LiveCapabilityConfig,
   type LiveWidgetOptions,
   type PresetOptions,
   type UrlPresetOptions,

@@ -40,7 +40,11 @@ const OF_FILES = "00000000000000000000000000000001";
 
 function serve(
   config: Partial<Parameters<typeof presets.artifact>[0]> = {},
-  options: { readonly bearer?: boolean } = {},
+  options: {
+    readonly bearer?: boolean;
+    /** More configs the server serves artifacts under, beside `artifact`. */
+    readonly configs?: Readonly<Record<string, PortholeConfig>>;
+  } = {},
 ) {
   const assets = new Map<string, StoredAsset>([
     [
@@ -70,7 +74,7 @@ function serve(
     content: { domain: DOMAIN, scheme: "https", name: prefixedName("a-") },
     secret: new Uint8Array(32).fill(3),
     hostOrigins: [HOST],
-    configs: { artifact },
+    configs: { artifact, ...options.configs },
     artifacts: {
       get: (id) =>
         Promise.resolve(
@@ -215,8 +219,9 @@ describe("/_blob/<id> on the content origin (P089, P091)", () => {
     expect(answer?.headers.get("x-content-type-options")).toBe("nosniff");
     expect(answer?.headers.get("cross-origin-resource-policy")).toBe("same-origin");
     expect(answer?.headers.get("cache-control")).toBe("private, no-cache");
-    expect(answer?.headers.get("etag")).toBe(`"${"a".repeat(64)}"`);
-    expect((await get(ID, { "if-none-match": `"${"a".repeat(64)}"` }))?.status).toBe(304);
+    // Its sha256 and whether it went out as code (P103).
+    expect(answer?.headers.get("etag")).toBe(`"${"a".repeat(64)}-inert"`);
+    expect((await get(ID, { "if-none-match": `"${"a".repeat(64)}-inert"` }))?.status).toBe(304);
     const ranged = await get(ID, { range: "bytes=0-3" });
     expect([ranged?.status, await ranged?.text()]).toEqual([206, "<svg"]);
     const page = await get(OTHER);
@@ -253,6 +258,72 @@ describe("/_blob/<id> on the content origin (P089, P091)", () => {
     expect(answer?.status).toBe(200);
     expect(asked).toEqual([null]);
     expect((await server.handle(new Request(at("a-two", `/_blob/${ID}`))))?.status).toBe(404);
+  });
+
+  // P103.2: a trusted code asset runs only while the config still lets uploaded code run, asked
+  // at every request: in bearer mode too (it served one as code by its upload's word alone), and
+  // where the config no longer serves assets at all. A stricter config wins.
+  test("code only while the current config lets uploaded code run, in bearer mode too (P103)", async () => {
+    const typeOf = async (server: ReturnType<typeof serve>["server"], cookie?: string) =>
+      (
+        await server.handle(
+          new Request(at("a-one", `/_blob/${TRUSTED}`), {
+            headers: cookie === undefined ? ownLoad : { ...ownLoad, cookie },
+          }),
+        )
+      )?.headers.get("content-type");
+    const script = "text/javascript; charset=utf-8";
+    const download = "application/octet-stream";
+    // Uploads the admins' alone: the trusted script is one, by access and by id alone.
+    expect(await typeOf(serve({}, { bearer: true }).server)).toBe(script);
+    // Anyone who interacts uploads now: the script it was is a download, either way.
+    const opened = { capabilities: { assets: { levels: { upload: "interact" as const } } } };
+    expect(await typeOf(serve(opened, { bearer: true }).server)).toBe(download);
+    const tab = serve(opened);
+    expect(await typeOf(tab.server, await tabCookie(tab.server))).toBe(download);
+    // The config serves no assets any more (dropped): nothing of its library runs.
+    const dropped = serve({ capabilities: {} });
+    expect(await typeOf(dropped.server, await tabCookie(dropped.server))).toBe(download);
+    expect(await typeOf(serve({ capabilities: {} }, { bearer: true }).server)).toBe(download);
+    // By id alone the server can't tell which of its artifact configs the asset's page is under:
+    // the strictest one it might be wins.
+    const strict = presets.artifact({
+      isolation: "domain",
+      contentOrigins: [CONTENT],
+      runtime: "1",
+      capabilities: { assets: { levels: { upload: "interact" } } },
+    });
+    const either = serve({}, { bearer: true, configs: { page: strict } });
+    expect(await typeOf(either.server)).toBe(download);
+    // An access names its page's config: that one alone decides.
+    const named = serve({}, { configs: { page: strict } });
+    expect(await typeOf(named.server, await tabCookie(named.server))).toBe(script);
+  });
+
+  // P103, the review: the ETag carries the decision, so a copy a browser kept as code, asked
+  // again after a stricter config shipped, gets the download whole, never a 304 that keeps it
+  // typed as code.
+  test("a copy kept as code revalidates to the download once the config is stricter (P103)", async () => {
+    const load = (server: ReturnType<typeof serve>["server"], etag?: string) =>
+      server.handle(
+        new Request(at("a-one", `/_blob/${TRUSTED}`), {
+          headers: etag === undefined ? ownLoad : { ...ownLoad, "if-none-match": etag },
+        }),
+      );
+    const before = await load(serve({}, { bearer: true }).server);
+    const kept = before?.headers.get("etag") ?? "";
+    expect(kept).toBe(`"${"a".repeat(64)}-code"`);
+    // The same config: still the copy it kept.
+    expect((await load(serve({}, { bearer: true }).server, kept))?.status).toBe(304);
+    // Anyone who interacts uploads now: the bytes are the same, the answer isn't.
+    const stricter = serve(
+      { capabilities: { assets: { levels: { upload: "interact" } } } },
+      { bearer: true },
+    ).server;
+    const after = await load(stricter, kept);
+    expect(after?.status).toBe(200);
+    expect(after?.headers.get("content-type")).toBe("application/octet-stream");
+    expect(after?.headers.get("etag")).toBe(`"${"a".repeat(64)}-inert"`);
   });
 
   test("a page whose config serves assets opens /_blob/ on its own origin in its CSP", async () => {

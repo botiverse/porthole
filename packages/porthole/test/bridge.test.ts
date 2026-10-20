@@ -253,6 +253,29 @@ describe("the bridge's order: declared → rate → valid → muted → gesture 
     expect((await bridge.call("openLink", { url: "https://a.example" })).ok).toBe(true);
   });
 
+  // P103.3: callTool needs no gesture, so a page could call it on a timer; its confirmation alone
+  // bounded nothing where the host's `confirm` says yes by itself (an app's own tools). It has a
+  // rate by default, counted before the person is asked; a host's own gates replace it.
+  test("callTool is rate limited by default, before the person is asked (P103)", async () => {
+    const { bridge, asked, handled, advance } = setup(
+      { capabilities: { callTool: {} } },
+      { confirm: accept },
+    );
+    const call = () => bridge.call("callTool", { name: "refresh", arguments: {} });
+    for (let index = 0; index < 30; index += 1) {
+      expect((await call()).ok, `call ${index + 1}`).toBe(true);
+    }
+    expect(await call()).toMatchObject({ ok: false, refusal: "rate-limited" });
+    expect([asked.length, handled.length]).toEqual([30, 30]);
+    advance(60_001);
+    expect((await call()).ok).toBe(true);
+    // The host's own gates replace the defaults, as for every capability.
+    const own = setup({ capabilities: { callTool: { gates: ["confirm"] } } }, { confirm: accept });
+    for (let index = 0; index < 31; index += 1) {
+      expect((await own.bridge.call("callTool", { name: "refresh", arguments: {} })).ok).toBe(true);
+    }
+  });
+
   test("an explicitly ungated capability runs without asking", async () => {
     const { bridge, asked, handled } = setup(
       { capabilities: { openLink: { gates: [] } } },
