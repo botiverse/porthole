@@ -25,6 +25,9 @@
   on the edge it went past (below: `y` equals the viewport's height, `height` 0), not at its
   place beyond it. A custom `PlatformHost` gives its surfaces `viewport()` (the new optional
   `Surface.viewport`), or every box reaches the host as nothing at the frame's corner.
+- **Wordless elements are named** (P104): a picked element with no text of its own (an image, an
+  icon button, a chart) is labelled by its `alt`, `aria-label` or `title`, in that order, instead
+  of its tag and classes alone.
 - Negative controls `annotation-rect-clamp`, `annotation-activated`, `annotation-activated-count`,
   `marker-trusted` and `marker-click`, in `scripts/controls.ts`.
 

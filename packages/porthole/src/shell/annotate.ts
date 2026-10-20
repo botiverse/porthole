@@ -49,6 +49,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const rangeRect = Range.prototype.getBoundingClientRect;
       const rangeRects = Range.prototype.getClientRects;
       const attachShadow = Element.prototype.attachShadow;
+      const getAttribute = Element.prototype.getAttribute;
       const post = window.parent.postMessage.bind(window.parent);
       const tell = (method, params) => {
         if (window.parent !== window) {
@@ -198,7 +199,13 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         for (const each of classes) {
           name += "." + each;
         }
-        const words = squash(element.textContent || "").slice(0, 40);
+        // An element without words (an image, an icon button, a chart) is named by what it says it is.
+        let words = squash(element.textContent || "");
+        for (const attribute of ["alt", "aria-label", "title"]) {
+          if (words) break;
+          words = squash(getAttribute.call(element, attribute) || "");
+        }
+        words = words.slice(0, 40);
         return (words ? name + " " + words : name).slice(0, LIMIT.label);
       };
       const quoteOf = (index, start, end) => {

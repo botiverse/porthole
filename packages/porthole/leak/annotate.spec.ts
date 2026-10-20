@@ -137,6 +137,29 @@ test("an element without an id is anchored by its path; Escape cancels a pick", 
   await expect(frame.locator("body")).toHaveAttribute("data-clicked", "yes");
 });
 
+const WORDLESS = `<p>Before the picture.</p>
+<img id="chart" alt="Revenue by month" width="160" height="60" style="display:block;background:#ddd" src="data:,">
+<button id="close" aria-label="Close dialog" style="width:40px;height:30px"></button>
+<div id="map" title="Map of regions" style="width:120px;height:40px;background:#ccc"></div>`;
+
+test("an element without words is named by its alt, aria-label or title", async ({ page }) => {
+  const cases: [string, string][] = [
+    ["#chart", "Revenue by month"],
+    ["#close", "Close dialog"],
+    ["#map", "Map of regions"],
+  ];
+  for (const [selector, name] of cases) {
+    // A fresh display each time, so each pick's report is its own.
+    const display = await referenceHost.launch(page, { config: annotated(), content: WORDLESS });
+    const frame = await display.frame();
+    await display.annotate("start", { elements: true, text: false });
+    await frame.locator(selector).click();
+    const picked = await next(display, "selected");
+    expect(picked.anchor.kind).toBe("element");
+    expect(picked.anchor.label).toContain(name);
+  }
+});
+
 test("selecting text: a settled selection is reported with its anchor and box, and its clearing too", async ({
   page,
 }) => {
