@@ -685,10 +685,19 @@ it (`leak/mcp/`), in an opaque frame and behind the sandbox proxy.
 
 ### The host-function bridge
 
-`bridge.call(capability, args)` checks, in order: declared → arguments valid
-(`openLink` http(s) only and without credentials in the URL; a prompt
-1..`maxPromptChars` characters) → muted? → rate limit → user activation → `confirm`
-→ the host's handler. Each refusal is a
+`bridge.call(capability, args)` checks, in order: the display's run not stopped (a restart or
+its end closes its bridge, P095) → declared by the config → declared by the page, where it has
+a declaration (P086) → before the arguments are read: for the runtime's own host functions, a
+method by its `op` and the viewer's level for it, then for every capability its host function's
+own rate (P091, P095: a malformed call costs its rate) → arguments valid and within their
+limits (`openLink` http(s) only and without credentials in the URL; a prompt
+1..`maxPromptChars` characters; a tool's arguments, model context and a download's contents
+plain, bounded JSON, P095) → who may (P087: the level of each method the call runs for the
+viewer, the data a page named with or without a viewer (P094), db's rules) → muted, if
+confirm-gated → the own rate of each method it runs (`methodGates`; P094: a batch's writes count
+each) → user activation → the viewer's `consent` → `confirm` (at most 10 waiting a display, P095)
+→ the host's handler (or, for a read, a result the host already gave for it (P094), or for a read
+allowed stale, the host's cache). Each refusal is a
 `Refusal` and a `refused` display event; the frame gets an error result. After
 `declinesBeforeMute` declines a display stops asking (`muted`) until it runs again.
 
@@ -930,6 +939,7 @@ official App SDK connects under the inline, artifact and MCP Apps presets
 | 12 | `sendPrompt` | the shell refuses a call without a gesture; the host refuses one without its page's user activation, then asks `confirm` with the whole text; declines count toward a mute | `12.prompt-gesture-confirm` (a call on load is refused; a click asks; a no sends nothing; a yes reaches the handler), `12.raw-message` (a raw `ui/message` around the shell, no click: refused by the host), `12.mute`, `12.no-confirm` | `confirm-gate` → prompt-gesture-confirm, link, mute, no-confirm; `shell-gesture` → prompt-gesture-confirm, mute; `host-gesture` → raw-message |
 | 12 | live data (`readData`, `subscribeData`, P079) | MCP `resources/read`, `resources/subscribe`/`unsubscribe`, `notifications/resources/updated`; the `consent` gate asks the host once per display before the first data call (a no refuses them all; none refuses, fail closed), then the rate; a subscribed read may be answered from the host's cache, marked stale, the fresh one following as an update; a refusal tells content why (`data: { code, message }`, P080) | `test/live-data.test.ts`, `test/refusals.test.ts`; `leak/served/live.spec.ts` (read and followed, consent asked once; cached then fresh; a viewer's no refuses both, no handler runs, `denied` with its sentence; a host refusing all without handlers; a handler's `Refused`) | — |
 | 12 | `openLink` | link clicks go out through `openLink`; the bridge takes http(s) only, without credentials in the URL; confirmed | `12.link` (a web link asks and opens; `javascript:` links and `openLink("javascript:…")` do nothing and are refused) | `link-scheme` → `12.link` |
+| 14 | error reports (`reportError`, S05, P095) | the adapters hand the bridge what content logged as it came; the bridge counts reportError's rate before reading it, then makes bounded text of it (`boundedText`: each object once, `[Circular]`/`[Repeated]`; 1,000 values, 16 levels, 8,000 characters; a BigInt as `"5n"`), scrubs sealed addresses and cuts to 2,000; nothing a log holds throws out of an adapter | `14.error-shapes` (a cycle, a BigInt and a 20-level shared graph from an inline widget and from an MCP Apps view, each reported as bounded text); `test/log-bounds.test.ts` (undeclared or past its rate: nothing of it read) | `report-unbounded` → `14.error-shapes` |
 
 Measured: a click in the frame gives the host page user activation (it propagates to
 ancestors) on Chromium, WebKit and Firefox, so the host-side gesture check holds for real
@@ -1130,7 +1140,7 @@ Three more limits sit outside the list:
 - `theme` (where it runs): the person's theme, a page that declares it, or
   `theme.documents: "never"`, always light. Checks: `11.theme-flip`, `11.document-theme`,
   `14.theme-never`.
-- `errors` (interactive): `errors: "agent" | "host" | "none"`. Check: `14.errors`.
+- `errors` (interactive): `errors: "agent" | "host" | "none"`. Checks: `14.errors`, `14.error-shapes`.
 
 They are config facts a whole-page viewer needed (P065):
 - `layout.kind: "fill"` makes every mount fill its container (`MountOptions.fill`, React

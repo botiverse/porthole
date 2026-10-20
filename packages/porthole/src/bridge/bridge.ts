@@ -9,7 +9,9 @@ import type { AnnotationReport } from "../annotate/types.ts";
 import { parseReport } from "../annotate/validate.ts";
 import type { PortholeConfig } from "../config/schema.ts";
 import { callGates, effectiveGates } from "../compile/policy.ts";
-import { blockedNavigationMessage, withoutSealedAddresses } from "./navigation.ts";
+import { boundedText } from "./bounded-text.ts";
+import { isJsonData } from "./json-data.ts";
+import { blockedNavigationMessage, cutText, withoutSealedAddresses } from "./navigation.ts";
 import {
   RUNTIME_HOST_FUNCTIONS,
   familyOf,
@@ -60,10 +62,16 @@ import type {
 
 /**
  * The host-function bridge: every capability call from a frame passes here, and nowhere else
- * reaches a host handler. In order: declared → arguments well formed → not muted → within its
- * rate → a user gesture, if gated so → the viewer's consent, if gated so → a person's
- * confirmation, if gated so → the handler (or, for a read, a result the host already gave for it,
- * or for a stale-allowed one the host's cache).
+ * reaches a host handler. In order (`call`): the run not stopped (`close`) → declared by the
+ * config → declared by the page, where it has a declaration (P086) → before the arguments are
+ * read (`precheck`): for the runtime's own, a method by its `op` and the viewer's level, then for
+ * every capability its host function's own rate (P091, P095) → arguments well formed and within
+ * their limits → who may (P087: the level of each method the call runs for the viewer, a page's
+ * named data with or without a viewer, db's rules) → not muted, if confirm-gated → the own rate
+ * of each method it runs (P094: a batch's writes count each) → a user gesture, if gated so → the
+ * viewer's consent, if gated so → a person's confirmation, if gated so (at most 10 waiting) → the
+ * handler (or, for a read, a result the host already gave for it, or for a stale-allowed one the
+ * host's cache).
  */
 
 export type BridgeEvent =
@@ -110,6 +118,15 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
 const MAX_URL = 4_096;
+
+/**
+ * The most confirmations one display has waiting at once (P095): past it a call is refused as
+ * rate-limited, asking no one (and counted as no decline).
+ */
+const MAX_WAITING_CONFIRMS = 10;
+
+/** The most of an error report the host is told. */
+const MAX_ERROR_CHARS = 2_000;
 
 /** An http(s) URL without credentials in it (`https://bank.example@evil.example` reads as a lie). */
 export function linkTarget(value: unknown): string | null {
@@ -159,7 +176,11 @@ const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
   },
   downloadFile: (args) => {
     const contents = isRecord(args) ? args.contents : undefined;
-    return Array.isArray(contents) && contents.length > 0 && contents.length <= 100
+    // Plain, bounded JSON only (P095): what reaches the dialog and the handler is what MCP says.
+    return Array.isArray(contents) &&
+      contents.length > 0 &&
+      contents.length <= 100 &&
+      isJsonData(contents)
       ? { contents }
       : null;
   },
@@ -173,7 +194,7 @@ const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
       return null;
     }
     const given = args.arguments ?? {};
-    return isRecord(given) ? { name: args.name, arguments: given } : null;
+    return isRecord(given) && isJsonData(given) ? { name: args.name, arguments: given } : null;
   },
   readData: (args) => resourceUri(args),
   subscribeData: (args) => resourceUri(args),
@@ -184,7 +205,8 @@ const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
     const { content, structuredContent } = args;
     if (
       (content !== undefined && !Array.isArray(content)) ||
-      (structuredContent !== undefined && !isRecord(structuredContent))
+      (structuredContent !== undefined && !isRecord(structuredContent)) ||
+      !isJsonData({ content, structuredContent })
     ) {
       return null;
     }
@@ -205,10 +227,14 @@ const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
       const url = withoutSealedAddresses(blocked);
       return { message: blockedNavigationMessage(url, config), navigationBlocked: url };
     }
+    // What content said (S05, P095): any value, read only now, after its rate (`precheck`), into
+    // bounded text, then scrubbed, then cut to what the host is told.
     const message = isRecord(args) ? args.message : undefined;
-    return typeof message === "string" && message !== ""
-      ? { message: withoutSealedAddresses(message).slice(0, 2_000) }
-      : null;
+    if (message === undefined) {
+      return null;
+    }
+    const text = cutText(withoutSealedAddresses(boundedText(message)), MAX_ERROR_CHARS);
+    return text === "" ? null : { message: text };
   },
   copyText: (args) => {
     const text = isRecord(args) ? args.text : undefined;
@@ -295,12 +321,29 @@ function declaredOf(
     : undefined;
 }
 
-export function createBridge(options: BridgeOptions): HostFunctionBridge {
+/** A display's bridge: `close()` when its run stops (a restart, its end; P095, after the review). */
+export interface DisplayBridge extends HostFunctionBridge {
+  /**
+   * The run is over: every call waiting for a confirmation is refused at once, a yes that comes
+   * later (or its `proceed`) runs nothing, and no new call is taken.
+   */
+  close(): void;
+}
+
+/** What a stopped display's calls are refused with (the host's words; its frame is gone). */
+const STOPPED = "the display stopped before this was answered";
+
+export function createBridge(options: BridgeOptions): DisplayBridge {
   const { config, display, handlers, onEvent } = options;
   const now = options.now ?? (() => Date.now());
   const calls = new Map<string, number[]>();
   let declines = 0;
   let muted = false;
+  /** Confirmations asked and not yet answered: a frame's calls can't queue without end (P095). */
+  let waiting = 0;
+  /** Closed (`close`): its run stopped. What each waiting confirmation's wait is ended by. */
+  let closed = false;
+  const ending = new Set<() => void>();
 
   const refuse = <T>(
     capability: CapabilityName,
@@ -410,13 +453,14 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
   }
 
   /**
-   * The cheap checks for the runtime's own, before their arguments are read (after the review: a
-   * malformed call costs nothing but its rate): a method by its `op`, a viewer at its level, its
-   * host function's rate.
+   * The cheap checks, before a call's arguments are read (after the review: a malformed call
+   * costs nothing but its rate): for the runtime's own, a method by its `op` and a viewer at its
+   * level; for every capability, its host function's rate (P095: what content says, in any shape,
+   * is read only within it).
    */
   function precheck(capability: CapabilityName, raw: unknown): Refusal | null {
     if (!RUNTIME_HOST_FUNCTIONS.includes(capability)) {
-      return null;
+      return withinOwnRates(capability) ? null : "rate-limited";
     }
     const family = familyOf(capability);
     const method = methodOf(capability, raw);
@@ -433,15 +477,28 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
     if (viewer === undefined || (needed !== null && !atLeast(viewer.level, needed))) {
       return "level";
     }
+    return withinOwnRates(capability) ? null : "rate-limited";
+  }
+
+  /** Whether a call is within its host function's own rates, each counted. */
+  function withinOwnRates(capability: CapabilityName): boolean {
     for (const gate of effectiveGates(config, capability)) {
       if (typeof gate === "object" && !withinRate(capability, gate.rateLimit.perMinute)) {
-        return "rate-limited";
+        return false;
       }
     }
-    return null;
+    return true;
   }
 
   return {
+    close() {
+      closed = true;
+      // Each ends a wait; the wait leaves the set later, in its own `finally`.
+      for (const end of ending) {
+        end();
+      }
+    },
+
     declared: (capability) => config.capabilities[capability] !== undefined,
 
     roster: () =>
@@ -458,6 +515,9 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
       callOptions?: CallOptions,
     ): Promise<CallOutcome<CapabilityResults[N]>> {
       type Result = CapabilityResults[N];
+      if (closed) {
+        return refuse<Result>(capability, "failed", STOPPED);
+      }
       if (config.capabilities[capability] === undefined) {
         return refuse<Result>(capability, "not-declared");
       }
@@ -503,15 +563,7 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
       if (confirms && muted) {
         return refuse<Result>(capability, "muted");
       }
-      // The runtime's own were counted against their host function's rate before their arguments
-      // were read (`precheck`).
-      if (!RUNTIME_HOST_FUNCTIONS.includes(capability)) {
-        for (const gate of own) {
-          if (typeof gate === "object" && !withinRate(capability, gate.rateLimit.perMinute)) {
-            return refuse<Result>(capability, "rate-limited");
-          }
-        }
-      }
+      // Its host function's own rate was counted before its arguments were read (`precheck`).
       // A method's rate counts each time the call runs it, with its direct calls: a batch of
       // three sets is three sets (P094).
       if (family !== null) {
@@ -562,16 +614,35 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
           return refuse<Result>(capability, "denied");
         }
       }
+      // The run may have stopped while the viewer's consent was awaited: then no one is asked.
+      if (closed) {
+        return refuse<Result>(capability, "failed", STOPPED);
+      }
       // The effect, run once: when the person's "yes" calls `proceed` (inside its own click, so an
       // effect that needs a gesture gets one), or after `confirm` resolves accepted.
       let effect: Promise<CallOutcome<Result>> | null = null;
+      // Never once the bridge is closed: a yes to a stopped run's request does nothing.
       const run = (): Promise<CallOutcome<Result>> =>
-        (effect ??= perform(capability, args, callOptions));
+        (effect ??= closed
+          ? Promise.resolve(refuse<Result>(capability, "failed", STOPPED))
+          : perform(capability, args, callOptions));
       if (confirms) {
         if (options.confirm === undefined) {
           return refuse<Result>(capability, "no-confirm");
         }
-        let answer: ConfirmAnswer = false;
+        if (waiting >= MAX_WAITING_CONFIRMS) {
+          return refuse<Result>(capability, "rate-limited", undefined, {
+            code: "rate_limited",
+            message: "Too many confirmations are waiting: try again once they are answered.",
+          });
+        }
+        let answer: ConfirmAnswer | typeof STOPPED = false;
+        waiting += 1;
+        let end = () => {};
+        const ended = new Promise<typeof STOPPED>((resolve) => {
+          end = () => resolve(STOPPED);
+          ending.add(end);
+        });
         try {
           // Which of the methods the call runs asked for this yes (P094): a batch's gated writes.
           const askedBy =
@@ -580,17 +651,26 @@ export function createBridge(options: BridgeOptions): HostFunctionBridge {
               : [...new Set(methodsOfCall(capability, args))].filter((each) =>
                   methodGates(config, family.name, each).includes("confirm"),
                 );
-          answer = await options.confirm(
-            {
-              capability,
-              args,
-              display,
-              ...(askedBy.length === 0 ? {} : { askedBy }),
-            } as ConfirmRequest,
-            () => void run(),
-          );
+          answer = await Promise.race([
+            options.confirm(
+              {
+                capability,
+                args,
+                display,
+                ...(askedBy.length === 0 ? {} : { askedBy }),
+              } as ConfirmRequest,
+              () => void run(),
+            ),
+            ended,
+          ]);
         } catch {
           answer = effect === null ? false : "accepted";
+        } finally {
+          waiting -= 1;
+          ending.delete(end);
+        }
+        if (closed && effect === null) {
+          return refuse<Result>(capability, "failed", STOPPED);
         }
         if (effect === null && answer !== true && answer !== "accepted") {
           if (answer === "redirected") {

@@ -150,6 +150,44 @@ export const LIMIT_PROBES: readonly Probe[] = [
     },
   },
   {
+    id: "14.error-shapes",
+    item: 14,
+    title:
+      "what content logs as an error reaches the host as bounded text in any shape structured clone carries: a cycle, a BigInt, a shared graph (S05)",
+    async run(context) {
+      // A graph of 20 objects each holding the next twice: 2^20 leaves written as a tree.
+      const logs = `<script>
+(() => {
+  const say = (data) => parent.postMessage({ jsonrpc: "2.0", method: "notifications/message", params: { level: "error", data } }, "*");
+  const cycle = { name: "porthole-cycle" };
+  cycle.self = cycle;
+  let graph = "leaf";
+  for (let i = 0; i < 20; i += 1) graph = { a: graph, b: graph };
+  say(cycle);
+  say({ big: 5n });
+  say(graph);
+  say("porthole-after");
+})();
+</script>`;
+      const page = `<!doctype html><html><head><title>View</title></head><body><p>x</p>${logs}</body></html>`;
+      for (const display of [
+        await context.launch({ config: inline(), content: `<p>x</p>${logs}` }),
+        await context.launch({ config: presets.mcpApp(), content: "", document: page }),
+      ]) {
+        await expect
+          .poll(async () => (await display.errors()).includes("porthole-after"))
+          .toBe(true);
+        const errors = await display.errors();
+        expect(errors).toContain('{"name":"porthole-cycle","self":"[Circular]"}');
+        expect(errors).toContain('{"big":"5n"}');
+        const graph = errors.find((each) => each.startsWith('{"a":{"a":'));
+        expect(graph, "the shared graph, reported").toBeDefined();
+        expect(graph).toContain('"b":"[Repeated]"');
+        expect(graph?.length).toBeLessThanOrEqual(2_000);
+      }
+    },
+  },
+  {
     id: "14.silent",
     item: 14,
     title:
@@ -586,7 +624,7 @@ export const LIMIT_PROBES: readonly Probe[] = [
 export const LIMIT_CHECKS: { readonly [Id in LimitId]: readonly string[] } = {
   layout: ["11.size", "14.fill"],
   theme: ["11.theme-flip", "11.document-theme", "14.theme-never"],
-  errors: ["14.errors"],
+  errors: ["14.errors", "14.error-shapes"],
   silent: ["14.silent"],
   network: ["1.connect", "2.resources"],
   "inline-assets": ["14.inline-assets"],

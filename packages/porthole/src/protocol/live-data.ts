@@ -23,6 +23,12 @@ export interface LiveData {
   close(): void;
 }
 
+/**
+ * The most resources one frame follows at once (P095), as the runtime's watches (50): past it a
+ * subscription is refused as too large, and the host isn't asked.
+ */
+const MAX_SUBSCRIPTIONS = 50;
+
 /** Where MCP results carry their metadata. */
 const META = "_meta";
 
@@ -104,6 +110,13 @@ export function liveData(
     async subscribe(uri) {
       if (typeof uri === "string" && subscriptions.has(uri)) {
         return { ok: true, value: undefined };
+      }
+      if (subscriptions.size >= MAX_SUBSCRIPTIONS) {
+        return {
+          ok: false,
+          refusal: "too-large",
+          reason: { code: "too_large", message: "Too many things followed at once." },
+        };
       }
       const controller = new AbortController();
       if (typeof uri === "string") {

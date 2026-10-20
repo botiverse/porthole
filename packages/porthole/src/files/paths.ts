@@ -62,6 +62,10 @@ export function filePathProblem(path: unknown): string | null {
   if (path.length > MAX_FILE_PATH_CHARS) {
     return `a path is at most ${MAX_FILE_PATH_CHARS} characters`;
   }
+  // A lone surrogate is no character, and no URL can carry it (P095).
+  if (!path.isWellFormed()) {
+    return "a path is well-formed Unicode: no lone surrogates";
+  }
   if (path.startsWith("/")) {
     return "a path is relative: no leading /";
   }

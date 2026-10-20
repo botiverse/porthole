@@ -134,8 +134,48 @@ export function isPlainJson(value: unknown, nodes: number = DB_LIMITS.maxNodes):
 
 const encoder = new TextEncoder();
 
-/** The bytes `value` takes as JSON. */
-export const jsonBytes = (value: unknown): number => encoder.encode(JSON.stringify(value)).length;
+/**
+ * The fewest bytes checked plain JSON takes written out: each string's and key's characters (a
+ * character is a byte or more in UTF-8, an escape more), a byte a scalar. Stops past `max`.
+ */
+function leastJsonBytes(value: unknown, max: number): number {
+  if (typeof value === "string") {
+    return value.length + 2;
+  }
+  if (value === null || typeof value !== "object") {
+    return 1;
+  }
+  // The brackets, and a separator before each value but the first.
+  let total = 2;
+  let first = true;
+  if (Array.isArray(value)) {
+    for (const each of value as readonly unknown[]) {
+      total += (first ? 0 : 1) + leastJsonBytes(each, max - total);
+      first = false;
+      if (total > max) {
+        return total;
+      }
+    }
+    return total;
+  }
+  for (const [field, each] of Object.entries(value)) {
+    // `"field":` and the value.
+    total += (first ? 0 : 1) + field.length + 3 + leastJsonBytes(each, max - total);
+    first = false;
+    if (total > max) {
+      return total;
+    }
+  }
+  return total;
+}
+
+/**
+ * The bytes checked plain JSON takes (`plainJson` first: no cycles, bounded nodes and depth), or
+ * `max + 1` once it surely takes more: written out only within its limit (P095: a string of
+ * control characters is six times its length as JSON, and could pass a string's longest).
+ */
+export const jsonBytes = (value: unknown, max: number): number =>
+  leastJsonBytes(value, max) > max ? max + 1 : encoder.encode(JSON.stringify(value)).length;
 
 /** A document's data: a plain object, within the limits; "too_large" past them. */
 function dbData(
@@ -151,7 +191,9 @@ function dbData(
   if (!plainJson(value, budget, 0)) {
     return null;
   }
-  return jsonBytes(value) > DB_LIMITS.maxDocBytes ? "too_large" : (value as DbData);
+  return jsonBytes(value, DB_LIMITS.maxDocBytes) > DB_LIMITS.maxDocBytes
+    ? "too_large"
+    : (value as DbData);
 }
 
 const version = (value: unknown): number | null | undefined =>
@@ -272,7 +314,7 @@ function parseWhere(value: unknown): readonly DbWhere[] | undefined | null {
       field.length > 256 ||
       !(WHERE_OPS as readonly unknown[]).includes(op) ||
       !isPlainJson(operand, DB_LIMITS.maxOperandNodes) ||
-      jsonBytes(operand) > DB_LIMITS.maxOperandBytes ||
+      jsonBytes(operand, DB_LIMITS.maxOperandBytes) > DB_LIMITS.maxOperandBytes ||
       (op === "in" && (!Array.isArray(operand) || operand.length > DB_LIMITS.maxIn))
     ) {
       return null;
@@ -364,7 +406,7 @@ export function parseDbRequest(args: unknown): Parsed<DbRequest> {
         paths.add(write.path);
         parsed.push(write);
       }
-      if (jsonBytes(parsed) > DB_LIMITS.maxBatchBytes) {
+      if (jsonBytes(parsed, DB_LIMITS.maxBatchBytes) > DB_LIMITS.maxBatchBytes) {
         return "too_large";
       }
       return { op: "batch", writes: parsed };
