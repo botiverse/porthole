@@ -53,6 +53,11 @@ export interface ShellDocumentOptions {
      * renews it before then, at `<base>__porthole/renew`, and moves the page there.
      */
     readonly expires?: number;
+    /**
+     * The artifact version the files are (P098): the shell names it in its notices, and the host
+     * takes a notice only for the version it mounted. Not secret; the content can read it.
+     */
+    readonly set?: { readonly id: string; readonly version: string };
   };
 }
 
@@ -174,6 +179,9 @@ export function shellDocument(plan: ShellPlan, csp: string, options: ShellDocume
               base: options.files.base,
               ...(options.files.address === undefined ? {} : { address: options.files.address }),
               ...(options.files.expires === undefined ? {} : { expires: options.files.expires }),
+              ...(options.files.set === undefined
+                ? {}
+                : { set: { id: options.files.set.id, version: options.files.set.version } }),
             },
           }),
     }),

@@ -1,5 +1,6 @@
 import { expect, test, type Frame, type Page } from "@playwright/test";
 import type { PortholeConfig } from "../../src/index.ts";
+import { LATE_NOTICE_MS } from "../../src/host/pages-of-set.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
 import { storedFiles, startTabHost, viteFixture } from "./files.ts";
 import { harness } from "./harness.ts";
@@ -160,10 +161,66 @@ document.getElementById("go").addEventListener("click", async () => {
     expect(frame.url()).toBe(`${base}about`);
     await frame.locator("#back").click();
     await expect(frame.locator("#title")).toHaveText("Many files");
+    // The display goes on past the wait the host gives a late notice (P098): a page nobody
+    // announced (the guard's control, navigate-guard) starts it again only then.
+    await page.waitForTimeout(LATE_NOTICE_MS + 500);
     const record = await shown.read();
     expect(record.outcomes).toEqual([{ state: "loaded" }]);
     expect(record.navigationsBlocked).toEqual([]);
   });
+
+  for (const lost of ["dropped", "late"] as const) {
+    test(`a link to another page of the set opens it in the frame when the leaving page's notice is ${lost} (P098)`, async ({
+      page,
+    }) => {
+      // As Chromium may deliver it: a cross-process message is forwarded from a task of the
+      // sending document's, so the notice of a page that leaves can reach the host after the next
+      // page's load, or never (CI: the display started again at its spent ticket). Here the host
+      // page drops each leaving page's notice, or holds it until the frame's next load (the
+      // arriving page's own notice comes as the browser delivers it, before or after its load).
+      const id = unique(`pages-${lost}`);
+      await publish(id, "1", MANY);
+      const { frame, shown } = await showFiles(page, id, "1");
+      await page.evaluate((mode) => {
+        const held: MessageEventInit[] = [];
+        let releasing = false;
+        window.addEventListener(
+          "message",
+          (event) => {
+            const data = event.data as { method?: unknown; params?: { arrived?: unknown } } | null;
+            if (releasing || data?.method !== "porthole/navigating") {
+              return;
+            }
+            if (data.params?.arrived === true) {
+              return;
+            }
+            event.stopImmediatePropagation();
+            if (mode === "late") {
+              held.push({ data: event.data, origin: event.origin, source: event.source });
+            }
+          },
+          true,
+        );
+        document.querySelector("#displays iframe")?.addEventListener("load", () => {
+          releasing = true;
+          for (const each of held.splice(0)) {
+            window.dispatchEvent(new MessageEvent("message", each));
+          }
+          releasing = false;
+        });
+      }, lost);
+      const base = frame.url();
+      await frame.locator("#next").click();
+      await expect(frame.locator("#about")).toHaveText("the about page");
+      expect(frame.url()).toBe(`${base}about`);
+      await frame.locator("#back").click();
+      await expect(frame.locator("#title")).toHaveText("Many files");
+      await page.waitForTimeout(LATE_NOTICE_MS + 500);
+      const record = await shown.read();
+      expect(record.outcomes).toEqual([{ state: "loaded" }]);
+      expect(record.navigationsBlocked).toEqual([]);
+    });
+  }
 
   test("a page opens nothing else: not a file that isn't a page, not another path of its origin", async ({
     page,

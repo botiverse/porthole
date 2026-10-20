@@ -397,7 +397,7 @@ agreement test keeps the shell and the manual on the same name.
 **Revisit when** MCP Apps standardizes error reporting or theme-change events for
 views.
 
-## P025 · 2026-10-11 · A served document comes with its ticket's answer; the cookie serves what follows · Accepted; amended by P083
+## P025 · 2026-10-11 · A served document comes with its ticket's answer; the cookie serves what follows · Accepted; amended by P083, P098
 
 **Decision.** Refines P016's ticket flow. `/server` names each storage scope's origin
 `<label>.<content domain>` (24 base32 characters of an HMAC of the scope, keyed from the
@@ -1809,7 +1809,6 @@ artifact-only app lacks, two snippet bugs, no word on the page's CSP, two ways t
 which left the manual wrong), Workers specifics, and local development.
 **Revisit when** a second cold adoption (after 0.3) finds friction these don't cover.
 
-
 ## P072 · 2026-10-12 · Host kit 0.3: the client, the bootstrap and the relay, so adopters stop writing glue · Accepted
 
 **Decision.** After 0.2.2 the server's content file is policy and little
@@ -2214,6 +2213,8 @@ loads (its follow-up) proposes more hosts, such as mirrors reachable from mainla
 
 
 ## P079 · 2026-10-15 · Live widgets: no network of their own, Porthole's libraries on their origin, the host's data behind the viewer's consent, and frames that never navigate away · Accepted; amended by P084, P094, P103
+
+## P079 · 2026-10-15 · Live widgets: no network of their own, Porthole's libraries on their origin, the host's data behind the viewer's consent, and frames that never navigate away · Accepted; amended by P084, P094
 
 **Decision.** Content that shows its host's data, current, read as the person viewing it (a
 dashboard tile, a kept widget) gets a preset of its own and the mechanisms it needs. 0.5.0.
@@ -2697,7 +2698,7 @@ moved 56 minutes on, and the page goes on loading its files), on Chromium, WebKi
 **Revisit when** WebKit keeps partitioned cookies in frames (then the cookie, stable addresses and
 the shared cache), or hosts need a version's files cached across sessions (a seal per day).
 
-## P084 · 2026-10-18 · A served page with files opens its set's other pages in its frame · Accepted
+## P084 · 2026-10-18 · A served page with files opens its set's other pages in its frame · Accepted; amended by P098
 
 **Decision.** Amends P079 (no navigation to another document) and P031 (a navigated frame is
 started again) for served pages with files. The shell's plan names the version's files' address
@@ -4054,3 +4055,137 @@ resources with its cookie, a request from an opaque origin (a sandboxed frame in
 origin check stays, for frames on one host page); when an engine stops sending `Origin` or fetch
 metadata where this relies on them; or when a previewed app needs a write from another site (an
 opt-in per display, with its test).
+
+## P098 · 2026-10-19 · A set's page is taken as one when its notice is late or lost; tests that measure, not wait · Accepted
+
+The 2026-10-19 audit's flaky tests (baseline 264b12fa), which a release that waits for all of CI
+(P097) can no longer shrug off. Amends P084 (the notice) and P025 (how the suite knows which
+browsers keep a framed cookie).
+
+**Decision**, by finding:
+1. **A set's page is taken as one when its notice comes after its load, or only from the page
+   that arrived** (`files.spec.ts:151`, red on main's Chromium job since 0.6.0). Not a flaky test:
+   a product bug. CI's trace (run 39293363186): `about` loaded (200), 35 ms later the frame asked
+   for its spent ticket again (401, "This link has been used"): the host had taken `about`'s load
+   as the content navigating away (P031) and started the display again, because the leaving
+   page's `porthole/navigating` wasn't there yet. P084 assumed a message sent before a navigation
+   reaches the host before the next document's load. Chromium doesn't promise it: a frame in
+   another process forwards `postMessage` from a task of the sending document's
+   (`RemoteDOMWindow::SchedulePostMessage`, `kInternalPostMessageForwarding`), which a navigation
+   that commits first delays or drops with its document. WebKit and Firefox run the frame in the
+   host page's process here, so the order held there; it never reproduced here (30 of 30 alone,
+   112 of 112 under 20 busy loops, 60 of 60 instrumented), only on CI's 4-CPU runners. Now:
+   - every notice names the artifact version its files are (`files.set`, `{ id, version }`, from
+     the access the page is served for; not secret);
+   - the shell of a page a navigation opened (a page of files that is not its ticket's answer)
+     says `porthole/navigating` with `arrived: true` as it starts. Set inside the guard's own
+     block, so `navigate-guard` (the guard taken out) removes it with every other notice;
+   - which loads are the set's own pages is decided by `pagesOfSet` (`host/pages-of-set.ts`) on
+     the frame's surface, before anything the frame says reaches the display. The leaving page's
+     notice is taken for the next load within ten seconds, as before; the arriving page's too (the
+     host hears a load only once the page's images and modules have loaded, seconds after it
+     spoke), or for the load it came after. A load no notice explained waits `LATE_NOTICE_MS`
+     (2 s) for a notice naming the mounted version; every other display starts again at once, as
+     before. What a new page says before its load is delivered as it comes, as P084 had it.
+   Regressions: `test/pages-of-set.test.ts` and `test/files.test.ts` (a notice before or after its
+   load spares the restart; nothing answered during the wait; failed before),
+   `leak/served/files.spec.ts` (the leaving page's notice dropped, or every notice held until the
+   frame's next load, by the host page: the pages still open in the frame on all three engines;
+   the link cases read the display after the wait, so `navigate-guard` fails all three).
+2. **The lint's linear-time guard compares work, not a machine's speed** (`test/files.test.ts`).
+   What it guards (P081-P084's review): no pattern that grows faster than the text (72 KB of
+   `import a ` took 3.9 s). "1 MB in under 200 ms" said how busy the machine was (659 ms at load
+   30). Now each adversarial text is linted as 1 MB and as sixteen 64 KB texts, each the fastest of
+   three interleaved, and 1 MB must cost under eight times the sixteen: linear is about one
+   (measured 0.2-1.3; at most 4.2 with three times more runnable threads than CPUs), quadratic
+   sixteen (the scans from before the review: 9.6-16 already at 48 KB). Equal work on both sides
+   makes a busy machine slow both alike; a CPU-time clock was the other way, but Linux reports a
+   thread's CPU time in whole ticks here. Beside the ratio, a bound twenty times what a busy
+   machine takes: each 1 MB under 3 s (the slowest 31 ms idle, 143 ms at load 52). It is six
+   times the old case's work (9.6 s with 57 runnable threads on 16 CPUs), so its cap is a minute,
+   not vitest's 5 s.
+3. **Which browsers keep a cookie in a cross-site frame is measured, not named** (the audit's four
+   WebKit failures on macOS). P025 measured Playwright's WebKit on Linux: no cookie in a cross-site
+   frame. The audit's macOS run of the same WebKit kept them: `served.url.framed` passed where it was
+   expected to fail (the reference serving and the kit), the framed app `loaded` where `blocked:
+   cookies` was expected, and the framed page's reload after revocation was `denied` (403,
+   revoked) where `session` (401) was expected. The platform's cookie policy decides, not the
+   engine's name. `keepsFramedCookies(page, scheme)` (`src/conformance/cookies.ts`, internal) asks
+   the browser itself, once per browser: in a context of its own, a page on one made-up site frames
+   one on another, both answered by routes (never the network, never the host under test), the
+   frame's answer sets a cookie as Porthole's server sets a framed one (`Secure; SameSite=None;
+   Partitioned`, over the display's scheme), and the frame reads whether it was kept. The framed
+   case, the outcome case and the two mid-session revocation cases expect what it says; the one
+   that skips (the framed app mid-session) skips only on WebKit, the one engine measured keeping
+   none, and fails elsewhere if the probe says none, so a broken probe can't drop it. Nothing
+   that protects is weaker: where the cookie is kept, revocation must deny the next request and the
+   next load (403, revoked); where it isn't, the app must be `blocked: cookies` and the reload has
+   no session (401); the ticket and tab cases deny a revoked subject on every browser. Measured
+   here (Linux, Playwright 1.63): the probe says kept on Chromium and Firefox and not kept on
+   WebKit, over http and https, as the framed app does (loaded; loaded; `blocked: cookies`). What a
+   macOS run must show (`PORTHOLE_LEAK_ENGINES=webkit pnpm test:leak -g "served.url.framed|framed
+   app|mid-session"`, with any system proxy bypassed for `*.localhost`): `served.url.framed` passes
+   outright in the reference serving and the kit (not "expected to fail"), the outcome case is
+   `loaded`, the framed app mid-session runs (not skipped) with its 403 and `[loaded, denied]`, and
+   the framed page's reload is `denied` (403, revoked). If WebKit there takes the probe's
+   route-made cookie otherwise than a network one, these fail against the framed app, and the probe
+   moves to a loopback server of its own (as `conformance/oracles.ts` has).
+4. **Tests that waited a fixed time for something to happen now wait for it** (found looking over
+   the suite; each a positive result read once after a sleep): the dialog's early press
+   (`react.spec.ts`) is pressed as the dialog's buttons go in, before any timer can run, not after
+   three checks that took longer than the 500 ms arming delay on a busy machine; a script asset
+   (`runtime.spec.ts`) is read once its own `load` or `error` event says the attempt is over; the
+   host's report of a stopped navigation (`live.spec.ts`) and the three refused fakes
+   (`annotate.spec.ts`) are polled; the url-mode frame's `initialized` (`outcome.spec.ts`) is
+   polled, since a blocked entry page can report before its load ends. None of these failed here
+   (120 of 120 under 16 busy loops before the change); each read a positive result once, after a
+   fixed wait shorter than its slowest path. The dialog's did fail on CI's WebKit (PRs #21 twice,
+   #25; run 39362355564's trace): the click on Send found it unarmed (`data-armed="false"`), then
+   waited 459 ms for it to be visible, enabled and stable, and pressed it about 530 ms after the
+   dialog opened, armed by then (`ARM_DELAY_MS`, 500): the yes went, the dialog closed, and the
+   next `toBeVisible` found nothing. The dialog was right; the test's press wasn't "the moment it
+   opens". Now it is pressed from a mutation observer as the buttons go in, before any timer can
+   run, and the case asserts it was unarmed then. Waits that bound an absence ("nothing reached the
+   canary within N ms") stay: they can only pass wrongly, not fail.
+
+**Threat it re-opens, and its bounds.** The wait: for up to `LATE_NOTICE_MS` after a load no
+notice explained, a files display holds its frame instead of starting it again at once, so a
+frame that did navigate away is started again up to 2 s later than before. Bounded, each with its test
+(`test/pages-of-set.test.ts`, the stand-in host in `test/files.test.ts`, `files.spec.ts`):
+- **Only this display's set ends a wait.** A notice is taken only from the frame's own window and
+  content origin (the transport takes nothing else: another origin or label can't speak), and
+  ends a wait only if it names the mounted artifact and version. A notice naming another version
+  or artifact, an arriving page's that names none, or the new page's `ui/initialize` before any
+  notice ends the wait at once: started again. A shell from before P098 (no version) is taken for
+  a load still to come only, as P084 did; never to end a wait.
+- **No host access during the wait.** Everything the frame says is held, not delivered: no call
+  is answered, no report, size, annotation or frame status taken; nothing the host sends goes to
+  the frame. A notice for the mounted version delivers it all, in order; a restart drops it. At
+  most `HELD_MOST` (1,000) messages each way are held: one more starts the display again.
+- **The wait always ends in a restart unless that notice comes.** Its deadline is the first
+  waiting load's: more loads don't put it off. Nothing else clears it but the display's own stop.
+- **The guard's control still fails.** `navigate-guard` removes the guard's block, and with it the
+  arriving page's notice: on all three engines the three link cases fail, with "opens nothing
+  else", the sealed-address reports case and live.spec's four navigation cases (27 failures, as
+  before plus the two new cases); no other control weakens the navigation guard.
+What stays the content's word, as in P084: content in a page of the same origin can send any
+notice, the version's included (its id and version aren't secret). Same-origin pages are one
+trust domain already (P082: an artifact's versions share an origin; a scope's pages share its
+storage); a notice only spares a restart, and P031's restart is not a wall (`frame-src` and the
+guard are). A page a reload opened in a files display now stays rather than starting the display
+again at its entry. A late copy of a notice for the page the frame is on is dropped, not banked.
+**Rejected.** Holding each navigation until the host acknowledges its notice (the shell cancels
+and re-issues it): a round trip on every page, and history traversals can't be re-issued as they
+were. A wait any page of the origin could end (no version): a page outside the set would delay or
+stop the restart. Dropping what the frame says during the wait instead of holding it: the
+arriving page's first requests would go unanswered. Retrying the case, or a longer `expect`
+timeout: the display had already started again. A
+CPU-time clock for the lint guard: tick-granular on this kernel (0 or 4 ms for a 1.4 ms run). The
+engine's name with a platform check (`process.platform === "darwin"`): the policy is the build's,
+and an adopter's browser (a branded Chrome, a WebKit with different settings) would be named
+wrong again.
+**Revisit when** Chromium orders a cross-process `postMessage` before a navigation the same task
+started (then `LATE_NOTICE_MS` only covers the arriving page's notice); when a browser Porthole
+supports blocks script-set or route-set cookies differently from network ones (the probe would
+then disagree with the framed app: the framed case says so by failing either way); or when the
+lint scans more than 2 MiB a file (the guard's 1 MB is under it).

@@ -15,6 +15,7 @@ import {
 import { compile } from "../src/compile/compile.ts";
 import { addressWithoutQuery, withoutSealedAddresses } from "../src/bridge/navigation.ts";
 import { createHost } from "../src/host/create-host.ts";
+import { LATE_NOTICE_MS } from "../src/host/pages-of-set.ts";
 import type { PlatformHost } from "../src/platform/types.ts";
 import type { PortholeConfig } from "../src/config/schema.ts";
 import type { InstanceRef } from "../src/isolation/types.ts";
@@ -133,7 +134,9 @@ async function framed(
   // The entry comes in the ticket's answer; its shell moves the frame to its files' address.
   const html = await answer.clone().text();
   const base =
-    /"files":\{"base":"[^"]+","address":"([^"]+)","expires":\d+\}/u.exec(html)?.[1] ?? "";
+    /"files":\{"base":"[^"]+","address":"([^"]+)","expires":\d+,"set":\{[^}]*\}\}/u.exec(
+      html,
+    )?.[1] ?? "";
   return { location, answer, base, html };
 }
 
@@ -734,7 +737,10 @@ describe("a file set on a tab (P081)", () => {
     const csp = answer.headers.get("content-security-policy") ?? "";
     expect(csp).toContain(`script-src 'unsafe-inline' 'unsafe-eval' blob: ${origin("abc")}/v/1/`);
     expect(csp).not.toContain(`${origin("abc")}/v/2/`);
-    expect(await answer.text()).toContain(`"files":{"base":"${origin("abc")}/v/1/"}`);
+    // Its version named for the host's notices (P098), no ticket's address.
+    expect(await answer.text()).toContain(
+      `"files":{"base":"${origin("abc")}/v/1/","set":{"id":"abc","version":"1"}}`,
+    );
     // Its files ride on the session, immutable at the version's own address.
     const css = await app.open(browser, `${origin("abc")}/v/1/style.css`, subresource("style"));
     expect(css.hops.length).toBe(1);
@@ -938,9 +944,33 @@ describe("after the security review of 0.6.0's first cut", () => {
     ).toBe(true);
   });
 
-  it("lint reads 1 MB of adversarial text in well under 200 ms, and nothing past a limit", () => {
+  it("lint reads adversarial text in linear time: 1 MB costs what sixteen times 64 KB does; nothing past a limit", () => {
     const served = presets.artifact({ isolation: "domain", contentOrigins: [CONTENT] });
     const mb = 1024 * 1024;
+    // What this guards (after the review of 0.6.0, P081-P084): no pattern that grows faster than
+    // the text (72 KB of `import a ` took 3.9 s). A time limit says how fast the machine is, not
+    // that (659 ms for 1 MB on a busy box, P098): so the same work is timed both ways, once as
+    // 1 MB and once as sixteen 64 KB texts, each the fastest of three (interleaved, so a busy
+    // machine slows both alike). Linear, the two cost about the same (measured 0.2-1.3x; under
+    // 3x CPU oversubscription, at most 4.2x); quadratic, 1 MB costs sixteen times as much (the
+    // scans before the review: 9.6-16x at 48 KB). Six times the old case's work: 9.6 s on a machine
+    // three times oversubscribed, so its cap is a minute, not the default 5 s.
+    const fastest = (files: Record<string, string>, times: number): number => {
+      const started = performance.now();
+      for (let each = 0; each < times; each += 1) {
+        admitFiles(served, files);
+      }
+      return performance.now() - started;
+    };
+    const setsOf = (unit: string, bytes: number) => {
+      const big = unit.repeat(Math.ceil(bytes / unit.length));
+      const page = unit.repeat(Math.floor((190_000 * bytes) / mb / unit.length));
+      return [
+        { "index.html": "<p>x</p>", "a.js": big },
+        { "index.html": "<p>x</p>", "a.css": big },
+        { "index.html": page, "a.mjs": big },
+      ];
+    };
     for (const unit of [
       "import a ",
       "<img ",
@@ -955,20 +985,20 @@ describe("after the security review of 0.6.0's first cut", () => {
       "@import '",
       "a\n",
     ]) {
-      const big = unit.repeat(Math.ceil(mb / unit.length));
-      const page = unit.repeat(Math.floor(190_000 / unit.length));
-      for (const files of [
-        { "index.html": "<p>x</p>", "a.js": big },
-        { "index.html": "<p>x</p>", "a.css": big },
-        { "index.html": page, "a.mjs": big },
-      ]) {
-        const started = performance.now();
-        admitFiles(served, files);
-        const took = performance.now() - started;
-        expect(
-          took,
-          `${JSON.stringify(unit)} ${Object.keys(files).join(" ")}: ${Math.round(took)} ms`,
-        ).toBeLessThan(200);
+      const small = setsOf(unit, mb / 16);
+      const whole = setsOf(unit, mb);
+      for (const [index, files] of whole.entries()) {
+        let parts = Infinity;
+        let once = Infinity;
+        for (let round = 0; round < 3; round += 1) {
+          parts = Math.min(parts, fastest(small[index] as Record<string, string>, 16));
+          once = Math.min(once, fastest(files, 1));
+        }
+        const said = `${JSON.stringify(unit)} ${Object.keys(files).join(" ")}: 1 MB ${once.toFixed(1)} ms, 16 × 64 KB ${parts.toFixed(1)} ms`;
+        expect(once / parts, said).toBeLessThan(8);
+        // And a bound beside it, twenty times what a busy machine takes (the slowest 1 MB here: 31 ms
+        // idle, 143 ms at load 52 on 16 CPUs): a scan that grew faster than the text needs minutes.
+        expect(once, said).toBeLessThan(3_000);
       }
     }
     // Over a limit: only the set's problem, nothing read.
@@ -987,7 +1017,7 @@ describe("after the security review of 0.6.0's first cut", () => {
       "index.html": `<p>${"x".repeat(250_000)}<iframe></iframe>`,
     });
     expect(oversize.map((each) => each.rule)).toEqual(["size"]);
-  });
+  }, 60_000);
 
   it("a sealed address opens on its own for an hour; then only the running page's own loads, while its session lasts; its shell renews it", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -1175,7 +1205,7 @@ describe("after the security review of 0.6.0's first cut", () => {
   });
 
   it("the host takes `porthole/navigating` only from a display whose pages may come with files, for one load, soon (P084)", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     const run = async (config: PortholeConfig) => {
       const navigated: (() => void)[] = [];
       const listeners: ((message: unknown) => void)[] = [];
@@ -1228,7 +1258,7 @@ describe("after the security review of 0.6.0's first cut", () => {
       });
       const events: string[] = [];
       display.on("navigated", () => events.push("navigated"));
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await vi.advanceTimersByTimeAsync(0);
       const say = () => {
         for (const listener of listeners) {
           listener({ jsonrpc: "2.0", method: "porthole/navigating", params: { url: "./about" } });
@@ -1238,10 +1268,11 @@ describe("after the security review of 0.6.0's first cut", () => {
       say();
       load();
       const first = [...events];
-      // Banked: said, then a load much later.
+      // Banked: said, then a load much later (started again once a late notice can't come, P098).
       say();
       vi.setSystemTime(Date.now() + 11_000);
       load();
+      await vi.advanceTimersByTimeAsync(LATE_NOTICE_MS);
       const banked = [...events];
       display.destroy();
       return { first, banked, surfaces };
@@ -1253,5 +1284,103 @@ describe("after the security review of 0.6.0's first cut", () => {
       presets.inlineWidget({ isolation: "domain", contentOrigins: [CONTENT] }),
     );
     expect(widget.first).toEqual(["navigated"]);
+  });
+
+  // P098: a set's page whose notice came late (on Chromium a cross-process postMessage can reach
+  // the host after the next page's load) is the same display: nothing the frame asked meanwhile
+  // was answered, and it is answered once the notice for the mounted version comes; a load no
+  // notice explained starts the display again once the wait is over (pages-of-set.test.ts says
+  // the rest).
+  it("a display waits LATE_NOTICE_MS for a set's page's late notice, answering nothing meanwhile (P098)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const navigated: (() => void)[] = [];
+    const listeners: ((message: unknown) => void)[] = [];
+    const sent: unknown[] = [];
+    let surfaces = 0;
+    const platform: PlatformHost = {
+      name: "stand-in",
+      createSurface: () => {
+        surfaces += 1;
+        return {
+          transport: {
+            send: (message) => void sent.push(message),
+            listen: (listener) => {
+              listeners.push(listener);
+              return () => {};
+            },
+            close: () => {},
+          },
+          element: null,
+          setHeight: () => {},
+          setColorScheme: () => {},
+          userActivation: () => undefined,
+          onNavigated: (listener) => {
+            navigated.push(listener);
+            return () => {};
+          },
+          onLoad: () => () => {},
+          destroy: () => {},
+        };
+      },
+    };
+    const container = {
+      ownerDocument: {
+        defaultView: { location: { origin: HOST }, navigator: { language: "en" } },
+      },
+      getBoundingClientRect: () => ({ width: 600 }),
+    } as unknown as HTMLElement;
+    const locator = {
+      locate: () =>
+        Promise.resolve({
+          url: `https://abc.${DOMAIN}/__porthole/d/x`,
+          origin: `https://abc.${DOMAIN}`,
+          reports: true,
+        }),
+    };
+    const display = createHost(
+      presets.artifact({ isolation: "domain", contentOrigins: [CONTENT] }),
+      {
+        platform,
+        locator,
+      },
+    ).mount(container, {
+      displayId: "d1",
+      title: "Page",
+      scheme: "light",
+      instance: site("1", "abc"),
+    });
+    const events: string[] = [];
+    display.on("navigated", () => events.push("navigated"));
+    await vi.advanceTimersByTimeAsync(0);
+    const say = (message: unknown) => {
+      for (const listener of listeners.slice()) {
+        listener(message);
+      }
+    };
+    const ping = (id: number) => ({ jsonrpc: "2.0", id, method: "ping", params: {} });
+    const answered = (id: number) =>
+      sent.some((each) => (each as { id?: unknown; result?: unknown }).id === id);
+    say(ping(1));
+    expect(answered(1)).toBe(true);
+    // A load, then a request, then the arriving page's notice for this version.
+    navigated.at(-1)?.();
+    say(ping(2));
+    await vi.advanceTimersByTimeAsync(LATE_NOTICE_MS - 1);
+    expect(answered(2)).toBe(false);
+    say({
+      jsonrpc: "2.0",
+      method: "porthole/navigating",
+      params: { url: "./about", arrived: true, set: { id: "site", version: "1" } },
+    });
+    expect(answered(2)).toBe(true);
+    await vi.advanceTimersByTimeAsync(LATE_NOTICE_MS);
+    expect({ events, surfaces }).toEqual({ events: [], surfaces: 1 });
+    // A load nobody announced: its request never answered, the display started again.
+    navigated.at(-1)?.();
+    say(ping(3));
+    await vi.advanceTimersByTimeAsync(LATE_NOTICE_MS);
+    expect(answered(3)).toBe(false);
+    expect({ events, surfaces }).toEqual({ events: ["navigated"], surfaces: 2 });
+    display.destroy();
   });
 });

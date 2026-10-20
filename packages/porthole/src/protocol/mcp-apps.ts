@@ -142,8 +142,10 @@ export const NAVIGATION_BLOCKED_METHOD = "porthole/navigation-blocked";
 
 /**
  * Porthole's own notification from the shell (P084): a page that came with files is opening
- * another page of its set, `{ url }`, in the frame. The host takes the frame's next load for that
- * page rather than for content that left (P031). The content's word: it only spares a restart.
+ * another page of its set, `{ url }`, in the frame; and, as it arrives, the page a navigation
+ * opened says so, `{ url, arrived: true }` (P098). The host takes the frame's next load (or the
+ * load it came after, within `LATE_NOTICE_MS`) for that page rather than for content that left
+ * (P031). The content's word: it only spares a restart.
  */
 export const NAVIGATING_METHOD = "porthole/navigating";
 

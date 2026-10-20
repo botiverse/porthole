@@ -250,6 +250,12 @@ function cookiesOf(request: Request): [string, string][] {
   return pairs;
 }
 
+/** The artifact version a file set is, for its pages' notices to the host (P098). */
+const versionOf = (instance: InstanceRef): { artifact?: { id: string; version: string } } =>
+  instance.document.kind === "artifact"
+    ? { artifact: { id: instance.document.id, version: instance.document.version } }
+    : {};
+
 /**
  * Serving for domain, artifact and url modes, and the MCP Apps sandbox proxy (P016, P020): a
  * fetch-style handler a host's backend mounts in front of its own routes, plus `issue`, which the
@@ -1019,6 +1025,7 @@ export function createServer(options: ServerOptions): PortholeServer {
           compiled: served.compiled,
           hostOrigins: options.hostOrigins,
           frameAncestors,
+          ...versionOf(access.instance),
         });
       }
       // A frame's document (a ticket's): its files carry its access in their path (P083). The
@@ -1038,6 +1045,7 @@ export function createServer(options: ServerOptions): PortholeServer {
         hostOrigins: options.hostOrigins,
         frameAncestors,
         ticket: { expires: sealed.expires },
+        ...versionOf(access.instance),
       });
     }
     // One page at a file set's base (P081): its base is the page, nothing under it is.

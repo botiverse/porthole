@@ -578,12 +578,15 @@ test.describe("the asset library (P089)", () => {
         scope,
         id: pageId,
         declaration: { assets: {} },
+        // The script's own load or error event says the attempt is over (a script runs before
+        // its load event), so the case reads the result then, not after a fixed wait (P098).
         files: filesWith(
-          `<script>porthole.use("assets").then((assets) => { const s = document.createElement("script"); s.src = assets.url("${id}"); document.head.append(s); });</script>`,
+          `<script>porthole.use("assets").then((assets) => { const s = document.createElement("script"); s.src = assets.url("${id}"); s.onload = s.onerror = (event) => { document.documentElement.dataset.settled = event.type; }; document.head.append(s); });</script>`,
         ),
       });
-      await frame.waitForLoadState("load");
-      await page.waitForTimeout(500);
+      await expect
+        .poll(() => frame.evaluate(() => document.documentElement.dataset.settled ?? ""))
+        .toBe(runs ? "load" : "error");
       const ran = await frame.evaluate(() => document.documentElement.dataset.blob ?? "");
       expect(ran, `${preset}, trusted ${trusted}`).toBe(runs ? "ran" : "");
     }
