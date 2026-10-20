@@ -39,6 +39,12 @@ export interface Surface {
    */
   userActivation(): boolean | undefined;
   /**
+   * The frame's viewport now, CSS px (its content box): what a box the frame reports is clamped
+   * to (P104). Undefined, or absent, where the platform can't tell: every reported box is then
+   * clamped to nothing, at the frame's corner.
+   */
+  viewport?(): { readonly width: number; readonly height: number } | undefined;
+  /**
    * The frame loaded a document other than the one it was given: the content navigated it. The
    * framework starts it again from its content and reports it.
    */

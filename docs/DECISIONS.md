@@ -1109,7 +1109,7 @@ clipboard is closed to them otherwise. Item 1 of 0.1.3.
 shows the text); writing from inside the frame (P051).
 **Revisit when** MCP Apps defines a clipboard request (then the adapter maps it).
 
-## P053 · 2026-10-11 · Annotations are mechanism: the host's comments, anchored in content it can't trust · Accepted
+## P053 · 2026-10-11 · Annotations are mechanism: the host's comments, anchored in content it can't trust · Accepted; amended by P104
 
 **Decision.** A new optional capability, `annotate`, declared by the host. It is for inline widgets
 and artifact pages, and for MCP Apps views where the host chooses. With it, the host can:
@@ -4589,3 +4589,157 @@ second wall on a tab); a host needs a served page to open windows from a tab (th
 `links.open`/`openLink`, never `allow-popups`); the platform adds a powerful feature with a
 `'self'` default (it joins `FRAME_DENIED_FEATURES`); or WebKit and Firefox apply
 `Permissions-Policy` to these features (the shell's device locks become the second wall there too).
+
+## P104 · 2026-10-20 · Annotation markers: a number at an anchor, a click the host hears, marks that follow a scroll · Accepted
+
+A host that shows its comments beside an artifact page wants, at each comment's anchor in the page,
+a small marker (a bubble and how many comments are there) that scrolls with the content; a click on
+it opens the host's own bubble, with who wrote what, outside the frame. P053's marks are a fill and
+an underline (text) or an outline (an element), with no number and nothing to click, and the frame
+reported where marks are only after `show`, `focus` or a change of the content, never after a
+scroll, so a host's bubble beside a mark couldn't follow it. One adopter also found the element
+outline plain and unclear on its own.
+
+**Decision.**
+1. **A count on a mark.** `AnnotationMark.count?: number`, a whole number from 0 to
+   `ANNOTATION_LIMITS.count` (999), checked by `checkMarks` (a bad one throws, as a bad anchor does).
+   With it, the shell draws a marker in its own layer (the closed shadow root, P053): a bubble glyph
+   and the number ("99+" above 99; 0 draws the bubble alone), at the end of a text anchor's last
+   line, raised, and on an element's top right corner, kept inside the frame's width (and below its
+   top while the anchor is in view); a second marker ending in the same place goes beside the
+   first. Each mark keeps its marker's node across redraws, so a press that spans one isn't lost. Its colors, font and spacing are set in
+   the layer, so the page's inherited styles don't reach it. Porthole doesn't say what is counted:
+   comments, replies, anything per anchor.
+2. **An element's mark with a marker is quieter**: a 1 px line 2 px out and a faint fill, 2 px
+   when active, where it was a 2 px outline over a light fill. The marker says what the mark is,
+   which the box alone didn't. A mark without a count draws as before (0.4.1's colors, P053's
+   reasons: the content's words stay readable on light and dark pages).
+3. **A click on a marker is reported**: `porthole/annotate.activated` with `{ id, rect }`, the
+   marker's box in the frame's viewport, a new `AnnotationReport` (`type: "activated"`). The layer
+   takes no pointer events but on its markers, so an event whose target is the layer is on one: the
+   shell's first window listener (it runs before any of the content's) stops each press, release,
+   click, double click, aux click, context menu, touch, and the pointer's moves over and out, there;
+   cancels what the browser would do with a press (focus, selection, a menu); and reports a trusted
+   primary click. The content's handlers, and what lies under the marker, never get it, as with
+   element picking (P053). The content can still tell that a marker was pressed, and roughly where
+   (see Trust). While elements are being picked the markers step aside (no pointer), so the click
+   picks what is under one.
+4. **The host takes `activated` only for a mark it shows with a count**, rebuilt from `id` and a
+   `rect` (`parseReport`), through the bridge's 120 a minute, delivered as the `annotation` event
+   (React: `onAnnotation`). An unknown id, or a mark shown without a count, is dropped; a malformed
+   report is refused as `invalid`.
+5. **Marks follow a scroll or a resize, while any mark has a marker.** Each mark keeps what the
+   host was last told of it (its state and box). Once scrolling (any scroller in the page) or
+   resizing has been quiet for 150 ms, or a run of changes of the content has (a run the 1 s
+   deadline cut short is checked 150 ms after it), the shell reports `anchored` with only the marks
+   whose state changed or whose box moved by more than 0.5 px since then, none when nothing moved,
+   and at most one such report a second: a settle within a second of the last waits for the
+   second's end and sends what is true then. Only while at least one shown mark has a `count`: a
+   host that gives none hears exactly what 0.8 told it (every mark after `show`, the focused one,
+   every mark when a change of the content changed a state). Rects stay in the frame's viewport; a
+   host whose frame grows with its content (no scroll inside) sees no report for its own page's
+   scroll, which it knows itself.
+6. **Not focusable.** Markers have no tab stop and stay in the layer that is `aria-hidden`: a tab
+   stop there would join the content's focus order, which the content controls (the realm is
+   shared), and focusables under `aria-hidden` are a known accessibility fault. The host's own list
+   of its marks, outside the frame, is the keyboard and assistive way, with `focus(id)` to bring
+   one into view.
+7. **After the review of b19e2e8.** Honest scrolling with a pause of 150 ms or more between turns
+   sent a report per pause: 30 s of it spent the bridge's 120 a minute, and a real marker click was
+   then refused (measured). Now follow-ups are at most one a second and only while a mark has a
+   marker (point 5), so they take at most half the budget; a run cut short by the deadline left its
+   last move untold, now checked once quiet. The layer's inline style also locks its size,
+   `scale`, `translate`, `rotate`, `zoom`, `clip-path`, `mask`, `filter`, `content-visibility` and
+   `contain`, and is set again at each draw; the pointer's moves over a marker are stopped too;
+   a marker near the frame's top is kept below it. Each of these narrows; none closes what Trust
+   says the content can still do.
+8. **Every reported box is clamped to the frame** (after the review of 43768be). A box in
+   `selected`, `activated` or an `anchored` result is the page's word, and `parseRect` checked only
+   that it was finite and not negative in size: a hostile page could report one far outside its
+   frame, and a host placing its own bubble by it would draw the host's UI wherever the page chose
+   over the rest of the app (misdirection, though the page reads nothing). Now `createHost` clamps
+   each, before the host hears it, to the frame's viewport as it is then (`Surface.viewport()`: the
+   web platform's frame element's content box): each side is held within it, so a box overlapping
+   it keeps the part inside, and one wholly outside becomes a box of no size on the nearest edge.
+   Kept, not dropped: a mark scrolled out of view is still told, on the edge it went past (below
+   the viewport: `y` at its height, of no height), which is what a host needs to point at it. A
+   platform that can't tell the frame's size (no `viewport`) gets every box as nothing at the
+   frame's corner: fail closed. This changes what 0.8 told for a mark outside the viewport. The
+   page still chooses any point inside its own frame: a box is a positioning hint.
+
+**Trust.** Unchanged in kind from P053: the shell shares the content's realm.
+- What content can now learn: each mark's `count`. Everything in a `show` (ids, anchors, counts)
+  is posted into the frame's window, where the content can listen. So a host gives a count only
+  where the page may know how many there are, and ids that say nothing (never a person's name or a
+  comment's words). Who commented, and what, stays in the host's own bubble outside the frame.
+- What content can fake: an `activated` report for any mark the host shows with a count, without
+  a click, and with any `rect` inside its frame (point 8); and look-alike markers drawn by its own elements (which
+  report nothing unless it fakes one), or elements laid over Porthole's markers. The host takes a
+  fake only for its own shown ids, at the bridge's rate. So `activated` opens the host's own view
+  of that mark, placed near the rect within the frame's box, and never acts (no resolve, delete,
+  approve or reply on it).
+- What content can tell: that a marker was pressed, and roughly where, though it gets none of the
+  press's events. The pointer leaving its own element names the layer (`relatedTarget`), the layer
+  matches `:hover` and `:active`, and the frame gets user activation. It can't act on the click or
+  cancel it.
+- What content can do to the layer: not read or reach inside it (a closed shadow root), but hide,
+  shrink, move or cover it. Its inline `!important` style holds against the content's style
+  sheets, and is set again at each draw, but the content's scripts can rewrite it in between, lay
+  elements over it, or transform the document it sits in. A host can't rely on a marker being
+  seen.
+- The rate limit is shared: a page that floods reports can crowd out real ones; it could before.
+  An honest page's follow-ups take at most 60 a minute (point 5).
+
+**Tested.** `test/annotate.test.ts`: a count's bounds (0 and 999 kept; -1, 1.5, 1,000, NaN,
+Infinity, a string, null refused), the `activated` report's shape, and on `createHost` over a
+stand-in platform, a click taken only for a shown mark with a marker (an unknown id, a mark
+without a count, and after `clear`: dropped; malformed: `invalid`). `leak/annotate.spec.ts`, on
+Chromium, WebKit and Firefox: markers drawn with their numbers (read through Chromium's inspector:
+"", "3", "99+"; on all three, each wider with its number), a click on each reported with its id and
+box while none of the content's capture listeners, nor the element under it, hears it; a mark
+without a count takes no click; while picking, a click on a marker picks what is under it; a run of
+scrolls gives one report with only the marks that moved (a `position: fixed` one never), checked
+against the steps' measured pauses (P098), and a scroll down and back in the next frame gives none;
+a line inserted above one mark gives a report with that mark only, once quiet;
+a hostile page faking `activated` (no marks, an unknown id, a mark without a count, malformed: none
+taken; well-formed for a shown marker: taken, rebuilt), and its synthetic click on the layer
+reports nothing. After the review of 43768be: `clampRect`'s math (inside kept; overlapping, the
+part inside; wholly outside, no size on the nearest edge; an unknown or non-finite viewport,
+nothing at the corner; every result finite, inside and passing `parseRect`, over a grid of
+negative, fractional and huge inputs), the stand-in host clamping an `activated` box to its
+600 by 400 viewport, and a hostile page's `activated` boxes (over the whole app; wholly outside),
+`selected` and `anchored` boxes reaching the host clamped to the frame's viewport; negative
+control `annotation-rect-clamp` (the clamp out) fails that case and the two that see a mark below
+the viewport on its edge. After the review of b19e2e8: a marker's double, right and middle click and the pointer's
+moves over it reach none of the content's listeners, and a selection and the focused input are as
+they were after its clicks; 140 wheel turns 200 ms apart (more than 120 settles) give at most 45
+follow-ups and no refusal, and a marker's click after them is reported (with one report per settle
+the same run gave 120 and the click was refused); a change every 40 ms for 0.9 s, cut short by the
+deadline, still reports where its last change moved the mark (nothing was reported before); a
+marker on an element at the frame's top is drawn whole and takes its click there. Negative
+controls (P032), in `scripts/controls.ts`: `annotation-activated` (the host's id check out) and
+`annotation-activated-count` (only its marker check out) fail the hostile case; `marker-trusted`
+(the shell's `isTrusted` check out) fails it too, by the content's synthetic click on the layer;
+`marker-click` (the shell's stop out) fails the markers case and the press case; each alone, on
+all three engines.
+
+**Rejected.**
+- A style option per mark (marker only, underline only, colors): the host's policy is whether to
+  give a count; a knob per look is surface without a threat or a need yet (PRINCIPLE 8).
+- Reporting every scroll frame: the bridge's 120 a minute (P053) would refuse most, and a host's
+  bubble that follows each frame is a host that wants the frame's scroll position, not marks.
+- A budget of its own for `anchored`, apart from selections and clicks. It would take a second
+  rate per capability in the bridge (a new mechanism), and it wouldn't protect against a hostile
+  page, which can spend the shared budget with fakes of any kind anyway. Against an honest page
+  the throttle is enough: its follow-ups take at most half.
+- Markers as buttons in the tab order (point 6).
+- Drawing the number with the CSS Custom Highlight API or in the content's DOM: P053's reasons.
+- A host-side id per marker distinct from the mark's: the mark's id is already the host's own, and
+  already in the frame.
+
+**Revisit when** a host needs a mark's box outside the viewport as it is (then a separate,
+named field, still never a place for the host's UI), a host needs markers reachable by keyboard
+inside the frame (then a focus model
+the content can't steal, likely the host's own overlay), a bubble must follow during a scroll (a
+coarser report, or the host drawing markers itself from `anchored`), or MCP Apps defines
+annotations.

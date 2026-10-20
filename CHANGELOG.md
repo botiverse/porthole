@@ -3,6 +3,34 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## Unreleased
+
+- **Annotation markers** (P104): `AnnotationMark.count` (0 to 999, `ANNOTATION_LIMITS.count`)
+  draws a small bubble with the number ("99+" above 99, the bubble alone for 0) at the end of a
+  text anchor and on an element's top right corner; that element's outline is then a thin line.
+  A click on a marker reaches none of the content's handlers and is reported as a new
+  `AnnotationReport`, `{ type: "activated", id, rect }` (`porthole/annotate.activated`), taken by
+  the host only for a mark it shows with a count. Open the host's own view of that mark with it,
+  never act on it: the content can fake it, can read every mark's count, and can tell that a
+  marker was pressed, and roughly where (it can't act on or cancel the click). Markers have no
+  tab stop; the host's own list of marks is the keyboard path.
+- **Marks follow a scroll** (P104), while any mark has a count: once a scroll, a resize or a run of
+  content changes has settled (150 ms), `anchored` reports only the marks that moved since the
+  host was last told, at most once a second. A host that gives no counts hears exactly what 0.8
+  told it.
+- **Reported boxes are clamped to the frame** (P104): every `rect` in `selected`, `activated`
+  and `anchored` reaches the host held to the frame's viewport as it is then; one wholly outside
+  becomes a box of no size on the nearest edge. A page can no longer make a host place its own UI
+  outside the frame. Act on this when upgrading: a mark scrolled out of the viewport is now told
+  on the edge it went past (below: `y` equals the viewport's height, `height` 0), not at its
+  place beyond it. A custom `PlatformHost` gives its surfaces `viewport()` (the new optional
+  `Surface.viewport`), or every box reaches the host as nothing at the frame's corner.
+- **Wordless elements are named** (P104): a picked element with no text of its own (an image, an
+  icon button, a chart) is labelled by its `alt`, `aria-label` or `title`, in that order, instead
+  of its tag and classes alone.
+- Negative controls `annotation-rect-clamp`, `annotation-activated`, `annotation-activated-count`,
+  `marker-trusted` and `marker-click`, in `scripts/controls.ts`.
+
 ## 0.8.0
 
 The fixes from the security review of 0.7.0 (2026-10-19): P092–P095, P098–P101 and P103, each
