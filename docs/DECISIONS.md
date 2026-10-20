@@ -4139,7 +4139,13 @@ browsers keep a framed cookie).
    (`annotate.spec.ts`) are polled; the url-mode frame's `initialized` (`outcome.spec.ts`) is
    polled, since a blocked entry page can report before its load ends. None of these failed here
    (120 of 120 under 16 busy loops before the change); each read a positive result once, after a
-   fixed wait shorter than its slowest path. Waits that bound an absence ("nothing reached the
+   fixed wait shorter than its slowest path. The dialog's did fail on CI's WebKit (PRs #21 twice,
+   #25; run 39362355564's trace): the click on Send found it unarmed (`data-armed="false"`), then
+   waited 459 ms for it to be visible, enabled and stable, and pressed it about 530 ms after the
+   dialog opened, armed by then (`ARM_DELAY_MS`, 500): the yes went, the dialog closed, and the
+   next `toBeVisible` found nothing. The dialog was right; the test's press wasn't "the moment it
+   opens". Now it is pressed from a mutation observer as the buttons go in, before any timer can
+   run, and the case asserts it was unarmed then. Waits that bound an absence ("nothing reached the
    canary within N ms") stay: they can only pass wrongly, not fail.
 
 **Threat it re-opens, and its bounds.** The wait: for up to `LATE_NOTICE_MS` after a load no
