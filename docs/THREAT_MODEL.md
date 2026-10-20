@@ -5,8 +5,8 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes Porthole 0.8.0 (2026-10-20). A review on 2026-10-19 found gaps, and every
-decision it led to has merged but P096. A note **open until P096** means the gap exists in 0.8.0 and
+**Status.** This describes Porthole 0.9.0 (2026-10-20). A review on 2026-10-19 found gaps, and every
+decision it led to has merged but P096. A note **open until P096** means the gap exists in 0.9.0 and
 P096 is its planned fix; once it merges, the note becomes a guarantee. [§8](#8-fixes-in-flight)
 lists the decisions.
 
@@ -620,7 +620,7 @@ section.
 
 ## 8. Fixes in flight
 
-The decisions below come from the 2026-10-19 review. "Planned" means not in 0.8.0: the gap its
+The decisions below come from the 2026-10-19 review. "Planned" means not in 0.9.0: the gap its
 row names exists today, and the sections it cites say "open until" that decision. Each merged row
 says what was wrong, what holds now, and the limit its decision accepts, if any.
 
