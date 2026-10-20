@@ -4,7 +4,8 @@ interface PortholeContextUpdate {
   /**
    * MCP text blocks only: [{ type: "text", text: "…" }]. Visible characters only, here and in
    * structuredContent: no zero-width or bidi controls, variation selectors, tag or private-use
-   * characters, or controls other than new lines and tabs (refused).
+   * characters, or controls other than new lines and tabs (refused), but the selectors and
+   * joiners inside real emoji (☀️, 👨‍👩‍👧, 1️⃣).
    */
   readonly content?: readonly unknown[];
   /** Plain JSON. With the text, at most 20,000 characters. */

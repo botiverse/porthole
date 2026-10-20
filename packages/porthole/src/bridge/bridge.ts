@@ -174,10 +174,24 @@ const MAX_CONTEXT_BLOCKS = 100;
  */
 const UNSEEN = /[\p{Cf}\p{Co}\p{Cs}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}]|[^\P{Cc}\n\t]/u;
 
+/**
+ * The parts of real emoji that draw as nothing alone, allowed only where an emoji has them (the
+ * re-review of P100): U+FE0E or U+FE0F directly after a pictograph, or after a keycap base
+ * (`[0-9#*]`) that U+20E3 follows; U+200D only between two pictographs, a selector or a skin tone
+ * after the first. Each carries at most one choice beside a visible emoji (a selector there or
+ * not, a joiner there or not), never letters a model would read. Tag characters stay refused:
+ * subdivision flags too.
+ */
+const EMOJI_PARTS =
+  /(?<=\p{Extended_Pictographic})[\uFE0E\uFE0F]|(?<=[0-9#*])[\uFE0E\uFE0F](?=\u20E3)|(?<=\p{Extended_Pictographic}[\uFE0F\p{Emoji_Modifier}]?)\u200D(?=\p{Extended_Pictographic})/gu;
+
+/** Whether `text` holds what a person can't see, the parts of real emoji aside. */
+const unseen = (text: string): boolean => UNSEEN.test(text.replace(EMOJI_PARTS, ""));
+
 /** Whether any string in `value`, a key or a value, holds what can't be seen (bounded JSON data). */
 function holdsUnseen(value: unknown): boolean {
   if (typeof value === "string") {
-    return UNSEEN.test(value);
+    return unseen(value);
   }
   if (value === null || typeof value !== "object") {
     return false;
@@ -185,7 +199,7 @@ function holdsUnseen(value: unknown): boolean {
   if (Array.isArray(value)) {
     return (value as readonly unknown[]).some(holdsUnseen);
   }
-  return Object.entries(value).some(([key, each]) => UNSEEN.test(key) || holdsUnseen(each));
+  return Object.entries(value).some(([key, each]) => unseen(key) || holdsUnseen(each));
 }
 
 /**
@@ -213,7 +227,7 @@ function modelContext(args: unknown): CapabilityArgs["setModelContext"] | "too_l
         !isRecord(block) ||
         block.type !== "text" ||
         typeof block.text !== "string" ||
-        UNSEEN.test(block.text)
+        unseen(block.text)
       ) {
         return null;
       }

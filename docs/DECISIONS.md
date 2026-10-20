@@ -4260,8 +4260,22 @@ manual line said "unconfirmed"), the leak probe `12.model-context`, and two case
      format character (`\p{Cf}`), a variation selector (U+FE00–FE0F, U+E0100–E01EF), a
      private-use character, a lone surrogate, or a control other than `\n` and `\t`. Refused, not
      escaped: an escaped update reads to the model differently from what the person saw. The
-     manual says so; the cost is that emoji written with a selector or a joiner (❤️, 👨‍👩‍👧) are
-     refused, so the agent writes them without, or in words.
+     manual says so. Real emoji pass (the re-review: "Weather: ☀️" is ordinary widget text): U+FE0E
+     or U+FE0F directly after an `\p{Extended_Pictographic}` character, or after a keycap base
+     (`[0-9#*]`) that U+20E3 follows (tighter than "after a keycap base": a selector after a bare
+     digit draws nothing and would hide a bit per digit); U+200D only between two pictographs, a
+     U+FE0F or a skin tone after the first. Every other variation selector (U+FE00–FE0D,
+     U+E0100–E01EF), a joiner anywhere else (between letters, in a run, first or last), and tag
+     characters (U+E0000–E007F, subdivision flags such as 🏴 England's among them) stay refused,
+     as does U+200C (so Persian text with a non-joiner, and Indic text with a joiner, is refused:
+     the agent writes it without). **The bound:** what the allowance lets through is at most two
+     code points per visible emoji (a selector there or not, a joiner there or not): a bit or two
+     of choice beside something the person sees, never characters a model reads as letters, as it
+     reads tag characters. A hidden instruction of 40 letters would need hundreds of emoji in a
+     row, in view, and a model that decodes a bit pattern it was never taught. Tested: 500 joined
+     emoji pass with at most two hidden per visible; one more joiner or selector anywhere is
+     refused; 2,000 strings drawn from emoji, letters, digits, selectors, joiners, keycaps and
+     skin tones never pass with more than two hidden per visible emoji.
    - *A replaced update still went* (medium). React drew two updates of a display from one task in
      one render, the latest only, and its layout effect let both calls go: the handler had one the
      person never saw. The default `show` now resolves only when its own update is in the committed

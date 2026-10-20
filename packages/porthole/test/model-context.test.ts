@@ -279,6 +279,102 @@ describe("review of P100, 1: what the person is shown is what the model gets", (
   });
 });
 
+describe("review of P100, 1b: real emoji sequences pass; selectors and joiners carry at most a bit or two per visible emoji", () => {
+  /** A bridge that takes many calls: the rate is not what these test. */
+  const many = () => setup(declared({ gates: [{ rateLimit: { perMinute: 10_000 } }, "show"] }));
+  const goes = async (bridge: ReturnType<typeof setup>["bridge"], text: string) =>
+    (
+      await bridge.call("setModelContext", {
+        content: [{ type: "text", text }],
+        structuredContent: { [text]: text },
+      })
+    ).ok;
+
+  test.each([
+    ["an emoji with its presentation selector", "Weather: ☀️"],
+    ["a heart", "❤️"],
+    ["text presentation (U+FE0E)", "☀︎"],
+    ["a family (ZWJ between pictographs)", "👨‍👩‍👧"],
+    ["a skin tone before a joiner", "👩🏽‍💻"],
+    ["a selector before a joiner", "🏳️‍🌈"],
+    ["a heart on fire", "❤️‍🔥"],
+    ["an eye in a speech bubble", "👁️‍🗨️"],
+    ["keycaps", "1️⃣ #️⃣ *️⃣ 0⃣"],
+    ["a sentence of them", "Done ✅, 3 left: 🧑‍🤝‍🧑 ❤️ 1️⃣"],
+  ])("%s passes: %s", async (_name, text) => {
+    expect(await goes(many().bridge, text)).toBe(true);
+  });
+
+  test.each([
+    ["a presentation selector after a letter", "a\uFE0F"],
+    ["a text selector after a letter", "a\uFE0E"],
+    ["a selector after a digit that isn't a keycap", "1\uFE0F"],
+    ["two selectors after an emoji", "😀\uFE0F\uFE0F"],
+    ["another selector after an emoji (U+FE00)", "😀\uFE00"],
+    ["a supplementary selector after an emoji", "😀\u{E0100}"],
+    ["a joiner between letters", "a\u200Db"],
+    ["a joiner from an emoji to a letter", "😀\u200Da"],
+    ["a joiner from a letter to an emoji", "a\u200D😀"],
+    ["a run of joiners", "😀\u200D\u200D\u200D😀"],
+    ["a joiner first", "\u200D😀"],
+    ["a joiner last", "😀\u200D"],
+    ["a joiner after a text selector", "😀\uFE0E\u200D😀"],
+    ["a non-joiner between emoji", "😀\u200C😀"],
+    [
+      "a subdivision flag (tag characters)",
+      "🏴\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}",
+    ],
+    ["tags after an emoji", "😀\u{E0069}\u{E0067}"],
+  ])("%s is refused", async (_name, text) => {
+    const { bridge, shown } = many();
+    expect(
+      await bridge.call("setModelContext", { content: [{ type: "text", text }] }),
+    ).toMatchObject({ ok: false, refusal: "invalid" });
+    expect(
+      await bridge.call("setModelContext", { structuredContent: { note: text } }),
+    ).toMatchObject({ ok: false, refusal: "invalid" });
+    expect(shown).toEqual([]);
+  });
+
+  /** The code points nobody sees that the rule lets through: selectors and joiners. */
+  const hidden = (text: string) => text.match(/[\uFE0E\uFE0F\u200D]/gu)?.length ?? 0;
+  /** What the person sees each of: a pictograph, a keycap. */
+  const visible = (text: string) => text.match(/[\p{Extended_Pictographic}\u20E3]/gu)?.length ?? 0;
+
+  test("a long run of joined emoji passes, and what hides in it is at most two per visible emoji", async () => {
+    const run = Array.from({ length: 500 }, () => "😀\uFE0F").join("\u200D");
+    expect(await goes(many().bridge, run)).toBe(true);
+    expect(hidden(run)).toBeLessThanOrEqual(2 * visible(run));
+    // One more joiner anywhere in it, or a second selector, and it is refused.
+    expect(await goes(many().bridge, run.replace("\u200D", "\u200D\u200D"))).toBe(false);
+    expect(await goes(many().bridge, run.replace("\uFE0F", "\uFE0F\uFE0F"))).toBe(false);
+  });
+
+  test("whatever passes carries at most two hidden code points per visible emoji (random strings)", async () => {
+    const { bridge } = many();
+    const alphabet = ["😀", "❤", "a", "1", "#", " ", "\uFE0F", "\uFE0E", "\u200D", "\u20E3", "🏽"];
+    // A fixed sequence (a linear congruential generator): the same strings every run.
+    let state = 20_261_019;
+    const next = () => {
+      state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return state;
+    };
+    let passed = 0;
+    for (let index = 0; index < 2_000; index += 1) {
+      const text = Array.from(
+        { length: 1 + (next() % 24) },
+        () => alphabet[next() % alphabet.length],
+      ).join("");
+      if ((await bridge.call("setModelContext", { content: [{ type: "text", text }] })).ok) {
+        passed += 1;
+        expect(hidden(text), JSON.stringify(text)).toBeLessThanOrEqual(2 * visible(text));
+      }
+    }
+    // Both kinds were tried: some passed, most with a stray selector or joiner didn't.
+    expect(passed).toBeGreaterThan(100);
+  });
+});
+
 describe("review of P100, 4: dropping show is said, and can be said to be deliberate", () => {
   const optOut = (extra: Record<string, unknown> = {}) =>
     presets.mcpApp({

@@ -238,7 +238,8 @@ createHost(config, {
 - **What can't be seen is refused**: an update with an invisible character (zero-width ones, bidi
   controls, variation selectors, tag or private-use characters, controls other than new lines and
   tabs), in its text or any string of its structured content, never reaches `show` or your
-  handler. Your own `show` resolves only once that very update is visible: if a later update of
+  handler. Real emoji pass (☀️, 👨‍👩‍👧, 👩🏽‍💻, 1️⃣): a selector right after a pictograph or in a
+  keycap, a joiner between two pictographs. Subdivision flags (tag characters) don't. Your own `show` resolves only once that very update is visible: if a later update of
   the display replaces it before it is drawn, reject, and it doesn't go.
 
 ## 4. Served pages: the host kit
