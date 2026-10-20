@@ -938,9 +938,33 @@ describe("after the security review of 0.6.0's first cut", () => {
     ).toBe(true);
   });
 
-  it("lint reads 1 MB of adversarial text in well under 200 ms, and nothing past a limit", () => {
+  it("lint reads adversarial text in linear time: 1 MB costs what sixteen times 64 KB does; nothing past a limit", () => {
     const served = presets.artifact({ isolation: "domain", contentOrigins: [CONTENT] });
     const mb = 1024 * 1024;
+    // What this guards (after the review of 0.6.0, P081-P084): no pattern that grows faster than
+    // the text (72 KB of `import a ` took 3.9 s). A time limit says how fast the machine is, not
+    // that (659 ms for 1 MB on a busy box, P098): so the same work is timed both ways, once as
+    // 1 MB and once as sixteen 64 KB texts, each the fastest of three (interleaved, so a busy
+    // machine slows both alike). Linear, the two cost about the same (measured 0.2-1.3x; under
+    // 3x CPU oversubscription, at most 4.2x); quadratic, 1 MB costs sixteen times as much (the
+    // scans before the review: 9.6-16x at 48 KB). Six times the old case's work: 9.6 s on a machine
+    // three times oversubscribed, so its cap is a minute, not the default 5 s.
+    const fastest = (files: Record<string, string>, times: number): number => {
+      const started = performance.now();
+      for (let each = 0; each < times; each += 1) {
+        admitFiles(served, files);
+      }
+      return performance.now() - started;
+    };
+    const setsOf = (unit: string, bytes: number) => {
+      const big = unit.repeat(Math.ceil(bytes / unit.length));
+      const page = unit.repeat(Math.floor((190_000 * bytes) / mb / unit.length));
+      return [
+        { "index.html": "<p>x</p>", "a.js": big },
+        { "index.html": "<p>x</p>", "a.css": big },
+        { "index.html": page, "a.mjs": big },
+      ];
+    };
     for (const unit of [
       "import a ",
       "<img ",
@@ -955,20 +979,19 @@ describe("after the security review of 0.6.0's first cut", () => {
       "@import '",
       "a\n",
     ]) {
-      const big = unit.repeat(Math.ceil(mb / unit.length));
-      const page = unit.repeat(Math.floor(190_000 / unit.length));
-      for (const files of [
-        { "index.html": "<p>x</p>", "a.js": big },
-        { "index.html": "<p>x</p>", "a.css": big },
-        { "index.html": page, "a.mjs": big },
-      ]) {
-        const started = performance.now();
-        admitFiles(served, files);
-        const took = performance.now() - started;
+      const small = setsOf(unit, mb / 16);
+      const whole = setsOf(unit, mb);
+      for (const [index, files] of whole.entries()) {
+        let parts = Infinity;
+        let once = Infinity;
+        for (let round = 0; round < 3; round += 1) {
+          parts = Math.min(parts, fastest(small[index] as Record<string, string>, 16));
+          once = Math.min(once, fastest(files, 1));
+        }
         expect(
-          took,
-          `${JSON.stringify(unit)} ${Object.keys(files).join(" ")}: ${Math.round(took)} ms`,
-        ).toBeLessThan(200);
+          once / parts,
+          `${JSON.stringify(unit)} ${Object.keys(files).join(" ")}: 1 MB ${once.toFixed(1)} ms, 16 × 64 KB ${parts.toFixed(1)} ms`,
+        ).toBeLessThan(8);
       }
     }
     // Over a limit: only the set's problem, nothing read.
@@ -987,7 +1010,7 @@ describe("after the security review of 0.6.0's first cut", () => {
       "index.html": `<p>${"x".repeat(250_000)}<iframe></iframe>`,
     });
     expect(oversize.map((each) => each.rule)).toEqual(["size"]);
-  });
+  }, 60_000);
 
   it("a sealed address opens on its own for an hour; then only the running page's own loads, while its session lasts; its shell renews it", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
