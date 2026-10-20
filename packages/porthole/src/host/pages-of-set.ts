@@ -14,6 +14,9 @@ export const PAGE_OF_SET_MS = 10_000;
  */
 export const LATE_NOTICE_MS = 2_000;
 
+/** The most messages held each way while a load waits (P098); past them, the display starts again. */
+export const HELD_MOST = 1_000;
+
 /** The artifact version a display mounted: the only set whose pages its notices may name. */
 export interface FileSetRef {
   readonly id: string;
@@ -58,10 +61,11 @@ const isHello = (raw: unknown): boolean =>
  *
  * A notice (`porthole/navigating`, from the frame's window and content origin: the transport
  * takes nothing else) names a page and the version its files are. The leaving page's notice is
- * taken for the next load within `PAGE_OF_SET_MS`; the arriving page's (`arrived`) for the next
- * load within `LATE_NOTICE_MS`, or for the load it came after. A load no notice explained waits
- * `LATE_NOTICE_MS`, holding the frame: nothing it says reaches the display (no call is answered,
- * no report taken), nothing is sent to it, and once the wait is over without a notice for the
+ * taken for the next load within `PAGE_OF_SET_MS`; the arriving page's (`arrived`) too, or for the
+ * load it came after. A load no notice explained waits `LATE_NOTICE_MS`, holding the frame
+ * (`HELD_MOST` messages each way at most; past them, started again): nothing it says reaches the
+ * display (no call is answered, no report taken), nothing is sent to it, and once the wait is
+ * over without a notice for the
  * mounted version, the display starts again. A notice for another version, or the new page's
  * hello before any notice, ends the wait at once: started again. Only a notice naming the mounted
  * version ends a wait without a restart; one from a shell before P098 (no version) can only be
@@ -149,7 +153,10 @@ export function pagesOfSet(options: {
           taken(notice.url);
         }
       } else {
-        grantUntil = Date.now() + (notice.arrived ? LATE_NOTICE_MS : PAGE_OF_SET_MS);
+        // Either page's notice, for the next load within P084's ten seconds: the host hears the
+        // frame's load only once its images and modules have loaded, which can be seconds after
+        // the arriving page spoke (after the review of P098).
+        grantUntil = Date.now() + PAGE_OF_SET_MS;
         grantFor = notice.url;
       }
     } else if (waiting > 0 && isHello(message)) {
@@ -158,6 +165,11 @@ export function pagesOfSet(options: {
       return;
     }
     if (waiting > 0) {
+      if (heard.length >= HELD_MOST) {
+        // A page that floods the host while it waits isn't one of the set's.
+        leave();
+        return;
+      }
       heard.push(message);
     } else {
       deliver(message);
@@ -183,6 +195,10 @@ export function pagesOfSet(options: {
     transport: {
       send(message) {
         if (waiting > 0) {
+          if (unsent.length >= HELD_MOST) {
+            leave();
+            return;
+          }
           unsent.push(message);
         } else {
           raw.send(message);

@@ -400,9 +400,11 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         // A frame that speaks: another page of the content's own set (P084) is the same content,
         // still connected (the new page's shell says hello again on the same transport); any other
         // load after the first is the content navigating away (P031), and the display starts
-        // again. Told apart before anything the frame says reaches the display (P098). A url-mode
-        // app's frame navigates as the app does (its entry page, then the app): never started
-        // again.
+        // again. `pagesOfSet` tells them apart at each load (P098): what a new page says before
+        // its load is delivered as it comes, as P084 had it; from a load no notice explained until
+        // a notice for the mounted version comes, nothing the frame says reaches the display. A
+        // url-mode app's frame navigates as the app does (its entry page, then the app): never
+        // started again.
         const mounted = mount.instance?.document;
         const created = speaks
           ? pagesOfSet({

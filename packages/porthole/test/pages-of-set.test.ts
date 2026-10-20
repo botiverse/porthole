@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LATE_NOTICE_MS, PAGE_OF_SET_MS, pagesOfSet } from "../src/host/pages-of-set.ts";
+import { HELD_MOST, LATE_NOTICE_MS, PAGE_OF_SET_MS, pagesOfSet } from "../src/host/pages-of-set.ts";
 import type { Surface } from "../src/platform/types.ts";
 import type { JsonRpcMessage } from "../src/protocol/jsonrpc.ts";
 
@@ -180,6 +180,58 @@ describe("pages of a set (P098)", () => {
     each.raw.load();
     vi.advanceTimersByTime(LATE_NOTICE_MS);
     expect(each.restarts()).toBe(1);
+  });
+
+  // After the review of P098: the host hears the frame's load only once its images and modules
+  // have loaded, so an arriving page's word can come seconds before its load (reproduced: the
+  // notice, then the load 2.5 s later, restarted).
+  it("takes the arriving page's notice for its load however late it comes, up to the leaving page's ten seconds", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const slow = display();
+    slow.raw.say(arriving("./about"));
+    vi.advanceTimersByTime(2_500);
+    slow.raw.load();
+    vi.advanceTimersByTime(LATE_NOTICE_MS * 2);
+    expect(slow.restarts()).toBe(0);
+    // No longer than P084 grants the leaving page's.
+    const late = display();
+    late.raw.say(arriving("./about"));
+    vi.advanceTimersByTime(PAGE_OF_SET_MS);
+    late.raw.load();
+    vi.advanceTimersByTime(LATE_NOTICE_MS);
+    expect(late.restarts()).toBe(1);
+  });
+
+  it("holds no more than HELD_MOST messages either way during a wait: past them, the display starts again", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const said = display();
+    said.raw.load();
+    for (let each = 0; each < HELD_MOST; each += 1) {
+      said.raw.say({
+        jsonrpc: "2.0",
+        method: "ui/notifications/size-changed",
+        params: { height: each },
+      });
+    }
+    expect(said.restarts()).toBe(0);
+    said.raw.say({
+      jsonrpc: "2.0",
+      method: "ui/notifications/size-changed",
+      params: { height: 0 },
+    });
+    expect(said.restarts()).toBe(1);
+    expect(said.heard).toEqual([]);
+    const sent = display();
+    sent.raw.load();
+    for (let each = 0; each <= HELD_MOST; each += 1) {
+      sent.surface.transport.send({
+        jsonrpc: "2.0",
+        method: "notifications/resources/updated",
+        params: { uri: "x" },
+      });
+    }
+    expect(sent.restarts()).toBe(1);
+    expect(sent.raw.sent).toEqual([]);
   });
 
   it("in a display whose pages never come with files, every load after the first starts it again at once", () => {
