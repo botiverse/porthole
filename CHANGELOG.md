@@ -3,7 +3,11 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
-## Unreleased
+## 0.9.0
+
+Annotation markers (P104): a host can show how many comments sit at each anchor, hear a click
+on one, and follow the marks as the page scrolls. Every box a page reports is now held to the
+frame, which changes what a host hears for a mark outside the viewport (below).
 
 - **Annotation markers** (P104): `AnnotationMark.count` (0 to 999, `ANNOTATION_LIMITS.count`)
   draws a small bubble with the number ("99+" above 99, the bubble alone for 0) at the end of a
