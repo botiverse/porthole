@@ -43,6 +43,8 @@ export interface FileServing {
    * that address before it ends (`expires`, epoch ms).
    */
   readonly ticket?: { readonly expires: number };
+  /** The artifact version the set is, which its pages name in their notices to the host (P098). */
+  readonly artifact?: { readonly id: string; readonly version: string };
 }
 
 const HEX = /^[0-9a-f]{64}$/u;
@@ -263,6 +265,7 @@ export async function serveFile(serving: FileServing): Promise<Response> {
               address: `${base}${found.path.includes("/") ? encodePath(found.path) : ""}`,
               expires: serving.ticket.expires,
             }),
+        ...(serving.artifact === undefined ? {} : { set: serving.artifact }),
       },
     });
     if (serving.ticket !== undefined) {

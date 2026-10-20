@@ -15,6 +15,7 @@ import {
 import { compile } from "../src/compile/compile.ts";
 import { addressWithoutQuery, withoutSealedAddresses } from "../src/bridge/navigation.ts";
 import { createHost } from "../src/host/create-host.ts";
+import { LATE_NOTICE_MS } from "../src/host/pages-of-set.ts";
 import type { PlatformHost } from "../src/platform/types.ts";
 import type { PortholeConfig } from "../src/config/schema.ts";
 import type { InstanceRef } from "../src/isolation/types.ts";
@@ -133,7 +134,9 @@ async function framed(
   // The entry comes in the ticket's answer; its shell moves the frame to its files' address.
   const html = await answer.clone().text();
   const base =
-    /"files":\{"base":"[^"]+","address":"([^"]+)","expires":\d+\}/u.exec(html)?.[1] ?? "";
+    /"files":\{"base":"[^"]+","address":"([^"]+)","expires":\d+,"set":\{[^}]*\}\}/u.exec(
+      html,
+    )?.[1] ?? "";
   return { location, answer, base, html };
 }
 
@@ -734,7 +737,10 @@ describe("a file set on a tab (P081)", () => {
     const csp = answer.headers.get("content-security-policy") ?? "";
     expect(csp).toContain(`script-src 'unsafe-inline' 'unsafe-eval' blob: ${origin("abc")}/v/1/`);
     expect(csp).not.toContain(`${origin("abc")}/v/2/`);
-    expect(await answer.text()).toContain(`"files":{"base":"${origin("abc")}/v/1/"}`);
+    // Its version named for the host's notices (P098), no ticket's address.
+    expect(await answer.text()).toContain(
+      `"files":{"base":"${origin("abc")}/v/1/","set":{"id":"abc","version":"1"}}`,
+    );
     // Its files ride on the session, immutable at the version's own address.
     const css = await app.open(browser, `${origin("abc")}/v/1/style.css`, subresource("style"));
     expect(css.hops.length).toBe(1);
@@ -1198,7 +1204,7 @@ describe("after the security review of 0.6.0's first cut", () => {
   });
 
   it("the host takes `porthole/navigating` only from a display whose pages may come with files, for one load, soon (P084)", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     const run = async (config: PortholeConfig) => {
       const navigated: (() => void)[] = [];
       const listeners: ((message: unknown) => void)[] = [];
@@ -1251,7 +1257,7 @@ describe("after the security review of 0.6.0's first cut", () => {
       });
       const events: string[] = [];
       display.on("navigated", () => events.push("navigated"));
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await vi.advanceTimersByTimeAsync(0);
       const say = () => {
         for (const listener of listeners) {
           listener({ jsonrpc: "2.0", method: "porthole/navigating", params: { url: "./about" } });
@@ -1261,10 +1267,11 @@ describe("after the security review of 0.6.0's first cut", () => {
       say();
       load();
       const first = [...events];
-      // Banked: said, then a load much later.
+      // Banked: said, then a load much later (started again once a late notice can't come, P098).
       say();
       vi.setSystemTime(Date.now() + 11_000);
       load();
+      await vi.advanceTimersByTimeAsync(LATE_NOTICE_MS);
       const banked = [...events];
       display.destroy();
       return { first, banked, surfaces };
@@ -1276,5 +1283,103 @@ describe("after the security review of 0.6.0's first cut", () => {
       presets.inlineWidget({ isolation: "domain", contentOrigins: [CONTENT] }),
     );
     expect(widget.first).toEqual(["navigated"]);
+  });
+
+  // P098: a set's page whose notice came late (on Chromium a cross-process postMessage can reach
+  // the host after the next page's load) is the same display: nothing the frame asked meanwhile
+  // was answered, and it is answered once the notice for the mounted version comes; a load no
+  // notice explained starts the display again once the wait is over (pages-of-set.test.ts says
+  // the rest).
+  it("a display waits LATE_NOTICE_MS for a set's page's late notice, answering nothing meanwhile (P098)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const navigated: (() => void)[] = [];
+    const listeners: ((message: unknown) => void)[] = [];
+    const sent: unknown[] = [];
+    let surfaces = 0;
+    const platform: PlatformHost = {
+      name: "stand-in",
+      createSurface: () => {
+        surfaces += 1;
+        return {
+          transport: {
+            send: (message) => void sent.push(message),
+            listen: (listener) => {
+              listeners.push(listener);
+              return () => {};
+            },
+            close: () => {},
+          },
+          element: null,
+          setHeight: () => {},
+          setColorScheme: () => {},
+          userActivation: () => undefined,
+          onNavigated: (listener) => {
+            navigated.push(listener);
+            return () => {};
+          },
+          onLoad: () => () => {},
+          destroy: () => {},
+        };
+      },
+    };
+    const container = {
+      ownerDocument: {
+        defaultView: { location: { origin: HOST }, navigator: { language: "en" } },
+      },
+      getBoundingClientRect: () => ({ width: 600 }),
+    } as unknown as HTMLElement;
+    const locator = {
+      locate: () =>
+        Promise.resolve({
+          url: `https://abc.${DOMAIN}/__porthole/d/x`,
+          origin: `https://abc.${DOMAIN}`,
+          reports: true,
+        }),
+    };
+    const display = createHost(
+      presets.artifact({ isolation: "domain", contentOrigins: [CONTENT] }),
+      {
+        platform,
+        locator,
+      },
+    ).mount(container, {
+      displayId: "d1",
+      title: "Page",
+      scheme: "light",
+      instance: site("1", "abc"),
+    });
+    const events: string[] = [];
+    display.on("navigated", () => events.push("navigated"));
+    await vi.advanceTimersByTimeAsync(0);
+    const say = (message: unknown) => {
+      for (const listener of listeners.slice()) {
+        listener(message);
+      }
+    };
+    const ping = (id: number) => ({ jsonrpc: "2.0", id, method: "ping", params: {} });
+    const answered = (id: number) =>
+      sent.some((each) => (each as { id?: unknown; result?: unknown }).id === id);
+    say(ping(1));
+    expect(answered(1)).toBe(true);
+    // A load, then a request, then the arriving page's notice for this version.
+    navigated.at(-1)?.();
+    say(ping(2));
+    await vi.advanceTimersByTimeAsync(LATE_NOTICE_MS - 1);
+    expect(answered(2)).toBe(false);
+    say({
+      jsonrpc: "2.0",
+      method: "porthole/navigating",
+      params: { url: "./about", arrived: true, set: { id: "site", version: "1" } },
+    });
+    expect(answered(2)).toBe(true);
+    await vi.advanceTimersByTimeAsync(LATE_NOTICE_MS);
+    expect({ events, surfaces }).toEqual({ events: [], surfaces: 1 });
+    // A load nobody announced: its request never answered, the display started again.
+    navigated.at(-1)?.();
+    say(ping(3));
+    await vi.advanceTimersByTimeAsync(LATE_NOTICE_MS);
+    expect(answered(3)).toBe(false);
+    expect({ events, surfaces }).toEqual({ events: ["navigated"], surfaces: 2 });
+    display.destroy();
   });
 });

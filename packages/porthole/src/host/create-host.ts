@@ -14,6 +14,7 @@ import {
 import type { HostFunctionBridge } from "../bridge/types.ts";
 import { compile } from "../compile/compile.ts";
 import { servesFiles } from "../files/paths.ts";
+import { pagesOfSet } from "./pages-of-set.ts";
 import { declaredCapabilities, effectiveGates } from "../compile/policy.ts";
 import { isRefused } from "../bridge/refusal.ts";
 import { capabilitySpec } from "../config/capabilities.ts";
@@ -46,8 +47,6 @@ import type {
 /** How long a display may take to load before its outcome is a timeout, by default. */
 const DEFAULT_LOAD_TIMEOUT_MS = 15_000;
 
-/** How long a set's page said its next load is another of its pages (P084), ms. */
-const PAGE_OF_SET_MS = 10_000;
 /** How many times a display is started again after its content navigated its frame away. */
 const MAX_RESTARTS = 3;
 
@@ -159,8 +158,6 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       let bridge: DisplayBridge | null = null;
       let destroyed = false;
       let restarts = 0;
-      // Until when the frame's next load is another page of its own set, as its content said (P084).
-      let pageOfSetUntil = 0;
       let generation = 0;
       // The viewer's answer for this display (P079): asked once, kept across its frames; or the
       // host's refusal of them all (P080).
@@ -365,7 +362,6 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         bridge?.close();
         bridge = null;
         handshaken = false;
-        pageOfSetUntil = 0;
         abort?.abort();
         abort = null;
         outcomeWatch?.stop();
@@ -377,7 +373,17 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       };
 
       const start = (source: FrameSource) => {
-        const created = platform.createSurface(container, {
+        const navigatedAway = () => {
+          emit("navigated", undefined);
+          if (restarts < MAX_RESTARTS) {
+            restarts += 1;
+            run();
+          } else {
+            stop();
+            contentError("The content kept navigating its frame away; it was stopped.");
+          }
+        };
+        const framed = platform.createSurface(container, {
           source,
           title: mount.title,
           sandbox: compiled.sandbox,
@@ -391,6 +397,23 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             ? { initialHeightPx: height }
             : { fill: true, initialHeightPx: config.limits.minHeightPx }),
         });
+        // A frame that speaks: another page of the content's own set (P084) is the same content,
+        // still connected (the new page's shell says hello again on the same transport); any other
+        // load after the first is the content navigating away (P031), and the display starts
+        // again. Told apart before anything the frame says reaches the display (P098). A url-mode
+        // app's frame navigates as the app does (its entry page, then the app): never started
+        // again.
+        const mounted = mount.instance?.document;
+        const created = speaks
+          ? pagesOfSet({
+              surface: framed,
+              set:
+                servesFiles(config) && mounted?.kind === "artifact"
+                  ? { id: mounted.id, version: mounted.version }
+                  : null,
+              away: navigatedAway,
+            })
+          : framed;
         surface = created;
         const watch = watchOutcome({
           surface: created,
@@ -443,11 +466,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           hostContext,
           emit: (event) => {
             if (event.type === "navigating") {
-              // Only a display whose pages may come with files (P084), for the next load only, and
-              // only soon: content can't bank it to skip a restart later (P031).
-              if (servesFiles(config)) {
-                pageOfSetUntil = Date.now() + PAGE_OF_SET_MS;
-              }
+              // Which loads are the set's own pages is the frame's surface's to tell (P084, P098:
+              // `pagesOfSet`, from the frame's own words before any of them reach this display).
               return;
             }
             if (event.type === "initialized") {
@@ -465,23 +485,6 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         for (const [name, args] of replay) {
           (opened as unknown as Record<string, (...each: unknown[]) => unknown>)[name]?.(...args);
         }
-        created.onNavigated(() => {
-          // Another page of the content's own set (P084): the same content, still connected (the
-          // new page's shell says hello again on the same transport). Not a restart.
-          const ofSet = pageOfSetUntil > Date.now();
-          pageOfSetUntil = 0;
-          if (ofSet) {
-            return;
-          }
-          emit("navigated", undefined);
-          if (restarts < MAX_RESTARTS) {
-            restarts += 1;
-            run();
-          } else {
-            stop();
-            contentError("The content kept navigating its frame away; it was stopped.");
-          }
-        });
       };
 
       const run = () => {

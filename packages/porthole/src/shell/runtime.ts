@@ -134,7 +134,13 @@ export const SHELL_RUNTIME = String.raw`(() => {
   const urlOf = getterOf(destinationProto, "url");
   const preventNavigation = Event.prototype.preventDefault;
   const applyOf = Reflect.apply;
+  // A page of a set that a navigation opened (not its ticket's answer) says so as it arrives
+  // (P098), below, once the shell can speak: the notice its last page sent as it left can reach
+  // the host after this page's load, or never (Chromium forwards a cross-process message from a
+  // task of the sending document's, which a navigation that commits first drops).
+  let arrived = false;
   if (navigationApi && typeof navigationApi.addEventListener === "function" && destinationOf !== null && sameDocumentOf !== null && navigationTypeOf !== null) {
+    arrived = filesBase !== null && typeof plan.files.address !== "string";
     navigationApi.addEventListener("navigate", (event) => {
       const destination = applyOf(destinationOf, event, []);
       if (!applyOf(sameDocumentOf, destination, []) && applyOf(navigationTypeOf, event, []) !== "reload") {
@@ -540,10 +546,15 @@ export const SHELL_RUNTIME = String.raw`(() => {
     reported += 1;
     post({ method: "porthole/navigation-blocked", params: { url: ownAddresses(url).slice(0, 4096) } });
   };
-  // Another page of the set opening in the frame (P084): the host takes the next load for it.
-  navigating = (url) => {
-    post({ method: "porthole/navigating", params: { url: ownAddresses(url).slice(0, 4096) } });
-  };
+  // Another page of the set opening in the frame (P084): the host takes the next load for it. Each
+  // notice names the version the files are (P098): the host takes one only for the version it
+  // mounted.
+  const filesSet = plan.files && plan.files.set && typeof plan.files.set === "object" ? { id: String(plan.files.set.id), version: String(plan.files.set.version) } : null;
+  const notice = (url, more) => post({ method: "porthole/navigating", params: Object.assign({ url: ownAddresses(url).slice(0, 4096) }, filesSet === null ? {} : { set: filesSet }, more) });
+  navigating = (url) => notice(url, {});
+  if (arrived) {
+    notice(location.href, { arrived: true });
+  }
   // A sealed files' address opens the page's files on its own for a while (P083): renewed before
   // it ends, the page moved to the new one in place (the same page, the same history entry). Its
   // modules keep the address they loaded from; the server serves their own loads till the session
