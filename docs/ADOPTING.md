@@ -5,6 +5,9 @@ app that does everything below: `examples/app.mjs` is the app, runtime-agnostic;
 `examples/node/server.mjs` (`nodeServer`) and `examples/workers/` (`contentHostFor`) run it, as
 §4 and §5 recommend; `examples/mcp/server.mjs` gives the
 agent its tools. DESIGN.md says how it works and DECISIONS.md why (the P-numbers the code cites).
+[THREAT_MODEL.md](THREAT_MODEL.md) says, for each use (chat widgets, live data, private and public
+pages, MCP Apps, previews, several displays on one page), what Porthole guarantees, what you must
+do, and what isn't covered: read your use's section before you show content that matters.
 
 ## 1. Choose how content is shown
 
@@ -166,7 +169,8 @@ createHost(displays.configFor(instance, contentSource), {
 - **Keep live widgets off pages with frames that reach the network.** A frame can `postMessage` any
   frame on its page, and nothing in it can stop that: a url-mode app (a dev server's preview) or an
   `anyHttps` display beside a live widget could be handed what it read. Displays with closed egress
-  or `LIBRARY_CDNS` are fine beside it.
+  or `LIBRARY_CDNS` are fine beside it. The rule for any page: its egress is the union of its
+  frames' ([THREAT_MODEL.md § S7](THREAT_MODEL.md#s7-several-displays-on-one-page)).
 - **Opaque live widgets** (no content domain) work, without libraries: the manual tells the agent
   to draw with SVG and CSS. An opaque frame's only wall against navigating itself away is your
   page's `frame-src` (the shell's guard gets no events in an opaque origin), so show them on pages
@@ -352,7 +356,9 @@ entry: {
 
 0.7 (P085–P090). A page reaches your services through one global, `porthole.use(name)`, for what
 it declared when it was published and what its viewer's level allows. Porthole carries, checks
-and gates the calls; you keep the services.
+and gates the calls; you keep the services. It is an optional layer over the display: what it adds
+to your side (your API's checks, versions, revocation, each person's data) is in
+[THREAT_MODEL.md § The display layer and the app runtime](THREAT_MODEL.md#7-the-display-layer-and-the-app-runtime).
 
 ```js
 import { declareCapabilities, presets } from "@botiverse/porthole";

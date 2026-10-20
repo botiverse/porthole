@@ -3641,3 +3641,77 @@ watch (`methodsOfCall` grows with it), MCP Apps standardizes a subscription that
 the view itself (then that channel needs the read's gates), or a host can withdraw consent or
 change a viewer's level within a display (then each watch's update, and each kept result, is
 checked again, and a withdrawal ends the watch with a refusal).
+
+## P102 · 2026-10-19 · A threat model, use by use; the display layer first, the app runtime an optional layer over it · Accepted
+
+The 2026-10-19 value and per-scenario assessment (baseline 264b12fa) and its follow-up. No
+document said whom Porthole defends against, what is out of scope, or, for each way of using it,
+what Porthole guarantees and what is left to the host: the facts were spread over DESIGN.md's
+tables, ADOPTING.md's notes and many entries here. And since 0.7 the README presented the
+capability runtime (P085–P090) as part of what Porthole is, so a host that only shows a chart card
+met the whole platform's concepts and responsibilities.
+
+**Decision.**
+1. **docs/THREAT_MODEL.md**: the assets; the attackers, (a) an agent steered by prompt injection,
+   (b) a third-party MCP server's view, (c) the author of a page others open (a public link's
+   visitors, or a page on a sibling label), (d) a previewed app, (e) other content on the same
+   page; the two lines of defense (origin isolation against attacks on the host; closed egress,
+   gates and approvals outside the frame against leaking and deceiving) and, under the runtime,
+   the host's API as the wall for its data; what is out of scope; what every host must do; and
+   for each use, S1 inline widgets, S2 live widgets, S3 private artifacts, S4 public links and
+   pages that are apps, S5 third-party MCP Apps, S6 url-mode previews, S7 several displays on one
+   page, what Porthole guarantees, what the host must do, and what is not guaranteed. Every claim
+   was checked against the code of `main` with P092, P093 and P094 (9ace866); the citations are in
+   the pull request, not the doc, so the doc doesn't rot with line numbers. A gap with a planned
+   fix says "open until P0xx", and §8 lists those decisions (P092–P103) with what each closes, so
+   each merge turns its notes into guarantees.
+2. **Two layers, the display first.** The display layer (the presets, isolation, egress, the shell,
+   the gated host functions, the manual: P001's mechanisms and presets together) is what most hosts
+   need. The app runtime is an optional layer over it, off unless a config sets `runtime`, and it
+   adds the host's backend to the trust picture: its API's checks, per-version declarations,
+   revocation, each person's data. A host that only shows content can skip it. The README leads
+   with the display layer and introduces the runtime as optional; ARCHITECTURE.md, ADOPTING.md,
+   DESIGN.md and the package's README link the doc. No API changes.
+3. **What every host must do**, said once: send the page's `frame-src` and run
+   `defineHostConformance`; keep the default gates (a config's `gates`, or a preset's
+   `options.capabilities` entry, replaces them whole); give its own confirmations and consent the
+   default dialog's protections; show what content reports only as text; list every app origin;
+   under the runtime, run `defineRuntimeConformance` with `api`.
+4. **Out of scope, named**: availability in the viewer's browser (no watchdog, no CPU or memory
+   limit; an opaque frame may share the host's process), bugs in the browser's own walls, engines
+   and WebViews the suite doesn't run, side channels between processes, markdown-image exfiltration
+   in a chat's renderer of model text, deceptive content, wrong results, malicious prompts, and the
+   sense of an action a person confirmed. In scope stay a page or a request that can crash the
+   host's server, and a message from content that makes the host's page do unbounded work.
+   SECURITY.md says both, and links the doc.
+5. **The composition rule**: a page's egress is the union of its frames' egress, since any frame
+   can `postMessage` any other on its page. Said once (S7) with what may sit beside a display that
+   reads data; ADOPTING.md's live-widget section links it. Porthole doesn't enforce it
+   (`defineDisplays` takes any kinds together).
+6. A change that alters what the doc says a use guarantees or leaves to the host updates the doc in
+   the same change, as DESIGN.md's tables are.
+- An independent review of the first draft found nine claims wider than the code (among them:
+  Porthole's cookies kept from every app relay, where a host's own WebSocket relay gets them; the
+  four CDNs of `LIBRARY_CDNS`, which reaches nine origins; the default dialog's text credited to
+  the bridge), host duties it left out, and terms it didn't explain (clean address, entered mark,
+  sealed files address, bearer mode). Each is fixed in the doc.
+
+**Threat it re-opens.** None: documentation only; no default, gate or wall changes.
+**Why.** A host deciding whether Porthole fits a use needs that use's guarantees and duties in one
+place, in plain sentences, with what is still open said as open; and a host that only shows
+untrusted HTML shouldn't have to take on the app runtime's concepts and duties to get started.
+**Rejected.**
+- Per-scenario ratings (strong, medium, weak): a grade goes stale with each fix and hides which
+  duty it depends on; the doc says what holds, what the host must do, and what is open instead.
+- Growing DESIGN.md § Threat model into it: DESIGN.md is the mechanism's long form, by defense;
+  adopters read by use. DESIGN.md keeps its two-class summary and links the doc.
+- Moving the runtime to a subpath of its own now: an API change to fix a reading order. It is
+  already off unless a config sets `runtime`; revisit if its exports weigh on hosts that don't use
+  it.
+- File and line citations in the doc: they rot with every change; the pull request carries them.
+- Naming the fixes by their branches: branches are internal and renamed on the remote; decision
+  numbers are what the repository keeps.
+**Revisit when** each planned decision in §8 merges (its "open until" notes become guarantees,
+and its row says merged); `defineDisplays` checks which kinds share a page, or a mount checks the
+page's `frame-src` (S7, S1); the content domain's Public Suffix List entry lands (S3); a preset, a
+mode or a runtime capability is added (it gets a scenario or a row).

@@ -46,7 +46,15 @@ config allows: leave its frame or its origin, reach the network beyond its egres
 function it didn't declare or at a level its viewer doesn't hold, get past a gate (a gesture, a
 confirmation, consent, a rate), or read another page's or another viewer's data; and anything in
 `/server`, `/node` or the host kit that serves content to someone its policy wouldn't (tickets,
-sealed addresses, assets, the issue endpoint), or that a page or a request can crash.
+sealed addresses, assets, the issue endpoint), or that a page or a request can crash; and a
+message from content that makes the host's page do unbounded work.
+
+Out of scope, as [docs/THREAT_MODEL.md § Out of scope](docs/THREAT_MODEL.md#5-out-of-scope) says:
+availability in the viewer's browser (content that loops or exhausts memory), bugs in the
+browser's own walls and engines the leak suite doesn't run, side channels (timing, Spectre-class), a
+chat's own rendering of model text (markdown images), deceptive or wrong content, hostile text in
+a prompt a person confirmed, and whether an action a person confirmed was wise. The threat model
+also says, for each way of using Porthole, what it guarantees and what is left to the host.
 
 Boundaries Porthole documents and accepts (a report that one is wider than documented is welcome):
 
