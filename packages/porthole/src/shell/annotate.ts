@@ -15,8 +15,9 @@
  *   is reported `orphaned`;
  * - markers (P104): a mark with a count gets a small bubble with the number at its anchor's end;
  *   a click on it is reported (`activated`), and the content's own handlers never see it;
- * - following: once a scroll, a resize or a change of the content settles, the marks that moved
- *   since the host was last told are reported, so the host's own UI beside a mark can follow.
+ * - following: while a mark has a marker, once a scroll, a resize or a change of the content
+ *   settles, the marks that moved since the host was last told are reported, at most once a
+ *   second, so the host's own UI beside a mark can follow.
  *
  * It shares the realm with the content, which can interfere with all of it: the host takes its
  * reports as UI hints only.
@@ -353,14 +354,19 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       // A marker is a small bubble with a number, drawn in its own colors and font (only what the
       // layer inherits from the page could reach it, so each of those is set here).
       const STYLE = ".mark{position:absolute;border-radius:2px;background:rgba(250,204,21,.18);box-shadow:inset 0 -2px 0 rgba(234,179,8,.95)}.mark.element{background:rgba(250,204,21,.07);box-shadow:none;outline:2px solid rgba(234,179,8,.9);outline-offset:1px}.mark.active{background:rgba(250,204,21,.26);box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 2px rgba(234,179,8,.45)}.mark.element.active{background:rgba(250,204,21,.12);box-shadow:none;outline-width:3px}.mark.element.quiet{background:rgba(250,204,21,.05);outline:1px solid rgba(234,179,8,.6);outline-offset:2px}.mark.element.quiet.active{background:rgba(250,204,21,.1);outline:2px solid rgba(234,179,8,.9)}.marker{position:absolute;box-sizing:border-box;height:18px;min-width:18px;display:flex;align-items:center;justify-content:center;gap:3px;margin:0;padding:0 5px;border:1px solid rgba(161,98,7,.6);border-radius:9px 9px 9px 2px;background:#fde68a;color:#422006;box-shadow:0 1px 2px rgba(0,0,0,.3);font:600 11px/16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-style:normal;letter-spacing:0;word-spacing:0;text-transform:none;text-indent:0;text-shadow:none;direction:ltr;writing-mode:horizontal-tb;white-space:nowrap;user-select:none;-webkit-user-select:none;cursor:pointer;pointer-events:auto}.marker:hover{background:#fcd34d}.marker.active{background:#facc15;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.3)}.marker.inert{pointer-events:none}.marker svg{display:block;width:11px;height:11px;flex:none}.mark.flash{animation:flash 1.8s ease-out}@keyframes flash{from{box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 6px rgba(250,204,21,.6)}}.hover{position:absolute;outline:2px solid #2563eb;outline-offset:1px;background:rgba(37,99,235,.12)}.tag{position:absolute;max-width:70vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace;padding:0 6px;border-radius:4px;background:#1e293b;color:#fff}";
+      // Inline and important: the content's own style sheets can't hide, shrink or move it by
+      // accident. Set again at each draw, since its scripts can rewrite it (narrowing only: the
+      // content can still cover the layer, or move it with its ancestors, P104).
+      const LAYER_STYLE = "position:fixed!important;inset:0!important;width:auto!important;height:auto!important;min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;display:block!important;visibility:visible!important;opacity:1!important;pointer-events:none!important;z-index:2147483647!important;overflow:hidden!important;margin:0!important;padding:0!important;border:0!important;background:none!important;transform:none!important;scale:none!important;translate:none!important;rotate:none!important;zoom:1!important;clip-path:none!important;mask:none!important;filter:none!important;content-visibility:visible!important;contain:none!important";
       const ensureLayer = () => {
         if (layer === null) {
           layer = createElement.call(document, "div");
           layer.setAttribute("aria-hidden", "true");
           layer.setAttribute("data-porthole-annotations", "");
-          // Inline and important: the content's own styles can't hide or move it by accident.
-          layer.style.cssText = "position:fixed!important;inset:0!important;display:block!important;visibility:visible!important;opacity:1!important;pointer-events:none!important;z-index:2147483647!important;overflow:hidden!important;margin:0!important;padding:0!important;border:0!important;background:none!important;transform:none!important";
           shadow = attachShadow.call(layer, { mode: "closed" });
+        }
+        if (layer.style.cssText !== LAYER_STYLE) {
+          layer.style.cssText = LAYER_STYLE;
         }
         if (!layer.isConnected) {
           document.documentElement.appendChild(layer);
@@ -371,8 +377,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       let mode = { elements: false, text: false };
       let hover = null;
       let marks = [];
-      // The markers as last drawn, for a click to find: { id, element }.
+      // The markers as last drawn, for a click to find: { id, element }. Each mark keeps its
+      // marker's node across draws, so a press that spans a redraw ends on the node it began on.
       let markers = [];
+      const markerNodes = new Map();
       const MARKER_HEIGHT = 18;
       const SVG = "http://www.w3.org/2000/svg";
       const markerOf = (mark, rects, overlaps) => {
@@ -391,7 +399,11 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         const room = document.documentElement.clientWidth || window.innerWidth;
         // At the end of a text anchor's last line, raised; on an element's top right corner.
         let left = mark.found.range ? at.right + 2 : at.right - width / 2;
-        const top = at.top - MARKER_HEIGHT / 2 - (mark.found.range ? 3 : 0);
+        let top = at.top - MARKER_HEIGHT / 2 - (mark.found.range ? 3 : 0);
+        // Not cut off at the frame's top while its anchor is in view; with its anchor as it goes.
+        if (top < 2) {
+          top = Math.min(2, at.bottom - MARKER_HEIGHT);
+        }
         // Two marks ending in one place: the later marker goes beside the earlier one.
         for (let tries = 0; tries < 20; tries += 1) {
           const hit = overlaps.filter((other) => Math.abs(other.top - top) < MARKER_HEIGHT && left < other.left + other.width + 2 && other.left < left + width + 2)[0];
@@ -402,9 +414,16 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
         left = Math.max(2, Math.min(left, room - width - 2));
         overlaps.push({ left, top, width });
-        const marker = createElement.call(document, "div");
+        const kept = markerNodes.get(mark.id);
+        const marker = kept ? kept.element : createElement.call(document, "div");
         marker.className = "marker" + (mark.id === active ? " active" : "") + (mode.elements ? " inert" : "");
         marker.style.cssText = "left:" + left + "px;top:" + top + "px";
+        markers.push({ id: mark.id, element: marker });
+        if (kept && kept.label === label) {
+          return marker;
+        }
+        markerNodes.set(mark.id, { element: marker, label });
+        marker.replaceChildren();
         const glyph = createElementNS.call(document, SVG, "svg");
         glyph.setAttribute("viewBox", "0 0 16 16");
         glyph.setAttribute("aria-hidden", "true");
@@ -418,7 +437,6 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           number.textContent = label;
           marker.appendChild(number);
         }
-        markers.push({ id: mark.id, element: marker });
         return marker;
       };
       let active = null;
@@ -464,6 +482,11 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
         for (const marker of badges) {
           parts.push(marker);
+        }
+        for (const id of Array.from(markerNodes.keys())) {
+          if (!markers.some((each) => each.id === id)) {
+            markerNodes.delete(id);
+          }
         }
         if (hover !== null && hover.isConnected) {
           const rect = elementRect.call(hover);
@@ -534,7 +557,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         if (all || changed) {
           report(resultsOf(false));
         } else if (quiet) {
-          report(resultsOf(true));
+          follow();
         }
         draw();
       };
@@ -575,6 +598,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           const every = reportAll;
           reportAll = false;
           anchorAll(every, wait === 150);
+          if (wait !== 150) {
+            // Cut short by the deadline: what moved is told once the content has been quiet.
+            settle();
+          }
           if (pendingFocus !== null) {
             const id = pendingFocus;
             pendingFocus = null;
@@ -596,9 +623,39 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       }).observe(document, { childList: true, subtree: true, characterData: true });
       window.addEventListener("resize", redraw);
       window.addEventListener("scroll", redraw, true);
-      // Once a scroll or a resize has settled, the marks that moved since the host was last told,
-      // in one report (P104); while marks are being found again, that run tells it instead.
+      // Once a scroll, a resize or a run of changes has settled, the marks that moved since the host
+      // was last told, in one report (P104), while any mark has a marker (a host without markers
+      // hears what it heard before), and at most one a second, the latest: the reports share the
+      // bridge's 120 a minute with the person's selections and clicks. While marks are being
+      // found again, that run tells it instead.
+      const FOLLOW_EVERY = 1000;
       let settleTimer = 0;
+      let followTimer = 0;
+      let followed = 0;
+      const sendFollow = () => {
+        if (marks.length === 0 || settling()) {
+          return;
+        }
+        const pairs = resultsOf(true);
+        if (pairs.length > 0) {
+          followed = Date.now();
+          report(pairs);
+        }
+      };
+      const follow = () => {
+        if (followTimer !== 0 || !marks.some((mark) => mark.count !== null)) {
+          return;
+        }
+        const wait = followed + FOLLOW_EVERY - Date.now();
+        if (wait <= 0) {
+          sendFollow();
+          return;
+        }
+        followTimer = setTimeout(() => {
+          followTimer = 0;
+          sendFollow();
+        }, wait);
+      };
       const settle = () => {
         if (marks.length === 0) {
           return;
@@ -606,9 +663,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         clearTimeout(settleTimer);
         settleTimer = setTimeout(() => {
           settleTimer = 0;
-          if (marks.length > 0 && !settling()) {
-            report(resultsOf(true));
-          }
+          follow();
         }, 150);
       };
       window.addEventListener("resize", settle);
@@ -658,7 +713,8 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           return;
         }
         event.stopImmediatePropagation();
-        if (event.type !== "touchstart" && event.type !== "touchend" && event.type !== "pointerdown" && event.type !== "pointerup") {
+        // No focus moves, no selection changes, no menu; a touch still makes its click.
+        if (CANCELLED[event.type] === 1) {
           event.preventDefault();
         }
         if (event.type === "click" && event.isTrusted && event.button === 0) {
@@ -668,7 +724,12 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           }
         }
       };
-      for (const type of ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "dblclick", "auxclick", "contextmenu", "touchstart", "touchend"]) {
+      // The pointer moving over a marker is stopped too. Narrowing only: the content still sees
+      // the pointer leave its own element for the layer (relatedTarget), the layer's :hover and
+      // :active, and the frame's user activation, so it can tell a marker was pressed, and
+      // roughly where; it can't act on or cancel the click.
+      const CANCELLED = { mousedown: 1, mouseup: 1, click: 1, dblclick: 1, auxclick: 1, contextmenu: 1 };
+      for (const type of ["pointerdown", "pointerup", "pointercancel", "mousedown", "mouseup", "click", "dblclick", "auxclick", "contextmenu", "touchstart", "touchend", "touchcancel", "pointerover", "pointerout", "pointerenter", "pointerleave", "pointermove", "mouseover", "mouseout", "mouseenter", "mouseleave", "mousemove"]) {
         window.addEventListener(type, onMarker, true);
       }
 

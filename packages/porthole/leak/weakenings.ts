@@ -261,6 +261,22 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "            if (id === null) {",
     },
   ],
+  // A marker's click (P104): only for a mark shown with a marker (the id check stays).
+  "annotation-activated-count": [
+    {
+      file: "src/host/create-host.ts",
+      find: "            if (!marks.some((mark) => mark.id === id && mark.count !== undefined)) {",
+      replace: "            if (!marks.some((mark) => mark.id === id)) {",
+    },
+  ],
+  // A marker's click (P104): the shell reports a trusted one only, never the content's own.
+  "marker-trusted": [
+    {
+      file: "src/shell/annotate.ts",
+      find: '        if (event.type === "click" && event.isTrusted && event.button === 0) {',
+      replace: '        if (event.type === "click" && event.button === 0) {',
+    },
+  ],
   // A marker's click (P104): the shell's first listener keeps it from the content.
   "marker-click": [
     {

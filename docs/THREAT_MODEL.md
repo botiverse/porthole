@@ -542,10 +542,16 @@ its realm with the content, so:
   each report only for what it asked for and its own shown ids, rebuilt within
   `ANNOTATION_LIMITS`, at 120 a minute; `activated` for a mark without a marker, or an id it
   doesn't show, is dropped (negative control `annotation-activated`).
-- *What holds.* A real click on a marker reaches none of the content's handlers (the shell's
-  first listener stops it; control `marker-click`). Content can't read or restyle the shell's
-  layer (a closed shadow root), but it can cover it, change its words so a mark is orphaned, or
-  flood the shared rate so real reports are refused.
+- *What holds.* A real press or click on a marker reaches none of the content's handlers (the
+  shell's first listener stops it; control `marker-click`), so content can't act on it or cancel
+  it. But content can tell that a marker was pressed, and roughly where: the pointer leaving its
+  own element names the layer, the layer matches `:hover` and `:active`, and the frame gets user
+  activation.
+- *What doesn't.* Content can't read or reach inside the shell's layer (a closed shadow root),
+  but it can hide, shrink, move or cover it (its scripts can rewrite the layer's style, lay
+  elements over it, or transform the page it sits in), change its words so a mark is orphaned, or
+  flood the shared rate so real reports are refused. An honest page's follow-up reports (after a
+  scroll) are at most one a second, and only while a mark has a marker.
 - So `activated` opens the host's own view of a mark it already shows, placed within the frame's
   box, and never acts on it (no resolve, delete or reply); an anchor or a rect decides where
   something is drawn, never who may see or do anything.

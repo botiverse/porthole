@@ -11,13 +11,15 @@
   A click on a marker reaches none of the content's handlers and is reported as a new
   `AnnotationReport`, `{ type: "activated", id, rect }` (`porthole/annotate.activated`), taken by
   the host only for a mark it shows with a count. Open the host's own view of that mark with it,
-  never act on it: the content can fake it, and can read every mark's count. Markers have no tab
-  stop; the host's own list of marks is the keyboard path.
-- **Marks follow a scroll** (P104): once a scroll or a resize has settled (150 ms), and after a
-  quiet run of content changes, `anchored` reports only the marks that moved since the host was
-  last told. A host that treated every `anchored` as following `show`, `focus` or a lost mark now
-  also gets these, partial.
-- Negative controls `annotation-activated` and `marker-click`, in `scripts/controls.ts`.
+  never act on it: the content can fake it, can read every mark's count, and can tell that a
+  marker was pressed, and roughly where (it can't act on or cancel the click). Markers have no
+  tab stop; the host's own list of marks is the keyboard path.
+- **Marks follow a scroll** (P104), while any mark has a count: once a scroll, a resize or a run of
+  content changes has settled (150 ms), `anchored` reports only the marks that moved since the
+  host was last told, at most once a second. A host that gives no counts hears exactly what 0.8
+  told it.
+- Negative controls `annotation-activated`, `annotation-activated-count`, `marker-trusted` and
+  `marker-click`, in `scripts/controls.ts`.
 
 ## 0.8.0
 

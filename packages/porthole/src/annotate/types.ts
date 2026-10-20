@@ -104,14 +104,16 @@ export type AnnotationReport =
   | { readonly type: "cancelled" }
   /**
    * Where the marked anchors are now: every mark after `show`, the focused one after `focus`,
-   * every mark when the content changed one's state, and, once a scroll, a resize or a change of
-   * the content has settled, only the marks that moved since the host was last told (P104).
+   * every mark when the content changed one's state, and, while any mark has a `count`, once a
+   * scroll, a resize or a change of the content has settled, only the marks that moved since the
+   * host was last told, at most once a second (P104).
    */
   | { readonly type: "anchored"; readonly results: readonly AnchorResult[] }
   /**
    * The person clicked the marker of a mark the host shows with a `count` (P104); `rect` is the
    * marker's box, to open the host's own UI beside it. The content can fake it for any mark the
-   * host shows: open the host's own view of that mark, never act on it.
+   * host shows with a count, and can tell a real one happened: open the host's own view of that
+   * mark, never act on it.
    */
   | { readonly type: "activated"; readonly id: string; readonly rect: AnnotationRect };
 

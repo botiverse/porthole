@@ -84,9 +84,20 @@ export const CONTROLS: Readonly<Record<string, { spec: string; fails: readonly E
     spec: "leak/annotate.spec.ts",
     fails: ["a hostile page fakes a marker's click"],
   },
+  "annotation-activated-count": {
+    spec: "leak/annotate.spec.ts",
+    fails: ["a hostile page fakes a marker's click"],
+  },
+  "marker-trusted": {
+    spec: "leak/annotate.spec.ts",
+    fails: ["a hostile page fakes a marker's click"],
+  },
   "marker-click": {
     spec: "leak/annotate.spec.ts",
-    fails: ["markers: a mark with a count gets a numbered bubble"],
+    fails: [
+      "markers: a mark with a count gets a numbered bubble",
+      "a marker's press, of any kind, moves",
+    ],
   },
   // The show gate (P100): a model context update reaches the handler unseen.
   "model-context-show": {

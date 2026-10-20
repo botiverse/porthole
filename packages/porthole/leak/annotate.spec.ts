@@ -756,10 +756,12 @@ test("following: once a scroll settles, one report with only the marks that move
     .toBe(400);
   await page.waitForTimeout(600);
   const run = await anchoredSince(count);
-  expect(run.length).toBeGreaterThanOrEqual(1 + gaps.filter((gap) => gap >= 170).length);
+  // At most one per settle, and one a second (P104): pauses within a second of the last report
+  // are told together.
+  expect(run.length).toBeGreaterThanOrEqual(1);
   expect(
     run.length,
-    `one report per settle (steps ${gaps.map(Math.round).join(", ")} ms apart)`,
+    `at most one per settle (steps ${gaps.map(Math.round).join(", ")} ms apart)`,
   ).toBeLessThanOrEqual(1 + gaps.filter((gap) => gap >= 130).length);
   for (const report of run) {
     expect(report.results.map((each) => each.id).sort()).toEqual(["far", "near", "top"]);
@@ -875,4 +877,163 @@ test("following: a change of the content that moves a mark, but loses none, repo
   expect(moved.results[0]?.rect?.y ?? 0).toBeGreaterThan(
     shown.results.find((each) => each.id === "b")?.rect?.y ?? 0,
   );
+});
+
+test("a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: annotated(),
+    content: `<p id="p1" style="font-size: 18px">Costs <b>fell</b><span id="after"> by three percent this quarter.</span></p>
+<p id="p2">Some words to select here.</p>
+<input id="field" value="typed">
+<script>
+  const seen = [];
+  window.seen = seen;
+  const layer = () => document.querySelector("[data-porthole-annotations]");
+  for (const type of ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "dblclick", "auxclick", "contextmenu", "pointerover", "pointermove", "mouseover", "mousemove", "pointerenter", "mouseenter"]) {
+    window.addEventListener(type, (event) => {
+      if (event.target === layer()) {
+        seen.push(type);
+      }
+    }, true);
+    document.getElementById("after").addEventListener(type, () => seen.push("after:" + type));
+  }
+</script>`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#field")).toBeVisible();
+  await display.annotate("show", [textMark("fell", "fell", 3)]);
+  await next(display, "anchored");
+  const at = await textMarkerPoint(frame, "#p1 b");
+  const activations = async () =>
+    (await reports(display)).filter((each) => each.type === "activated").length;
+
+  // A selection stays as it was.
+  expect(await select(frame, "#p2", "words to select")).toBe(true);
+  await page.mouse.click(at.x, at.y);
+  await expect.poll(activations).toBe(1);
+  expect(await frame.evaluate(() => String(getSelection()))).toBe("words to select");
+
+  // Focus stays where it was.
+  await frame.locator("#field").focus();
+  await page.mouse.click(at.x, at.y);
+  await expect.poll(activations).toBe(2);
+  expect(await frame.evaluate(() => document.activeElement?.id)).toBe("field");
+
+  // A double click is two clicks to the host and nothing to the content; a right or middle
+  // click is nothing to either.
+  await page.mouse.dblclick(at.x, at.y);
+  await expect.poll(activations).toBe(4);
+  await page.mouse.click(at.x, at.y, { button: "right" });
+  await page.mouse.click(at.x, at.y, { button: "middle" });
+  await page.mouse.move(at.x + 4, at.y + 2, { steps: 4 });
+  await page.waitForTimeout(400);
+  expect(await activations()).toBe(4);
+  expect(await frame.evaluate(() => (window as unknown as { seen: string[] }).seen)).toEqual([]);
+  expect(await frame.evaluate(() => document.activeElement?.id)).toBe("field");
+});
+
+test("an honest scroll session, long, leaves room for a marker's click: follow-ups at most one a second", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    content: SCROLLING,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#far")).toBeAttached();
+  await display.annotate("show", [textMark("near", "The near paragraph.", 2)]);
+  await next(display, "anchored");
+  const box = await (await frame.frameElement()).boundingBox();
+  if (box === null) {
+    throw new Error("no frame");
+  }
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  // 140 wheel turns, each settled (200 ms apart): more than the bridge's 120 a minute.
+  for (let i = 0; i < 140; i += 1) {
+    await page.mouse.wheel(0, i % 2 === 0 ? 60 : -60);
+    await page.waitForTimeout(200);
+  }
+  await expect.poll(() => frame.evaluate(() => window.scrollY)).toBe(0);
+  await page.waitForTimeout(1_200);
+  const followed = (await reports(display)).filter((each) => each.type === "anchored").length;
+  expect(followed).toBeLessThanOrEqual(45);
+  expect(await refusals(display)).toEqual([]);
+
+  const count = (await reports(display)).length;
+  // Its marker: just past the end of the words, where the host was last told they are.
+  const words = await frame.evaluate(() => {
+    const range = document.createRange();
+    range.selectNodeContents(document.getElementById("near") as Node);
+    const rect = range.getBoundingClientRect();
+    return { right: rect.right, top: rect.top };
+  });
+  await page.mouse.click(box.x + words.right + 10, box.y + words.top);
+  expect((await next(display, "activated", count)).id).toBe("near");
+  expect(await refusals(display)).toEqual([]);
+});
+
+test("following: a burst of changes cut short by the anchoring deadline still reports what its last change moved", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    content: `<p style="font-size: 18px"><span id="t">x</span> <b id="w">target</b> words</p>`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#w")).toBeVisible();
+  await display.annotate("show", [textMark("w", "target", 1)]);
+  await next(display, "anchored");
+  await page.waitForTimeout(400);
+  const count = (await reports(display)).length;
+  // A change every 40 ms for 0.9 s, each moving the mark along its line: the run is cut short at
+  // 1 s, under 150 ms after the last change.
+  await frame.evaluate(async () => {
+    const start = performance.now();
+    const span = document.getElementById("t");
+    for (let i = 2; performance.now() - start < 900; i += 1) {
+      if (span) {
+        span.textContent = "x".repeat(i);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    }
+  });
+  const x = await frame.locator("#w").evaluate((element) => element.getBoundingClientRect().x);
+  await expect
+    .poll(async () => {
+      const last = (await reports(display))
+        .slice(count)
+        .filter(
+          (each): each is Extract<AnnotationReport, { type: "anchored" }> =>
+            each.type === "anchored",
+        )
+        .at(-1);
+      return Math.round(last?.results.find((each) => each.id === "w")?.rect?.x ?? -1);
+    })
+    .toBe(Math.round(x));
+});
+
+test("a marker on an element at the frame's top edge is drawn whole, and takes its click there", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    content: `<!doctype html><html><head><title>Edge</title></head><body style="margin: 0">
+<h1 id="edge" style="margin: 0; width: 300px">At the edge</h1><p>More below.</p></body></html>`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#edge")).toBeVisible();
+  await display.annotate("show", [elementMark("edge", "#edge", 4)]);
+  await next(display, "anchored");
+  const box = await (await frame.frameElement()).boundingBox();
+  if (box === null) {
+    throw new Error("no frame");
+  }
+  // Below the half a marker on the corner would show: only a marker kept inside is there.
+  await page.mouse.click(box.x + 300, box.y + 15);
+  const activated = await next(display, "activated");
+  expect(activated.id).toBe("edge");
+  expect(activated.rect.y).toBeGreaterThanOrEqual(0);
 });

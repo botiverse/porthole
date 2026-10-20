@@ -1033,7 +1033,7 @@ chooses), and the annotation runtime is in the shell only then.
 | frame → host | `porthole/annotate.selected` | `{ anchor, rect }` |
 | frame → host | `porthole/annotate.unselected` | — (the text selection went away) |
 | frame → host | `porthole/annotate.cancelled` | — (Escape) |
-| frame → host | `porthole/annotate.anchored` | `{ results: [{ id, state: "attached" \| "orphaned", rect? }] }`: every mark after `show`, the one after `focus`, every mark when the content changed a state, and once a scroll, a resize or a change of the content has settled (150 ms quiet), only the marks that moved more than 0.5 px since the host was last told (P104) |
+| frame → host | `porthole/annotate.anchored` | `{ results: [{ id, state: "attached" \| "orphaned", rect? }] }`: every mark after `show`, the one after `focus`, every mark when the content changed a state, and, while any mark has a `count`, once a scroll, a resize or a run of content changes has settled (150 ms quiet), only the marks that moved more than 0.5 px since the host was last told, at most one a second (P104) |
 | frame → host | `porthole/annotate.activated` | `{ id, rect }`: the person clicked a mark's marker; `rect` is the marker's (P104) |
 
 - **Anchors** are W3C Web Annotation selectors, at most one of each:
@@ -1051,14 +1051,18 @@ chooses), and the annotation runtime is in the shell only then.
 - **Markers** (P104). A mark with a `count` gets a bubble glyph and its number ("99+"
   above 99; 0 the bubble alone) at the end of a text anchor's last line, raised, or on
   an element's top right corner, inside the frame's width; its element mark is then a
-  thin line. The layer takes no pointer but on markers: a press on one is stopped in
-  the shell's first window listener (none of the content's handlers, nor what is
-  under it, sees it) and a trusted click is reported `activated`. Markers step aside
+  thin line. The layer takes no pointer but on markers: a press on one, and the
+  pointer's moves over it, are stopped in the shell's first window listener (none of
+  the content's handlers, nor what is under it, gets them; the content can still tell
+  a press happened, by `:active`, `relatedTarget` and user activation) and a trusted
+  click is reported `activated`. Markers step aside
   while elements are picked. No tab stop, and the layer stays `aria-hidden`: the
   host's own list of marks is the keyboard path.
-- **Following** (P104). Each mark keeps what the host was last told (state and box);
-  a settled scroll or resize (any scroller), or a quiet run of content changes,
-  reports only what moved, in one report.
+- **Following** (P104), only while a mark has a `count`. Each mark keeps what the
+  host was last told (state and box); a settled scroll or resize (any scroller), or
+  a quiet run of content changes (one the deadline cut short is checked once quiet),
+  reports only what moved, at most once a second (the latest), so honest scrolling
+  takes at most half of the bridge's 120 a minute.
 - **Settled.** Nothing is reported before the content is in place (marks shown
   before it arrives are anchored once it has), nor while a run of changes settles; a
   `focus` asked for meanwhile waits for anchoring, then scrolls and reports, so a
@@ -1084,12 +1088,15 @@ moved, by words respaced, one deleted and orphaned); live changes reported only 
 they change; an MCP Apps view; and a hostile page faking every report (not asked,
 malformed, too large, the wrong kind, no such mark, a flood), whose negative
 control is `annotation-checks`. Markers (P104): drawn with their numbers, a click
-reported with its id and box and heard by none of the content's listeners
-(`marker-click` → that case), none without a count, stepping aside while picking;
-a run of scrolls reported once with only the marks that moved, a fixed one never;
-a content change that moves one mark reports it alone; and a hostile page faking a
-marker's click for no mark, an unknown id or a mark without a marker
-(`annotation-activated` → that case).
+reported with its id and box and heard by none of the content's listeners, nor a
+double, right or middle click, focus and selection kept (`marker-click` → those
+two cases), none without a count, stepping aside while picking, drawn whole at the
+frame's top; a run of scrolls reported with only the marks that moved, a fixed one
+never; a long honest scroll session leaving a marker's click its budget; a content
+change that moves one mark reports it alone, even when the deadline cut its run
+short; and a hostile page faking a marker's click for no mark, an unknown id or a
+mark without a marker, or clicking the layer itself (`annotation-activated`,
+`annotation-activated-count`, `marker-trusted` → that case).
 
 ## The shell runtime
 
