@@ -5,8 +5,10 @@ import {
   CONTROLS,
   ENGINES,
   UNWEAKENED,
+  VERDICT,
   controlsTable,
   judge,
+  names,
   type Control,
   type Run,
 } from "../leak/controls.ts";
@@ -22,49 +24,67 @@ const read = (relative: string): string => readFileSync(path.join(root, relative
 type Status = "passed" | "failed" | "timedOut" | "skipped" | "interrupted";
 
 const ASSERTION = "Error: \u001b[2mexpect(\u001b[22mreceived).toBe(expected)\n\nExpected: 0";
+/** A probe's verdict failing: its deciding expect carries the mark. */
+const VERDICT_FAILED = `Error: ${VERDICT}WebRTC is gone\n\nexpect(received).toBe(expected)\n\nExpected: 0`;
 
 interface Synthetic {
   readonly title: string;
   readonly status: Status | "not run";
   readonly message?: string;
+  /** What the test declares: `test.fail` is "failed". */
+  readonly expected?: "passed" | "failed";
 }
 
-/** A Playwright JSON report: each engine's tests, in one spec file. */
+/** A Playwright JSON report: each engine's tests, in one spec file ("A › b": b in describe A). */
 function report(tests: Readonly<Record<string, readonly Synthetic[]>>, errors: string[] = []) {
   const titles = [...new Set(Object.values(tests).flatMap((each) => each.map((one) => one.title)))];
+  const spec = (title: string) => ({
+    title: title.split(" › ").at(-1),
+    tests: Object.entries(tests).flatMap(([project, mine]) =>
+      mine
+        .filter((one) => one.title === title)
+        .map((one) => ({
+          projectName: project,
+          expectedStatus: one.expected ?? "passed",
+          status:
+            one.status === "skipped" || one.status === "not run"
+              ? "skipped"
+              : (one.status === "passed") === ((one.expected ?? "passed") === "passed")
+                ? "expected"
+                : "unexpected",
+          results:
+            one.status === "not run"
+              ? []
+              : [
+                  {
+                    status: one.status,
+                    errors:
+                      one.status === "failed" || one.status === "timedOut"
+                        ? [
+                            {
+                              message:
+                                one.message ??
+                                (one.title.includes("[3.") ? VERDICT_FAILED : ASSERTION),
+                            },
+                          ]
+                        : [],
+                  },
+                ],
+        })),
+    ),
+  });
+  const described = (title: string) => (title.includes(" › ") ? title.split(" › ")[0] : undefined);
   return JSON.stringify({
     suites: [
       {
         title: "leak/leak.spec.ts",
-        specs: titles.map((title) => ({
-          title,
-          tests: Object.entries(tests).flatMap(([project, mine]) =>
-            mine
-              .filter((one) => one.title === title)
-              .map((one) => ({
-                projectName: project,
-                expectedStatus: "passed",
-                status:
-                  one.status === "passed"
-                    ? "expected"
-                    : one.status === "skipped" || one.status === "not run"
-                      ? "skipped"
-                      : "unexpected",
-                results:
-                  one.status === "not run"
-                    ? []
-                    : [
-                        {
-                          status: one.status,
-                          errors:
-                            one.status === "failed" || one.status === "timedOut"
-                              ? [{ message: one.message ?? ASSERTION }]
-                              : [],
-                        },
-                      ],
-              })),
-          ),
-        })),
+        specs: titles.filter((title) => described(title) === undefined).map(spec),
+        suites: [...new Set(titles.map(described).filter((one) => one !== undefined))].map(
+          (block) => ({
+            title: block,
+            specs: titles.filter((title) => described(title) === block).map(spec),
+          }),
+        ),
       },
     ],
     errors: errors.map((message) => ({ message })),
@@ -136,7 +156,7 @@ describe("V01: a control's run passes only when its probes failed for real", () 
     const verdict = judge(control, ["chromium"], run(report({ chromium: good("skipped") })));
     expect(verdict.ok).toBe(false);
     expect(verdict.problems).toEqual([
-      `[chromium] "[3.webrtc]" didn't fail by its assertion: skipped`,
+      `[chromium] "[3.webrtc]" didn't fail by its verdict: skipped`,
     ]);
   });
 
@@ -155,9 +175,8 @@ describe("V01: a control's run passes only when its probes failed for real", () 
     expect(verdict.problems.join("\n")).toContain("errored: Error: browserType.launch");
   });
 
-  test("an assertion with its own message counts as an assertion", () => {
-    const message =
-      "Error: the very next request\n\nexpect(received).toBe(expected)\n\n> 93 |   expect(";
+  test("a verdict's own message counts, after the mark", () => {
+    const message = `Error: ${VERDICT}the very next request\n\nexpect(received).toBe(expected)\n\n> 93 |   expect(`;
     expect(
       judge(control, ["chromium"], run(report({ chromium: good("failed", message) }))).ok,
     ).toBe(true);
@@ -229,6 +248,130 @@ describe("V01: a control's run passes only when its probes failed for real", () 
 });
 
 // ---------------------------------------------------------------------------------------------
+// The review of P096: a probe fails for the right reason, named exactly; a test declared to fail
+// that passes is news; a control that fails nothing says why.
+
+describe("P096's review: what counts as a control's probe failing", () => {
+  test("only a failure of the probe's verdict counts, never one of its setup (item 1)", () => {
+    const setup =
+      "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: 200\nReceived: 404";
+    const verdict = judge(control, ["chromium"], run(report({ chromium: good("failed", setup) })));
+    expect(verdict.ok).toBe(false);
+    expect(verdict.problems).toEqual([
+      `[chromium] "[3.webrtc]" didn't fail by its verdict: unmarked: Error: expect(received).toBe(expected) // Object.is equality`,
+    ]);
+    // A poll's message carries the mark the same way.
+    const poll = `Error: ${VERDICT}the frame still runs\n\nexpect(received).toBe(expected)\n\nCall Log:\n- Timeout 5000ms exceeded while waiting on the predicate`;
+    expect(judge(control, ["chromium"], run(report({ chromium: good("failed", poll) }))).ok).toBe(
+      true,
+    );
+    // The mark elsewhere in the message (a quoted source line) is no verdict.
+    const quoted = `Error: expect(received).toBe(expected)\n\n> 12 |   expect(x, "${VERDICT}y")`;
+    expect(judge(control, ["chromium"], run(report({ chromium: good("failed", quoted) }))).ok).toBe(
+      false,
+    );
+  });
+
+  test("a registry entry names a test exactly, not as a part of its title (item 3)", () => {
+    expect(names("[3.webrtc]", "[3.webrtc] WebRTC is gone")).toBe(true);
+    expect(names("[3.web", "[3.webrtc] WebRTC is gone")).toBe(false);
+    expect(names("[3.webrtc]", "[3.webrtc-extra] another")).toBe(false);
+    expect(names("served.domain.tab-links", "served.domain.tab-links: a page on a tab…")).toBe(
+      true,
+    );
+    expect(names("served.domain.tab-links", "served.domain.tab-links-x: another")).toBe(false);
+    expect(names("served.domain.tab", "served.domain.tab-links: a page on a tab…")).toBe(false);
+    expect(names("a page opens nothing", "a page opens nothing else: not a file")).toBe(false);
+    expect(
+      names("a page opens nothing else: not a file", "a page opens nothing else: not a file"),
+    ).toBe(true);
+    // The judge matches a test's own title, not its describe blocks.
+    const described: Control = {
+      ...control,
+      fails: { ...control.fails, chromium: ["in a frame"] },
+    };
+    const nested = [...good("passed"), { title: "in a frame › a test", status: "failed" as const }];
+    expect(judge(described, ["chromium"], run(report({ chromium: nested }))).problems).toContain(
+      `[chromium] no test "in a frame"`,
+    );
+  });
+
+  test("a test declared to fail (test.fail) that passes fails the control, unless it is a target (item 4)", () => {
+    const declared = (status: Status): Synthetic[] => [
+      ...good(),
+      { title: "[4.static] a known gap", status, expected: "failed" },
+    ];
+    expect(judge(control, ["chromium"], run(report({ chromium: declared("failed") }))).ok).toBe(
+      true,
+    );
+    expect(
+      judge(control, ["chromium"], run(report({ chromium: declared("passed") }))).problems,
+    ).toEqual([
+      `[chromium] "[4.static] a known gap" passed, though it is declared to fail (test.fail)`,
+    ]);
+    // As a target, it is held to its verdict like any other.
+    const target: Control = {
+      ...control,
+      fails: { ...control.fails, chromium: ["[3.webrtc]", "[4.static]"] },
+    };
+    expect(
+      judge(target, ["chromium"], run(report({ chromium: declared("passed") }))).problems,
+    ).toEqual([`[chromium] "[4.static]" passed: the control has gone blind`]);
+  });
+});
+
+/** Each weakening's source edits, as `file` and the text it finds. */
+const edits = (name: string): string[] =>
+  name
+    .split(",")
+    .flatMap((part) => {
+      const weakening = WEAKENINGS[part];
+      return typeof weakening === "object" ? weakening : [];
+    })
+    .map((edit) => `${edit.file}\n${edit.find}`);
+
+describe("P096's review: a control that fails nothing says why (item 2)", () => {
+  const quiet = Object.entries(CONTROLS).filter(([, each]) =>
+    ENGINES.some((engine) => each.fails[engine].length === 0),
+  );
+
+  test("every control that names no test on an engine says why, and only those", () => {
+    expect(quiet.length).toBeGreaterThan(5);
+    for (const [name, each] of Object.entries(CONTROLS)) {
+      const silent = ENGINES.some((engine) => each.fails[engine].length === 0);
+      expect(each.holds !== undefined, name).toBe(silent);
+      if (each.holds !== undefined) {
+        expect(each.holds.why.length, name).toBeGreaterThan(20);
+      }
+    }
+  });
+
+  test("each is covered by a control that takes its walls out with another's and fails something there, or says no probe can see it", () => {
+    for (const [name, each] of quiet) {
+      const by = each.holds?.by;
+      if (by === undefined) {
+        expect(each.holds?.why, name).toMatch(/^no probe /);
+        continue;
+      }
+      const cover = CONTROLS[by];
+      expect(cover, `${name}: ${by}`).toBeDefined();
+      expect(by, name).not.toBe(name);
+      const parts = new Set(by.split(","));
+      const mine = name.split(",");
+      const takes =
+        mine.every((part) => parts.has(part)) ||
+        (edits(name).length > 0 && edits(name).every((edit) => edits(by).includes(edit)));
+      expect(takes, `${by} takes ${name}'s walls out`).toBe(true);
+      for (const engine of ENGINES.filter((one) => each.fails[one].length === 0)) {
+        expect(cover!.fails[engine].length, `${by} fails something on ${engine}`).toBeGreaterThan(
+          0,
+        );
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
 // The registry: every weakening is run, each control as DESIGN.md says (V02).
 
 describe("V02: one registry of the negative controls", () => {
@@ -257,7 +400,7 @@ describe("V02: one registry of the negative controls", () => {
 
   test("every control DESIGN.md's tables name is in the registry", () => {
     const design = read("../../docs/DESIGN.md");
-    const names = new Set<string>();
+    const named = new Set<string>();
     let columns = -1;
     for (const line of design.split("\n")) {
       if (!line.startsWith("|")) {
@@ -275,12 +418,12 @@ describe("V02: one registry of the negative controls", () => {
       }
       for (const [, token] of cell.matchAll(/`([a-z,-]+)`/g)) {
         if (token!.split(",").every((part) => WEAKENINGS[part] !== undefined)) {
-          names.add(token!);
+          named.add(token!);
         }
       }
     }
-    expect(names.size).toBeGreaterThan(20);
-    expect([...names].filter((name) => CONTROLS[name] === undefined)).toEqual([]);
+    expect(named.size).toBeGreaterThan(20);
+    expect([...named].filter((name) => CONTROLS[name] === undefined)).toEqual([]);
   });
 
   test("CI runs every control, on every engine", () => {

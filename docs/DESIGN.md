@@ -1318,72 +1318,78 @@ defenses taken out (P032; § The negative controls lists what each must fail).
 ### The negative controls
 
 Every control the suite has is in one registry (`leak/controls.ts`, P096): the specs it
-is run with and the tests it must fail on each engine. `pnpm --filter
-@botiverse/porthole test:controls` (`scripts/controls.ts`; in CI, a job per engine) runs
-each of them and requires its tests to fail by their own assertions, on every engine
-asked, and every other test of its specs to pass; a run that didn't happen, an engine
-missing from the report, or a probe skipped, never run, timed out or failed by
-something other than its assertion fails the check. A control that fails nothing on an
-engine claims another wall holds there, and its run checks that too; one that fails
-"every other test" takes out what all of them stand on (`nonce`: the shell), and none
-of them may pass. No control runs `kit.spec.ts`: the kit's reference app runs Porthole
-in Node, where no weakening reaches (`UNWEAKENED`). The table is the registry's (`node
-scripts/controls.ts --table` prints it; `test/controls.test.ts` holds them equal, every
-weakening to a control, and every control the tables above name to the registry):
+is run with and the tests it must fail on each engine, each named exactly (a probe's
+`[id]`, a served case's id, or a test's whole title). `pnpm --filter @botiverse/porthole
+test:controls` (`scripts/controls.ts`; in CI, a job per engine) runs each of them and
+requires its tests to fail by their verdicts, on every engine asked, and every other test
+of its specs to pass. A probe's verdict is its deciding `expect`, whose message starts
+`probe: ` (in the shipped probes and in the spec tests the registry names); a failure of
+its setup or of a positive control is no failure of the wall. A run that didn't happen, an
+engine missing from the report, a probe skipped, never run, timed out or failed by anything
+but its verdict, or a test declared to fail (`test.fail`) that passes, fails the check. A
+control that fails nothing on an engine says why: another wall holds, shown by a combined
+control that takes both out and fails something there, or no probe can see the wall; one
+that fails "every other test" takes out what all of them stand on (`nonce`: the shell),
+and none of them may pass. No control runs `kit.spec.ts`: the kit's reference app runs
+Porthole in Node, where no weakening reaches (`UNWEAKENED`). The table is the registry's
+(`node scripts/controls.ts --table` prints it; `test/controls.test.ts` holds them equal,
+every weakening to a control, every control that fails nothing to its reason, and every
+control the tables above name to the registry):
 
-| Control | Run with | Fails on every engine | Fails only on |
-|---------|----------|-----------------------|---------------|
-| `connect-src` | `leak.spec.ts` | `[1.connect]`, `[14.silent]` | — |
-| `webrtc` | `leak.spec.ts` | `[3.webrtc]`, `[14.workers]` | — |
-| `frame-guard` | `leak.spec.ts` | nothing | — |
-| `attach-shadow` | `leak.spec.ts` | nothing | — |
-| `sync-guard` | `leak.spec.ts` | nothing | WebKit: `[8.preconnect]` |
-| `frame-guard,sync-guard` | `leak.spec.ts` | `[4.light-dom]`, `[4.sync-realm]`, `[4.plugins]`, `[4.foreign-object]`, `[4.template-clone]`, `[7.base-plugins]`, `[14.shell]` | WebKit: `[8.preconnect]` |
-| `attach-shadow,sync-guard` | `leak.spec.ts` | `[4.closed-shadow]`, `[4.shadow-nested]` | WebKit: `[8.preconnect]` |
-| `declarative-shadow` | `leak.spec.ts` | `[4.declarative-shadow]` | — |
-| `parser-entry-points` | `leak.spec.ts` | `[4.document-write]`, `[14.shell]` | — |
-| `embedder-csp` | `leak.spec.ts` | `[5.location]`, `[5.replace]`, `[5.open-self]`, `[5.anchor]`, `[5.svg-link]`, `[5.host-origin]`, `[5.blob]`, `[5.data]`, `[6.remote-download]` | — |
-| `embedder-self` | `leak.spec.ts` | `[5.host-origin]` | — |
-| `sandbox` | `leak.spec.ts` | `[6.open]`, `[6.blank-link]`, `[6.top]`, `[6.top-link]`, `[6.parent]`, `[14.dialogs]`, `[14.windows]` | Chromium: `[6.download]`, `[14.print]`; Firefox: `[14.print]` |
-| `base-uri` | `leak.spec.ts` | `[7.base-plugins]` | — |
-| `self` | `leak.spec.ts` | nothing | — |
-| `style-split` | `leak.spec.ts` | `[0.app-sdk-inline]`, `[0.app-sdk-artifact]`, `[0.app-sdk-mcp-app]` | — |
-| `draft-inert` | `leak.spec.ts` | `[11.streaming]` | — |
-| `document-theme` | `leak.spec.ts` | `[11.document-theme]`, `[14.theme-never]` | — |
-| `confirm-gate` | `leak.spec.ts` | `[12.prompt-gesture-confirm]`, `[12.link]`, `[12.mute]`, `[12.no-confirm]`, `[14.windows]` | — |
-| `shell-gesture` | `leak.spec.ts` | `[12.prompt-gesture-confirm]`, `[12.mute]`, `[12.copy-text]` | — |
-| `host-gesture` | `leak.spec.ts` | `[12.raw-message]` | — |
-| `model-context-show` | `leak.spec.ts` | `[12.model-context]` | — |
-| `link-scheme` | `leak.spec.ts` | `[12.link]` | — |
-| `clipboard` | `leak.spec.ts` | `[13.clipboard-command]`, `[13.clipboard-event]` | WebKit, Firefox: `[13.clipboard-api]`, `[14.shell]` |
-| `report-unbounded` | `leak.spec.ts`, `strict-csp.spec.ts` | `[14.error-shapes]`, `[14.silent]` | — |
-| `nonce` | `strict-csp.spec.ts` | `[0.opaque-origin]`, `[0.globals]`, and every other test | — |
-| `annotation-checks` | `annotate.spec.ts` | `a hostile page fakes reports` | — |
-| `authorize` | `served/authorize.spec.ts` | `a revoked subject's ticket opens nothing`, `in a tab of its own, a revoked app and page` | Chromium, Firefox: `a framed app mid-session`, `a framed page mid-session` |
-| `url-permissions` | `served/permissions.spec.ts` | `a url-mode frame gets no clipboard writes or full screen` | — |
-| `navigate-guard` | `served/live.spec.ts`, `served/files.spec.ts`, `served/served.spec.ts`, `served/tab.spec.ts` | `served.domain.self-navigation`, `served.domain.tab-navigation`, `served.domain.tab-links`, `can't navigate itself away (location)`, `can't navigate itself away (replace)`, `can't navigate itself away (open-self)`, `can't navigate itself away (navigation-api)`, `a link to another page of the set opens it in the frame`, `a page opens nothing else`, `no report, content error or blocked navigation names the frame's sealed address` | — |
-| `tab-sandbox` | `served/tab.spec.ts` | `served.domain.tab-escapes`, `served.domain.tab-opener`, `a file set's page on a tab of its own`, `a frame's sealed address opened on a tab of its own` | — |
-| `window-open` | `served/tab.spec.ts` | nothing | — |
-| `tab-sandbox,window-open` | `served/tab.spec.ts` | `served.domain.tab-escapes`, `served.domain.tab-opener`, `a file set's page on a tab of its own`, `a frame's sealed address opened on a tab of its own`, `served.domain.tab-window-open` | — |
-| `navigate-ask` | `served/tab.spec.ts` | nothing | WebKit: `served.domain.tab-navigation`, `served.domain.tab-links` |
-| `link-rule` | `served/tab.spec.ts` | nothing | WebKit: `served.domain.tab-links`, `served.domain.tab-navigation` |
-| `permissions-policy` | `served/tab.spec.ts` | nothing | — |
-| `device-locks` | `served/tab.spec.ts` | nothing | WebKit: `served.domain.tab-devices`; Firefox: `served.domain.tab-devices`, `served.domain.tab-prompts` |
-| `permissions-policy,device-locks` | `served/tab.spec.ts` | `served.domain.tab-devices` | Chromium, Firefox: `served.domain.tab-prompts` |
-| `url-origin` | `served/served.spec.ts` | nothing | Chromium, Firefox: `served.url.siblings` |
-| `service-worker` | `served/files.spec.ts` | `no service worker ever registers` | — |
-| `file-corp` | `served/files.spec.ts` | `another origin reads none of the files` | — |
-| `file-self` | `served/files.spec.ts` | `a page loads no other version's files`, `a file outside the set is a 404, and so is every spelling of a way out` | — |
-| `runtime-declaration` | `served/runtime.spec.ts` | `an undeclared capability` | — |
-| `runtime-level` | `served/runtime.spec.ts` | `a method above the viewer's level`, `a read above the viewer's level: a result the host pushed is refused` | — |
-| `runtime-data-names` | `served/runtime.spec.ts` | `a resource outside the page's data names: refused with a viewer and without one` | — |
-| `live-held-read` | `served/runtime.spec.ts` | `a read above the viewer's level: a result the host pushed is refused` | — |
-| `db-private` | `served/runtime.spec.ts` | `a person's own data is theirs` | — |
-| `comments-result` | `served/runtime.spec.ts` | `comments are write-only` | — |
-| `blob-script` | `served/runtime.spec.ts` | nothing | — |
-| `blob-trusted` | `served/runtime.spec.ts` | `a script asset runs as code only if an admin uploaded it` | — |
-| `blob-script,blob-trusted` | `served/runtime.spec.ts` | `a script asset runs as code only if an admin uploaded it`, `scripts load from /_blob/ only where uploads are the admins'` | — |
-| `blob-inert` | `served/runtime.spec.ts` | `an asset opened on its own runs nothing` | — |
+| Control | Run with | Fails on every engine | Fails only on | Where it fails nothing, why |
+|---------|----------|-----------------------|---------------|-----------------------------|
+| `connect-src` | `leak.spec.ts` | `[1.connect]`, `[14.silent]` | — | — |
+| `webrtc` | `leak.spec.ts` | `[3.webrtc]`, `[14.workers]` | — | — |
+| `frame-guard` | `leak.spec.ts` | nothing | — | the synchronous guard drops what the observer would (`frame-guard,sync-guard`) |
+| `attach-shadow` | `leak.spec.ts` | nothing | — | the synchronous guard reaches a closed shadow root's frames as they connect (`attach-shadow,sync-guard`) |
+| `sync-guard` | `leak.spec.ts` | nothing | WebKit: `[8.preconnect]` | on Chromium and Firefox the observer removes what the synchronous guard would, and no preconnect opens even unsandboxed (measured) (`frame-guard,sync-guard`) |
+| `frame-guard,sync-guard` | `leak.spec.ts` | `[4.light-dom]`, `[4.sync-realm]`, `[4.plugins]`, `[4.foreign-object]`, `[4.template-clone]`, `[7.base-plugins]`, `[14.shell]` | WebKit: `[8.preconnect]` | — |
+| `attach-shadow,sync-guard` | `leak.spec.ts` | `[4.closed-shadow]`, `[4.shadow-nested]` | WebKit: `[8.preconnect]` | — |
+| `declarative-shadow` | `leak.spec.ts` | `[4.declarative-shadow]` | — | — |
+| `parser-entry-points` | `leak.spec.ts` | `[4.document-write]`, `[14.shell]` | — | — |
+| `embedder-csp` | `leak.spec.ts` | `[5.location]`, `[5.replace]`, `[5.open-self]`, `[5.anchor]`, `[5.svg-link]`, `[5.host-origin]`, `[5.blob]`, `[5.data]`, `[6.remote-download]` | — | — |
+| `embedder-self` | `leak.spec.ts` | `[5.host-origin]` | — | — |
+| `sandbox` | `leak.spec.ts` | `[6.open]`, `[6.blank-link]`, `[6.top]`, `[6.top-link]`, `[6.parent]`, `[14.dialogs]`, `[14.windows]` | Chromium: `[6.download]`, `[14.print]`; Firefox: `[14.print]` | — |
+| `base-uri` | `leak.spec.ts` | `[7.base-plugins]` | — | — |
+| `self` | `leak.spec.ts` | nothing | — | no probe can see it: an opaque frame's 'self' matches no origin, so 'self' in its CSP reaches nothing of the host on any engine (measured, P022); kept out because nothing needs it, and its run checks that it still opens nothing |
+| `style-split` | `leak.spec.ts` | `[0.app-sdk-inline]`, `[0.app-sdk-artifact]`, `[0.app-sdk-mcp-app]` | — | — |
+| `draft-inert` | `leak.spec.ts` | `[11.streaming]` | — | — |
+| `document-theme` | `leak.spec.ts` | `[11.document-theme]`, `[14.theme-never]` | — | — |
+| `confirm-gate` | `leak.spec.ts` | `[12.prompt-gesture-confirm]`, `[12.link]`, `[12.mute]`, `[12.no-confirm]`, `[14.windows]` | — | — |
+| `shell-gesture` | `leak.spec.ts` | `[12.prompt-gesture-confirm]`, `[12.mute]`, `[12.copy-text]` | — | — |
+| `host-gesture` | `leak.spec.ts` | `[12.raw-message]` | — | — |
+| `model-context-show` | `leak.spec.ts` | `[12.model-context]` | — | — |
+| `link-scheme` | `leak.spec.ts` | `[12.link]` | — | — |
+| `clipboard` | `leak.spec.ts` | `[13.clipboard-command]`, `[13.clipboard-event]` | WebKit, Firefox: `[13.clipboard-api]`, `[14.shell]` | — |
+| `report-unbounded` | `leak.spec.ts`, `strict-csp.spec.ts` | `[14.error-shapes]`, `[14.silent]` | — | — |
+| `nonce` | `strict-csp.spec.ts` | `the shell runs on a host page whose script-src is its nonce alone (P054)`, and every other test | — | — |
+| `annotation-checks` | `annotate.spec.ts` | `a hostile page fakes reports: the host takes none it didn't ask for, nothing malformed, and not a flood` | — | — |
+| `authorize` | `served/authorize.spec.ts` | `a revoked subject's ticket opens nothing: a page and an app are denied, and the host is told`, `in a tab of its own, a revoked app and page are denied from the next request on` | Chromium, Firefox: `a framed app mid-session: its next request after revocation is denied, and its next load tells the host`, `a framed page mid-session: its next load after revocation is denied where the engine keeps its cookie` | — |
+| `url-permissions` | `served/permissions.spec.ts` | `a url-mode frame gets no clipboard writes or full screen unless the host delegates them` | — | — |
+| `navigate-guard` | `served/live.spec.ts`, `served/files.spec.ts`, `served/served.spec.ts`, `served/tab.spec.ts` | `served.domain.self-navigation`, `served.domain.tab-navigation`, `served.domain.tab-links`, `can't navigate itself away (location): to a site, or to another content origin`, `can't navigate itself away (replace): to a site, or to another content origin`, `can't navigate itself away (open-self): to a site, or to another content origin`, `can't navigate itself away (navigation-api): to a site, or to another content origin`, `a link to another page of the set opens it in the frame; the display goes on`, `a link to another page of the set opens it in the frame when the leaving page's notice is dropped (P098)`, `a link to another page of the set opens it in the frame when the leaving page's notice is late (P098)`, `a page opens nothing else: not a file that isn't a page, not another path of its origin`, `no report, content error or blocked navigation names the frame's sealed address (P083)` | — | — |
+| `tab-sandbox` | `served/tab.spec.ts` | `served.domain.tab-escapes`, `served.domain.tab-opener`, `a file set's page on a tab of its own opens its own pages, and no window, link in a new window or download`, `a frame's sealed address opened on a tab of its own is sandboxed as its frame is` | — | — |
+| `window-open` | `served/tab.spec.ts` | nothing | — | the CSP's sandbox stops a window first (`tab-sandbox,window-open`) |
+| `tab-sandbox,window-open` | `served/tab.spec.ts` | `served.domain.tab-escapes`, `served.domain.tab-opener`, `a file set's page on a tab of its own opens its own pages, and no window, link in a new window or download`, `a frame's sealed address opened on a tab of its own is sandboxed as its frame is`, `served.domain.tab-window-open` | — | — |
+| `navigate-ask` | `served/tab.spec.ts` | nothing | WebKit: `served.domain.tab-navigation`, `served.domain.tab-links` | on Chromium and Firefox the navigate event cancels what the rule would have (`navigate-guard`) |
+| `link-rule` | `served/tab.spec.ts` | nothing | WebKit: `served.domain.tab-links`, `served.domain.tab-navigation` | on Chromium and Firefox the navigate event cancels a link the browser follows (`link-rule,navigate-guard`) |
+| `link-rule,navigate-guard` | `served/tab.spec.ts` | `served.domain.tab-navigation`, `served.domain.tab-links` | — | — |
+| `permissions-policy` | `served/tab.spec.ts` | nothing | — | the shell's locks deny what the header would (`permissions-policy,device-locks`) |
+| `device-locks` | `served/tab.spec.ts` | nothing | WebKit: `served.domain.tab-devices`; Firefox: `served.domain.tab-devices`, `served.domain.tab-prompts` | Chromium applies the Permissions-Policy header, which denies them first (`permissions-policy,device-locks`) |
+| `permissions-policy,device-locks` | `served/tab.spec.ts` | `served.domain.tab-devices` | Chromium, Firefox: `served.domain.tab-prompts` | — |
+| `url-origin` | `served/served.spec.ts` | nothing | Chromium, Firefox: `served.url.siblings` | no probe can see it on WebKit here: it keeps no cookie in a cross-site frame (P025), and the reference serving's labels are cross-site, so no request of another origin rides the app's cookie |
+| `service-worker` | `served/files.spec.ts` | `no service worker ever registers` | — | — |
+| `file-corp` | `served/files.spec.ts` | `another origin reads none of the files: not another artifact's page, not a page elsewhere` | — | — |
+| `file-self` | `served/files.spec.ts` | `a page loads no other version's files, though the browser may open both (P082)`, `a file outside the set is a 404, and so is every spelling of a way out` | — | — |
+| `runtime-declaration` | `served/runtime.spec.ts` | `an undeclared capability: null from use, refused when sent anyway, its handler never asked` | — | — |
+| `runtime-level` | `served/runtime.spec.ts` | `a method above the viewer's level: forbidden, its handler never asked`, `a read above the viewer's level: a result the host pushed is refused as a cold read is` | — | — |
+| `runtime-data-names` | `served/runtime.spec.ts` | `a resource outside the page's data names: refused with a viewer and without one, its handler never asked` | — | — |
+| `live-held-read` | `served/runtime.spec.ts` | `a read above the viewer's level: a result the host pushed is refused as a cold read is` | — | — |
+| `db-private` | `served/runtime.spec.ts` | `a person's own data is theirs: another person's is refused, never reaching the service` | — | — |
+| `comments-result` | `served/runtime.spec.ts` | `comments are write-only: the composer opens from a click, content hears only that` | — | — |
+| `blob-script` | `served/runtime.spec.ts` | nothing | — | an untrusted script asset is served as a download (`blob-script,blob-trusted`) |
+| `blob-trusted` | `served/runtime.spec.ts` | `a script asset runs as code only if an admin uploaded it where uploads are the admins'` | — | — |
+| `blob-script,blob-trusted` | `served/runtime.spec.ts` | `a script asset runs as code only if an admin uploaded it where uploads are the admins'`, `scripts load from /_blob/ only where uploads are the admins' (a tab, its session)` | — | — |
+| `blob-inert` | `served/runtime.spec.ts` | `an asset opened on its own runs nothing, on a tab with the artifact's session` | — | — |
 
 ## Milestones
 

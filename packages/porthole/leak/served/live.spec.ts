@@ -186,9 +186,9 @@ test.describe("a live widget (P079)", () => {
       await settle(2_500);
       expect(
         served.requests.filter((url) => url.includes(`secret-${name}`)),
-        "the navigation reached another content origin",
+        "probe: the navigation reached another content origin",
       ).toEqual([]);
-      expect(canary.requests(), "the navigation reached the outside site").toEqual([]);
+      expect(canary.requests(), "probe: the navigation reached the outside site").toEqual([]);
       // Then the frame: kept, or started again from its content (P031) where the engine
       // replaced its document on a navigation the page's frame-src blocked (measured: WebKit,
       // for navigation.navigate() to an outside site, which fires no navigate event first).
@@ -199,8 +199,14 @@ test.describe("a live widget (P079)", () => {
         (await shown.read()).contentErrors.find((message) =>
           message.includes("navigate its frame"),
         );
-      await expect.poll(async () => (await shown.read()).navigationsBlocked).toContain(sibling);
-      await expect.poll(toldOf).toBeDefined();
+      await expect
+        .poll(async () => (await shown.read()).navigationsBlocked, {
+          message: "probe: the host was told of the blocked navigation",
+        })
+        .toContain(sibling);
+      await expect
+        .poll(toldOf, { message: "probe: the host was told a content error naming the navigation" })
+        .toBeDefined();
       const told = await toldOf();
       // Its script ran to the end in the frame, or the frame was started again (its document
       // replaced, so the script never ends): which one, once it is so.
@@ -215,8 +221,10 @@ test.describe("a live widget (P079)", () => {
         )
         .toBe(true);
       const record = await shown.read();
-      expect(told).toContain(`http://sibling-${name}.localhost:${port}/?…`);
-      expect(told).not.toContain("secret");
+      expect(told, "probe: the content error names the sibling's address").toContain(
+        `http://sibling-${name}.localhost:${port}/?…`,
+      );
+      expect(told, "probe: the content error carried the secret").not.toContain("secret");
       if (record.outcomes.length > 1) {
         expect(record.outcomes[0]).toEqual({ state: "loaded" });
         test.info().annotations.push({
@@ -225,8 +233,11 @@ test.describe("a live widget (P079)", () => {
         });
       } else {
         const r = await probed(frame);
-        expect(String(r.at)).not.toContain("secret");
-        await expect(frame.locator("#marker")).toHaveCount(1);
+        expect(String(r.at), "probe: the frame navigated away").not.toContain("secret");
+        await expect(
+          frame.locator("#marker"),
+          "probe: the frame's document was replaced",
+        ).toHaveCount(1);
       }
       await canary.close();
     });

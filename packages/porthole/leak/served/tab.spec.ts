@@ -124,8 +124,11 @@ fetch("./data.json").then((r) => r.json()).then((d) => { document.documentElemen
   await page.locator("#next").click();
   await expect(page.locator("#about")).toHaveText("the about page");
   expect(page.url()).toBe(`${host.origin(scope)}/v/1/about`);
-  expect(await tryEscapes(page, unique("tab-set-escape"))).toEqual(CLOSED);
-  expect(answer?.headers()["content-security-policy"], "the page's own sandbox").toContain(
+  expect(
+    await tryEscapes(page, unique("tab-set-escape")),
+    "probe: a window, new-window link, download, dialog or canary request got out",
+  ).toEqual(CLOSED);
+  expect(answer?.headers()["content-security-policy"], "probe: the page's own sandbox").toContain(
     "sandbox allow-scripts allow-same-origin",
   );
 });
@@ -160,7 +163,10 @@ test("a frame's sealed address opened on a tab of its own is sandboxed as its fr
   const answer = await tab.goto(frame.url());
   expect(answer?.status()).toBe(200);
   await expect(tab.locator("#sealed")).toHaveText("sealed");
-  expect(await tryEscapes(tab, unique("tab-sealed-escape"))).toEqual(CLOSED);
+  expect(
+    await tryEscapes(tab, unique("tab-sealed-escape")),
+    "probe: a window, new-window link, download, dialog or canary request got out",
+  ).toEqual(CLOSED);
   await tab.close();
 });
 

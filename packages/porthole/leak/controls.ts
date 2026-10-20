@@ -14,19 +14,48 @@ export interface Control {
   /** The spec files it is run with, relative to the package. */
   readonly specs: readonly string[];
   /**
-   * The tests it must make fail on each engine, each a part of a test's title (a probe's `[id]`,
-   * or a served test's own words; every test it is part of, as a probe in two specs). Every other
-   * test of its specs must pass (or
-   * be skipped as it always is). An engine with none: the control fails nothing there, a claim
-   * the run checks as well (another wall holds).
+   * The tests it must make fail on each engine, each named exactly (`names`): a probe's `[id]`, a
+   * served case's id, or a test's whole title; a probe in two specs is a test in each. Every other
+   * test of its specs must pass (or be skipped as it always is). An engine with none: the control
+   * fails nothing there, which `holds` says why.
    */
   readonly fails: Readonly<Record<Engine, readonly string[]>>;
   /**
-   * `fail`: every other test of its specs fails too, by its assertion or by timing out, and none
+   * `fail`: every other test of its specs fails too (by an assertion or by timing out), and none
    * passes: the control takes out what all of them stand on (the shell, on a strict page without
-   * the host's nonce). Its named tests still fail by their assertions.
+   * the host's nonce). Its named tests still fail by their verdicts.
    */
   readonly others?: "fail";
+  /**
+   * Why it fails nothing on an engine where it names no test (every such control says, P096):
+   * `by` a combined control that takes this one's walls out with another's and fails something
+   * there (test/controls.test.ts checks both), or, without `by`, why no probe can see the wall
+   * (`why` starts "no probe").
+   */
+  readonly holds?: { readonly why: string; readonly by?: string };
+}
+
+/**
+ * The mark a probe's verdict carries: its deciding `expect`'s message starts with it (`expect(x,
+ * "probe: …")`, `expect.poll(f, { message: "probe: …" })`). A control counts only a failure whose
+ * error carries it, so a probe that failed in its setup (a page that didn't load, a positive
+ * control) never counts as the wall seen to fail (P096, after its review).
+ */
+export const VERDICT = "probe: ";
+
+/**
+ * Whether a registry entry names a test (its own title, without its describe blocks): `[id]` is
+ * the probe whose title starts with it and a space; a served case's id (`served.<mode>.<case>`)
+ * the case whose title starts with it and a colon; anything else the test whose title it is.
+ */
+export function names(expected: string, title: string): boolean {
+  if (/^\[[^\]]+\]$/.test(expected)) {
+    return title.startsWith(`${expected} `);
+  }
+  if (/^served\.[a-z]+\.[a-z-]+$/.test(expected)) {
+    return title.startsWith(`${expected}: `);
+  }
+  return title === expected;
 }
 
 /**
@@ -50,8 +79,8 @@ const TAB = "leak/served/tab.spec.ts";
 const TAB_SANDBOX = [
   "served.domain.tab-escapes",
   "served.domain.tab-opener",
-  "a file set's page on a tab of its own",
-  "a frame's sealed address opened on a tab of its own",
+  "a file set's page on a tab of its own opens its own pages, and no window, link in a new window or download",
+  "a frame's sealed address opened on a tab of its own is sandboxed as its frame is",
 ];
 
 /** The same tests on every engine. */
@@ -73,6 +102,21 @@ function each(
 
 const NOTHING = all();
 
+/** Titles named by more than one control; the link cases of a set's pages (P084, P098). */
+const FRAMED_APP =
+  "a framed app mid-session: its next request after revocation is denied, and its next load tells the host";
+const FRAMED_PAGE =
+  "a framed page mid-session: its next load after revocation is denied where the engine keeps its cookie";
+const PUSHED_READ =
+  "a read above the viewer's level: a result the host pushed is refused as a cold read is";
+const TRUSTED_CODE =
+  "a script asset runs as code only if an admin uploaded it where uploads are the admins'";
+const IN_SET_LINKS = [
+  "a link to another page of the set opens it in the frame; the display goes on",
+  "a link to another page of the set opens it in the frame when the leaving page's notice is dropped (P098)",
+  "a link to another page of the set opens it in the frame when the leaving page's notice is late (P098)",
+];
+
 export const CONTROLS: Readonly<Record<string, Control>> = {
   // The shell runtime and the CSP, through the leak suite (DESIGN.md, items 1-13).
   // 14.silent's fetch rejects only while connect-src holds; 8.prefetch holds on Chromium too, by
@@ -80,9 +124,30 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   "connect-src": { specs: [LEAK], fails: all("[1.connect]", "[14.silent]") },
   webrtc: { specs: [LEAK], fails: all("[3.webrtc]", "[14.workers]") },
   // The frame guards are two walls: either alone is covered by the other.
-  "frame-guard": { specs: [LEAK], fails: NOTHING },
-  "attach-shadow": { specs: [LEAK], fails: NOTHING },
-  "sync-guard": { specs: [LEAK], fails: each([], { webkit: ["[8.preconnect]"] }) },
+  "frame-guard": {
+    specs: [LEAK],
+    fails: NOTHING,
+    holds: {
+      why: "the synchronous guard drops what the observer would",
+      by: "frame-guard,sync-guard",
+    },
+  },
+  "attach-shadow": {
+    specs: [LEAK],
+    fails: NOTHING,
+    holds: {
+      why: "the synchronous guard reaches a closed shadow root's frames as they connect",
+      by: "attach-shadow,sync-guard",
+    },
+  },
+  "sync-guard": {
+    specs: [LEAK],
+    fails: each([], { webkit: ["[8.preconnect]"] }),
+    holds: {
+      why: "on Chromium and Firefox the observer removes what the synchronous guard would, and no preconnect opens even unsandboxed (measured)",
+      by: "frame-guard,sync-guard",
+    },
+  },
   "frame-guard,sync-guard": {
     specs: [LEAK],
     fails: each(
@@ -137,8 +202,13 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     ),
   },
   "base-uri": { specs: [LEAK], fails: all("[7.base-plugins]") },
-  // 'self' reaches nothing of the host from an opaque frame (measured); kept out anyway.
-  self: { specs: [LEAK], fails: NOTHING },
+  self: {
+    specs: [LEAK],
+    fails: NOTHING,
+    holds: {
+      why: "no probe can see it: an opaque frame's 'self' matches no origin, so 'self' in its CSP reaches nothing of the host on any engine (measured, P022); kept out because nothing needs it, and its run checks that it still opens nothing",
+    },
+  },
   "style-split": {
     specs: [LEAK],
     fails: all("[0.app-sdk-inline]", "[0.app-sdk-artifact]", "[0.app-sdk-mcp-app]"),
@@ -181,28 +251,35 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   // suite asks of it happens.
   nonce: {
     specs: ["leak/strict-csp.spec.ts"],
-    fails: all("[0.opaque-origin]", "[0.globals]"),
+    fails: all("the shell runs on a host page whose script-src is its nonce alone (P054)"),
     others: "fail",
   },
   "annotation-checks": {
     specs: ["leak/annotate.spec.ts"],
-    fails: all("a hostile page fakes reports"),
+    fails: all(
+      "a hostile page fakes reports: the host takes none it didn't ask for, nothing malformed, and not a flood",
+    ),
   },
   // Served content (leak/served/).
   authorize: {
     specs: ["leak/served/authorize.spec.ts"],
     fails: each(
-      ["a revoked subject's ticket opens nothing", "in a tab of its own, a revoked app and page"],
+      [
+        "a revoked subject's ticket opens nothing: a page and an app are denied, and the host is told",
+        "in a tab of its own, a revoked app and page are denied from the next request on",
+      ],
       // WebKit keeps no cookie in a cross-site frame (P025): no framed session to revoke.
       {
-        chromium: ["a framed app mid-session", "a framed page mid-session"],
-        firefox: ["a framed app mid-session", "a framed page mid-session"],
+        chromium: [FRAMED_APP, FRAMED_PAGE],
+        firefox: [FRAMED_APP, FRAMED_PAGE],
       },
     ),
   },
   "url-permissions": {
     specs: ["leak/served/permissions.spec.ts"],
-    fails: all("a url-mode frame gets no clipboard writes or full screen"),
+    fails: all(
+      "a url-mode frame gets no clipboard writes or full screen unless the host delegates them",
+    ),
   },
   "navigate-guard": {
     specs: ["leak/served/live.spec.ts", FILES, SERVED, TAB],
@@ -211,21 +288,23 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "served.domain.tab-navigation",
       // A tab's links stand on the guard's rule too (measured: the outside site hears them).
       "served.domain.tab-links",
-      "can't navigate itself away (location)",
-      "can't navigate itself away (replace)",
-      "can't navigate itself away (open-self)",
-      "can't navigate itself away (navigation-api)",
-      // The in-set link case and its two P098 variants (the leaving page's notice dropped, late).
-      "a link to another page of the set opens it in the frame",
-      "a page opens nothing else",
-      "no report, content error or blocked navigation names the frame's sealed address",
+      ...["location", "replace", "open-self", "navigation-api"].map(
+        (how) => `can't navigate itself away (${how}): to a site, or to another content origin`,
+      ),
+      ...IN_SET_LINKS,
+      "a page opens nothing else: not a file that isn't a page, not another path of its origin",
+      "no report, content error or blocked navigation names the frame's sealed address (P083)",
     ),
   },
   // A served page on a tab of its own (P099): its CSP's sandbox is the wall for links and forms
   // in new windows, downloads, browser dialogs and its opener; window.open and picture-in-picture
   // have the shell's lock behind it too, so their case fails only with both out.
   "tab-sandbox": { specs: [TAB], fails: all(...TAB_SANDBOX) },
-  "window-open": { specs: [TAB], fails: NOTHING },
+  "window-open": {
+    specs: [TAB],
+    fails: NOTHING,
+    holds: { why: "the CSP's sandbox stops a window first", by: "tab-sandbox,window-open" },
+  },
   "tab-sandbox,window-open": {
     specs: [TAB],
     fails: all(...TAB_SANDBOX, "served.domain.tab-window-open"),
@@ -236,23 +315,46 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   "navigate-ask": {
     specs: [TAB],
     fails: each([], { webkit: ["served.domain.tab-navigation", "served.domain.tab-links"] }),
+    holds: {
+      why: "on Chromium and Firefox the navigate event cancels what the rule would have",
+      by: "navigate-guard",
+    },
   },
   // A tab's links followed by the shell, as it read them (P099): without it the browser follows
   // them after content's listeners, and WebKit sends a cancelled one's request.
   "link-rule": {
     specs: [TAB],
     fails: each([], { webkit: ["served.domain.tab-links", "served.domain.tab-navigation"] }),
+    holds: {
+      why: "on Chromium and Firefox the navigate event cancels a link the browser follows",
+      by: "link-rule,navigate-guard",
+    },
+  },
+  "link-rule,navigate-guard": {
+    specs: [TAB],
+    fails: all("served.domain.tab-navigation", "served.domain.tab-links"),
   },
   // Its devices, location and full screen (P099): the Permissions-Policy header, and the shell's
   // locks behind it (the only wall where the header isn't applied: WebKit, Firefox). WebKit
   // refuses each prompt at once without them (no share sheet on desktop, no authenticator).
-  "permissions-policy": { specs: [TAB], fails: NOTHING },
+  "permissions-policy": {
+    specs: [TAB],
+    fails: NOTHING,
+    holds: {
+      why: "the shell's locks deny what the header would",
+      by: "permissions-policy,device-locks",
+    },
+  },
   "device-locks": {
     specs: [TAB],
     fails: each([], {
       webkit: ["served.domain.tab-devices"],
       firefox: ["served.domain.tab-devices", "served.domain.tab-prompts"],
     }),
+    holds: {
+      why: "Chromium applies the Permissions-Policy header, which denies them first",
+      by: "permissions-policy,device-locks",
+    },
   },
   "permissions-policy,device-locks": {
     specs: [TAB],
@@ -269,53 +371,83 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       chromium: ["served.url.siblings"],
       firefox: ["served.url.siblings"],
     }),
+    holds: {
+      why: "no probe can see it on WebKit here: it keeps no cookie in a cross-site frame (P025), and the reference serving's labels are cross-site, so no request of another origin rides the app's cookie",
+    },
   },
   "service-worker": { specs: [FILES], fails: all("no service worker ever registers") },
-  "file-corp": { specs: [FILES], fails: all("another origin reads none of the files") },
+  "file-corp": {
+    specs: [FILES],
+    fails: all(
+      "another origin reads none of the files: not another artifact's page, not a page elsewhere",
+    ),
+  },
   "file-self": {
     specs: [FILES],
     fails: all(
-      "a page loads no other version's files",
+      "a page loads no other version's files, though the browser may open both (P082)",
       "a file outside the set is a 404, and so is every spelling of a way out",
     ),
   },
   // The capability runtime (P085-P091).
-  "runtime-declaration": { specs: [RUNTIME], fails: all("an undeclared capability") },
+  "runtime-declaration": {
+    specs: [RUNTIME],
+    fails: all(
+      "an undeclared capability: null from use, refused when sent anyway, its handler never asked",
+    ),
+  },
   // The pushed-result probe (P094) stands on the level check too: both its reads are refused for it.
   "runtime-level": {
     specs: [RUNTIME],
     fails: all(
-      "a method above the viewer's level",
-      "a read above the viewer's level: a result the host pushed is refused",
+      "a method above the viewer's level: forbidden, its handler never asked",
+      PUSHED_READ,
     ),
   },
   // A page's data names, held with a viewer and without one (P094).
   "runtime-data-names": {
     specs: [RUNTIME],
-    fails: all("a resource outside the page's data names: refused with a viewer and without one"),
+    fails: all(
+      "a resource outside the page's data names: refused with a viewer and without one, its handler never asked",
+    ),
   },
   // A result the host pushed answers a read only past the read's gates (P094).
   "live-held-read": {
     specs: [RUNTIME],
-    fails: all("a read above the viewer's level: a result the host pushed is refused"),
+    fails: all(PUSHED_READ),
   },
-  "db-private": { specs: [RUNTIME], fails: all("a person's own data is theirs") },
-  "comments-result": { specs: [RUNTIME], fails: all("comments are write-only") },
+  "db-private": {
+    specs: [RUNTIME],
+    fails: all(
+      "a person's own data is theirs: another person's is refused, never reaching the service",
+    ),
+  },
+  "comments-result": {
+    specs: [RUNTIME],
+    fails: all("comments are write-only: the composer opens from a click, content hears only that"),
+  },
   // Two walls stand behind a script from /_blob/: the CSP and the type it is served as. Each
   // control alone takes one out; the CSP's probe fails only with both out.
-  "blob-script": { specs: [RUNTIME], fails: NOTHING },
-  "blob-trusted": {
+  "blob-script": {
     specs: [RUNTIME],
-    fails: all("a script asset runs as code only if an admin uploaded it"),
+    fails: NOTHING,
+    holds: {
+      why: "an untrusted script asset is served as a download",
+      by: "blob-script,blob-trusted",
+    },
   },
+  "blob-trusted": { specs: [RUNTIME], fails: all(TRUSTED_CODE) },
   "blob-script,blob-trusted": {
     specs: [RUNTIME],
     fails: all(
-      "a script asset runs as code only if an admin uploaded it",
-      "scripts load from /_blob/ only where uploads are the admins'",
+      TRUSTED_CODE,
+      "scripts load from /_blob/ only where uploads are the admins' (a tab, its session)",
     ),
   },
-  "blob-inert": { specs: [RUNTIME], fails: all("an asset opened on its own runs nothing") },
+  "blob-inert": {
+    specs: [RUNTIME],
+    fails: all("an asset opened on its own runs nothing, on a tab with the artifact's session"),
+  },
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -331,14 +463,15 @@ export interface Run {
 }
 
 /**
- * How a test ended: `failed` is an assertion of its own that failed (an `expect`), the only
- * failure a control may count; the rest are runs that prove nothing (skipped, never run, timed
- * out, interrupted, an error that isn't an assertion: a browser that didn't start, a harness
- * that threw).
+ * How a test ended: `failed` is its verdict failing (an `expect` marked `VERDICT`), the only
+ * failure a control may count; `unmarked` an `expect` of its setup or positive control; the rest
+ * are runs that prove nothing (skipped, never run, timed out, interrupted, an error that isn't an
+ * assertion: a browser that didn't start, a harness that threw).
  */
 export type Outcome =
   | "passed"
   | "failed"
+  | "unmarked"
   | "skipped"
   | "not run"
   | "timed out"
@@ -346,9 +479,14 @@ export type Outcome =
   | "errored";
 
 export interface TestResult {
+  /** Its whole title, with its describe blocks. */
   readonly title: string;
+  /** Its own title, which the registry names. */
+  readonly name: string;
   readonly project: string;
   readonly outcome: Outcome;
+  /** What the test declares (`test.fail`: failed; `test.skip`: skipped). */
+  readonly expected: "passed" | "failed" | "skipped";
   /** The first line of its error, where it has one. */
   readonly error: string;
 }
@@ -395,10 +533,25 @@ function isAssertion(error: JsonError): boolean {
   return /^(Error: )?expect(\.soft|\.poll)?\(/m.test((error.message ?? "").replace(ANSI, ""));
 }
 
-function outcomeOf(test: JsonTest): { outcome: Outcome; error: string } {
+/** An error of a probe's verdict: its first line is the deciding `expect`'s message. */
+function isVerdict(error: JsonError): boolean {
+  return new RegExp(`^(Error: )?${VERDICT}`).test(firstLine(error));
+}
+
+function outcomeOf(test: JsonTest): {
+  outcome: Outcome;
+  expected: TestResult["expected"];
+  error: string;
+} {
+  const expected =
+    test.expectedStatus === "skipped"
+      ? "skipped"
+      : test.expectedStatus === "failed"
+        ? "failed"
+        : "passed";
   const last = test.results?.at(-1);
   if (last === undefined) {
-    return { outcome: "not run", error: "" };
+    return { outcome: "not run", expected, error: "" };
   }
   const errors =
     last.errors !== undefined && last.errors.length > 0
@@ -407,26 +560,30 @@ function outcomeOf(test: JsonTest): { outcome: Outcome; error: string } {
         ? []
         : [last.error];
   const error = firstLine(errors[0]);
-  if (test.expectedStatus !== undefined && test.expectedStatus !== "passed") {
-    return { outcome: "skipped", error };
+  if (expected === "skipped") {
+    return { outcome: "skipped", expected, error };
   }
   switch (last.status) {
     case "passed":
-      return { outcome: "passed", error };
+      return { outcome: "passed", expected, error };
     case "skipped":
-      return { outcome: "skipped", error };
+      return { outcome: "skipped", expected, error };
     case "timedOut":
-      return { outcome: "timed out", error };
+      return { outcome: "timed out", expected, error };
     case "interrupted":
-      return { outcome: "interrupted", error };
-    case "failed":
-      return {
-        outcome:
-          errors.length > 0 && errors.every((one) => isAssertion(one)) ? "failed" : "errored",
-        error,
-      };
+      return { outcome: "interrupted", expected, error };
+    case "failed": {
+      const [first] = errors;
+      const outcome: Outcome =
+        first === undefined || !errors.every((one) => isAssertion(one))
+          ? "errored"
+          : isVerdict(first)
+            ? "failed"
+            : "unmarked";
+      return { outcome, expected, error };
+    }
     default:
-      return { outcome: "not run", error };
+      return { outcome: "not run", expected, error };
   }
 }
 
@@ -440,6 +597,7 @@ export function resultsOf(report: { readonly suites?: readonly JsonSuite[] }): T
       for (const test of spec.tests) {
         out.push({
           title: [...here, spec.title].join(" › "),
+          name: spec.title,
           project: test.projectName,
           ...outcomeOf(test),
         });
@@ -498,7 +656,7 @@ export function judge(control: Control, engines: readonly Engine[], run: Run): V
     const matched = new Set<TestResult>();
     for (const expected of targets) {
       // A probe in more than one spec (the leak suite on two host pages) is a test in each.
-      const found = mine.filter((one) => one.title.includes(expected));
+      const found = mine.filter((one) => names(expected, one.name));
       if (found.length === 0) {
         problems.push(`[${engine}] no test "${expected}"`);
       }
@@ -509,25 +667,38 @@ export function judge(control: Control, engines: readonly Engine[], run: Run): V
           problems.push(`[${engine}] "${expected}"${which} passed: the control has gone blind`);
         } else if (probe.outcome !== "failed") {
           problems.push(
-            `[${engine}] "${expected}"${which} didn't fail by its assertion: ${said(probe)}`,
+            `[${engine}] "${expected}"${which} didn't fail by its verdict: ${said(probe)}`,
           );
         }
       }
     }
     const why = (one: TestResult): string =>
       one.error === "" ? "" : `: ${one.error.slice(0, 200)}`;
+    const failure = (outcome: Outcome): boolean =>
+      outcome === "failed" ||
+      outcome === "unmarked" ||
+      outcome === "errored" ||
+      outcome === "timed out";
     for (const one of mine) {
       if (matched.has(one)) {
         continue;
       }
       if (control.others === "fail") {
-        if (one.outcome !== "failed" && one.outcome !== "timed out") {
+        if (one.outcome !== "failed" && one.outcome !== "unmarked" && one.outcome !== "timed out") {
           problems.push(
             `[${engine}] "${one.title}" ${one.outcome}, though every test should fail${why(one)}`,
           );
         }
+      } else if (one.expected === "failed") {
+        // `test.fail`: its failure is the run as it always is; its passing is news (after the review).
+        if (!failure(one.outcome) && one.outcome !== "skipped") {
+          problems.push(
+            `[${engine}] "${one.title}" ${one.outcome}, though it is declared to fail (test.fail)`,
+          );
+        }
       } else if (one.outcome !== "passed" && one.outcome !== "skipped") {
-        problems.push(`[${engine}] "${one.title}" ${one.outcome} too${why(one)}`);
+        const outcome = one.outcome === "unmarked" ? "failed" : one.outcome;
+        problems.push(`[${engine}] "${one.title}" ${outcome} too${why(one)}`);
       }
     }
     const failed = mine.filter((one) => one.outcome === "failed").length;
@@ -581,11 +752,15 @@ export function controlsTable(): string {
       .map(([tests, engines]) => `${engines.map((one) => ENGINE_NAMES[one]).join(", ")}: ${tests}`)
       .join("; ");
     const every = control.others === "fail" ? ", and every other test" : "";
-    return `| \`${name}\` | ${specs} | ${list(common)}${every} | ${some === "" ? "—" : some} |`;
+    const holds =
+      control.holds === undefined
+        ? "—"
+        : `${control.holds.why}${control.holds.by === undefined ? "" : ` (\`${control.holds.by}\`)`}`;
+    return `| \`${name}\` | ${specs} | ${list(common)}${every} | ${some === "" ? "—" : some} | ${holds} |`;
   });
   return [
-    "| Control | Run with | Fails on every engine | Fails only on |",
-    "|---------|----------|-----------------------|---------------|",
+    "| Control | Run with | Fails on every engine | Fails only on | Where it fails nothing, why |",
+    "|---------|----------|-----------------------|---------------|-----------------------------|",
     ...rows,
   ].join("\n");
 }

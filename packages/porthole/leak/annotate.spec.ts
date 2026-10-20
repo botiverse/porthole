@@ -401,7 +401,7 @@ test("a hostile page fakes reports: the host takes none it didn't ask for, nothi
   await fake("cancelled", {});
   await fake("anchored", { results: [{ id: "x", state: "attached", rect }] });
   await page.waitForTimeout(500);
-  expect(await reports(display)).toEqual([]);
+  expect(await reports(display), "probe: the host took a report it didn't ask for").toEqual([]);
 
   // Asked for text: what's malformed, too large, of the wrong kind, or about no mark is dropped.
   await display.annotate("start", { elements: false, text: true });
@@ -420,16 +420,25 @@ test("a hostile page fakes reports: the host takes none it didn't ask for, nothi
   // The three malformed ones are refused once the host has handled them: waited for, not
   // counted once after a fixed wait (P098). What was dropped stays dropped.
   await expect
-    .poll(async () => (await refusals(display)).filter((each) => each === "annotate:invalid"))
+    .poll(async () => (await refusals(display)).filter((each) => each === "annotate:invalid"), {
+      message: "probe: the three malformed reports were refused",
+    })
     .toHaveLength(3);
   await page.waitForTimeout(500);
-  expect(await reports(display)).toEqual([]);
-  expect((await refusals(display)).filter((each) => each === "annotate:invalid")).toHaveLength(3);
+  expect(await reports(display), "probe: the host took a malformed or unasked report").toEqual([]);
+  expect(
+    (await refusals(display)).filter((each) => each === "annotate:invalid"),
+    "probe: the three malformed reports were refused",
+  ).toHaveLength(3);
 
   // A well-formed fake, asked for, gets through: rebuilt from known fields, a UI hint only.
   await fake("selected", { anchor: { ...anchor, extra: "<img onerror>" }, rect, admin: true });
   const taken = await next(display, "selected");
-  expect(taken).toEqual({ type: "selected", anchor, rect });
+  expect(taken, "probe: the report was rebuilt from known fields only").toEqual({
+    type: "selected",
+    anchor,
+    rect,
+  });
 
   // A flood is cut at the rate limit.
   await frame.evaluate(
@@ -451,9 +460,13 @@ test("a hostile page fakes reports: the host takes none it didn't ask for, nothi
     .poll(
       async () =>
         (await refusals(display)).filter((each) => each === "annotate:rate-limited").length,
+      { message: "probe: the flood was cut at the rate limit" },
     )
     .toBeGreaterThan(0);
-  expect((await reports(display)).length).toBeLessThanOrEqual(120);
+  expect(
+    (await reports(display)).length,
+    "probe: the host took a flood of reports",
+  ).toBeLessThanOrEqual(120);
 });
 
 test("an MCP Apps view, where the host declares annotate, is annotated the same way", async ({

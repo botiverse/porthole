@@ -1,5 +1,6 @@
-import { test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { leakTests } from "../src/conformance/index.ts";
+import { inline } from "../src/conformance/kit.ts";
 import { referenceHostWith } from "./reference-host.ts";
 
 /**
@@ -13,4 +14,23 @@ test.describe(`Porthole leak suite (${strict.name})`, () => {
   for (const each of leakTests(strict)) {
     test(each.title, ({ page, browserName }, info) => each.run({ page, browserName }, info));
   }
+});
+
+/**
+ * The wall itself (P054, P096): the shell runs on such a page only with the host's nonce, so the
+ * content it draws and runs shows. The `nonce` control fails this by its verdict (every other test
+ * here fails with it, waiting on a shell that never ran).
+ */
+test("the shell runs on a host page whose script-src is its nonce alone (P054)", async ({
+  page,
+}) => {
+  const display = await strict.launch(page, {
+    config: inline(),
+    content: `<p id="ran">not yet</p><script>document.getElementById("ran").textContent = "ran";</script>`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#ran"), "probe: the shell drew and ran the content").toHaveText(
+    "ran",
+    { timeout: 10_000 },
+  );
 });

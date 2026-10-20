@@ -310,15 +310,20 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
           "artifact",
         ),
       ),
+      "probe: use gave an undeclared capability",
     ).toBeNull();
     const publish = await raw(frame, {
       capability: "artifact",
       method: "publish",
       args: { base: "ver_1", files: { "index.html": { text: "<p>owned</p>" } } },
     });
-    expect(publish.error?.data?.code).toBe("not_allowed");
+    expect(publish.error?.data?.code, "probe: an undeclared publish was refused").toBe(
+      "not_allowed",
+    );
     const asked = await raw(frame, { capability: "user", method: "get", args: {} });
-    expect(asked.error?.data?.code).toBe("not_allowed");
+    expect(asked.error?.data?.code, "probe: an undeclared user read was refused").toBe(
+      "not_allowed",
+    );
     // 0.6's request for the host's data, from a page that declared db only.
     const read = await frame.evaluate(
       () =>
@@ -335,8 +340,11 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
           );
         }),
     );
-    expect(read).toBe("not_allowed");
-    expect((await runtimeCalls(page, key)).map((each) => each.capability)).toEqual([]);
+    expect(read, "probe: 0.6's data read was refused").toBe("not_allowed");
+    expect(
+      (await runtimeCalls(page, key)).map((each) => each.capability),
+      "probe: no handler was asked",
+    ).toEqual([]);
   });
 
   test("a method above the viewer's level: forbidden, its handler never asked", async ({
@@ -351,6 +359,7 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
         view.frame,
         `return (await porthole.use("db")).set("votes/vic", { choice: "a" });`,
       ),
+      "probe: a viewer's db write was refused",
     ).toEqual({ code: "forbidden" });
     expect(
       await settled(view.frame, `return (await porthole.use("db")).get("votes/vic");`),
@@ -364,20 +373,26 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
         interact.frame,
         `return (await porthole.use("artifact")).publish({ base: "ver_1", files: { "a.txt": "x" } });`,
       ),
+      "probe: an interactor's publish was refused",
     ).toEqual({ code: "forbidden" });
     const sent = await raw(interact.frame, {
       capability: "artifact",
       method: "publish",
       args: { base: "ver_1", files: { "a.txt": { text: "x" } } },
     });
-    expect(sent.error?.data?.code).toBe("forbidden");
+    expect(sent.error?.data?.code, "probe: an interactor's publish sent anyway was refused").toBe(
+      "forbidden",
+    );
     expect(
       (await runtimeCalls(page, view.key)).map((each) => [
         each.capability,
         (each.args as { op: string }).op,
       ]),
+      "probe: only the viewer's db read reached a handler",
     ).toEqual([["db", "get"]]);
-    expect(await runtimeCalls(page, interact.key)).toEqual([]);
+    expect(await runtimeCalls(page, interact.key), "probe: no publish reached a handler").toEqual(
+      [],
+    );
   });
 
   test("a resource outside the page's data names: refused with a viewer and without one, its handler never asked", async ({
@@ -395,7 +410,7 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
       expect
         .soft(
           await settled(frame, `return (await porthole.use("data")).read("app://outside-list");`),
-          who,
+          `probe: ${who}`,
         )
         .toEqual({ code: "not_allowed" });
       const sent = await raw(frame, {
@@ -403,7 +418,7 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
         method: "read",
         args: { uri: "app://outside-list" },
       });
-      expect.soft(sent.error?.data?.code, who).toBe("not_allowed");
+      expect.soft(sent.error?.data?.code, `probe: ${who}`).toBe("not_allowed");
       expect
         .soft(
           await settled(frame, `return (await porthole.use("data")).read("app://allowed");`),
@@ -413,7 +428,7 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
       expect
         .soft(
           (await runtimeCalls(page, key)).map((each) => (each.args as { uri: string }).uri),
-          who,
+          `probe: ${who}`,
         )
         .toEqual(["app://allowed"]);
     }
@@ -434,7 +449,7 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
     const failed = () =>
       frame.evaluate(() => (window as unknown as { failed: string[] }).failed.length);
     // The first read, cold: refused for its level.
-    await expect.poll(failed).toBe(1);
+    await expect.poll(failed, { message: "probe: the cold read was refused" }).toBe(1);
     await page.evaluate(
       ([each]) =>
         (
@@ -445,7 +460,7 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
       [key],
     );
     // The read the push announced: refused the same.
-    await expect.poll(failed).toBe(2);
+    await expect.poll(failed, { message: "probe: the pushed read was refused" }).toBe(2);
     expect(
       await frame.evaluate(() => {
         const { heard, failed: codes } = window as unknown as {
@@ -454,10 +469,12 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
         };
         return { heard, codes };
       }),
+      "probe: content heard no result, both reads forbidden",
     ).toEqual({ heard: [], codes: ["forbidden", "forbidden"] });
-    expect((await runtimeCalls(page, key)).map((each) => each.capability)).toEqual([
-      "subscribeData",
-    ]);
+    expect(
+      (await runtimeCalls(page, key)).map((each) => each.capability),
+      "probe: no read reached a handler",
+    ).toEqual(["subscribeData"]);
   });
 
   test("a person's own data is theirs: another person's is refused, never reaching the service", async ({
@@ -485,17 +502,21 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
     });
     expect(
       await settled(bob.frame, `return (await porthole.use("db")).get("data/users/ada/prefs");`),
+      "probe: another person's get was refused",
     ).toEqual({ code: "forbidden" });
     expect(
       await settled(bob.frame, `return (await porthole.use("db")).query("data/users/ada");`),
+      "probe: another person's query was refused",
     ).toEqual({ code: "forbidden" });
     expect(
       await settled(bob.frame, `return (await porthole.use("db")).get("data/users/me/prefs");`),
+      "probe: a person's own data is not another's",
     ).toMatchObject({ value: { exists: false } });
     const bobs = (await runtimeCalls(page, key)).filter((each) => each.viewer === "bob");
-    expect(bobs.map((each) => (each.args as { path?: string }).path)).toEqual([
-      "data/users/bob/prefs",
-    ]);
+    expect(
+      bobs.map((each) => (each.args as { path?: string }).path),
+      "probe: only the person's own path reached the service",
+    ).toEqual(["data/users/bob/prefs"]);
   });
 
   test("comments are write-only: the composer opens from a click, content hears only that", async ({
@@ -528,16 +549,22 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
         ),
       )
       .not.toBe("null");
-    expect(await frame.evaluate(() => (window as unknown as { opened: unknown }).opened)).toBe(
-      false,
-    );
-    expect(await frame.evaluate(() => (window as unknown as { keys: string[] }).keys)).toEqual([
-      "open",
-    ]);
+    expect(
+      await frame.evaluate(() => (window as unknown as { opened: unknown }).opened),
+      "probe: content heard only whether the composer opened",
+    ).toBe(false);
+    expect(
+      await frame.evaluate(() => (window as unknown as { keys: string[] }).keys),
+      "probe: comments has open alone",
+    ).toEqual(["open"]);
     expect(
       (await raw(frame, { capability: "comments", method: "list", args: {} })).error?.data?.code,
+      "probe: a comments list was refused",
     ).toBe("not_allowed");
-    expect((await runtimeCalls(page, key)).map((each) => each.capability)).toEqual(["comments"]);
+    expect(
+      (await runtimeCalls(page, key)).map((each) => each.capability),
+      "probe: only the open reached a handler",
+    ).toEqual(["comments"]);
   });
 });
 
@@ -585,10 +612,12 @@ test.describe("the asset library (P089)", () => {
         ),
       });
       await expect
-        .poll(() => frame.evaluate(() => document.documentElement.dataset.settled ?? ""))
+        .poll(() => frame.evaluate(() => document.documentElement.dataset.settled ?? ""), {
+          message: `probe: ${preset}, trusted ${trusted}: the script's load`,
+        })
         .toBe(runs ? "load" : "error");
       const ran = await frame.evaluate(() => document.documentElement.dataset.blob ?? "");
-      expect(ran, `${preset}, trusted ${trusted}`).toBe(runs ? "ran" : "");
+      expect(ran, `probe: ${preset}, trusted ${trusted}`).toBe(runs ? "ran" : "");
     }
   });
 
@@ -616,7 +645,7 @@ test.describe("the asset library (P089)", () => {
       await tab.goto(location.url);
       await tab.waitForTimeout(500);
       const ran = await tab.evaluate(() => document.documentElement.dataset.blob ?? "");
-      expect(ran, preset).toBe(runs ? "ran" : "");
+      expect(ran, `probe: ${preset}`).toBe(runs ? "ran" : "");
       await tab.close();
     }
   });
@@ -716,7 +745,10 @@ test.describe("the asset library (P089)", () => {
     expect(answer?.status()).toBe(200);
     expect(answer?.headers()["content-type"]).toBe("image/svg+xml");
     await tab.waitForTimeout(300);
-    expect(await tab.evaluate(() => document.documentElement.getAttribute("data-ran"))).toBeNull();
+    expect(
+      await tab.evaluate(() => document.documentElement.getAttribute("data-ran")),
+      "probe: the asset's script ran",
+    ).toBeNull();
     await tab.close();
   });
 

@@ -4816,12 +4816,25 @@ P097's CI triggers. From the audit of 2026-10-19 (V01, V02).
    amending P097's `branches: ["**"]`), with `pull_request` and `workflow_dispatch`. A pull
    request's push ran every job twice, the controls with them; a push run can't be re-run by the
    agents, a pull request's can. The release gate reads main's push and dispatch runs, unchanged;
-   `test/release.test.ts` pins the triggers.
+   `test/release.test.ts` pins the triggers. AGENTS.md says how to get CI before a pull request.
+5. **After its review, a probe fails for the right reason, named exactly.** (a) A failed `expect`
+   counted, a setup check too (`goto` not 200, a positive control): now a probe's deciding
+   `expect` carries `probe: ` at the start of its message (`VERDICT`), in the shipped probes
+   (`src/conformance`) and the spec tests the registry names, and only a failure whose error
+   starts with it counts; the `nonce` control has a probe of its own in `strict-csp.spec.ts` (the
+   shell drew and ran the content), since the suite's probes fail there before their verdicts.
+   (b) "Fails nothing" was a label: every control that names no test on an engine now says why
+   (`holds`), either by a combined control that takes its walls out with another's and fails
+   something there (`link-rule,navigate-guard` is new for `link-rule`), or with a reason why no
+   probe can see the wall (`self`: an opaque frame's `'self'` matches no origin; `url-origin` on
+   WebKit, which keeps no framed cookie); the test checks the cover. (c) Entries named a part of a
+   title; now a probe's `[id]`, a served case's id before its colon, or a test's whole title. (d)
+   A test declared to fail (`test.fail`) that passes fails the control, unless it is a target.
 
 **Why.** PRINCIPLE 6: a wall never seen to fail proves nothing, and a check that says a wall was
 seen to fail when its run never happened is worse than no check. CI's "every control" was 7 of
-the 38 there were (51 with P094's, P095's, P099's, P100's and P101's); the rest ran by hand, when someone remembered, and what DESIGN.md said
-they fail had drifted from what they do.
+the 38 there were (52 now, with P094's, P095's, P099's, P100's and P101's); the rest ran by hand,
+when someone remembered, and what DESIGN.md said they fail had drifted from what they do.
 **Rejected.**
 - Requiring exit 0, or exit 1, alone: either is what a broken run can give.
 - Counting any failure of a named test: a browser that can't launch fails every test, and a spec

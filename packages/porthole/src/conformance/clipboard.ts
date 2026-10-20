@@ -57,10 +57,14 @@ async function click(display: LaunchedDisplay, selector: string): Promise<void> 
   await (await display.frame()).locator(selector).click();
 }
 
-async function bodyData(display: LaunchedDisplay, name: string): Promise<string> {
+async function bodyData(display: LaunchedDisplay, name: string, verdict?: string): Promise<string> {
   const frame = await display.frame();
+  // A probe's verdict where the answer is a wall's (P096): none coming fails it, not its setup.
   await expect
-    .poll(() => frame.locator("body").getAttribute(`data-${name}`), { timeout: 5_000 })
+    .poll(() => frame.locator("body").getAttribute(`data-${name}`), {
+      timeout: 5_000,
+      ...(verdict === undefined ? {} : { message: verdict }),
+    })
     .not.toBeNull();
   return (await frame.locator("body").getAttribute(`data-${name}`)) ?? "";
 }
@@ -92,10 +96,21 @@ export const CLIPBOARD_PROBES: readonly Probe[] = [
       });
       await seed(context.page, SEED);
       await click(display, "#go");
-      expect(await bodyData(display, "text")).toMatch(/^refused/u);
-      expect(await bodyData(display, "item")).toMatch(/^refused/u);
-      expect(await bodyData(display, "read")).toMatch(/^refused/u);
-      expect(await pasted(context.page), "the clipboard still holds the person's own").toBe(SEED);
+      expect(
+        await bodyData(display, "text", "probe: writeText is refused"),
+        "probe: writeText is refused",
+      ).toMatch(/^refused/u);
+      expect(
+        await bodyData(display, "item", "probe: write is refused"),
+        "probe: write is refused",
+      ).toMatch(/^refused/u);
+      expect(
+        await bodyData(display, "read", "probe: readText is refused"),
+        "probe: readText is refused",
+      ).toMatch(/^refused/u);
+      expect(await pasted(context.page), "probe: the clipboard still holds the person's own").toBe(
+        SEED,
+      );
     },
   },
   {
@@ -125,8 +140,13 @@ export const CLIPBOARD_PROBES: readonly Probe[] = [
       });
       await seed(context.page, SEED);
       await click(display, "#go");
-      expect(await bodyData(display, "copied")).not.toContain("true");
-      expect(await pasted(context.page), "the clipboard still holds the person's own").toBe(SEED);
+      expect(
+        await bodyData(display, "copied", "probe: execCommand copied or cut"),
+        "probe: execCommand copied or cut",
+      ).not.toContain("true");
+      expect(await pasted(context.page), "probe: the clipboard still holds the person's own").toBe(
+        SEED,
+      );
     },
   },
   {
@@ -156,8 +176,14 @@ export const CLIPBOARD_PROBES: readonly Probe[] = [
       await context.page.keyboard.press("ControlOrMeta+C");
       await settle(200);
       // The positive control: the person's own copy works, and copies what they selected.
-      expect((await pasted(context.page)).trim()).toBe("porthole-selected-text");
-      expect(await frame.locator("body").getAttribute("data-ran")).toBeNull();
+      expect(
+        (await pasted(context.page)).trim(),
+        "probe: the clipboard holds what the person selected",
+      ).toBe("porthole-selected-text");
+      expect(
+        await frame.locator("body").getAttribute("data-ran"),
+        "probe: a copy listener of the content's ran",
+      ).toBeNull();
     },
   },
   {
@@ -176,12 +202,16 @@ export const CLIPBOARD_PROBES: readonly Probe[] = [
   copyText("copied on load").then(${settled("onload")});
 </script>`,
       });
-      expect(await bodyData(display, "onload")).toMatch(/^refused/u);
+      expect(
+        await bodyData(display, "onload", "probe: copyText without a click is refused"),
+        "probe: copyText without a click is refused",
+      ).toMatch(/^refused/u);
       await click(display, "#copy");
       expect(await bodyData(display, "result")).toBe("true");
-      expect(await display.calls()).toEqual([
-        { capability: "copyText", args: { text: "npm test -- --run" } },
-      ]);
+      expect(
+        await display.calls(),
+        "probe: only the click's whole text reached the host's handler",
+      ).toEqual([{ capability: "copyText", args: { text: "npm test -- --run" } }]);
     },
   },
 ];

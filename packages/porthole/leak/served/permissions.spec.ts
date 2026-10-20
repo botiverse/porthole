@@ -108,15 +108,15 @@ test("a url-mode frame gets no clipboard writes or full screen unless the host d
     description: JSON.stringify({ browserName, closed, open }),
   });
   const seen = JSON.stringify({ closed, open });
-  expect(closed.fullscreenEnabled, `full screen, by default: ${seen}`).toBe(false);
-  expect(closed.fullscreen, `full screen, by default: ${seen}`).not.toBe("ok");
+  expect(closed.fullscreenEnabled, `probe: full screen, by default: ${seen}`).toBe(false);
+  expect(closed.fullscreen, `probe: full screen, by default: ${seen}`).not.toBe("ok");
   expect(open.fullscreenEnabled, `full screen, delegated: ${seen}`).toBe(true);
   expect(open.clipboard, `clipboard, delegated: ${seen}`).toBe("ok");
   // Measured (P049): only Chromium enforces the clipboard-write policy feature. WebKit and Firefox
   // let any frame write the clipboard in a click, delegated or not: there the host's choice
   // changes nothing, and default-off is no wall.
   if (browserName === "chromium") {
-    expect(closed.clipboard, `clipboard, by default: ${seen}`).toMatch(/^NotAllowedError/u);
+    expect(closed.clipboard, `probe: clipboard, by default: ${seen}`).toMatch(/^NotAllowedError/u);
   } else {
     expect(closed.clipboard, `clipboard, by default: ${seen}`).toBe("ok");
   }
