@@ -157,16 +157,24 @@ document.getElementById("go").addEventListener("click", async () => {
     const { frame, shown } = await showFiles(page, id, "1");
     const base = frame.url();
     await frame.locator("#next").click();
-    await expect(frame.locator("#about")).toHaveText("the about page");
-    expect(frame.url()).toBe(`${base}about`);
+    await expect(
+      frame.locator("#about"),
+      "probe: the link opened the about page in the frame",
+    ).toHaveText("the about page");
+    expect(frame.url(), "probe: the frame is on the about page").toBe(`${base}about`);
     await frame.locator("#back").click();
-    await expect(frame.locator("#title")).toHaveText("Many files");
+    await expect(
+      frame.locator("#title"),
+      "probe: the link back opened the first page in the frame",
+    ).toHaveText("Many files");
     // The display goes on past the wait the host gives a late notice (P098): a page nobody
     // announced (the guard's control, navigate-guard) starts it again only then.
     await page.waitForTimeout(LATE_NOTICE_MS + 500);
     const record = await shown.read();
-    expect(record.outcomes).toEqual([{ state: "loaded" }]);
-    expect(record.navigationsBlocked).toEqual([]);
+    expect(record.outcomes, "probe: the display went on, loaded once").toEqual([
+      { state: "loaded" },
+    ]);
+    expect(record.navigationsBlocked, "probe: the host blocked no navigation").toEqual([]);
   });
 
   for (const lost of ["dropped", "late"] as const) {
@@ -211,14 +219,22 @@ document.getElementById("go").addEventListener("click", async () => {
       }, lost);
       const base = frame.url();
       await frame.locator("#next").click();
-      await expect(frame.locator("#about")).toHaveText("the about page");
-      expect(frame.url()).toBe(`${base}about`);
+      await expect(
+        frame.locator("#about"),
+        "probe: the link opened the about page in the frame",
+      ).toHaveText("the about page");
+      expect(frame.url(), "probe: the frame is on the about page").toBe(`${base}about`);
       await frame.locator("#back").click();
-      await expect(frame.locator("#title")).toHaveText("Many files");
+      await expect(
+        frame.locator("#title"),
+        "probe: the link back opened the first page in the frame",
+      ).toHaveText("Many files");
       await page.waitForTimeout(LATE_NOTICE_MS + 500);
       const record = await shown.read();
-      expect(record.outcomes).toEqual([{ state: "loaded" }]);
-      expect(record.navigationsBlocked).toEqual([]);
+      expect(record.outcomes, "probe: the display went on, loaded once").toEqual([
+        { state: "loaded" },
+      ]);
+      expect(record.navigationsBlocked, "probe: the host blocked no navigation").toEqual([]);
     });
   }
 
@@ -240,18 +256,27 @@ go("text", "notes.txt"); go("root", "/"); go("away", "/__porthole/d/aaaaaaaaaaaa
     const served = await harness();
     const { frame, shown } = await showFiles(page, id, "1");
     const before = served.requests.length;
+    const opened = () =>
+      served.requests
+        .slice(before)
+        .map((each) => new URL(each).pathname)
+        .filter(
+          (each) =>
+            each.endsWith("/notes.txt") || each === "/" || each.startsWith("/__porthole/d/"),
+        );
+    // Each click is checked before the next: a page that went away takes the next button with it,
+    // and the guard's control (navigate-guard) must fail this by its assertion (P096).
     for (const target of ["#file", "#text", "#root", "#away"]) {
       await frame.locator(target).click();
+      await page.waitForTimeout(500);
+      expect(opened(), `probe: ${target} opened nothing`).toEqual([]);
     }
-    await frame.waitForTimeout(1_000);
-    await expect(frame.locator("#here")).toHaveText("here");
-    const asked = served.requests.slice(before).map((each) => new URL(each).pathname);
-    expect(
-      asked.filter(
-        (each) => each.endsWith("/notes.txt") || each === "/" || each.startsWith("/__porthole/d/"),
-      ),
-    ).toEqual([]);
-    expect((await shown.read()).outcomes).toEqual([{ state: "loaded" }]);
+    await page.waitForTimeout(1_000);
+    await expect(frame.locator("#here"), "probe: the page stayed").toHaveText("here");
+    expect(opened(), "probe: nothing else was opened").toEqual([]);
+    expect((await shown.read()).outcomes, "probe: the display went on, loaded once").toEqual([
+      { state: "loaded" },
+    ]);
   });
 
   test("a file outside the set is a 404, and so is every spelling of a way out", async ({
@@ -292,7 +317,7 @@ go("text", "notes.txt"); go("root", "/"); go("away", "/__porthole/d/aaaaaaaaaaaa
       }
       return answers;
     }, Object.keys(expected));
-    expect(statuses).toEqual(expected);
+    expect(statuses, "probe: each path outside the set was refused").toEqual(expected);
   });
 
   test("an .html published as .txt is text, never sniffed into a page", async ({
@@ -343,10 +368,21 @@ s.onerror = () => { document.documentElement.dataset.script = "refused"; }; docu
 </script>`,
     });
     const stolen = await showFiles(page, thief, "1");
-    await expect.poll(() => flag(stolen.frame, "got")).toBe("refused");
-    await expect.poll(() => flag(stolen.frame, "script")).toBe("refused");
+    await expect
+      .poll(() => flag(stolen.frame, "got"), {
+        message: "probe: another artifact's read was refused",
+      })
+      .toBe("refused");
+    await expect
+      .poll(() => flag(stolen.frame, "script"), {
+        message: "probe: another artifact's script load was refused",
+      })
+      .toBe("refused");
     // Its CSP stopped them before any request.
-    expect(served.requests.filter((each) => each.startsWith(base)).length).toBe(before);
+    expect(
+      served.requests.filter((each) => each.startsWith(base)).length,
+      "probe: no request reached the owner's files",
+    ).toBe(before);
 
     // A page elsewhere, with no CSP of its own: no CORS, and the resource policy keeps it the
     // owner's origin's.
@@ -374,7 +410,11 @@ s.onerror = () => { document.documentElement.dataset.script = "refused"; }; docu
       });
       return { read, script, image };
     }, base);
-    expect(results).toEqual({ read: "refused", script: "refused", image: "refused" });
+    expect(results, "probe: a page elsewhere read none of the files").toEqual({
+      read: "refused",
+      script: "refused",
+      image: "refused",
+    });
     await elsewhere.close();
   });
 });
@@ -406,17 +446,31 @@ setTimeout(() => Promise.reject(new Error("at " + location.href)), 50);
         return record.errors.length + record.navigationsBlocked.length;
       })
       .toBeGreaterThanOrEqual(5);
-    await frame.waitForTimeout(500);
+    // The host page's clock, not the frame's: a frame that navigated away is gone (P096).
+    await page.waitForTimeout(500);
     const record = await shown.read();
     const said = [...record.errors, ...record.contentErrors, ...record.navigationsBlocked];
-    expect(said.filter((each) => each.includes("/__porthole/f/"))).toEqual([]);
+    expect(
+      said.filter((each) => each.includes("/__porthole/f/")),
+      "probe: nothing the host heard names the sealed address",
+    ).toEqual([]);
     // What it says names the page's own files as ./ instead.
-    expect(record.navigationsBlocked).toEqual(
-      expect.arrayContaining(["./notes.txt", "./data.json?x=1"]),
-    );
-    expect(said.some((each) => each.includes("./missing.js"))).toBe(true);
-    expect(said.some((each) => each.includes("boom from ./boom.mjs"))).toBe(true);
-    expect(said.some((each) => each.includes("at ./"))).toBe(true);
+    expect(
+      record.navigationsBlocked,
+      "probe: blocked navigations name the page's files as ./",
+    ).toEqual(expect.arrayContaining(["./notes.txt", "./data.json?x=1"]));
+    expect(
+      said.some((each) => each.includes("./missing.js")),
+      "probe: the missing script is named as ./",
+    ).toBe(true);
+    expect(
+      said.some((each) => each.includes("boom from ./boom.mjs")),
+      "probe: the module's error names it as ./",
+    ).toBe(true);
+    expect(
+      said.some((each) => each.includes("at ./")),
+      "probe: the page's error names its address as ./",
+    ).toBe(true);
   });
 
   test("the shell renews its sealed address before it ends, in place; the page goes on loading its files", async ({
@@ -517,8 +571,14 @@ document.getElementById("go").addEventListener("click", async () => {
       );
       return { read, imported };
     });
-    expect(seen).toEqual({ read: "refused", imported: "refused" });
-    expect(host.requests.slice(before).filter((each) => each.includes("/v/1/"))).toEqual([]);
+    expect(seen, "probe: the other version's files were refused").toEqual({
+      read: "refused",
+      imported: "refused",
+    });
+    expect(
+      host.requests.slice(before).filter((each) => each.includes("/v/1/")),
+      "probe: no request reached the other version",
+    ).toEqual([]);
   });
 
   test("no service worker ever registers", async ({ page }) => {
@@ -536,6 +596,6 @@ document.getElementById("go").addEventListener("click", async () => {
         (error: unknown) => `refused: ${String(error).slice(0, 80)}`,
       );
     });
-    expect(registered).not.toBe("registered");
+    expect(registered, "probe: a service worker registered").not.toBe("registered");
   });
 });

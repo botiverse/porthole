@@ -209,8 +209,12 @@ describe("V03: a release waits for ci.yml on the same commit", () => {
     // The security suites are among them.
     for (const engine of ["chromium", "webkit", "firefox"]) {
       expect(requiredCiJobs).toContain(`loopback (${engine})`);
-      expect(requiredCiJobs).toContain(`controls (${engine})`);
+      // The controls, in shards (P096: a whole engine's outlast a job), and their summary.
+      for (const shard of [1, 2, 3, 4]) {
+        expect(requiredCiJobs).toContain(`controls (${engine}, ${shard}/4)`);
+      }
     }
+    expect(requiredCiJobs).toContain("controls");
     expect(requiredCiJobs).toContain("prod-shape");
     expect(requiredCiJobs).toContain("examples");
   });
@@ -243,10 +247,12 @@ describe("V03: a release waits for ci.yml on the same commit", () => {
     expect(gate?.["timeout-minutes"] ?? 0).toBeGreaterThanOrEqual(wait + 5);
   });
 
-  it("ci.yml runs on pushes to branches and by hand, and none of its jobs is skipped or allowed to fail", () => {
+  it("ci.yml runs on pushes to main, pull requests and by hand, and none of its jobs is skipped or allowed to fail", () => {
     const on = ci.on as Record<string, unknown>;
-    // Branches, never tags: a tag's run names the tag as its branch (a tag named main).
-    expect(on["push"]).toEqual({ branches: ["**"] });
+    // main, never tags: a tag's run names the tag as its branch (a tag named main). A pull
+    // request's commits run as the pull request's, once (P096).
+    expect(on["push"]).toEqual({ branches: ["main"] });
+    expect(Object.hasOwn(on, "pull_request")).toBe(true);
     // `stamp workflow run ci.yml` for a run that flaked, or a commit without one.
     expect(Object.hasOwn(on, "workflow_dispatch")).toBe(true);
     for (const [id, job] of Object.entries(ci.jobs)) {

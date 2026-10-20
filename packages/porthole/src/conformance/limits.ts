@@ -24,16 +24,42 @@ async function recorded(
   timeoutMs = 10_000,
 ): Promise<Record<string, unknown>> {
   const frame = await display.frame();
-  await expect
-    .poll(
-      () =>
-        frame
-          .evaluate(() => (window as unknown as { r?: { done?: boolean } }).r?.done === true)
-          .catch(() => false),
-      { timeout: timeoutMs },
-    )
-    .toBe(true);
+  // Each look is bounded: a frame a dialog holds (a print dialog, where the sandbox lets one open)
+  // answers no evaluation, and the probe fails by its assertion, not a test timeout (P096).
+  const done = (): Promise<boolean> =>
+    Promise.race([
+      frame
+        .evaluate(() => (window as unknown as { r?: { done?: boolean } }).r?.done === true)
+        .catch(() => false),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1_000)),
+    ]);
+  await expect.poll(done, { timeout: timeoutMs }).toBe(true);
   return frame.evaluate(() => (window as unknown as { r: Record<string, unknown> }).r);
+}
+
+/**
+ * What the content recorded, or, where its document went before it could say, that as the probe's
+ * verdict (P096): started again (navigated away), or written over by `document.write` once the
+ * shell's lock is gone (its own element `own` gone): the escape itself, not a probe that failed to
+ * start.
+ */
+async function replacedOrRecorded(
+  display: LaunchedDisplay,
+  own: string,
+): Promise<Record<string, unknown>> {
+  try {
+    return await recorded(display);
+  } catch (error) {
+    const restarts = (await display.events()).filter((event) => event.type === "navigated");
+    expect(restarts, "probe: the content's document was replaced before it reported").toEqual([]);
+    const frame = await display.frame().catch(() => undefined);
+    const kept = await frame
+      ?.locator(own)
+      .count()
+      .catch(() => undefined);
+    expect(kept, "probe: the content's document was written over before it reported").not.toBe(0);
+    throw error;
+  }
 }
 
 /** Counts what the page shows the person beyond the frame: dialogs, downloads, new windows. */
@@ -73,7 +99,11 @@ export const LIMIT_PROBES: readonly Probe[] = [
       });
       const frame = await display.frame();
       await expect(frame.locator("#bar")).toBeAttached();
-      await expect.poll(async () => Math.round((await display.box()).height)).toBe(400);
+      await expect
+        .poll(async () => Math.round((await display.box()).height), {
+          message: "probe: the frame is its box's height",
+        })
+        .toBe(400);
       await frame.evaluate(() => window.scrollTo(0, 600));
       const seen = await frame.evaluate(() => ({
         scrolled: window.scrollY,
@@ -82,11 +112,16 @@ export const LIMIT_PROBES: readonly Probe[] = [
           (document.getElementById("bar") as HTMLElement).getBoundingClientRect().top,
         ),
       }));
-      expect(seen).toEqual({ scrolled: 600, scrolls: true, barTop: 0 });
+      expect(seen, "probe: the page scrolls itself and position: fixed stays put").toEqual({
+        scrolled: 600,
+        scrolls: true,
+        barTop: 0,
+      });
       await settle(500);
-      expect(Math.round((await display.box()).height), "it doesn't grow with its content").toBe(
-        400,
-      );
+      expect(
+        Math.round((await display.box()).height),
+        "probe: it doesn't grow with its content",
+      ).toBe(400);
     },
   },
   {
@@ -115,13 +150,14 @@ export const LIMIT_PROBES: readonly Probe[] = [
         events: (window as unknown as { events: number }).events,
         prefers: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light",
       }));
-      expect(seen.theme).toBeNull();
-      expect(seen.text).toBe(light["--color-text-primary"]);
-      expect(seen.events).toBe(0);
+      expect(seen.theme, "probe: the page took a theme").toBeNull();
+      expect(seen.text, "probe: the page stays light").toBe(light["--color-text-primary"]);
+      expect(seen.events, "probe: the page heard a theme change").toBe(0);
       const element = await frame.frameElement();
-      expect(await element.evaluate((node) => (node as HTMLElement).style.colorScheme)).toBe(
-        "light",
-      );
+      expect(
+        await element.evaluate((node) => (node as HTMLElement).style.colorScheme),
+        "probe: the frame element stays light",
+      ).toBe("light");
       context.measured(`prefers-color-scheme inside, the person on dark: ${seen.prefers}`);
     },
   },
@@ -137,16 +173,21 @@ export const LIMIT_PROBES: readonly Probe[] = [
         content: thrower,
       });
       await expect
-        .poll(async () =>
-          (await reported.errors()).some(
-            (each) => each.includes("porthole-thrown") || each.includes("Script error"),
-          ),
+        .poll(
+          async () =>
+            (await reported.errors()).some(
+              (each) => each.includes("porthole-thrown") || each.includes("Script error"),
+            ),
+          { message: "probe: what content threw reached the host" },
         )
         .toBe(true);
       const quiet = await context.launch({ config: inline({ errors: "none" }), content: thrower });
       await expect((await quiet.frame()).locator("p")).toHaveText("x");
       await settle(800);
-      expect(await quiet.errors()).toEqual([]);
+      expect(
+        await quiet.errors(),
+        "probe: an error reached a host that didn't declare reportError",
+      ).toEqual([]);
     },
   },
   {
@@ -175,15 +216,21 @@ export const LIMIT_PROBES: readonly Probe[] = [
         await context.launch({ config: presets.mcpApp(), content: "", document: page }),
       ]) {
         await expect
-          .poll(async () => (await display.errors()).includes("porthole-after"))
+          .poll(async () => (await display.errors()).includes("porthole-after"), {
+            message: "probe: every logged error reached the host",
+          })
           .toBe(true);
         const errors = await display.errors();
-        expect(errors).toContain('{"name":"porthole-cycle","self":"[Circular]"}');
-        expect(errors).toContain('{"big":"5n"}');
+        expect(errors, "probe: a cycle is reported as bounded text").toContain(
+          '{"name":"porthole-cycle","self":"[Circular]"}',
+        );
+        expect(errors, "probe: a BigInt is reported as text").toContain('{"big":"5n"}');
         const graph = errors.find((each) => each.startsWith('{"a":{"a":'));
-        expect(graph, "the shared graph, reported").toBeDefined();
-        expect(graph).toContain('"b":"[Repeated]"');
-        expect(graph?.length).toBeLessThanOrEqual(2_000);
+        expect(graph, "probe: the shared graph, reported").toBeDefined();
+        expect(graph, "probe: a shared graph's repeats are cut").toContain('"b":"[Repeated]"');
+        expect(graph?.length, "probe: the shared graph's report is bounded").toBeLessThanOrEqual(
+          2_000,
+        );
       }
     },
   },
@@ -210,19 +257,21 @@ export const LIMIT_PROBES: readonly Probe[] = [
       });
       const verdict = await context.result(display, 15_000);
       await settle();
-      expect(verdict).toMatchObject({
+      expect(verdict, "probe: what the sandbox blocks fails quietly in the content").toMatchObject({
         fetch: "rejected TypeError",
         image: "failed",
         script: "undefined",
         after: "ran",
       });
-      expect(canary.requests()).toEqual([]);
-      expect(seen.dialogs).toEqual([]);
+      expect(canary.requests(), "probe: nothing reached the canary").toEqual([]);
+      expect(seen.dialogs, "probe: a dialog was shown").toEqual([]);
       // Where reportError is declared, each block is reported to the host (the manual says where
       // it goes, by \`errors\`, #4); where it isn't, nothing is.
       await expect
-        .poll(async () =>
-          (await display.errors()).some((each) => each.startsWith("Blocked by the sandbox:")),
+        .poll(
+          async () =>
+            (await display.errors()).some((each) => each.startsWith("Blocked by the sandbox:")),
+          { message: "probe: the host heard of each block where reportError is declared" },
         )
         .toBe(true);
       const quiet = await context.launch({
@@ -233,11 +282,17 @@ export const LIMIT_PROBES: readonly Probe[] = [
           `<img src="${c}/quiet.png">`,
         ),
       });
-      expect(await context.result(quiet, 15_000)).toMatchObject({ fetch: "rejected TypeError" });
+      expect(
+        await context.result(quiet, 15_000),
+        "probe: the fetch rejects where reportError isn't declared",
+      ).toMatchObject({ fetch: "rejected TypeError" });
       await settle();
-      expect(await quiet.errors()).toEqual([]);
-      expect(canary.requests()).toEqual([]);
-      expect(seen.dialogs).toEqual([]);
+      expect(
+        await quiet.errors(),
+        "probe: a block reached a host that didn't declare reportError",
+      ).toEqual([]);
+      expect(canary.requests(), "probe: nothing reached the canary").toEqual([]);
+      expect(seen.dialogs, "probe: a dialog was shown").toEqual([]);
     },
   },
   {
@@ -274,8 +329,11 @@ export const LIMIT_PROBES: readonly Probe[] = [
           "the page's own CSP, which an opaque frame inherits, blocks data: images or inline styles (img-src, style-src): opaque content here can't inline its assets, whatever its config",
         );
       }
-      expect(verdict).toMatchObject({ inline: "loaded", styled: "37px" });
-      expect(canary.requests()).toEqual([]);
+      expect(verdict, "probe: inline data: images and <style> CSS work").toMatchObject({
+        inline: "loaded",
+        styled: "37px",
+      });
+      expect(canary.requests(), "probe: nothing reached the canary").toEqual([]);
     },
   },
   {
@@ -299,9 +357,13 @@ export const LIMIT_PROBES: readonly Probe[] = [
       });
       await click(display, "#go");
       const verdict = await recorded(display);
-      expect(verdict).toMatchObject({ alert: "undefined", confirm: "false", prompt: "null" });
-      expect(verdict.ms as number).toBeLessThan(1_000);
-      expect(seen.dialogs).toEqual([]);
+      expect(verdict, "probe: alert, confirm and prompt return without asking").toMatchObject({
+        alert: "undefined",
+        confirm: "false",
+        prompt: "null",
+      });
+      expect(verdict.ms as number, "probe: a dialog held the content").toBeLessThan(1_000);
+      expect(seen.dialogs, "probe: a dialog was shown").toEqual([]);
     },
   },
   {
@@ -321,12 +383,23 @@ export const LIMIT_PROBES: readonly Probe[] = [
   });
 </script>`,
       });
-      await click(display, "#go");
+      // A print dialog holds the click that opened it, and the frame, where the sandbox lets one
+      // open (Firefox with allow-modals): the click is bounded (15 s, so a slow click on a busy
+      // runner isn't taken for a held one), and a click still held is this probe's verdict
+      // failing, not a test timeout (P096).
+      const held = await Promise.race([
+        click(display, "#go").then(
+          () => false,
+          () => false,
+        ),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 15_000)),
+      ]);
+      expect(held, "probe: print() opened a dialog that held the click").toBe(false);
       const verdict = await recorded(display);
-      expect(verdict.print).toBe("undefined");
-      expect(verdict.beforeprint).toBeUndefined();
-      expect(verdict.afterprint).toBeUndefined();
-      expect(seen.dialogs).toEqual([]);
+      expect(verdict.print, "probe: print() returns nothing").toBe("undefined");
+      expect(verdict.beforeprint, "probe: a print started").toBeUndefined();
+      expect(verdict.afterprint, "probe: a print finished").toBeUndefined();
+      expect(seen.dialogs, "probe: a dialog was shown").toEqual([]);
     },
   },
   {
@@ -349,7 +422,7 @@ export const LIMIT_PROBES: readonly Probe[] = [
         await click(display, selector);
       }
       await settle(1_000);
-      expect(seen.downloads).toEqual([]);
+      expect(seen.downloads, "probe: a download started").toEqual([]);
     },
   },
   {
@@ -373,9 +446,9 @@ export const LIMIT_PROBES: readonly Probe[] = [
         r: (window as unknown as { r: Record<string, unknown> }).r,
         form: document.getElementById("form") !== null,
       }));
-      expect(state.form, "the frame stayed on its content").toBe(true);
-      expect(state.r.clicked).toBe(true);
-      expect(canary.requests()).toEqual([]);
+      expect(state.form, "probe: the frame stayed on its content").toBe(true);
+      expect(state.r.clicked, "probe: a button's click handler runs").toBe(true);
+      expect(canary.requests(), "probe: the form submitted to the canary").toEqual([]);
       context.measured(`submit event fired: ${JSON.stringify(state.r.submitEvent ?? 0)} time(s)`);
     },
   },
@@ -393,9 +466,12 @@ export const LIMIT_PROBES: readonly Probe[] = [
         await click(display, selector);
       }
       await settle(800);
-      await expect((await display.frame()).locator("#still")).toHaveText("still here");
-      expect(seen.windows).toEqual([]);
-      expect(await display.calls(), "nothing went to the host").toEqual([]);
+      await expect(
+        (await display.frame()).locator("#still"),
+        "probe: the frame stayed on its content",
+      ).toHaveText("still here");
+      expect(seen.windows, "probe: a window opened").toEqual([]);
+      expect(await display.calls(), "probe: nothing went to the host").toEqual([]);
     },
   },
   {
@@ -414,24 +490,26 @@ export const LIMIT_PROBES: readonly Probe[] = [
       const closed = await context.launch({ config: inline(), content });
       await click(closed, "#open");
       const verdict = await recorded(closed);
-      expect(["null", "throws"]).toContain(verdict.open);
+      expect(["null", "throws"], "probe: window.open opened a window").toContain(verdict.open);
       context.measured(`window.open: ${String(verdict.open)}`);
       await click(closed, "#blank");
       await settle(800);
-      expect(seen.windows).toEqual([]);
+      expect(seen.windows, "probe: a window opened").toEqual([]);
       // With openLink declared, the link asks the app instead (the person says no here).
       const linked = await context.launch({
         config: inline({ capabilities: { openLink: {} } }),
         content,
       });
       await click(linked, "#blank");
-      const asked = await linked.answerNextConfirmation(false);
-      expect(asked).toMatchObject({
+      const asked = await linked.answerNextConfirmation(false).catch(() => undefined);
+      // A matcher on nothing says nothing of the message: none asked is said first (P096).
+      expect(asked, "probe: the link asked the app").toBeDefined();
+      expect(asked, "probe: the link asked the app").toMatchObject({
         capability: "openLink",
         args: { url: "https://example.com/report" },
       });
       await settle(500);
-      expect(seen.windows).toEqual([]);
+      expect(seen.windows, "probe: a window opened after the person said no").toEqual([]);
     },
   },
   {
@@ -476,11 +554,13 @@ export const LIMIT_PROBES: readonly Probe[] = [
         buffer: Buffer.from("file text"),
       });
       const verdict = await recorded(display);
-      expect(String(verdict.media)).toMatch(/^(rejected|absent)/u);
-      expect(String(verdict.location)).toMatch(/^(denied 1|absent)$/u);
-      expect(String(verdict.share)).toMatch(/^(rejected|absent)/u);
-      expect(verdict.file).toBe("file text");
-      expect(seen.dialogs).toEqual([]);
+      expect(String(verdict.media), "probe: camera and microphone are denied").toMatch(
+        /^(rejected|absent)/u,
+      );
+      expect(String(verdict.location), "probe: location is denied").toMatch(/^(denied 1|absent)$/u);
+      expect(String(verdict.share), "probe: sharing is denied").toMatch(/^(rejected|absent)/u);
+      expect(verdict.file, "probe: a chosen file can be read").toBe("file text");
+      expect(seen.dialogs, "probe: a dialog was shown").toEqual([]);
       context.measured(
         `camera/microphone: ${String(verdict.media)}; share: ${String(verdict.share)}`,
       );
@@ -509,9 +589,11 @@ export const LIMIT_PROBES: readonly Probe[] = [
           "the page's own CSP, which an opaque frame inherits, blocks blob: workers (worker-src falls back to its script-src): opaque content here gets no workers, whatever its config",
         );
       }
-      expect(verdict.worker).toBe("answered 42");
-      expect(String(verdict.serviceWorker)).toMatch(/^(absent|rejected|throws)/u);
-      expect(verdict.rtc).toBe("undefined");
+      expect(verdict.worker, "probe: a blob: worker answers").toBe("answered 42");
+      expect(String(verdict.serviceWorker), "probe: a service worker was registered").toMatch(
+        /^(absent|rejected|throws)/u,
+      );
+      expect(verdict.rtc, "probe: WebRTC is there").toBe("undefined");
       context.measured(`service worker: ${String(verdict.serviceWorker)}`);
     },
   },
@@ -540,7 +622,7 @@ export const LIMIT_PROBES: readonly Probe[] = [
           "the page's own CSP, which an opaque frame inherits, blocks data: media (media-src): opaque content here plays no inline sound, whatever its config",
         );
       }
-      expect(verdict.clicked, "play() in a click's handler").toBe("played");
+      expect(verdict.clicked, "probe: play() in a click's handler").toBe("played");
       context.measured(`play() without a click: ${String(verdict.unasked)}`);
     },
   },
@@ -556,7 +638,10 @@ export const LIMIT_PROBES: readonly Probe[] = [
     r.search = location.search;
     r.hash = location.hash;`),
       });
-      expect(await context.result(display)).toMatchObject({
+      expect(
+        await context.result(display),
+        "probe: the address is about:srcdoc with no query or hash",
+      ).toMatchObject({
         href: "about:srcdoc",
         search: "",
         hash: "",
@@ -586,13 +671,18 @@ export const LIMIT_PROBES: readonly Probe[] = [
 </script>`,
       });
       await click(display, "#go");
-      expect(await recorded(display)).toMatchObject({
+      expect(
+        await replacedOrRecorded(display, "#go"),
+        "probe: write and open throw, nested frames are removed, full screen is closed",
+      ).toMatchObject({
         write: "throws",
         open: "throws",
         frames: 0,
         fullscreen: "rejected",
       });
-      expect(["rejected", "absent"]).toContain((await recorded(display)).clipboard);
+      expect(["rejected", "absent"], "probe: the clipboard was written").toContain(
+        (await recorded(display)).clipboard,
+      );
     },
   },
   {
@@ -607,12 +697,15 @@ export const LIMIT_PROBES: readonly Probe[] = [
     localStorage.setItem("porthole-limits", "first");
     r.read = localStorage.getItem("porthole-limits");`),
       });
-      expect((await context.result(first)).read).toBe("first");
+      expect(
+        (await context.result(first)).read,
+        "probe: storage works while the frame is shown",
+      ).toBe("first");
       const second = await context.launch({
         config: inline(),
         content: attack(`r.read = String(localStorage.getItem("porthole-limits"));`),
       });
-      expect((await context.result(second)).read, "another frame's storage").toBe("null");
+      expect((await context.result(second)).read, "probe: another frame's storage").toBe("null");
     },
   },
 ];

@@ -65,12 +65,18 @@ async function expectNoChild(
   display: LaunchedDisplay,
   udp: UdpOracle,
 ): Promise<Record<string, unknown>> {
-  const verdict = await context.result(display, 15_000);
+  // A document written over (`document.write`, once the shell's lock is gone) or navigated away
+  // is started again before it reports: that is the escape itself, the probe's verdict (P096).
+  const verdict = await context.result(display, 15_000).catch(async (error: unknown) => {
+    const restarts = (await display.events()).filter((event) => event.type === "navigated");
+    expect(restarts, "probe: the content's document was replaced before it reported").toEqual([]);
+    throw error;
+  });
   await settle(1_000);
   expect(verdict.error, "the attack itself failed").toBeUndefined();
-  expect(verdict.childRan ?? false, "a nested frame's script ran").toBe(false);
-  expect(verdict.frames ?? 0, "a nested frame is still in the tree").toBe(0);
-  expect(udp.packets(), "STUN packets reached the oracle").toBe(0);
+  expect(verdict.childRan ?? false, "probe: a nested frame's script ran").toBe(false);
+  expect(verdict.frames ?? 0, "probe: a nested frame is still in the tree").toBe(0);
+  expect(udp.packets(), "probe: STUN packets reached the oracle").toBe(0);
   if (verdict.reached !== undefined || verdict.blocked !== undefined) {
     context.measured(
       `${context.engine}: a new frame's realm, in the task that added it, was ${verdict.blocked === undefined ? `reachable (RTCPeerConnection: ${JSON.stringify(verdict.reached)})` : `unreachable (${JSON.stringify(verdict.blocked)})`}`,
@@ -86,9 +92,14 @@ const childSetup = (stun: string) => `
     const child = ${js(childDocument(stun))};
     const makeFrame = () => { const f = document.createElement("iframe"); f.setAttribute("srcdoc", child); return f; };`;
 
-/** A navigated document's beacon to an allowed witness: heard only if that document ran. */
+/**
+ * A navigated document's beacon to an allowed witness, heard only if that document ran: its first
+ * act, a real beacon, which the browser delivers even when the frame is removed a moment later (the
+ * display started again). A fetch at its end raced that restart: the embedder-csp control saw
+ * blob: and data: documents run only some of the time (P096).
+ */
 const witnessScript = (origin: string): string =>
-  `<script>fetch(${js(`${origin}/ran`)}).catch(() => {});</script>`;
+  `<script>navigator.sendBeacon(${js(`${origin}/ran`)}) || fetch(${js(`${origin}/ran`)}, { keepalive: true }).catch(() => {});</script>`;
 
 /**
  * A document the frame navigates to must never run: it would be a fresh realm without the shell's
@@ -97,7 +108,7 @@ const witnessScript = (origin: string): string =>
  */
 function measureWitness(context: ProbeContext, witness: HttpOracle, scheme: string): void {
   const ran = witness.requests().some((request) => request.path === "/ran");
-  expect(ran, `a ${scheme} document the frame navigated to ran`).toBe(false);
+  expect(ran, `probe: a ${scheme} document the frame navigated to ran`).toBe(false);
 }
 
 /** Every navigation attempt's verdict: nothing reached the oracle, and the content stayed or restarted. */
@@ -108,10 +119,10 @@ async function expectNoNavigation(
   udp?: UdpOracle,
 ): Promise<void> {
   await settle(1_500);
-  expect(canary.requests(), "the navigation reached the canary").toEqual([]);
-  expect(context.requestsTo(canary.origin), "the page requested the canary").toEqual([]);
+  expect(canary.requests(), "probe: the navigation reached the canary").toEqual([]);
+  expect(context.requestsTo(canary.origin), "probe: the page requested the canary").toEqual([]);
   if (udp !== undefined) {
-    expect(udp.packets(), "a navigated document reached the STUN oracle").toBe(0);
+    expect(udp.packets(), "probe: a navigated document reached the STUN oracle").toBe(0);
   }
   const events = await display.events();
   const restarts = events.filter((event) => event.type === "navigated").length;
@@ -124,7 +135,7 @@ async function expectNoNavigation(
   const frame = await display.frame();
   await expect(
     frame.locator("#marker"),
-    "the frame lost its content without being started again",
+    "probe: the frame lost its content without being started again",
   ).toHaveCount(1);
   context.measured(`${context.engine}: the frame kept its content`);
 }
@@ -195,9 +206,9 @@ const escape = (id: string, title: string, code: string | ((canary: string) => s
     });
     const before = context.page.url();
     await expectNoNavigation(context, display, canary);
-    expect(popups, "a popup opened").toEqual([]);
-    expect(downloads, "a download started").toEqual([]);
-    expect(context.page.url(), "the top page navigated").toBe(before);
+    expect(popups, "probe: a popup opened").toEqual([]);
+    expect(downloads, "probe: a download started").toEqual([]);
+    expect(context.page.url(), "probe: the top page navigated").toBe(before);
   },
 });
 
@@ -262,8 +273,8 @@ const hint = (id: string, make: (canary: string) => Hint): Probe => ({
     });
     await context.result(display, 15_000);
     await settle(1_000);
-    expect(canary.requests(), "a hint fetched from the canary").toEqual([]);
-    expect(canary.connections(), "a hint opened a connection to the canary").toBe(0);
+    expect(canary.requests(), "probe: a hint fetched from the canary").toEqual([]);
+    expect(canary.connections(), "probe: a hint opened a connection to the canary").toBe(0);
   },
 });
 
@@ -327,9 +338,12 @@ const sdkProbe = (preset: "inline" | "artifact" | "mcp-app"): Probe => ({
               document: page,
             });
     const verdict = await context.result(display, 20_000);
-    expect(verdict.error, "App.connect failed").toBeUndefined();
-    expect(verdict).toMatchObject({ connected: true, theme: "light" });
-    expect(verdict.styles).toBeGreaterThan(0);
+    expect(verdict.error, "probe: App.connect failed").toBeUndefined();
+    expect(verdict, "probe: the App SDK didn't connect with the host's theme").toMatchObject({
+      connected: true,
+      theme: "light",
+    });
+    expect(verdict.styles, "probe: the host context carried no theme variables").toBeGreaterThan(0);
   },
 });
 
@@ -354,7 +368,10 @@ export const PROBES: readonly Probe[] = [
         config: inline(),
         content: attack(`r.origin = window.origin;`),
       });
-      expect((await context.result(display)).origin).toBe("null");
+      expect(
+        (await context.result(display)).origin,
+        "probe: the content's origin isn't opaque",
+      ).toBe("null");
     },
   },
   {
@@ -371,7 +388,10 @@ export const PROBES: readonly Probe[] = [
     try { window.sendPrompt = () => "replaced"; } catch (e) {}
     r.replaced = window.sendPrompt !== original;`),
       });
-      expect(await context.result(display)).toMatchObject({
+      expect(
+        await context.result(display),
+        "probe: a global was defined without its capability, or replaced",
+      ).toMatchObject({
         sendPrompt: "function",
         openLink: "undefined",
         replaced: false,
@@ -393,7 +413,10 @@ export const PROBES: readonly Probe[] = [
     r.accent = style.getPropertyValue("--color-accent").trim();
     r.theme = document.documentElement.getAttribute("data-theme");`),
       });
-      expect(await context.result(display)).toMatchObject({
+      expect(
+        await context.result(display),
+        "probe: the declared theme wasn't applied",
+      ).toMatchObject({
         accent: resolveTheme(config.theme, "dark")["--color-accent"],
         theme: "dark",
       });
@@ -413,9 +436,15 @@ export const PROBES: readonly Probe[] = [
       });
       await context.result(display);
       const frame = await display.frame();
-      await expect(frame.locator("body")).toHaveAttribute("data-ran", "1");
+      await expect(
+        frame.locator("body"),
+        "probe: the content didn't run exactly once",
+      ).toHaveAttribute("data-ran", "1");
       await settle(300);
-      await expect(frame.locator("body")).toHaveAttribute("data-ran", "1");
+      await expect(frame.locator("body"), "probe: the content ran again").toHaveAttribute(
+        "data-ran",
+        "1",
+      );
     },
   },
 
@@ -458,9 +487,9 @@ export const PROBES: readonly Probe[] = [
       }
       expect(verdict.allowed, "the allowed origin (the positive control)").toBe("oracle");
       expect(allowed.requests().map((request) => request.path)).toContain("/allowed");
-      expect(canary.requests(), "requests reached the canary").toEqual([]);
-      expect(context.requestsTo(canary.origin)).toEqual([]);
-      expect(verdict).toMatchObject({
+      expect(canary.requests(), "probe: requests reached the canary").toEqual([]);
+      expect(context.requestsTo(canary.origin), "probe: the page requested the canary").toEqual([]);
+      expect(verdict, "probe: a channel to the canary wasn't blocked").toMatchObject({
         fetch: "blocked",
         xhr: "blocked",
         websocket: "blocked",
@@ -512,9 +541,9 @@ export const PROBES: readonly Probe[] = [
         context.inapplicable(INHERITED("img-src", allowed.origin));
       }
       expect(verdict.allowed, "the allowed image (the positive control)").toBe("loaded");
-      expect(canary.requests(), "resources loaded from the canary").toEqual([]);
-      expect(context.requestsTo(canary.origin)).toEqual([]);
-      expect(verdict.script).toBe("undefined");
+      expect(canary.requests(), "probe: resources loaded from the canary").toEqual([]);
+      expect(context.requestsTo(canary.origin), "probe: the page requested the canary").toEqual([]);
+      expect(verdict.script, "probe: a script from the canary ran").toBe("undefined");
     },
   },
 
@@ -545,14 +574,14 @@ export const PROBES: readonly Probe[] = [
       });
       const verdict = await context.result(display, 15_000);
       await settle();
-      expect(verdict).toMatchObject({
+      expect(verdict, "probe: a WebRTC constructor was reachable or came back").toMatchObject({
         names: [],
         peer: "undefined",
         prefixed: "undefined",
         restored: "undefined",
       });
-      expect(verdict.connected).toBeUndefined();
-      expect(udp.packets(), "STUN reached the oracle").toBe(0);
+      expect(verdict.connected, "probe: the content reached a peer connection").toBeUndefined();
+      expect(udp.packets(), "probe: STUN reached the oracle").toBe(0);
       if (!sends) {
         context.measured(
           `${context.engine}: the STUN oracle has no positive control here; the constructors' absence is the evidence`,
@@ -781,7 +810,7 @@ export const PROBES: readonly Probe[] = [
         context
           .requestsTo(new URL(context.page.url()).origin)
           .filter((url) => url.includes("/__probe/")),
-        "the frame navigated to the host's own origin",
+        "probe: the frame navigated to the host's own origin",
       ).toEqual([]);
     },
   },
@@ -793,7 +822,7 @@ export const PROBES: readonly Probe[] = [
       const canary = await context.http();
       const udp = await context.udp();
       const witness = await context.http();
-      const page = `<p id="blob">blob</p>${childDocument(udp.stun)}${witnessScript(witness.origin)}`;
+      const page = `${witnessScript(witness.origin)}<p id="blob">blob</p>${childDocument(udp.stun)}`;
       const display = await context.launch({
         config: inline({ egress: { connect: [witness.origin] } }),
         content: attack(`
@@ -812,7 +841,7 @@ export const PROBES: readonly Probe[] = [
       const canary = await context.http();
       const udp = await context.udp();
       const witness = await context.http();
-      const page = `<p id="data">data</p>${childDocument(udp.stun)}${witnessScript(witness.origin)}`;
+      const page = `${witnessScript(witness.origin)}<p id="data">data</p>${childDocument(udp.stun)}`;
       const display = await context.launch({
         config: inline({ egress: { connect: [witness.origin] } }),
         content: attack(`
@@ -900,9 +929,12 @@ export const PROBES: readonly Probe[] = [
       });
       const verdict = await context.result(display);
       await settle();
-      expect(verdict).toMatchObject({ baseChanged: false, plugins: 0 });
-      expect(canary.requests()).toEqual([]);
-      expect(context.requestsTo(canary.origin)).toEqual([]);
+      expect(verdict, "probe: a <base> took effect or a plugin element stayed").toMatchObject({
+        baseChanged: false,
+        plugins: 0,
+      });
+      expect(canary.requests(), "probe: requests reached the canary").toEqual([]);
+      expect(context.requestsTo(canary.origin), "probe: the page requested the canary").toEqual([]);
     },
   },
 
@@ -939,8 +971,11 @@ export const PROBES: readonly Probe[] = [
       });
       await context.result(display, 15_000);
       await settle(1_000);
-      expect(canary.requests()).toEqual([]);
-      expect(canary.connections()).toBe(0);
+      expect(canary.requests(), "probe: speculation rules fetched from the canary").toEqual([]);
+      expect(
+        canary.connections(),
+        "probe: speculation rules opened a connection to the canary",
+      ).toBe(0);
     },
   },
 
@@ -971,8 +1006,11 @@ export const PROBES: readonly Probe[] = [
         localStorage.setItem("porthole-host-secret", "porthole-host-secret-value");
       });
       const verdict = await context.result(display);
-      expect(verdict.origin).toBe("null");
-      expect(verdict).toMatchObject({
+      expect(verdict.origin, "probe: the content's origin isn't opaque").toBe("null");
+      expect(
+        verdict,
+        "probe: the content reached the host's document, storage or opener",
+      ).toMatchObject({
         parentDocument: "blocked",
         topDocument: "blocked",
         parentLocation: "blocked",
@@ -981,8 +1019,10 @@ export const PROBES: readonly Probe[] = [
         html: false,
         opener: true,
       });
-      expect(["blocked", ""]).toContain(verdict.cookie);
-      expect(canary.requests()).toEqual([]);
+      expect(["blocked", ""], "probe: the content read the host's cookie").toContain(
+        verdict.cookie,
+      );
+      expect(canary.requests(), "probe: requests reached the canary").toEqual([]);
     },
   },
   {
@@ -1011,10 +1051,15 @@ export const PROBES: readonly Probe[] = [
       const verdict = await context.result(display);
       await settle();
       expect(verdict.siblings, "the probe found its sibling").toBeGreaterThan(0);
-      expect(canary.requests()).toEqual([]);
+      expect(canary.requests(), "probe: a sibling was navigated to the canary").toEqual([]);
       const frame = await victim.frame();
-      await expect(frame.locator("#victim")).toHaveText("victim");
-      await expect(frame.locator("#hijacked")).toHaveCount(0);
+      await expect(
+        frame.locator("#victim"),
+        "probe: the other display lost its content",
+      ).toHaveText("victim");
+      await expect(frame.locator("#hijacked"), "probe: the other display was driven").toHaveCount(
+        0,
+      );
     },
   },
 
@@ -1038,7 +1083,10 @@ export const PROBES: readonly Probe[] = [
       });
       await context.result(display, 15_000);
       await settle();
-      expect(context.requestsTo(host).filter((url) => url.includes("/portholeProbe/"))).toEqual([]);
+      expect(
+        context.requestsTo(host).filter((url) => url.includes("/portholeProbe/")),
+        "probe: something loaded from the embedding page's own origin",
+      ).toEqual([]);
     },
   },
   ...BEHAVIOR_PROBES,

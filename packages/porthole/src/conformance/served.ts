@@ -224,8 +224,10 @@ export function servedTests(
           const display = await showMode(page, mode, instance(`${mode}-origin`));
           const frame = await display.frame();
           const origin = await frame.evaluate(() => window.origin);
-          expect(origin).toBe(display.origin);
-          expect(origin).not.toBe(new URL(page.url()).origin);
+          expect(origin, "probe: content runs on its own origin").toBe(display.origin);
+          expect(origin, "probe: content runs on the host's origin").not.toBe(
+            new URL(page.url()).origin,
+          );
         },
       );
 
@@ -235,7 +237,10 @@ export function servedTests(
         async ({ page }) => {
           const display = await showMode(page, mode, instance(`${mode}-reach`));
           await plantHostSecrets(page);
-          expect(await reachIntoHost(await display.frame())).toEqual(CLOSED);
+          expect(
+            await reachIntoHost(await display.frame()),
+            "probe: content reached into the host",
+          ).toEqual(CLOSED);
         },
       );
 
@@ -267,8 +272,11 @@ export function servedTests(
           }, target);
           await frame.click("#porthole-probe-top");
           await page.waitForTimeout(SETTLE_MS);
-          expect(page.url()).toBe(before);
-          expect(await host.canaryHits(`${mode}-top`)).toBe(0);
+          expect(page.url(), "probe: the host's page stays").toBe(before);
+          expect(
+            await host.canaryHits(`${mode}-top`),
+            "probe: the navigation reached the canary",
+          ).toBe(0);
         },
       );
 
@@ -301,10 +309,16 @@ export function servedTests(
           }, target);
           await frame.click("#porthole-probe-popup");
           await page.waitForTimeout(SETTLE_MS);
-          expect(programmatic).toBe(false);
-          expect(await frame.evaluate(() => document.body.dataset.popup)).toBe("false");
-          expect(opened).toHaveLength(0);
-          expect(await host.canaryHits(`${mode}-popup`)).toBe(0);
+          expect(programmatic, "probe: a window opened on load").toBe(false);
+          expect(
+            await frame.evaluate(() => document.body.dataset.popup),
+            "probe: a window opened after a click",
+          ).toBe("false");
+          expect(opened, "probe: a window opened").toHaveLength(0);
+          expect(
+            await host.canaryHits(`${mode}-popup`),
+            "probe: the popup reached the canary",
+          ).toBe(0);
         },
       );
     }
@@ -322,10 +336,14 @@ export function servedTests(
           search: location.search,
           hash: location.hash,
         }));
-        expect(seen.origin).toBe(display.origin);
-        expect(seen.search).toMatch(/^(\?ticket=[^&]+)?$/u);
-        expect(seen.hash).toBe("");
-        expect(seen.origin).not.toBe(new URL(page.url()).origin);
+        expect(seen.origin, "probe: the frame's address is on its own origin").toBe(display.origin);
+        expect(seen.search, "probe: the frame's address carries more than the ticket").toMatch(
+          /^(\?ticket=[^&]+)?$/u,
+        );
+        expect(seen.hash, "probe: the frame's address carries a fragment").toBe("");
+        expect(seen.origin, "probe: the frame's address is the host's origin").not.toBe(
+          new URL(page.url()).origin,
+        );
       },
     );
 
@@ -346,8 +364,11 @@ export function servedTests(
         const other = await host.show(page, await host.shell("scope-b"), {
           content: SHELL_CONTENT,
         });
-        expect(other.origin).not.toBe(first.origin);
-        expect(await (await other.frame()).evaluate(() => localStorage.getItem("kept"))).toBeNull();
+        expect(other.origin, "probe: another scope shares the origin").not.toBe(first.origin);
+        expect(
+          await (await other.frame()).evaluate(() => localStorage.getItem("kept")),
+          "probe: another scope read the storage",
+        ).toBeNull();
       },
     );
 
@@ -364,9 +385,10 @@ export function servedTests(
         ] as const) {
           const frame = await display.frame();
           await expect(frame.locator("#artifact")).toHaveText(`version ${version}`);
-          expect(await frame.evaluate(() => document.documentElement.dataset.rtc)).toBe(
-            "undefined",
-          );
+          expect(
+            await frame.evaluate(() => document.documentElement.dataset.rtc),
+            "probe: the page ran before it was hardened",
+          ).toBe("undefined");
         }
       },
     );
@@ -383,8 +405,11 @@ export function servedTests(
         try {
           const other = await fresh.newPage();
           const again = await other.goto(location.url);
-          expect(again?.status(), browserName).toBe(401);
-          expect(await other.locator("#porthole-root").count()).toBe(0);
+          expect(again?.status(), `probe: ${browserName}`).toBe(401);
+          expect(
+            await other.locator("#porthole-root").count(),
+            "probe: a used ticket showed content",
+          ).toBe(0);
         } finally {
           await fresh.close();
         }
@@ -428,10 +453,10 @@ export function servedTests(
               (window as unknown as { portholeProbeStays?: boolean }).portholeProbeStays === true,
           )
           .catch(() => false);
-        expect(stays, "another content origin: the frame's document stays").toBe(true);
-        expect(new URL(frame.url()).origin, "another content origin").toBe(display.origin);
+        expect(stays, "probe: another content origin: the frame's document stays").toBe(true);
+        expect(new URL(frame.url()).origin, "probe: another content origin").toBe(display.origin);
         await away(outside);
-        expect(await host.canaryHits("self-navigation"), "the outside site").toBe(0);
+        expect(await host.canaryHits("self-navigation"), "probe: the outside site").toBe(0);
       },
     );
 
@@ -518,15 +543,18 @@ export function servedTests(
         }, target);
         await press(page, "#porthole-probe-open");
         await page.waitForTimeout(SETTLE_MS);
-        expect(programmatic, "on load").toBe(false);
-        expect(await page.evaluate(() => document.body.dataset.popup), "after a click").toBe(
+        expect(programmatic, "probe: on load").toBe(false);
+        expect(await page.evaluate(() => document.body.dataset.popup), "probe: after a click").toBe(
           "false",
         );
-        expect(["absent", "refused"], "picture-in-picture").toContain(
+        expect(["absent", "refused"], "probe: picture-in-picture").toContain(
           await page.evaluate(() => document.body.dataset.pip),
         );
-        expect(opened, "a window opened").toEqual([]);
-        expect(await host.canaryHits("tab-window-open")).toBe(0);
+        expect(opened, "probe: a window opened").toEqual([]);
+        expect(
+          await host.canaryHits("tab-window-open"),
+          "probe: the window reached the canary",
+        ).toBe(0);
       },
     );
 
@@ -580,12 +608,12 @@ export function servedTests(
         }, urls);
         await press(page, "#porthole-probe-escape");
         await page.waitForTimeout(SETTLE_MS);
-        expect(opened, "a window opened").toEqual([]);
-        expect(downloads, "a download started").toEqual([]);
-        expect(dialogs, "a browser dialog showed").toEqual([]);
-        expect(new URL(page.url()).pathname, "the page stays").not.toMatch(/canary/u);
+        expect(opened, "probe: a window opened").toEqual([]);
+        expect(downloads, "probe: a download started").toEqual([]);
+        expect(dialogs, "probe: a browser dialog showed").toEqual([]);
+        expect(new URL(page.url()).pathname, "probe: the page stays").not.toMatch(/canary/u);
         for (const kind of kinds) {
-          expect(await host.canaryHits(`tab-${kind}`), kind).toBe(0);
+          expect(await host.canaryHits(`tab-${kind}`), `probe: ${kind}`).toBe(0);
         }
       },
     );
@@ -639,8 +667,11 @@ export function servedTests(
         const away = await host.canary("tab-opener");
         await clickAway(tab, `${away}?d=secret`, "opener");
         await page.waitForTimeout(SETTLE_MS);
-        expect(page.url(), "the opener stays").toBe("about:blank");
-        expect(await host.canaryHits("tab-opener")).toBe(0);
+        expect(page.url(), "probe: the opener stays").toBe("about:blank");
+        expect(
+          await host.canaryHits("tab-opener"),
+          "probe: the opener's navigation reached the canary",
+        ).toBe(0);
       },
     );
 
@@ -831,7 +862,7 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
             }
             expect(
               tab.url(),
-              `a ${name === "blob" ? "blob: document" : "outside site"} by ${how}: the tab stays`,
+              `probe: a ${name === "blob" ? "blob: document" : "outside site"} by ${how}: the tab stays`,
             ).toBe(here);
             await tab.close();
           }
@@ -842,7 +873,7 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
             ways.map(async (how) => [how, await host.canaryHits(`tab-nav-${how}`)] as const),
           )
         ).filter(([, hits]) => hits > 0);
-        expect(heard, "the outside site heard these").toEqual([]);
+        expect(heard, "probe: the outside site heard these").toEqual([]);
       },
     );
 
@@ -924,7 +955,7 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
             [how, canaries[how] ?? ""] as const,
           );
           await tab.waitForTimeout(SETTLE_MS);
-          expect(tab.url(), `${how}: the tab stays`).toBe(here);
+          expect(tab.url(), `probe: ${how}: the tab stays`).toBe(here);
           await tab.close();
         }
         await page.waitForTimeout(SETTLE_MS);
@@ -933,7 +964,7 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
             ways.map(async (how) => [how, await host.canaryHits(`tab-links-${how}`)] as const),
           )
         ).filter(([, hits]) => hits > 0);
-        expect(heard, "the outside site heard these").toEqual([]);
+        expect(heard, "probe: the outside site heard these").toEqual([]);
         // Still as before: a fragment link jumps; a link content cancels goes nowhere.
         const tab = await freshTab();
         await tab.evaluate(() => {
@@ -1037,11 +1068,11 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
         const said = JSON.parse(
           await page.evaluate(() => document.body.dataset.devices ?? "{}"),
         ) as Record<string, string>;
-        expect(said.location, "location").toBe("denied 1");
+        expect(said.location, "probe: location").toBe("denied 1");
         // No stream, however it is refused: a machine without a camera says NotFoundError even
         // where the policy would refuse (measured: Chromium, the header alone).
-        expect(said.media, "camera and microphone").not.toBe("granted");
-        expect(["rejected", "absent"], "full screen").toContain(said.fullscreen);
+        expect(said.media, "probe: camera and microphone").not.toBe("granted");
+        expect(["rejected", "absent"], "probe: full screen").toContain(said.fullscreen);
         if (warnings.length > 0) {
           info?.annotations.push({
             type: "measured",
@@ -1169,9 +1200,12 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
           document.body.append(button);
         }, canary);
         await press(page, "#porthole-probe-prompts");
+        // A prompt the page may show waits for the person, and its report never comes: the
+        // probe's verdict (P096), as much as one refused too late.
         await expect
           .poll(() => page.evaluate(() => document.body.dataset.prompts ?? ""), {
             timeout: 10_000,
+            message: "probe: a prompt was shown and waited, instead of being refused at once",
           })
           .not.toBe("");
         const said = JSON.parse(
@@ -1179,17 +1213,17 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
         ) as Record<string, string | boolean>;
         const atOnce = (value: unknown) =>
           value === "absent" || (typeof value === "string" && /^refused \w+ at once$/u.test(value));
-        expect(atOnce(said.passkey), `a passkey: ${String(said.passkey)}`).toBe(true);
-        expect(atOnce(said.payment), `a payment: ${String(said.payment)}`).toBe(true);
-        expect(atOnce(said.share), `a share: ${String(said.share)}`).toBe(true);
-        expect(atOnce(said.applePay), `Apple Pay: ${String(said.applePay)}`).toBe(true);
+        expect(atOnce(said.passkey), `probe: a passkey: ${String(said.passkey)}`).toBe(true);
+        expect(atOnce(said.payment), `probe: a payment: ${String(said.payment)}`).toBe(true);
+        expect(atOnce(said.share), `probe: a share: ${String(said.share)}`).toBe(true);
+        expect(atOnce(said.applePay), `probe: Apple Pay: ${String(said.applePay)}`).toBe(true);
         expect(
           said.video === "absent" || String(said.video).startsWith("refused"),
-          `a video's full screen: ${String(said.video)}`,
+          `probe: a video's full screen: ${String(said.video)}`,
         ).toBe(true);
-        expect(said.shown, "a video in full screen").toBe(false);
+        expect(said.shown, "probe: a video in full screen").toBe(false);
         await page.waitForTimeout(SETTLE_MS);
-        expect(await host.canaryHits("tab-payment"), "the payment method's address").toBe(0);
+        expect(await host.canaryHits("tab-payment"), "probe: the payment method's address").toBe(0);
       },
     );
 
@@ -1215,8 +1249,10 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
               setTimeout(() => resolve(unreachable), 3_000),
             ),
           ]);
-          expect(shown.root).toBe(false);
-          expect(shown.origin).not.toBe(location.origin);
+          expect(shown.root, "probe: a foreign origin framed the content").toBe(false);
+          expect(shown.origin, "probe: a foreign origin framed the content's origin").not.toBe(
+            location.origin,
+          );
         }
       },
     );
@@ -1266,8 +1302,8 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
           return { fetched, policy: policies.find((policy) => /connect-src/u.test(policy)) ?? "" };
         }, urls);
         await page.waitForTimeout(SETTLE_MS);
-        expect(seen.fetched).toBe("blocked");
-        expect(seen.policy, "a CSP applied to the document").not.toBe("");
+        expect(seen.fetched, "probe: the fetch got out").toBe("blocked");
+        expect(seen.policy, "probe: a CSP applied to the document").not.toBe("");
         const sources = new Map(
           seen.policy
             .split(";")
@@ -1276,10 +1312,10 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
         );
         // What runs or talks never opens to any site (P059), whatever the config.
         for (const name of ["script-src", "style-src", "connect-src", "frame-src", "default-src"]) {
-          expect(sources.get(name) ?? [], `${name} opens no scheme`).not.toContain("https:");
+          expect(sources.get(name) ?? [], `probe: ${name} opens no scheme`).not.toContain("https:");
         }
         for (const kind of ["fetch", "script", "style", "frame"] as const) {
-          expect(await host.canaryHits(`egress-${kind}`), kind).toBe(0);
+          expect(await host.canaryHits(`egress-${kind}`), `probe: ${kind}`).toBe(0);
         }
         // Images and media: closed, unless the config opened them to any https site (P059);
         // then, the canary being an https site, an image reaches it, as the config means.
@@ -1299,10 +1335,10 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
             "the image, as the config opens it",
           ).toBeGreaterThan(0);
         } else {
-          expect(await host.canaryHits("egress-img"), "img").toBe(0);
+          expect(await host.canaryHits("egress-img"), "probe: img").toBe(0);
         }
         if (!https("media")) {
-          expect(await host.canaryHits("egress-media"), "media").toBe(0);
+          expect(await host.canaryHits("egress-media"), "probe: media").toBe(0);
         }
       },
     );
@@ -1330,11 +1366,18 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
         await expect
           .poll(async () => methodsOf(await display.received()))
           .toContain(MCP_APPS_METHODS.initialize);
-        await expect(frame.locator("html")).toHaveAttribute("data-fetch", "blocked");
+        await expect(
+          frame.locator("html"),
+          "probe: the view's undeclared fetch got out",
+        ).toHaveAttribute("data-fetch", "blocked");
         expect(
           await frame.evaluate(() => [window.origin, document.documentElement.dataset.rtc]),
+          "probe: the view runs hardened on its own origin",
         ).toEqual([display.origin, "undefined"]);
-        expect(await host.canaryHits("proxy-undeclared")).toBe(0);
+        expect(
+          await host.canaryHits("proxy-undeclared"),
+          "probe: the undeclared fetch reached the canary",
+        ).toBe(0);
       },
     );
 
@@ -1350,7 +1393,10 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
           resourceReady('<p id="view">Not from the host.</p>'),
         );
         await page.waitForTimeout(SETTLE_MS);
-        expect(await frame.locator("#view").count()).toBe(0);
+        expect(
+          await frame.locator("#view").count(),
+          "probe: the proxy took a view not from its host",
+        ).toBe(0);
       },
     );
 
@@ -1383,9 +1429,10 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
           const other = await fresh.newPage();
           const bare = await other.goto(`${location.origin}/`);
           const away = new URL(other.url()).origin !== location.origin;
-          expect(bare?.status() === 401 || away, `ended at ${other.url()}`).toBe(true);
+          expect(bare?.status() === 401 || away, `probe: ended at ${other.url()}`).toBe(true);
           expect(
             await other.evaluate(() => document.documentElement.dataset.app ?? null),
+            "probe: the app ran without its ticket's cookie",
           ).toBeNull();
         } finally {
           await fresh.close();
@@ -1470,7 +1517,7 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
           const b = await host.show(page, await host.app("url-siblings-b"));
           const frameB = await b.frame();
           await ready(frameB);
-          expect(await load(frameB, script), "another app's frame loading it").toBe("error");
+          expect(await load(frameB, script), "probe: another app's frame loading it").toBe("error");
         }
         // Each on a tab of its own, in one browser.
         const c = await host.locate(await host.app("url-siblings-c"));
@@ -1483,7 +1530,9 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
           expect(await load(tab.mainFrame(), script), "the app's own load").toBe("load");
           await tab.goto(d.url);
           await ready(tab.mainFrame());
-          expect(await load(tab.mainFrame(), script), "another app's tab loading it").toBe("error");
+          expect(await load(tab.mainFrame(), script), "probe: another app's tab loading it").toBe(
+            "error",
+          );
         } finally {
           await tab.close();
         }

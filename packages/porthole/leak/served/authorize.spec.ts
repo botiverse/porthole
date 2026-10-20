@@ -52,7 +52,9 @@ test("a revoked subject's ticket opens nothing: a page and an app are denied, an
     pageLocation,
     artifact("deny-ticket-page"),
   );
-  expect(await outcomeOf(shown.read)).toEqual(DENIED);
+  expect(await outcomeOf(shown.read), "probe: the revoked page's display was told denied").toEqual(
+    DENIED,
+  );
   const entered = await mount(
     page,
     served.hostOrigin,
@@ -60,10 +62,18 @@ test("a revoked subject's ticket opens nothing: a page and an app are denied, an
     appLocation,
     app("deny-ticket-app"),
   );
-  expect(await outcomeOf(entered.read)).toEqual(DENIED);
+  expect(await outcomeOf(entered.read), "probe: the revoked app's display was told denied").toEqual(
+    DENIED,
+  );
   const frame = await entered.frame();
-  await expect(frame.locator("main")).toHaveAttribute("data-porthole-code", "revoked");
-  expect(await frame.locator("html").getAttribute("data-app")).toBeNull();
+  await expect(frame.locator("main"), "probe: the frame shows the revoked refusal").toHaveAttribute(
+    "data-porthole-code",
+    "revoked",
+  );
+  expect(
+    await frame.locator("html").getAttribute("data-app"),
+    "probe: the revoked app ran",
+  ).toBeNull();
 });
 
 test("a framed app mid-session: its next request after revocation is denied, and its next load tells the host", async ({
@@ -98,12 +108,21 @@ test("a framed app mid-session: its next request after revocation is denied, and
   expect(await fetchStatus(frame, "/api")).toBe(200);
 
   served.revoked.add(subject);
-  expect(await fetchStatus(frame, "/api"), "the very next request").toBe(403);
+  expect(await fetchStatus(frame, "/api"), "probe: the very next request").toBe(403);
   await reloadItself(frame);
-  expect(await outcomesOf(shown.read, 2)).toEqual([{ state: "loaded" }, DENIED]);
+  expect(await outcomesOf(shown.read, 2), "probe: the next load told the host denied").toEqual([
+    { state: "loaded" },
+    DENIED,
+  ]);
   const after = await shown.frame();
-  await expect(after.locator("main")).toHaveAttribute("data-porthole-reason", "denied");
-  expect(await after.locator("html").getAttribute("data-app")).toBeNull();
+  await expect(after.locator("main"), "probe: the frame shows the denied refusal").toHaveAttribute(
+    "data-porthole-reason",
+    "denied",
+  );
+  expect(
+    await after.locator("html").getAttribute("data-app"),
+    "probe: the revoked app ran",
+  ).toBeNull();
 });
 
 test("a framed page mid-session: its next load after revocation is denied where the engine keeps its cookie", async ({
@@ -132,13 +151,16 @@ test("a framed page mid-session: its next load after revocation is denied where 
     ? DENIED
     : { state: "blocked", reason: "session", status: 401 };
   await expect
-    .poll(async () => (await shown.read()).outcomes.at(-1), { timeout: 10_000 })
+    .poll(async () => (await shown.read()).outcomes.at(-1), {
+      timeout: 10_000,
+      message: "probe: the load after revocation was refused",
+    })
     .toEqual(refusal);
   const [first, ...rest] = (await shown.read()).outcomes;
   expect(first).toEqual({ state: "loaded" });
-  expect(rest.length).toBeGreaterThan(0);
+  expect(rest.length, "probe: a load after revocation told the host").toBeGreaterThan(0);
   for (const each of rest) {
-    expect(each).toEqual(refusal);
+    expect(each, "probe: a load after revocation was not refused").toEqual(refusal);
   }
 });
 
@@ -166,10 +188,16 @@ test("in a tab of its own, a revoked app and page are denied from the next reque
   await expect(tab.locator("#artifact"), "the cookie serves a reload").toHaveText("version 1");
 
   served.revoked.add(subject);
-  expect(await fetchStatus(page, "/api"), "the very next request").toBe(403);
+  expect(await fetchStatus(page, "/api"), "probe: the very next request").toBe(403);
   await page.reload();
-  await expect(page.locator("main")).toHaveAttribute("data-porthole-code", "revoked");
+  await expect(
+    page.locator("main"),
+    "probe: the app's tab shows the revoked refusal",
+  ).toHaveAttribute("data-porthole-code", "revoked");
   await tab.reload();
-  await expect(tab.locator("main")).toHaveAttribute("data-porthole-reason", "denied");
-  await expect(tab.locator("#artifact")).toHaveCount(0);
+  await expect(
+    tab.locator("main"),
+    "probe: the page's tab shows the denied refusal",
+  ).toHaveAttribute("data-porthole-reason", "denied");
+  await expect(tab.locator("#artifact"), "probe: the revoked page was served").toHaveCount(0);
 });

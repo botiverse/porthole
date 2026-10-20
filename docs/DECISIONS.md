@@ -4743,3 +4743,117 @@ inside the frame (then a focus model
 the content can't steal, likely the host's own overlay), a bubble must follow during a scroll (a
 coarser report, or the host drawing markers itself from `anchored`), or MCP Apps defines
 annotations.
+
+## P096 · 2026-10-19 · The negative controls: one registry, every control run, and a run that proves nothing fails · Accepted
+
+Amends P032 (what DESIGN.md records per control), P091's harness item (`scripts/controls.ts`) and
+P097's CI triggers. From the audit of 2026-10-19 (V01, V02).
+
+**Decision**, by finding:
+1. **V01: a control passes only on its probes' own failures.** The runner judged a control by the
+   tests it found in Playwright's report and nothing else: it ignored the child's exit status,
+   signal and spawn error and the report's own errors, so a run whose web server never started
+   (`suites: []`) left nothing to check and passed; a skipped probe counted as failed; an engine
+   asked for but absent from the report wasn't checked. The judgement is now a function of the
+   child's whole result (`judge`, `leak/controls.ts`), and the script only runs and prints it.
+   A spawn error, a signal, no JSON report, or any error in the report fails the control. Every
+   engine asked must be in the report. Each test the control names must have failed by its own
+   `expect` (Playwright's message carries the matcher's call): skipped (an `inapplicable` probe, a
+   `test.skip`), never run, timed out, interrupted, or failed by anything else (a browser that
+   didn't launch, a detached frame, a harness that threw) is no failure. Every other test of its
+   specs must pass or be skipped as it always is. Then the exit status must be what the control
+   implies (1 when it expects failures, 0 when it claims nothing fails), never simply 0, since a
+   negative control's run exits 1 whether its probes failed or its server never started.
+   `test/controls.test.ts` gives the judge synthetic reports (the audit's two: an empty report
+   with a launch error, a skipped probe; and a missing engine, a timeout, a launch error as a
+   probe's failure, a signal, no report, the wrong exit status): each fails. 264b12fa's runner,
+   given the same reports by a fake Playwright, printed "as it should" and exited 0 for all three
+   of the audit's cases.
+2. **V02: one registry, every control, its probes per engine.** `CONTROLS` (`leak/controls.ts`) is
+   every control the suite has: the specs it runs with and the tests it fails on each engine
+   (`others: "fail"` where it takes out what every test stands on: `nonce`). It holds the single
+   weakenings DESIGN.md says another wall covers (`frame-guard`, `attach-shadow`, `blob-script`,
+   `self`, `sync-guard` off WebKit): each must fail nothing. The runner runs them all by default,
+   and CI's controls job (one per engine, 90 minutes, its reports kept on failure) runs it.
+   `test/controls.test.ts` holds the registry to `WEAKENINGS` (every weakening is run by a
+   control, every control is made of weakenings), to the specs (each exists, and none is a spec
+   the weakenings don't reach: `UNWEAKENED`, the kit's reference app, which runs Porthole in Node),
+   to DESIGN.md (§ The negative controls is `controlsTable()` exactly, and every control the
+   tables' "Negative control" columns name is in the registry), and to CI (the job runs
+   `test:controls` with no names, on all three engines). A probe named by a control is every test
+   whose title has it, so a control run with two specs of the same suite fails it in both.
+3. **What running them all found** (0.7.0; Chromium 153, WebKit 26.6, Firefox 155). Every
+   control's own probes fail on every engine; DESIGN.md's tables were older than the probes:
+   - Probes added since that stand on an older wall, now named: `connect-src` → `14.silent`;
+     `webrtc` → `14.workers`; `frame-guard,sync-guard` and `parser-entry-points` → `14.shell`;
+     `sandbox` → `14.dialogs`, `14.windows`, and `14.print` (not WebKit: it prints nothing from a
+     frame either way); `document-theme` → `14.theme-never`; `confirm-gate` → `14.windows`;
+     `shell-gesture` → `12.copy-text`; `clipboard` → `14.shell` (WebKit, Firefox);
+     `embedder-csp` → `5.host-origin`; every control with `sync-guard` → WebKit's `8.preconnect`;
+     `navigate-guard` → P083's reports case; `report-unbounded` (P095) → `14.silent` too, on
+     both host pages (its blocked-load report is read as the text it was); `navigate-guard` →
+     P099's `served.domain.tab-links` too (the outside site hears the links).
+   - Claims that no longer hold: `connect-src` fails `8.prefetch` on Chromium no more (the
+     shell's hint guard holds it too); Firefox no longer holds `5.data` by itself (P035).
+   - Probes that didn't fail by their assertions with their wall out, now fixed, each still
+     passing with it in: under `embedder-csp`, `5.blob` (Firefox) and `5.data` (WebKit, Firefox)
+     saw the navigated document run in 2 of 3 runs: its witness, a fetch at the document's end,
+     raced the display's restart (P031's race, again). The witness is now the document's first
+     act and a beacon, which the browser delivers after the frame is gone: 3 of 3 on each engine.
+     Under `sandbox`, Firefox's print dialog held `14.print`'s click until the test timed out: the
+     click and each look at the frame are bounded (`recorded`), so it fails by its assertion.
+     Under `navigate-guard`, two `files.spec.ts` cases failed by a detached frame ("a page opens
+     nothing else" clicked its next button in a page that had gone; the P083 reports case waited
+     on the frame's clock): the first checks what reached the server after every click, the
+     second waits on the host page's clock. On WebKit, once in four runs, a `live.spec.ts`
+     navigation case threw "the display has no frame" while its display restarted: its first
+     look (`showLive`) takes a missing frame as a look to repeat.
+   - `nonce` fails every test of `strict-csp.spec.ts` (71 by their assertions, 15 by timing out,
+     each engine): `others: "fail"`, with `0.opaque-origin` and `0.globals` failing by theirs.
+   - `5.blob`, `5.data` and `14.print` are the shipped suite's (`/conformance`): an adopter's run
+     of them sees the same, with no change to its API.
+4. **CI runs once per commit of a pull request**: ci.yml's `push` is `main` only (was every branch,
+   amending P097's `branches: ["**"]`), with `pull_request` and `workflow_dispatch`. A pull
+   request's push ran every job twice, the controls with them; a push run can't be re-run by the
+   agents, a pull request's can. The release gate reads main's push and dispatch runs, unchanged;
+   `test/release.test.ts` pins the triggers. AGENTS.md says how to get CI before a pull request.
+5. **After its review, a probe fails for the right reason, named exactly.** (a) A failed `expect`
+   counted, a setup check too (`goto` not 200, a positive control): now a probe's deciding
+   `expect` carries `probe: ` at the start of its message (`VERDICT`), in the shipped probes
+   (`src/conformance`) and the spec tests the registry names, and only a failure whose error
+   starts with it counts; the `nonce` control has a probe of its own in `strict-csp.spec.ts` (the
+   shell drew and ran the content), since the suite's probes fail there before their verdicts.
+   (b) "Fails nothing" was a label: every control that names no test on an engine now says why
+   (`holds`), either by a combined control that takes its walls out with another's and fails
+   something there (`link-rule,navigate-guard` is new for `link-rule`), or with a reason why no
+   probe can see the wall (`self`: an opaque frame's `'self'` matches no origin; `url-origin` on
+   WebKit, which keeps no framed cookie); the test checks the cover. (c) Entries named a part of a
+   title; now a probe's `[id]`, a served case's id before its colon, or a test's whole title. (d)
+   A test declared to fail (`test.fail`) that passes fails the control, unless it is a target.
+6. **CI runs the controls in shards.** One engine's 57 controls outlasted a 90-minute job on CI's
+   runners (all three cancelled). Each engine now runs four shards, `controls (<engine>, k/4)`,
+   60 minutes each (`--shard k/4`: the registry split by each control's measured weight, heaviest
+   first to the lightest shard, so `nonce` shares its shard with small ones; stable for a
+   registry), each uploading its reports and `verdicts.json`; the `controls` job puts them
+   together (`--summary`) and fails if any control failed or never ran on an engine. A job's
+   name changed, so release.yml's REQUIRED_CI_JOBS lists the twelve shards and `controls`.
+
+**Why.** PRINCIPLE 6: a wall never seen to fail proves nothing, and a check that says a wall was
+seen to fail when its run never happened is worse than no check. CI's "every control" was 7 of
+the 38 there were (57 now, with P094's, P095's, P099's, P100's, P101's and P104's); the rest ran by hand,
+when someone remembered, and what DESIGN.md said they fail had drifted from what they do.
+**Rejected.**
+- Requiring exit 0, or exit 1, alone: either is what a broken run can give.
+- Counting any failure of a named test: a browser that can't launch fails every test, and a spec
+  whose every test is named (permissions, authorize) would pass a run that never reached Porthole.
+- Retrying: a named test that fails only sometimes is not a wall seen to fail; a test that fails
+  besides them is either a dependency the registry must name, or a flaky probe to fix.
+- Parsing the prose columns of DESIGN.md's tables for each control's probes: the prose explains
+  why; the generated table is the exact claim, and the test holds the prose to naming only
+  controls that exist.
+- Running controls with `kit.spec.ts` until the kit's app applies weakenings: its walls are the
+  core's, whose controls run against the leak and served harnesses.
+**Threat it re-opens.** None: no default, gate or policy changes; four probes see more.
+**Revisit when** Playwright's JSON report changes shape (the judge's tests pin the fields it reads),
+a control's run makes a CI job too long (shard the controls across jobs), or the kit's app gains
+a weakening seam (then its controls join the registry).

@@ -1,17 +1,19 @@
 name: ci
 
-# Every push: the checks (types, lint, format, unit tests with /server in workerd), the browser
-# suites on loopback on each engine Porthole supports, and the prod-shape profile (P066): the
-# host kit behind a TLS edge with real DNS, on same-site sibling origins, in docker compose.
+# Every push to main, every pull request's push, and by hand: the checks (types, lint, format,
+# unit tests with /server in workerd), the browser suites on loopback on each engine Porthole
+# supports, the negative controls, and the prod-shape profile (P066): the host kit behind a TLS
+# edge with real DNS, on same-site sibling origins, in docker compose.
 # release.yml publishes a commit only once this passed on it on main, every job below by name (its
 # REQUIRED_CI_JOBS; test/release.test.ts holds the two together). A run that flaked, or a commit
 # without one, is run again by hand: `stamp workflow run ci.yml --repo botiverse/porthole`. Every
 # Action is pinned to the commit of the release named beside it (P097).
-# Branches only: a tag's run would name the tag as its branch (a tag named main would pass for it),
-# and a release tag's commit has had main's run already.
+# Pushes to main only: a tag's run would name the tag as its branch (a tag named main would pass
+# for it), a release tag's commit has had main's run already, and a pull request's commits run
+# once, as the pull request's (a branch push too ran everything twice, P096).
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -71,14 +73,21 @@ jobs:
           path: .dev/leak-results
           retention-days: 7
 
-  # The negative controls (P032): each must fail exactly its probes on every engine.
-  controls:
+  # The negative controls (P032, P096): every control in leak/controls.ts (DESIGN.md's table of
+  # them, held to it by test/controls.test.ts) must fail exactly its probes, by their verdicts, on
+  # each engine, and nothing else; a run that didn't happen, or a probe skipped, never run or timed
+  # out, fails. A whole engine's controls outlast a job, so each job runs one of four shards
+  # (split by measured weight, `--shard k/4`), and `controls` checks every shard's verdicts: every
+  # control ran and held on every engine.
+  controls-shard:
+    name: controls (${{ matrix.engine }}, ${{ matrix.shard }}/4)
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         engine: [chromium, webkit, firefox]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -90,9 +99,32 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @botiverse/porthole exec playwright install --with-deps ${{ matrix.engine }}
-      - run: pnpm --filter @botiverse/porthole run test:controls
+      - run: pnpm --filter @botiverse/porthole exec node scripts/controls.ts --shard ${{ matrix.shard }}/4
         env:
           PORTHOLE_LEAK_ENGINES: ${{ matrix.engine }}
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: controls-${{ matrix.engine }}-${{ matrix.shard }}
+          path: .dev/controls
+          retention-days: 7
+
+  controls:
+    needs: controls-shard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: controls-*
+          path: .dev/shards
+      - run: node packages/porthole/scripts/controls.ts --summary .dev/shards
 
   examples:
     runs-on: ubuntu-24.04

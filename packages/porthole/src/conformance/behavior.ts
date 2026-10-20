@@ -1,6 +1,7 @@
 import { expect, type Frame } from "@playwright/test";
 import { presets } from "../presets/presets.ts";
 import { resolveTheme } from "../theme/variables.ts";
+import type { ConfirmRequest } from "../bridge/types.ts";
 import type { LaunchedDisplay } from "./index.ts";
 import { inline, js, type Probe, type ProbeContext } from "./kit.ts";
 import { settle } from "./oracles.ts";
@@ -23,10 +24,16 @@ const variable = (frame: Frame, name: string): Promise<string> =>
 /** Polls the frame element's height until it is `px` (± 1). */
 async function expectHeight(display: LaunchedDisplay, px: number, message: string): Promise<void> {
   await expect
-    .poll(async () => Math.round((await display.box()).height), { message, timeout: 5_000 })
+    .poll(async () => Math.round((await display.box()).height), {
+      message: `probe: ${message}`,
+      timeout: 5_000,
+    })
     .toBeGreaterThanOrEqual(px - 1);
   await expect
-    .poll(async () => Math.round((await display.box()).height), { message, timeout: 5_000 })
+    .poll(async () => Math.round((await display.box()).height), {
+      message: `probe: ${message}`,
+      timeout: 5_000,
+    })
     .toBeLessThanOrEqual(px + 1);
 }
 
@@ -64,13 +71,39 @@ async function clickAfterLapse(
   await context.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 }
 
-/** The attribute `name` of the frame's body, once set. */
-async function bodyData(display: LaunchedDisplay, name: string, timeout = 5_000): Promise<string> {
+/**
+ * The attribute `name` of the frame's body, once set. Where it is a gate's answer to the content,
+ * `verdict` is the probe's: an answer that never comes (a call left waiting on a gate that should
+ * have refused it) fails the probe's verdict, not its setup (P096).
+ */
+async function bodyData(
+  display: LaunchedDisplay,
+  name: string,
+  verdict?: string,
+  timeout = 5_000,
+): Promise<string> {
   const frame = await display.frame();
   await expect
-    .poll(() => frame.locator("body").getAttribute(`data-${name}`), { timeout })
+    .poll(() => frame.locator("body").getAttribute(`data-${name}`), {
+      timeout,
+      ...(verdict === undefined ? {} : { message: verdict }),
+    })
     .not.toBeNull();
   return (await frame.locator("body").getAttribute(`data-${name}`)) ?? "";
+}
+
+/**
+ * The next confirmation, answered, where the gate must ask one now: none coming
+ * (`answerNextConfirmation` rejects) is the probe's verdict failing, `verdict` (P096).
+ */
+async function answered(
+  display: LaunchedDisplay,
+  accept: boolean,
+  verdict: string,
+): Promise<ConfirmRequest> {
+  const request = await display.answerNextConfirmation(accept).catch(() => undefined);
+  expect(request, verdict).toBeDefined();
+  return request!;
 }
 
 /** A model context update (P100): what the view says the person is looking at. */
@@ -128,7 +161,7 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
           1;
       });
       await display.setContent(step2, { partial: true });
-      await expect(frame.locator("#r2")).toHaveText("two");
+      await expect(frame.locator("#r2"), "probe: the next draft is drawn").toHaveText("two");
       expect(
         await read(frame, () => ({
           kept: (document.getElementById("img") as HTMLElement & { portholeMark?: number })
@@ -138,17 +171,29 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
           handler: document.getElementById("b")?.getAttribute("onclick") ?? null,
           scripts: document.querySelectorAll("#porthole-root script").length,
         })),
+        "probe: a draft keeps what was drawn and is inert",
       ).toEqual({ kept: 1, ran: null, href: null, handler: null, scripts: 0 });
 
       await display.setContent(whole);
-      await expect(frame.locator("body")).toHaveAttribute("data-ran", "1");
-      expect(await frame.locator("#b").getAttribute("onclick")).not.toBeNull();
+      await expect(frame.locator("body"), "probe: the whole ran once").toHaveAttribute(
+        "data-ran",
+        "1",
+      );
+      expect(
+        await frame.locator("#b").getAttribute("onclick"),
+        "probe: the whole keeps its handlers",
+      ).not.toBeNull();
       // The whole goes once: sending it again, or a late draft, changes nothing.
       await display.setContent(whole);
       await display.setContent(head, { partial: true });
       await settle(400);
-      await expect(frame.locator("body")).toHaveAttribute("data-ran", "1");
-      await expect(frame.locator("#r2")).toHaveText("two");
+      await expect(frame.locator("body"), "probe: the whole ran only once").toHaveAttribute(
+        "data-ran",
+        "1",
+      );
+      await expect(frame.locator("#r2"), "probe: a late draft changed what was drawn").toHaveText(
+        "two",
+      );
     },
   },
 
@@ -174,7 +219,7 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
           frame,
           () => document.documentElement.scrollHeight > document.documentElement.clientHeight,
         ),
-        "past its height, the content scrolls inside",
+        "probe: past its height, the content scrolls inside",
       ).toBe(true);
       await frame.evaluate(() => (window as unknown as { setBox(px: number): void }).setBox(5));
       await expectHeight(display, 30, "shrinks to minHeightPx");
@@ -183,9 +228,11 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
       );
       // The first size is the content's: an empty shell reports none (it would make the host
       // forget the height it remembered, and the frame jump).
-      expect(sizes[0]).toBe(150);
-      expect(sizes).toEqual(expect.arrayContaining([150, 300, 400, 30]));
-      expect(Math.max(...sizes)).toBe(400);
+      expect(sizes[0], "probe: the first size reported is the content's").toBe(150);
+      expect(sizes, "probe: each size was reported").toEqual(
+        expect.arrayContaining([150, 300, 400, 30]),
+      );
+      expect(Math.max(...sizes), "probe: no size past maxHeightPx was reported").toBe(400);
     },
   },
   {
@@ -200,11 +247,13 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
       await expectHeight(display, 500, "follows the page");
       const frame = await display.frame();
       await expect(frame.locator("#page")).toHaveText("page");
-      await expect(frame.locator("body"), "the page's own load event fires").toHaveAttribute(
+      await expect(frame.locator("body"), "probe: the page's own load event fires").toHaveAttribute(
         "data-loaded",
         "1",
       );
-      expect(await read(frame, () => document.title)).toBe("Report");
+      expect(await read(frame, () => document.title), "probe: the page keeps its own title").toBe(
+        "Report",
+      );
     },
   },
 
@@ -225,19 +274,27 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
       });
       const frame = await display.frame();
       await expect(frame.locator("p")).toHaveText("themed");
-      expect(await variable(frame, "--color-text-primary")).toBe(light["--color-text-primary"]);
+      expect(
+        await variable(frame, "--color-text-primary"),
+        "probe: the content takes the light theme",
+      ).toBe(light["--color-text-primary"]);
       const flips = () => read(frame, () => (window as unknown as { flips: string[] }).flips);
       // Mounting, and a host telling it the scheme it already has, are no flip: no event (#3).
       await settle(400);
-      expect(await flips(), "no theme event at mount").toEqual([]);
+      expect(await flips(), "probe: no theme event at mount").toEqual([]);
       await display.setTheme("light");
       await settle(400);
-      expect(await flips(), "no theme event for the scheme it has").toEqual([]);
+      expect(await flips(), "probe: no theme event for the scheme it has").toEqual([]);
       await display.setTheme("dark");
       await expect
-        .poll(() => variable(frame, "--color-text-primary"))
+        .poll(() => variable(frame, "--color-text-primary"), {
+          message: "probe: the content is re-themed dark",
+        })
         .toBe(dark["--color-text-primary"]);
-      expect(await variable(frame, "--color-chart-1")).toBe(dark["--color-chart-1"]);
+      expect(
+        await variable(frame, "--color-chart-1"),
+        "probe: the chart colors are re-themed dark",
+      ).toBe(dark["--color-chart-1"]);
       expect(
         await read(frame, () => ({
           kept: (window as unknown as { kept?: string }).kept,
@@ -245,19 +302,23 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
           theme: document.documentElement.dataset.theme,
           scheme: document.documentElement.style.colorScheme,
         })),
+        "probe: the running content is re-themed in place and told once",
       ).toEqual({ kept: "yes", flips: ["dark"], theme: "dark", scheme: "dark" });
       const element = await frame.frameElement();
-      expect(await element.evaluate((node) => (node as HTMLElement).style.colorScheme)).toBe(
-        "dark",
-      );
+      expect(
+        await element.evaluate((node) => (node as HTMLElement).style.colorScheme),
+        "probe: the frame element takes the dark scheme",
+      ).toBe("dark");
       await display.setTheme("light");
       await expect
-        .poll(() => variable(frame, "--color-text-primary"))
+        .poll(() => variable(frame, "--color-text-primary"), {
+          message: "probe: the content is re-themed light",
+        })
         .toBe(light["--color-text-primary"]);
-      expect(await read(frame, () => (window as unknown as { flips: string[] }).flips)).toEqual([
-        "dark",
-        "light",
-      ]);
+      expect(
+        await read(frame, () => (window as unknown as { flips: string[] }).flips),
+        "probe: each flip is told once",
+      ).toEqual(["dark", "light"]);
     },
   },
   {
@@ -280,9 +341,19 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
       });
       const frame = await display.frame();
       await expect(frame.locator("p")).toHaveText("live");
-      await expect.poll(() => variable(frame, "--color-text-primary")).toBe("rgb(1, 2, 3)");
-      expect(await variable(frame, "--color-chart-1")).toBe("rgb(4, 5, 6)");
-      expect(await variable(frame, "--not-declared")).toBe("");
+      await expect
+        .poll(() => variable(frame, "--color-text-primary"), {
+          message: "probe: the host's spec value reached the frame",
+        })
+        .toBe("rgb(1, 2, 3)");
+      expect(
+        await variable(frame, "--color-chart-1"),
+        "probe: the host's Porthole value reached the frame",
+      ).toBe("rgb(4, 5, 6)");
+      expect(
+        await variable(frame, "--not-declared"),
+        "probe: an undeclared host value reached the frame",
+      ).toBe("");
     },
   },
   {
@@ -307,14 +378,17 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
           input: of("i").borderTopLeftRadius,
         };
       });
-      expect(styles).toEqual({
+      expect(
+        styles,
+        "probe: native controls take the theme, and content's CSS overrides it",
+      ).toEqual({
         radius: resolveTheme(config.theme, "light")["--border-radius-md"],
         font: true,
         height: expect.any(Number),
         overridden: "0px",
         input: resolveTheme(config.theme, "light")["--border-radius-md"],
       });
-      expect(styles.height, "a control is tall enough to tap").toBeGreaterThanOrEqual(44);
+      expect(styles.height, "probe: a control is tall enough to tap").toBeGreaterThanOrEqual(44);
     },
   },
 
@@ -344,7 +418,10 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
         content: page("", "plain"),
       });
       // An author's own page, declaring nothing: shown as styled, in light; the variables are there.
-      expect(await scheme(plain, "plain")).toEqual({
+      expect(
+        await scheme(plain, "plain"),
+        "probe: a page declaring nothing stays as styled",
+      ).toEqual({
         scheme: "normal",
         theme: null,
         variable: true,
@@ -352,7 +429,10 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
       await plain.setTheme("light");
       await plain.setTheme("dark");
       await settle(300);
-      expect(await scheme(plain, "plain")).toEqual({
+      expect(
+        await scheme(plain, "plain"),
+        "probe: a page declaring nothing stays as styled after a flip",
+      ).toEqual({
         scheme: "normal",
         theme: null,
         variable: true,
@@ -362,14 +442,25 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
         scheme: "dark",
         content: page('<meta name="color-scheme" content="light dark">', "declared"),
       });
-      await expect.poll(async () => (await scheme(declared, "declared")).theme).toBe("dark");
-      expect((await scheme(declared, "declared")).scheme).toBe("dark");
+      await expect
+        .poll(async () => (await scheme(declared, "declared")).theme, {
+          message: "probe: a page declaring its schemes takes the person's",
+        })
+        .toBe("dark");
+      expect(
+        (await scheme(declared, "declared")).scheme,
+        "probe: a page declaring its schemes takes the person's color scheme",
+      ).toBe("dark");
       const always = await context.launch({
         config: presets.artifact({ theme: { documents: "always" } }),
         scheme: "dark",
         content: page("", "always"),
       });
-      await expect.poll(async () => (await scheme(always, "always")).theme).toBe("dark");
+      await expect
+        .poll(async () => (await scheme(always, "always")).theme, {
+          message: "probe: a page the host always themes takes the person's scheme",
+        })
+        .toBe("dark");
     },
   },
 
@@ -381,10 +472,13 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
     async run(context) {
       const display = await context.launch({ config: prompts(), content: PROMPT_CONTENT });
       expect(
-        await bodyData(display, "onload"),
-        "a call made on load is refused by the shell",
+        await bodyData(display, "onload", "probe: a call made on load is refused by the shell"),
+        "probe: a call made on load is refused by the shell",
       ).toContain("needs a click");
-      expect(await display.calls()).toEqual([]);
+      expect(
+        await display.calls(),
+        "probe: a call made on load reached the host's handler",
+      ).toEqual([]);
 
       // The host's own check needs the frame's click to reach the host page (activation
       // propagates to ancestors): measured with raw input, after the harness's activation lapsed.
@@ -395,14 +489,27 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
         `${context.engine}: a click in the frame ${refused.includes("sendPrompt:no-user-activation") ? "does not reach" : "reaches"} the host page's user activation`,
       );
       expect(refused, "the frame's click didn't count as a gesture on the host page").toEqual([]);
-      const declined = await display.answerNextConfirmation(false);
-      expect(declined).toMatchObject({
+      const declined = await answered(
+        display,
+        false,
+        "probe: the person was asked about the prompt",
+      );
+      expect(declined, "probe: the person was asked about the whole prompt").toMatchObject({
         capability: "sendPrompt",
         args: { text: "Explain why signups doubled in March" },
         display: { title: "Probe" },
       });
-      expect(await bodyData(display, "result")).toBe("false");
-      expect(await display.calls(), "a declined prompt reached the host's handler").toEqual([]);
+      expect(
+        await bodyData(
+          display,
+          "result",
+          "probe: the content is told a declined prompt wasn't sent",
+        ),
+        "probe: the content is told a declined prompt wasn't sent",
+      ).toBe("false");
+      expect(await display.calls(), "probe: a declined prompt reached the host's handler").toEqual(
+        [],
+      );
 
       await click(display, "#ask");
       await display.answerNextConfirmation(true);
@@ -429,9 +536,16 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
       });
       // Nothing is evaluated in the page until the message has been answered.
       await context.page.waitForTimeout(ACTIVATION_LAPSE_MS + 1_500);
-      expect(await bodyData(display, "answer")).toBe(JSON.stringify({ isError: true }));
-      expect(await display.calls()).toEqual([]);
-      expect(await refusals(display)).toEqual(["sendPrompt:no-user-activation"]);
+      expect(
+        await bodyData(display, "answer", "probe: a raw ui/message without a click is refused"),
+        "probe: a raw ui/message without a click is refused",
+      ).toBe(JSON.stringify({ isError: true }));
+      expect(await display.calls(), "probe: a raw ui/message reached the host's handler").toEqual(
+        [],
+      );
+      expect(await refusals(display), "probe: the host refused it for no user activation").toEqual([
+        "sendPrompt:no-user-activation",
+      ]);
     },
   },
   {
@@ -449,8 +563,8 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
 </script>`,
       });
       await click(display, "#web");
-      const asked = await display.answerNextConfirmation(true);
-      expect(asked).toMatchObject({
+      const asked = await answered(display, true, "probe: the person was asked about the link");
+      expect(asked, "probe: the person was asked about the link").toMatchObject({
         capability: "openLink",
         args: { url: "https://example.com/report?q=1" },
       });
@@ -459,11 +573,23 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
         .toEqual([{ capability: "openLink", args: { url: "https://example.com/report?q=1" } }]);
       await click(display, "#js");
       await click(display, "#raw");
-      expect(await bodyData(display, "raw")).toBe("false");
+      expect(
+        await bodyData(display, "raw", "probe: openLink of a javascript: URL is refused"),
+        "probe: openLink of a javascript: URL is refused",
+      ).toBe("false");
       await settle(300);
-      expect(await (await display.frame()).locator("body").getAttribute("data-ran")).toBeNull();
-      expect(await refusals(display)).toContain("openLink:invalid");
-      expect(await display.calls()).toHaveLength(1);
+      expect(
+        await (await display.frame()).locator("body").getAttribute("data-ran"),
+        "probe: a javascript: link ran",
+      ).toBeNull();
+      expect(
+        await refusals(display),
+        "probe: the host refused the javascript: URL as invalid",
+      ).toContain("openLink:invalid");
+      expect(
+        await display.calls(),
+        "probe: a non-http(s) link reached the host's handler",
+      ).toHaveLength(1);
     },
   },
   {
@@ -477,16 +603,30 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
       });
       for (let index = 0; index < 2; index += 1) {
         await click(display, "#ask");
-        await display.answerNextConfirmation(false);
-        expect(await bodyData(display, "result")).toBe("false");
+        await answered(display, false, "probe: the display asked before it muted");
+        expect(
+          await bodyData(
+            display,
+            "result",
+            "probe: the content is told a declined prompt wasn't sent",
+          ),
+          "probe: the content is told a declined prompt wasn't sent",
+        ).toBe("false");
       }
       await expect
-        .poll(async () => (await display.events()).some((event) => event.type === "muted"))
+        .poll(async () => (await display.events()).some((event) => event.type === "muted"), {
+          message: "probe: the display muted after the declines",
+        })
         .toBe(true);
       await click(display, "#ask");
-      expect(await bodyData(display, "result")).toBe("false");
-      expect(await refusals(display)).toContain("sendPrompt:muted");
-      expect(await display.calls()).toEqual([]);
+      expect(
+        await bodyData(display, "result", "probe: a muted display's prompt is refused"),
+        "probe: a muted display's prompt is refused",
+      ).toBe("false");
+      expect(await refusals(display), "probe: the prompt was refused as muted").toContain(
+        "sendPrompt:muted",
+      );
+      expect(await display.calls(), "probe: a prompt reached the host's handler").toEqual([]);
     },
   },
   {
@@ -511,9 +651,17 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
           "this host always has a confirm function (a default dialog), so a display without one can't be shown; it asked the person instead",
         );
       }
-      expect(await bodyData(display, "result")).toBe("false");
-      expect(await refusals(display)).toContain("sendPrompt:no-confirm");
-      expect(await display.calls()).toEqual([]);
+      expect(
+        await bodyData(display, "result", "probe: a prompt with no one to confirm it is refused"),
+        "probe: a prompt with no one to confirm it is refused",
+      ).toBe("false");
+      expect(await refusals(display), "probe: the prompt was refused for no confirm").toContain(
+        "sendPrompt:no-confirm",
+      );
+      expect(
+        await display.calls(),
+        "probe: an unconfirmed prompt reached the host's handler",
+      ).toEqual([]);
     },
   },
   {
@@ -532,8 +680,8 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
       }
       expect(await bodyData(display, "answer")).toBe("{}");
       const shown = await said();
-      expect(shown, "the update reached the model unseen").toHaveLength(1);
-      expect(shown[0]).toMatchObject({
+      expect(shown, "probe: the update reached the model unseen").toHaveLength(1);
+      expect(shown[0], "probe: the person was shown the whole update").toMatchObject({
         capability: "setModelContext",
         args: CONTEXT_UPDATE,
         display: { title: "Probe" },
@@ -549,9 +697,13 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
           "this host always has a show function (a default surface), so a display without one can't be shown; it showed the person instead",
         );
       }
-      expect(answer.code, "an update nobody could see was taken").toBe("not_allowed");
-      expect(await refusals(unseen)).toContain("setModelContext:no-show");
-      expect(await unseen.calls()).toEqual([]);
+      expect(answer.code, "probe: an update nobody could see was taken").toBe("not_allowed");
+      expect(await refusals(unseen), "probe: the update was refused for no show").toContain(
+        "setModelContext:no-show",
+      );
+      expect(await unseen.calls(), "probe: an unseen update reached the host's handler").toEqual(
+        [],
+      );
     },
   },
 ];

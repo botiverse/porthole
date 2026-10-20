@@ -251,7 +251,7 @@ describe.skipIf(!runnable)("V03: the gate, against a simulated API", () => {
   it("stops when a required job was skipped, failed its latest attempt, or is missing", () => {
     for (const [overrides, extra] of [
       [{ "prod-shape": "skipped" }, []],
-      [{ "controls (webkit)": "missing" }, []],
+      [{ "controls (webkit, 2/4)": "missing" }, []],
       [
         { examples: "missing" },
         [

@@ -68,9 +68,19 @@ jobs:
             loopback (chromium)
             loopback (webkit)
             loopback (firefox)
-            controls (chromium)
-            controls (webkit)
-            controls (firefox)
+            controls (chromium, 1/4)
+            controls (chromium, 2/4)
+            controls (chromium, 3/4)
+            controls (chromium, 4/4)
+            controls (webkit, 1/4)
+            controls (webkit, 2/4)
+            controls (webkit, 3/4)
+            controls (webkit, 4/4)
+            controls (firefox, 1/4)
+            controls (firefox, 2/4)
+            controls (firefox, 3/4)
+            controls (firefox, 4/4)
+            controls
             examples
             prod-shape
         # Every API call is an assignment of its own under `set -euo pipefail`, so an error stops
