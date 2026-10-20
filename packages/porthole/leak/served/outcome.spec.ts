@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { presets, type PortholeConfig } from "../../src/index.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
+import { keepsFramedCookies } from "../../src/conformance/cookies.ts";
 import { harness } from "./harness.ts";
 import { app, mount, outcomeOf } from "./porthole-host.ts";
 
@@ -12,7 +13,6 @@ import { app, mount, outcomeOf } from "./porthole-host.ts";
 
 test("a framed app is loaded where the engine keeps its cookie; blocked (cookies) where it doesn't", async ({
   page,
-  browserName,
 }) => {
   const served = await harness();
   const instance = app("outcome-framed");
@@ -26,13 +26,19 @@ test("a framed app is loaded where the engine keeps its cookie; blocked (cookies
     instance,
   );
   const outcome = await outcomeOf(read);
-  // Measured (P025): WebKit keeps no cookie in a cross-site frame; the entry page finds that out.
+  // Where the browser keeps no cookie in a cross-site frame (P025), the entry page finds that
+  // out. Which browsers those are is measured by a probe of the browser's own, not by its name
+  // (P098: Playwright's WebKit keeps none on Linux, keeps them on macOS).
+  const kept = await keepsFramedCookies(page, "http:");
   expect(outcome).toEqual(
-    browserName === "webkit"
-      ? { state: "blocked", reason: "cookies", status: 401 }
-      : { state: "loaded" },
+    kept ? { state: "loaded" } : { state: "blocked", reason: "cookies", status: 401 },
   );
-  expect((await read()).initialized, "the frame shows (url mode has no handshake)").toBe(true);
+  // The frame's first load says it shows; a blocked entry page can say so before its load ends.
+  await expect
+    .poll(async () => (await read()).initialized, {
+      message: "the frame shows (url mode has no handshake)",
+    })
+    .toBe(true);
   if (outcome.state === "loaded") {
     const frame = page.frameLocator("#displays iframe").first();
     await expect(frame.locator("html")).toHaveAttribute("data-app", "ready");

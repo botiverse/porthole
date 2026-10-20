@@ -1,6 +1,7 @@
 import { expect, test, type Frame, type Page } from "@playwright/test";
 import type { PortholeConfig } from "../../src/index.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
+import { keepsFramedCookies } from "../../src/conformance/cookies.ts";
 import { harness } from "./harness.ts";
 import { app, mount, outcomeOf, outcomesOf } from "./porthole-host.ts";
 
@@ -69,9 +70,11 @@ test("a framed app mid-session: its next request after revocation is denied, and
   page,
   browserName,
 }) => {
+  // Measured, not assumed from the engine's name (P098: Playwright's WebKit keeps none on Linux,
+  // keeps them on macOS).
   test.skip(
-    browserName === "webkit",
-    "WebKit keeps no cookie in a cross-site frame (P025): a framed app never has a session there (blocked: cookies); the ticket and tab cases cover it",
+    !(await keepsFramedCookies(page, "http:")),
+    "this browser keeps no cookie in a cross-site frame (P025): a framed app never has a session there (blocked: cookies); the ticket and tab cases cover it",
   );
   const served = await harness();
   const subject = `mid-session-${browserName}`;
@@ -118,10 +121,11 @@ test("a framed page mid-session: its next load after revocation is denied where 
   await reloadItself(await shown.frame());
   // A frame that speaks for itself and navigates is mounted again (its navigation recovery), at
   // a location the host gives again: each mounting tells its own outcome. Every one after the
-  // first is the refusal. WebKit keeps no cookie in a cross-site frame (P025): its reload had no
-  // session to revoke.
-  const refusal =
-    browserName === "webkit" ? { state: "blocked", reason: "session", status: 401 } : DENIED;
+  // first is the refusal. A browser that keeps no cookie in a cross-site frame (P025, measured:
+  // P098) had no session to revoke on its reload.
+  const refusal = (await keepsFramedCookies(page, "http:"))
+    ? DENIED
+    : { state: "blocked", reason: "session", status: 401 };
   await expect
     .poll(async () => (await shown.read()).outcomes.at(-1), { timeout: 10_000 })
     .toEqual(refusal);

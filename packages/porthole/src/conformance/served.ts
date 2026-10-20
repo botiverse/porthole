@@ -16,6 +16,7 @@ import type { ConformanceTest } from "./probes.ts";
 import type { EgressConfig } from "../config/schema.ts";
 import type { FrameLocation, InstanceRef } from "../isolation/types.ts";
 import { MCP_APPS_METHODS } from "../protocol/mcp-apps.ts";
+import { keepsFramedCookies } from "./cookies.ts";
 
 /** One served display, as the host shows it. */
 export interface ServedDisplay {
@@ -592,11 +593,17 @@ export function servedTests(
     define(
       "served.url.framed",
       "a framed app's own requests ride on its partitioned cookie",
-      async ({ page, browserName }) => {
-        // Measured (P025): WebKit keeps no cookie in a cross-site frame, partitioned or not, so a
-        // framed app's subresources are refused there; such hosts open the app on a tab.
-        typed.fail(browserName === "webkit", "WebKit keeps no cookie in a cross-site frame");
+      async ({ page }) => {
+        // Where the browser keeps no cookie in a cross-site frame (P025: Playwright's WebKit on
+        // Linux), a framed app's own requests are refused and such hosts open it on a tab: the
+        // case must fail there. Measured by a probe of the browser's own, not by its name (P098:
+        // the same WebKit on macOS keeps them).
         const display = await host.show(page, await host.app("url-framed"));
+        const scheme = new URL(display.origin).protocol === "https:" ? "https:" : "http:";
+        typed.fail(
+          !(await keepsFramedCookies(page, scheme)),
+          "this browser keeps no cookie in a cross-site frame (measured)",
+        );
         const frame = await display.frame();
         await expect
           .poll(() => frame.evaluate(() => document.documentElement.dataset.app ?? null), {
