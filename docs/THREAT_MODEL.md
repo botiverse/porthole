@@ -6,9 +6,8 @@ guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
 **Status.** This describes Porthole 0.9.0 (2026-10-20). A review on 2026-10-19 found gaps, and every
-decision it led to has merged but P096. A note **open until P096** means the gap exists in 0.9.0 and
-P096 is its planned fix; once it merges, the note becomes a guarantee. [§8](#8-fixes-in-flight)
-lists the decisions.
+decision it led to has merged. P096 came after 0.9.0: it changed the negative-control runner and CI,
+and the shipped conformance probes' messages and timing, not what they check. [§8](#8-fixes-in-flight) lists the decisions.
 
 ## 1. Two layers
 
@@ -77,9 +76,9 @@ viewer and any declaration.
 
 The leak suite attempts each channel in DESIGN.md's table from inside the content, on Chromium,
 WebKit and Firefox, and most defenses have a negative control that takes the defense out to show
-its probes then fail (DESIGN.md § "Egress hardening, each with its test"). CI runs the negative
-controls of the runtime only, and its runner can count a control that didn't run as passed (open
-until P096).
+its probes then fail (DESIGN.md § "Egress hardening, each with its test"). CI runs every negative
+control on all three engines, and a control passes only when its marked probes failed by their own
+assertion (P096).
 
 ## 5. Out of scope
 
@@ -630,7 +629,7 @@ says what was wrong, what holds now, and the limit its decision accepts, if any.
 | P093 | Merged | `intersectDeclarations` compared rules name by name, so a current wildcard didn't narrow a version's named rule, and a collection named `__proto__` was lost. Now the result allows exactly what both sides allow. | §7 |
 | P094 | Merged | Without a viewer, a page's declared `data` names weren't held; a pushed result answered a read past `readData`'s gates; `db.batch` and `db.watch` skipped their inner methods' `methodGates`. Now each holds. | §4, S2, S4, §7 |
 | P095 | Merged | What content sent was read before its gate: a log or error report was serialized whole first; waiting confirmations had no cap. Now the bridge reads it after the gate into bounded text, nothing a page sends throws out of an adapter, and at most 10 confirmations wait per display. | §5, S1, S5 |
-| P096 | Planned | The negative-control runner counts a control that didn't run as passed, and CI runs the runtime's controls only. | §4 |
+| P096 | Merged | The negative-control runner counts a control that didn't run as passed, and CI runs the runtime's controls only. | §4 |
 | P097 | Merged | A release waits for the same commit's CI. No guarantee here depends on it. | |
 | P098 | Merged | A set's page whose notice came late was taken for a navigation away (red on Chromium since 0.6.0), and tests that waited a fixed time. Accepted: a files display may hold a frame that did navigate away for up to 2 s before starting it again, delivering nothing while it waits. | S1 |
 | P099 | Merged | A served page in a tab had no sandbox: `window.open` sent input out, it could navigate its opener, open a picture-in-picture window, and ask for the camera, location or full screen. Now its headers carry its frame's sandbox and deny what its frame's `allow` doesn't grant, and the shell closes those on a tab too; the served suite probes self-navigation in frames and tabs. A browser without the Navigation API is an accepted limit. | S4 |
