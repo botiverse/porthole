@@ -182,13 +182,14 @@ test("the shell fixes each of its walls in place, and says which it couldn't", a
   await page.goto((await servedHost.locate(instance)).url);
   expect(await unfixed(page), "on a tab").toBeNull();
   // A property fixed before the shell ran (an extension's, an engine's own): the shell says so.
+  // WebRTC's constructor, which no control here touches (its removal is the shell's from start).
   await page.addInitScript(() => {
-    Object.defineProperty(window, "open", {
+    Object.defineProperty(window, "RTCPeerConnection", {
       configurable: false,
       writable: false,
-      value: window.open,
+      value: window.RTCPeerConnection,
     });
   });
   await page.goto((await servedHost.locate(instance)).url);
-  expect((await unfixed(page))?.split(" ")).toContain("open");
+  expect((await unfixed(page))?.split(" ")).toContain("RTCPeerConnection");
 });

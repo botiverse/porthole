@@ -4512,7 +4512,7 @@ but `.tab-navigation`, on every engine. Measured then, on a tab: `documentPictur
    swallowed. Now each such name goes on the shell's own script element
    (`data-porthole-unfixed`) and, once the shell can speak, to the host as an error report. The
    tab case "the shell fixes each of its walls in place" finds none in a frame or on a tab on any
-   engine, and names `open` where a script fixed it first. WebKit's `ApplePaySession` is locked
+   engine, and names `RTCPeerConnection` where a script fixed it first. WebKit's `ApplePaySession` is locked
    with the other payments (absent in Playwright's WebKit on Linux: `.tab-prompts` asks where it
    is).
 5. **Probes**, in the served conformance suite (shipped: `defineHostConformance` runs them against
