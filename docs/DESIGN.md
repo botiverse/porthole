@@ -1064,11 +1064,15 @@ chooses), and the annotation runtime is in the shell only then.
   Markers ending on one line go together, in the order their words end; where the
   bubble with its glyph fits nowhere, its number alone does (compact); where neither
   does (two anchors on one full line of a phone), they go over the line's end. The
-  pointer on a marker lights its words. An element's mark with a marker is a thin
-  line. The layer takes no pointer but on markers: a press on one, and the pointer's
+  pointer on a marker lights its words. Placing costs a bounded number of hit tests
+  per marker in view (the layer's own boxes out of the way meanwhile), none for one
+  out of view, and its line's end is read only as far as the line goes (P105: 300
+  marks with counts in view, about 20 ms a change). An element's mark with a marker
+  is a thin line. The layer takes no pointer but on markers: a press on one, and the pointer's
   moves over it, are stopped in the shell's first window listener, read through the
   platform's own functions kept before content runs (P105), and a trusted click is
-  reported `activated`. Against content that patches none of the built-ins, none of
+  reported `activated`; a tap too, on WebKit as well, since each marker has a click
+  listener of its own (WebKit makes a tap a click only on such an element, P105). Against content that patches none of the built-ins, none of
   its handlers, nor what is under the marker, gets them; content that patches others
   can reach the layer's nodes (P105). Either way the content can tell a press
   happened, by `:active`, `relatedTarget` and user activation. Markers step aside
@@ -1122,8 +1126,14 @@ the layer itself (`annotation-activated`, `annotation-activated-count`,
 `marker-trusted` → that case), or by itself, without a gesture
 (`annotation-activated-gesture`); and a page that patches `Event`'s and
 `MouseEvent`'s prototypes neither hearing a marker's press nor stopping its report
-(`marker-originals`; `marker-click` too). A text marker's place was judged on
-screen (P105: a 640 px column and a 390 px phone page, three engines).
+(`marker-originals`; `marker-click` too); a tap on a marker reported on each
+engine, a touch screen and a phone's emulation (iPhone 13, Pixel 5), content hearing
+none of it (`marker-tap` → WebKit; `marker-click` too); on a 640 px column and a phone page's lines
+with one marker each, no marker covering a word (`marker-place`, the marker just
+past its words as 0.9.0 had it); and ADOPTING.md's `guardPresses`, as written
+there, taking no press within 500 ms of its view opening (a release on a menu item,
+a double click's second press on a button or a trigger, a press held past the
+arming) and the person's own press or key after.
 
 ## The shell runtime
 
@@ -1394,8 +1404,10 @@ control the tables above name to the registry):
 | `annotation-activated` | `annotate.spec.ts` | `a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker` | — | — |
 | `annotation-activated-count` | `annotate.spec.ts` | `a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker` | — | — |
 | `marker-trusted` | `annotate.spec.ts` | `a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker` | — | — |
-| `marker-click` | `annotate.spec.ts` | `markers: a mark with a count gets a numbered bubble; its click is reported and never reaches the content`, `a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection`, `a page that patches the event's built-ins neither hears a marker's press nor stops its report (P105)` | — | — |
+| `marker-click` | `annotate.spec.ts` | `markers: a mark with a count gets a numbered bubble; its click is reported and never reaches the content`, `a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection`, `a page that patches the event's built-ins neither hears a marker's press nor stops its report (P105)`, `a tap on a marker is reported on every engine, and the content hears none of it (P105)` | — | — |
 | `marker-prevent` | `annotate.spec.ts` | `a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection` | — | — |
+| `marker-place` | `annotate.spec.ts` | `text markers cover no word: on a column page, and on a phone's lines with one marker each (P105, #36)` | — | — |
+| `marker-tap` | `annotate.spec.ts` | nothing | WebKit: `a tap on a marker is reported on every engine, and the content hears none of it (P105)` | no probe can see it on Chromium and Firefox: they make a tap a click on the marker without a listener of its own (measured, P105) |
 | `marker-originals` | `annotate.spec.ts` | `a page that patches the event's built-ins neither hears a marker's press nor stops its report (P105)` | — | — |
 | `follow-throttle` | `annotate.spec.ts` | `an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second` | — | — |
 | `selection-follow` | `annotate.spec.ts` | `an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second` | — | — |

@@ -118,6 +118,8 @@ const MARKER_PRESS =
   "a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection";
 const PATCHED_PRESS =
   "a page that patches the event's built-ins neither hears a marker's press nor stops its report (P105)";
+const MARKER_TAP =
+  "a tap on a marker is reported on every engine, and the content hears none of it (P105)";
 const HONEST_SCROLL =
   "an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second";
 const IN_SET_LINKS = [
@@ -280,12 +282,26 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "markers: a mark with a count gets a numbered bubble; its click is reported and never reaches the content",
       MARKER_PRESS,
       PATCHED_PRESS,
+      MARKER_TAP,
     ),
   },
   // After the review of P104 (P105): the press's default cancelled (focus on every engine; a
   // drag's selection on WebKit), read through the platform's own functions, follow-ups on one
   // clock and only while a mark has a marker, a marker's click only within a gesture.
   "marker-prevent": { specs: [ANNOTATE], fails: all(MARKER_PRESS) },
+  "marker-place": {
+    specs: [ANNOTATE],
+    fails: all(
+      "text markers cover no word: on a column page, and on a phone's lines with one marker each (P105, #36)",
+    ),
+  },
+  "marker-tap": {
+    specs: [ANNOTATE],
+    fails: each([], { webkit: [MARKER_TAP] }),
+    holds: {
+      why: "no probe can see it on Chromium and Firefox: they make a tap a click on the marker without a listener of its own (measured, P105)",
+    },
+  },
   "marker-originals": { specs: [ANNOTATE], fails: all(PATCHED_PRESS) },
   "follow-throttle": { specs: [ANNOTATE], fails: all(HONEST_SCROLL) },
   "selection-follow": { specs: [ANNOTATE], fails: all(HONEST_SCROLL) },
@@ -844,6 +860,8 @@ const MEASURED: Readonly<Record<string, number>> = {
   "selection-follow": 70,
   "follow-count": 70,
   "annotation-activated-gesture": 69,
+  "marker-tap": 83,
+  "marker-place": 83,
 };
 
 /**

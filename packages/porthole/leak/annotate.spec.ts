@@ -1,4 +1,5 @@
-import { expect, test, type Frame, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { devices, expect, test, type Frame, type Page } from "@playwright/test";
 import {
   presets,
   type AnchorResult,
@@ -1108,10 +1109,15 @@ test("a marker's press, of any kind, moves nothing of the content's: no handler,
   if (words === null) {
     throw new Error("no words");
   }
-  // Down from the marker to the next line, then along it over its words: never over #after.
+  // Up off the marker's line, round the paragraph's left edge, down to the next line and along
+  // it over its words: never over #after, wherever on its line the marker is.
+  const frameBox = await (await frame.frameElement()).boundingBox();
+  const left = (frameBox?.x ?? 0) + 2;
   await page.mouse.move(at.x, at.y);
   await page.mouse.down();
-  await page.mouse.move(at.x, words.y + words.height / 2, { steps: 4 });
+  await page.mouse.move(at.x, at.y - 20, { steps: 1 });
+  await page.mouse.move(left, at.y - 20, { steps: 4 });
+  await page.mouse.move(left, words.y + words.height / 2, { steps: 4 });
   await page.mouse.move(words.x + words.width / 3, words.y + words.height / 2, { steps: 8 });
   await page.mouse.up();
   await page.waitForTimeout(150);
@@ -1241,6 +1247,284 @@ test("a hostile page's marker click with no gesture is dropped; one on the perso
   await page.mouse.down();
   await next(display, "activated");
   await page.mouse.up();
+});
+
+test("a tap on a marker is reported on every engine, and the content hears none of it (P105)", async ({
+  browser,
+  browserName,
+}) => {
+  test.setTimeout(90_000);
+  // A touch screen on each engine, and the phone each mobile engine emulates (Firefox has none).
+  const phones: Record<string, (typeof devices)[string]> = {
+    webkit: devices["iPhone 13"],
+    chromium: devices["Pixel 5"],
+  };
+  const phone = phones[browserName];
+  const kinds: [string, Parameters<typeof browser.newContext>[0]][] = [
+    ["touch", { hasTouch: true }],
+  ];
+  if (phone !== undefined) {
+    const { defaultBrowserType: _engine, ...options } = phone;
+    kinds.push([browserName === "webkit" ? "iPhone 13" : "Pixel 5", options]);
+  }
+  for (const [kind, options] of kinds) {
+    const context = await browser.newContext(options);
+    try {
+      const page = await context.newPage();
+      const display = await referenceHost.launch(page, {
+        config: annotated(),
+        widthPx: 360,
+        content: `<p id="p1" style="font-size: 18px">Costs <b>fell</b><span id="after"> by three percent.</span></p>
+<script>
+  window.heard = [];
+  const layer = () => document.querySelector("[data-porthole-annotations]");
+  for (const type of ["touchstart", "touchend", "pointerdown", "pointerup", "mousedown", "mouseup", "click"]) {
+    window.addEventListener(type, (event) => {
+      if (event.target === layer()) {
+        window.heard.push(type);
+      }
+    }, true);
+  }
+</script>`,
+      });
+      const frame = await display.frame();
+      await expect(frame.locator("#after")).toBeVisible();
+      await display.annotate("show", [textMark("fell", "fell", 3)]);
+      await next(display, "anchored");
+      const at = await textMarkerPoint(frame, "#p1 b");
+      // Nothing asks either page anything for 6 s (an evaluate is a gesture): the tap's own
+      // activation is what the host takes it by.
+      await page.waitForTimeout(6_000);
+      await page.touchscreen.tap(at.x, at.y);
+      await expect
+        .poll(
+          async () => (await reports(display)).filter((each) => each.type === "activated").length,
+          { message: `probe: a tap on the marker is reported (${kind})` },
+        )
+        .toBe(1);
+      expect(
+        await frame.evaluate(() => (window as unknown as { heard: string[] }).heard),
+        `probe: no handler of the content's heard the tap (${kind})`,
+      ).toEqual([]);
+    } finally {
+      await context.close();
+    }
+  }
+});
+
+// The page #36 was judged on (P105): 16 px text, line height 1.6, a 640 px column or a phone's
+// full width with 20 px padding; anchors ending mid-line, at a line's end, at a wrapped line's
+// start, two on one line, in a card, in a table's cell; elements.
+const PLACED = (column: string) => `<!doctype html><html><head><title>Notes</title><style>
+body { margin: 0; font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #1f2328; background: #fff; }
+main { ${column} }
+h2 { font-size: 22px; line-height: 1.3; margin: 0 0 12px; }
+p { margin: 0 0 14px; }
+.cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 14px; }
+.card { border: 1px solid #d0d7de; border-radius: 8px; padding: 10px 12px; }
+table { border-collapse: collapse; width: 100%; margin: 0 0 14px; }
+td, th { border-bottom: 1px solid #d0d7de; padding: 4px 8px; text-align: left; }
+</style></head><body><main>
+<h2 id="title">Quarterly review</h2>
+<p id="p1">Revenue grew 12% over the last quarter, mostly from the two new regions, while costs stayed flat even though we hired two engineers and one designer before the summer began.</p>
+<p id="p2">The roadmap for next year is short: ship the mobile app, finish the billing rewrite, move the reports to the new storage, and hire one more person for support before the busy season.</p>
+<div class="cards"><div class="card" id="c1">Churn fell to 2.1% this quarter, the lowest in two years.</div><div class="card" id="c2">Support tickets rose by a third after the launch.</div></div>
+<table><tr><th>Region</th><th>Revenue</th><th>Growth</th></tr><tr><td>North</td><td id="north">$1.2M</td><td>+14%</td></tr><tr><td>South</td><td>$0.8M</td><td>+9%</td></tr></table>
+<p id="p3">Next steps are listed in the plan, with owners and dates for each of them.</p>
+</main></body></html>`;
+
+/** Phrases by where they end as the page is laid out: at a line's end, at a wrapped line's start, two on one line. */
+const phrasesOf = (frame: Frame) =>
+  frame.evaluate(() => {
+    const words = (id: string) => {
+      const node = document.getElementById(id)?.firstChild as Text;
+      const text = node.nodeValue ?? "";
+      return {
+        text,
+        all: Array.from(text.matchAll(/\S+/gu), (match) => {
+          const range = document.createRange();
+          range.setStart(node, match.index);
+          range.setEnd(node, match.index + match[0].length);
+          return {
+            start: match.index,
+            end: match.index + match[0].length,
+            top: Math.round(range.getBoundingClientRect().top),
+          };
+        }),
+      };
+    };
+    const breakAfter = (list: { top: number }[]) =>
+      list.findIndex((each, i) => list[i + 1] !== undefined && list[i + 1]?.top !== each.top);
+    const p1 = words("p1");
+    const p2 = words("p2");
+    const end1 = breakAfter(p1.all);
+    const end2 = breakAfter(p2.all);
+    const second = p2.all.filter((each) => each.top === p2.all[end2 + 1]?.top);
+    const slice = (of: typeof p1, from: number, to: number) =>
+      of.text.slice(of.all[from]?.start, of.all[to]?.end);
+    return {
+      lineEnd: slice(p1, end1 - 1, end1),
+      wrapped: slice(p2, end2, end2 + 1),
+      firstOfTwo: p2.text.slice(second[2]?.start, second[3]?.end),
+      secondOfTwo: p2.text.slice(second[5]?.start, second[6]?.end),
+    };
+  });
+
+/** The words any marker covers: every word's glyph boxes against the points the layer takes (2 px). */
+const coveredWords = (frame: Frame) =>
+  frame.evaluate(() => {
+    const layer = document.querySelector("[data-porthole-annotations]");
+    const on = new Set<string>();
+    const width = document.documentElement.clientWidth;
+    const height = document.documentElement.clientHeight;
+    for (let y = 0; y < height; y += 2) {
+      for (let x = 0; x < width; x += 2) {
+        if (document.elementFromPoint(x, y) === layer) {
+          on.add(`${x},${y}`);
+        }
+      }
+    }
+    const covered: string[] = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      for (const match of (node.nodeValue ?? "").matchAll(/\S+/gu)) {
+        const range = document.createRange();
+        range.setStart(node, match.index);
+        range.setEnd(node, match.index + match[0].length);
+        for (const box of Array.from(range.getClientRects())) {
+          let hit = false;
+          for (let y = Math.ceil(box.top / 2) * 2; y < box.bottom && !hit; y += 2) {
+            for (let x = Math.ceil(box.left / 2) * 2; x < box.right && !hit; x += 2) {
+              hit = on.has(`${x},${y}`);
+            }
+          }
+          if (hit) {
+            covered.push(match[0]);
+          }
+        }
+      }
+    }
+    return { markerPoints: on.size, covered };
+  });
+
+test("text markers cover no word: on a column page, and on a phone's lines with one marker each (P105, #36)", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  for (const [kind, column, width, height] of [
+    ["column", "max-width: 640px; margin: 0 auto; padding: 24px 20px;", 1000, 640],
+    ["phone", "padding: 20px;", 390, 820],
+  ] as const) {
+    const display = await referenceHost.launch(page, {
+      config: presets.artifact({ capabilities: { annotate: {} } }),
+      content: PLACED(column),
+      widthPx: width,
+      heightPx: height,
+    });
+    const frame = await display.frame();
+    await expect(frame.locator("#p3")).toBeVisible();
+    const at = await phrasesOf(frame);
+    const count = (await reports(display)).length;
+    await display.annotate("show", [
+      textMark("mid", "Revenue grew 12%", 3),
+      textMark("hire", "one designer", 99),
+      textMark("card", "lowest in two years", 4),
+      textMark("cell", "$1.2M", 7),
+      elementMark("title", "#title", 0),
+      elementMark("c2", "#c2", 2),
+      // On a phone two or three anchors ending on one full line can't all fit beside it: the
+      // column only (P105).
+      ...(kind === "column"
+        ? [
+            textMark("end", at.lineEnd, 1),
+            textMark("wrap", at.wrapped, 12),
+            textMark("two-a", at.firstOfTwo, 2),
+            textMark("two-b", at.secondOfTwo, 5),
+          ]
+        : []),
+    ]);
+    await next(display, "anchored", count);
+    await page.waitForTimeout(400);
+    const { markerPoints, covered } = await coveredWords(frame);
+    expect(markerPoints, `the markers are drawn (${kind})`).toBeGreaterThan(0);
+    expect(covered, `probe: no marker covers a word (${kind})`).toEqual([]);
+  }
+});
+
+/** ADOPTING.md's guardPresses, as it is written there: the duty's reference code (P105). */
+const GUARD = (() => {
+  const doc = readFileSync(new URL("../../../docs/ADOPTING.md", import.meta.url), "utf8");
+  const at = doc.indexOf("function guardPresses(");
+  const code = doc.slice(at, doc.indexOf("```", at));
+  return code.replace(/^ {2}/gmu, "");
+})();
+
+test("ADOPTING's guard: a view a report opens takes no press for 500 ms, nor one begun before, then takes them (P105)", async ({
+  page,
+}) => {
+  expect(GUARD, "ADOPTING.md has the guard").toContain("placed");
+  // A view opening on the person's press in the content, under the pointer (as the review's R4,
+  // R9): a plain button, a menu item that clicks itself when a press ends on it (Radix's, Base
+  // UI's), a trigger acting on pointerdown.
+  await page.setContent(`<!doctype html><body style="margin:0">
+<div id="content" style="position:absolute;left:0;top:0;width:400px;height:300px;background:#eee">content</div>
+<div id="view" style="position:absolute;left:150px;top:100px;width:200px;height:120px;background:#fff;display:none">
+  <button id="plain" style="display:block;width:200px;height:40px">Resolve</button>
+  <div id="item" role="menuitem" style="width:200px;height:40px;background:#fcc">Delete</div>
+  <div id="trigger" style="width:200px;height:40px;background:#ccf">More</div>
+</div>
+<script>
+${GUARD}
+  window.fired = [];
+  const view = document.getElementById("view");
+  const guard = guardPresses(view);
+  document.getElementById("plain").addEventListener("click", () => fired.push("plain"));
+  const item = document.getElementById("item");
+  let down = false;
+  item.addEventListener("pointerdown", () => (down = true));
+  item.addEventListener("pointerup", () => { if (!down) item.click(); down = false; });
+  item.addEventListener("click", () => fired.push("item"));
+  document.getElementById("trigger").addEventListener("pointerdown", () => fired.push("trigger"));
+  window.open = () => { view.style.display = "block"; guard.placed(); };
+  document.getElementById("content").addEventListener("pointerdown", () => open());
+</script>`);
+  const fired = () =>
+    page.evaluate(() => (window as unknown as { fired: string[] }).fired.splice(0));
+  const close = () =>
+    page.evaluate(() => {
+      (document.getElementById("view") as HTMLElement).style.display = "none";
+    });
+  // A press in the content that ends where the menu item opened under it.
+  await page.mouse.move(250, 160);
+  await page.mouse.down();
+  await page.waitForTimeout(50);
+  await page.mouse.up();
+  expect(await fired(), "probe: a release on the menu item, within 500 ms").toEqual([]);
+  // A double click whose second press lands on the button, or on the trigger.
+  for (const [y, what] of [
+    [120, "button"],
+    [200, "trigger"],
+  ] as const) {
+    await close();
+    await page.mouse.click(250, y);
+    await page.mouse.click(250, y);
+    expect(await fired(), `probe: a double click's second press, on the ${what}`).toEqual([]);
+  }
+  // A press begun in the content, held past the 500 ms, released on the menu item.
+  await close();
+  await page.mouse.move(250, 160);
+  await page.mouse.down();
+  await page.waitForTimeout(700);
+  await page.mouse.up();
+  expect(await fired(), "probe: a press that began before the view did, ended on it").toEqual([]);
+  // Once armed, the person's own press, or key, is taken.
+  await page.waitForTimeout(100);
+  await page.mouse.click(250, 120);
+  expect(await fired(), "a press begun on the view after 500 ms").toEqual(["plain"]);
+  await page.focus("#plain");
+  await page.keyboard.press("Enter");
+  expect(await fired(), "a key on the view after 500 ms").toEqual(["plain"]);
 });
 
 test("an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second", async ({

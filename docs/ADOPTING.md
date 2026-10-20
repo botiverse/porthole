@@ -266,27 +266,53 @@ display.on("annotation", (report) => {
 - **Ids say nothing, and a count only where the page may know it**: the content reads every
   `show`. Who wrote what stays in your view, outside the frame.
 - **The content chooses when your view opens and where** (it can post `activated` for a mark you
-  show, on the person's own press in the content, under their pointer, P105), so a view that a
-  report opens or moves takes no press for 500 ms after it appears or moves, ignores a press that
-  began before that, opens beside the frame rather than over `rect` where the layout allows, takes
-  no focus, and has no destructive action (resolve, delete) one click away:
+  show on the person's own press in the content, under their pointer, P105), so a view that a
+  report opens or moves takes no press of any kind for 500 ms after it appears or moves (no
+  `pointerdown`, `pointerup`, `click` or key: menu triggers act on a press, and menu items click
+  themselves on a release), ignores a press that began before that, opens beside the frame rather
+  than over `rect` where the layout allows, takes no focus, and has no destructive action (resolve,
+  delete) one click away. Making it `inert` while it arms does all of the first:
 
   ```js
-  // Call placed() each time the view appears or moves; a click counts only if its press began on
-  // the view at least 500 ms after that.
-  function guardPresses(view) {
-    let from = Infinity;
-    let began = -Infinity;
-    view.addEventListener("pointerdown", () => (began = performance.now()), true);
-    view.addEventListener("click", (event) => {
-      if (event.detail !== 0 && began < from) {
-        event.preventDefault();
-        event.stopPropagation();
+  // Call placed() each time the view appears or moves. For 500 ms it takes nothing (inert: no
+  // press, no click, no focus; the pointer reaches what is under it), then only a press or a key
+  // that began on it after that.
+  function guardPresses(...parts) {
+    let timer = 0;
+    let fresh = false;
+    for (const part of parts) {
+      part.addEventListener("pointerdown", () => (fresh = true), true);
+      part.addEventListener("keydown", () => (fresh = true), true);
+      for (const type of ["pointerup", "mouseup", "touchend", "click"]) {
+        part.addEventListener(type, (event) => {
+          if (!fresh) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }, true);
       }
-    }, true);
-    return { placed: () => ((from = performance.now() + 500), (began = -Infinity)) };
+    }
+    const arm = (on) => {
+      for (const part of parts) {
+        part.inert = on;
+        part.style.pointerEvents = on ? "none" : "";
+      }
+    };
+    return {
+      placed() {
+        fresh = false;
+        arm(true);
+        clearTimeout(timer);
+        timer = setTimeout(() => arm(false), 500);
+      },
+    };
   }
   ```
+
+  Menus and popovers the view opens are part of it, but a portaled one (Base UI's, Radix's) is
+  drawn outside it, where this guard doesn't reach: give it a container inside the view (both take
+  one, `container`), or pass that container to `guardPresses` too, and close it each time the view
+  appears or moves.
 
 - **Boxes are in the frame's CSS px**, clamped to its viewport (P104): add the frame element's
   position. A frame you scale or transform (a thumbnail, a zoomed preview) needs the box mapped

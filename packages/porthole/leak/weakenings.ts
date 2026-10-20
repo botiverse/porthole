@@ -295,6 +295,22 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
         "        if (layer === null || callOf(targetOf, event, []) !== layer) {\n          return;\n        }\n",
     },
   ],
+  // A text marker's place (P105, #36): just past its words, as 0.9.0 had it (centred on the line).
+  "marker-place": [
+    {
+      file: "src/shell/annotate.ts",
+      find: "            found = placeLine(line, false, GAP, placed, room);",
+      replace: "            found = { left: line.at.right + 2 };",
+    },
+  ],
+  // A marker's tap (P105): without a listener of its own, WebKit makes no click of a tap on it.
+  "marker-tap": [
+    {
+      file: "src/shell/annotate.ts",
+      find: '          callOf(listenOn, marker, ["click", tapTarget]);\n',
+      replace: "",
+    },
+  ],
   // A marker's press (P104, P105): what the browser would do with it (focus, selection) goes on.
   "marker-prevent": [
     {

@@ -52,6 +52,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const rangeRects = Range.prototype.getClientRects;
       const attachShadow = Element.prototype.attachShadow;
       const getAttribute = Element.prototype.getAttribute;
+      const listenOn = EventTarget.prototype.addEventListener;
       const post = window.parent.postMessage.bind(window.parent);
       // Read once: content can replace window.parent (it is [Replaceable]), never what was read.
       const framed = window.parent !== window;
@@ -443,20 +444,42 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         return elementRect.call(block).right - (parseFloat(style.borderRightWidth) || 0) - (parseFloat(style.paddingRight) || 0);
       };
       // How far the words reach on the anchor's last line (at), in its block: at least its own.
+      // Read forward from the anchor's end, 64 characters at a time, only until the text leaves
+      // that line (P105: the whole rest of a long block, for each marker, cost 100 ms and more).
       const lineEnd = (range, block, at) => {
         let end = at.right;
-        const rest = createRange.call(document);
-        try {
-          rest.setStart(range.endContainer, range.endOffset);
-          rest.setEnd(block, block.childNodes.length);
-        } catch (_) {
+        let node = range.endContainer;
+        if (node.nodeType !== 3) {
           return end;
         }
         const middle = at.top + at.height / 2;
-        for (const rect of Array.from(rangeRects.call(rest))) {
-          if (rect.width > 0 && rect.height < at.height * 2 && rect.top <= middle && rect.bottom >= middle && rect.right > end) {
-            end = rect.right;
+        const walker = createTreeWalker.call(document, block, NodeFilter.SHOW_TEXT);
+        walker.currentNode = node;
+        const piece = createRange.call(document);
+        let from = range.endOffset;
+        for (let pieces = 0; node !== null && pieces < 64; pieces += 1) {
+          const length = node.nodeValue.length;
+          if (from >= length) {
+            node = walker.nextNode();
+            from = 0;
+            continue;
           }
+          const to = Math.min(length, from + 64);
+          try {
+            piece.setStart(node, from);
+            piece.setEnd(node, to);
+          } catch (_) {
+            return end;
+          }
+          for (const rect of Array.from(rangeRects.call(piece))) {
+            if (rect.top > middle) {
+              return end;
+            }
+            if (rect.width > 0 && rect.bottom >= middle && rect.right > end) {
+              end = rect.right;
+            }
+          }
+          from = to;
         }
         return end;
       };
@@ -470,13 +493,14 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         const first = hits[0] === layer ? hits[1] : hits[0];
         return first === undefined || containsOf.call(first, block);
       };
+      // Its box: two opposite corners and its middle (the line's middle, up to it, is the path's).
       const clearOver = (left, top, width, block) =>
-        clearAt(left + 1, top + 1, block) && clearAt(left + width - 1, top + 1, block) && clearAt(left + 1, top + MARKER_HEIGHT - 1, block) && clearAt(left + width - 1, top + MARKER_HEIGHT - 1, block) && clearAt(left + width / 2, top + MARKER_HEIGHT / 2, block);
+        clearAt(left + width / 2, top + MARKER_HEIGHT / 2, block) && clearAt(left + 1, top + 1, block) && clearAt(left + width - 1, top + MARKER_HEIGHT - 1, block);
       const GAP = 6;
       const NEAR = 3;
       const BETWEEN = 3;
       const EDGE = 2;
-      const STEP = 6;
+      const STEP = 8;
       const overlapping = (placed, left, top, width) => placed.filter((other) => Math.abs(other.top - top) < MARKER_HEIGHT && left < other.left + other.width + BETWEEN && other.left < left + width + BETWEEN)[0];
       // The first place, of those above, where a line's markers fit, or null.
       const placeLine = (line, compact, gap, placed, room) => {
@@ -542,20 +566,27 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             line.range = each.range;
           }
         }
+        const seen = document.documentElement.clientHeight || window.innerHeight;
         for (const line of lines) {
           line.top = line.middle - MARKER_HEIGHT / 2;
           // Not cut off at the frame's top while its anchor is in view; with its anchor as it goes.
           if (line.top < 2) {
             line.top = Math.min(2, line.bottom - MARKER_HEIGHT);
           }
-          line.words = lineEnd(line.range, line.block, line.at);
           let compact = false;
-          let found = placeLine(line, false, GAP, placed, room);
-          if (found === null) {
-            compact = true;
-            found = placeLine(line, true, NEAR, placed, room);
-          }
+          let found = null;
           let left;
+          if (line.top + MARKER_HEIGHT < 0 || line.top > seen) {
+            // Out of view, nothing is measured: it is placed again as it comes into view.
+            found = { left: Math.max(EDGE, Math.min(contentRight(line.block) + GAP, room - EDGE - line.items.length * MARKER_HEIGHT)) };
+          } else {
+            line.words = lineEnd(line.range, line.block, line.at);
+            found = placeLine(line, false, GAP, placed, room);
+            if (found === null) {
+              compact = true;
+              found = placeLine(line, true, NEAR, placed, room);
+            }
+          }
           if (found !== null) {
             left = found.left;
           } else {
@@ -606,7 +637,14 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         const mark = each.mark;
         const label = each.label;
         const kept = markerNodes.get(mark.id);
-        const marker = kept ? kept.element : createElement.call(document, "div");
+        let marker = kept ? kept.element : null;
+        if (marker === null) {
+          marker = createElement.call(document, "div");
+          // A listener of its own makes it a thing to tap: WebKit makes a tap a click only on such
+          // an element (P105, measured: the window's listener isn't enough). It never runs (the
+          // window's first listener stops every click on the layer); the click is told there.
+          callOf(listenOn, marker, ["click", tapTarget]);
+        }
         marker.className = "marker" + (each.compact ? " compact" : "") + (mark.id === active ? " active" : "") + (mode.elements ? " inert" : "");
         marker.style.cssText = "left:" + each.left + "px;top:" + each.top + "px";
         markers.push({ id: mark.id, element: marker });
@@ -633,6 +671,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
         return marker;
       };
+      const tapTarget = () => {};
       let active = null;
       // The mark whose marker the pointer is over: its words are lit as the active mark's are, so
       // a marker in the gutter shows which words it is for (P105).
@@ -663,6 +702,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           return;
         }
         const root = ensureLayer();
+        const into = boxesOf(root);
         const parts = [];
         const flashOn = Date.now() < flashUntil;
         // What is measured first, then drawn: no node of the layer changes while the page is read.
@@ -689,7 +729,8 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
               const label = labelOf(mark.count);
               const each = { mark, order: corners.length + wanted.length, label, width: markerWidth(label), small: compactWidth(label), compact: false, at, left: 0, top: 0 };
               if (mark.found.range) {
-                if (mark.block === undefined || !mark.block.isConnected) {
+                // Kept while it still holds the words (P105): a change elsewhere doesn't move them.
+                if (mark.block === undefined || !mark.block.isConnected || !containsOf.call(mark.block, mark.found.range.endContainer)) {
                   mark.block = blockOf(mark.found.range);
                 }
                 each.range = mark.found.range;
@@ -707,7 +748,18 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         for (const each of corners) {
           placeCorner(each, placed, room);
         }
-        placeLines(wanted, placed, room);
+        // The layer's own boxes out of the way while places are hit-tested (P105): each test
+        // otherwise walks every mark and marker the last draw left (0.13 ms each, 300 of them).
+        if (wanted.length > 0) {
+          into.marks.style.display = "none";
+          into.markers.style.display = "none";
+          try {
+            placeLines(wanted, placed, room);
+          } finally {
+            into.marks.style.display = "";
+            into.markers.style.display = "";
+          }
+        }
         const badges = [];
         for (const each of corners.concat(wanted).sort((a, b) => a.order - b.order)) {
           badges.push(markerOf(each));
@@ -729,7 +781,6 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           tag.style.cssText = "left:" + Math.max(4, rect.left) + "px;top:" + (rect.top >= 24 ? rect.top - 22 : Math.max(4, rect.bottom + 4)) + "px";
           outlines.push(outline, tag);
         }
-        const into = boxesOf(root);
         into.marks.replaceChildren(...parts);
         for (const child of Array.from(into.markers.childNodes)) {
           if (badges.indexOf(child) === -1) {
@@ -791,7 +842,6 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             changed = true;
           }
           mark.found = found;
-          mark.block = undefined;
           mark.state = state;
         }
         if (all || changed) {
@@ -999,7 +1049,8 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
         callOf(stopPress, event, []);
         const type = callOf(typeOf, event, []);
-        // No focus moves, no selection changes, no menu; a touch still makes its click.
+        // No focus moves, no selection changes, no menu; a touch still makes its click (on WebKit,
+        // since the marker has a listener of its own, P105).
         if (CANCELLED[type] === 1) {
           callOf(cancelPress, event, []);
         }
