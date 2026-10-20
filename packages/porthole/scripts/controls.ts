@@ -100,7 +100,11 @@ export const CONTROLS: Readonly<Record<string, { spec: string; fails: readonly E
   // event alone.
   "navigate-ask": {
     spec: "leak/served/tab.spec.ts",
-    fails: [{ title: "served.domain.tab-navigation", on: ["webkit"] }],
+    fails: [
+      { title: "served.domain.tab-navigation", on: ["webkit"] },
+      // The shell follows a link only where the rule lets it.
+      { title: "served.domain.tab-links", on: ["webkit"] },
+    ],
   },
   // A tab's links followed by the shell, as it read them (P099): without it the browser follows
   // them after content's listeners, and WebKit sends a cancelled one's request.
