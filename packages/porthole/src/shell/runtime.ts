@@ -172,16 +172,16 @@ export const SHELL_RUNTIME = String.raw`(() => {
     }
   }
 
-  // Nor, on a tab, the camera, the microphone, the screen, location or full screen (P099): a frame
-  // has none of them (its allow grants none), a tab has no allow, and its Permissions-Policy
-  // header, the wall on Chromium, isn't applied to them by WebKit and Firefox (measured). Each
-  // refuses as a denial does, at once, with no prompt.
+  // Nor, on a tab, the camera, the microphone, the screen, location, full screen, passkeys, the
+  // share sheet or payments (P099): a frame has none of them (its allow grants none), a tab has
+  // no allow, and its Permissions-Policy header, the wall on Chromium, isn't applied to them by
+  // WebKit and Firefox (measured). Each refuses as a denial does, at once, with no prompt.
   if (window.top === window) {
-    const deniedMedia = () => Promise.reject(new DOMException("Not available here", "NotAllowedError"));
+    const deny = () => Promise.reject(new DOMException("Not available here", "NotAllowedError"));
     if (typeof MediaDevices === "function") {
       for (const name of ["getUserMedia", "getDisplayMedia", "selectAudioOutput"]) {
         if (typeof MediaDevices.prototype[name] === "function") {
-          lock(MediaDevices.prototype, name, deniedMedia);
+          lock(MediaDevices.prototype, name, deny);
         }
       }
     }
@@ -210,6 +210,35 @@ export const SHELL_RUNTIME = String.raw`(() => {
       if (typeof Element.prototype[name] === "function") {
         lock(Element.prototype, name, () => undefined);
       }
+    }
+    // A video's own full screen (WebKit), passkeys and saved passwords, the share sheet, and
+    // payments (whose method's address the browser fetches outside the CSP): each a prompt or a
+    // way out a frame never has.
+    const notHere = () => {
+      throw new DOMException("Not available here", "NotAllowedError");
+    };
+    if (typeof HTMLVideoElement === "function") {
+      for (const name of ["webkitEnterFullscreen", "webkitEnterFullScreen"]) {
+        if (typeof HTMLVideoElement.prototype[name] === "function") {
+          lock(HTMLVideoElement.prototype, name, notHere);
+        }
+      }
+    }
+    if (typeof CredentialsContainer === "function") {
+      for (const name of ["create", "get", "store"]) {
+        if (typeof CredentialsContainer.prototype[name] === "function") {
+          lock(CredentialsContainer.prototype, name, deny);
+        }
+      }
+    }
+    if (typeof Navigator.prototype.share === "function") {
+      lock(Navigator.prototype, "share", deny);
+      lock(Navigator.prototype, "canShare", () => false);
+    }
+    if (typeof PaymentRequest === "function") {
+      lock(window, "PaymentRequest", function () {
+        throw new DOMException("Payments aren't available here", "SecurityError");
+      });
     }
   }
 

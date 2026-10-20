@@ -89,6 +89,7 @@ export const TAB_CASES: readonly string[] = [
   "served.domain.tab-opener",
   "served.domain.tab-navigation",
   "served.domain.tab-devices",
+  "served.domain.tab-prompts",
 ];
 
 const SETTLE_MS = 800;
@@ -739,6 +740,114 @@ export function servedTests(
             description: `${browserName}: ${warnings.slice(0, 3).join(" | ")}`,
           });
         }
+      },
+    );
+
+    define(
+      "served.domain.tab-prompts",
+      "a page on a tab of its own can't ask for a passkey, a payment or a share, or put a video in full screen, even after a click",
+      async ({ page }) => {
+        // Each where the engine has it, refused at once (a prompt would wait for the person, up
+        // to the request's own timeout). A payment method's address is fetched by the browser,
+        // outside the CSP: the canary must hear nothing.
+        await onTab(page, "tab-prompts");
+        const canary = await host.canary("tab-payment");
+        await page.evaluate((payTo) => {
+          const button = document.createElement("button");
+          button.id = "porthole-probe-prompts";
+          button.textContent = "pay";
+          const timed = (start: () => Promise<unknown> | undefined): Promise<string> => {
+            const begun = performance.now();
+            let asked: Promise<unknown> | undefined;
+            try {
+              asked = start();
+            } catch (error) {
+              return Promise.resolve(
+                `refused ${error instanceof Error ? error.name : "error"} at once`,
+              );
+            }
+            if (asked === undefined) {
+              return Promise.resolve("absent");
+            }
+            return asked.then(
+              () => "granted",
+              (error: unknown) =>
+                `refused ${error instanceof Error ? error.name : "error"}${performance.now() - begun < 1_500 ? " at once" : " later"}`,
+            );
+          };
+          const challenge = new Uint8Array(32);
+          button.addEventListener("click", () => {
+            const passkey = timed(() =>
+              navigator.credentials?.create({
+                publicKey: {
+                  challenge,
+                  rp: { name: "Probe" },
+                  user: { id: challenge, name: "probe", displayName: "Probe" },
+                  pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+                  timeout: 6_000,
+                },
+              }),
+            );
+            const payment = timed(() =>
+              typeof PaymentRequest === "function"
+                ? new PaymentRequest([{ supportedMethods: `${payTo}?d=secret` }], {
+                    total: { label: "Probe", amount: { currency: "USD", value: "1.00" } },
+                  }).show()
+                : undefined,
+            );
+            const share = timed(() =>
+              typeof navigator.share === "function"
+                ? navigator.share({ title: "Probe", url: `${payTo}?via=share` })
+                : undefined,
+            );
+            const video = document.createElement("video");
+            document.body.append(video);
+            const enter = (video as unknown as { webkitEnterFullscreen?: () => void })
+              .webkitEnterFullscreen;
+            let videoFullscreen = "absent";
+            if (typeof enter === "function") {
+              try {
+                enter.call(video);
+                videoFullscreen = "called";
+              } catch (error) {
+                videoFullscreen = `refused ${error instanceof Error ? error.name : "error"}`;
+              }
+            }
+            void Promise.all([passkey, payment, share]).then(([key, pay, sent]) => {
+              document.body.dataset.prompts = JSON.stringify({
+                passkey: key,
+                payment: pay,
+                share: sent,
+                video: videoFullscreen,
+                shown:
+                  (video as unknown as { webkitDisplayingFullscreen?: boolean })
+                    .webkitDisplayingFullscreen === true,
+              });
+            });
+          });
+          document.body.append(button);
+        }, canary);
+        await press(page, "#porthole-probe-prompts");
+        await expect
+          .poll(() => page.evaluate(() => document.body.dataset.prompts ?? ""), {
+            timeout: 10_000,
+          })
+          .not.toBe("");
+        const said = JSON.parse(
+          await page.evaluate(() => document.body.dataset.prompts ?? "{}"),
+        ) as Record<string, string | boolean>;
+        const atOnce = (value: unknown) =>
+          value === "absent" || (typeof value === "string" && /^refused \w+ at once$/u.test(value));
+        expect(atOnce(said.passkey), `a passkey: ${String(said.passkey)}`).toBe(true);
+        expect(atOnce(said.payment), `a payment: ${String(said.payment)}`).toBe(true);
+        expect(atOnce(said.share), `a share: ${String(said.share)}`).toBe(true);
+        expect(
+          said.video === "absent" || String(said.video).startsWith("refused"),
+          `a video's full screen: ${String(said.video)}`,
+        ).toBe(true);
+        expect(said.shown, "a video in full screen").toBe(false);
+        await page.waitForTimeout(SETTLE_MS);
+        expect(await host.canaryHits("tab-payment"), "the payment method's address").toBe(0);
       },
     );
 

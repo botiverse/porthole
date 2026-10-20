@@ -343,9 +343,11 @@ the attacker (c), and its readers are strangers.
   carries the frame's sandbox (scripts on its own origin; no popups, forms, downloads, browser
   dialogs, or navigation of another window, its opener's included), and its `Permissions-Policy`
   header denies what the frame's `allow` doesn't grant (camera, microphone, location, full
-  screen). The shell adds its own walls there: `window.open` answers null, picture-in-picture
-  windows, devices, location and full screen are refused, and its navigation guard stops the page
-  navigating itself away. `defineHostConformance`'s `served.domain.tab-*` cases check it through
+  screen, passkeys, payments, sharing, the built-in AI models, and every other feature a frame
+  lacks by default). The shell adds its own walls there, the only ones on engines that don't apply
+  that header (WebKit, Firefox): `window.open` answers null; picture-in-picture windows, devices,
+  location, full screen, passkeys, the share sheet and payments are refused at once; and its
+  navigation guard stops the page navigating itself away. `defineHostConformance`'s `served.domain.tab-*` cases check it through
   the host's real edge.
 
 **The host must**

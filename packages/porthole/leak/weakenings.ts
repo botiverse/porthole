@@ -199,8 +199,8 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "device-locks": [
     {
       file: RUNTIME,
-      find: "  if (window.top === window) {\n    const deniedMedia",
-      replace: "  if (false) {\n    const deniedMedia",
+      find: "  if (window.top === window) {\n    const deny",
+      replace: "  if (false) {\n    const deny",
     },
   ],
   // The shell's window.open on a tab of its own (P099): the second wall behind the sandbox.

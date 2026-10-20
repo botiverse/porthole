@@ -4455,6 +4455,27 @@ but `.tab-navigation`, on every engine. Measured then, on a tab: `documentPictur
    the shell, on a tab only, also refuses `getUserMedia`, `getDisplayMedia`, `getCurrentPosition`, `watchPosition`
    and `requestFullscreen` as a denial does, at once, without a prompt: the manual's "camera,
    microphone, location denied without asking" and "full screen closed" now hold on a tab too.
+   After the independent review of a32f5b2, likewise passkeys and saved passwords
+   (`navigator.credentials.create`, `get`, `store`), the share sheet (`navigator.share`;
+   `canShare` says no), payments (`PaymentRequest` throws `SecurityError`, as the header makes it:
+   a payment method's address is fetched by the browser, outside the CSP) and WebKit's video full
+   screen (`webkitEnterFullscreen`). `served.domain.tab-prompts` asks for each where the engine
+   has it, after a click: each refused at once (a prompt waits for the person, up to the request's
+   timeout), the payment method's address never fetched. With the shell's locks out
+   (`device-locks`) it fails on Firefox (a passkey request waited); with the header out too, on
+   Chromium as well; WebKit refused each at once either way here (no share sheet on desktop, no
+   authenticator to ask).
+   *The list* is held to Chromium's own (`permissions_policy_features.json5`, checked in as
+   `test/reference/permissions-policy-features.json`, read 2026-10-20): every feature a web page
+   has whose default allowlist is `'self'` is denied, but client hints, `cross-origin-isolated`
+   and Chromium's sample, each kept with its reason in `test/permissions-policy.test.ts`, which
+   fails on a refreshed reference until a new feature is classified. The review's eight names
+   (`digital-credentials-get`, `captured-surface-control`, `deferred-fetch`, `keyboard-map`,
+   `compute-pressure`, `summarizer`, `translator`, `language-detector`) are all there, with 18
+   more (the other built-in models, `webnn`, WebMCP's `tools`, local network access, `autofill`,
+   `digital-credentials-create`, `web-app-installation`, …). An engine logs each name it doesn't
+   know (measured: Playwright's Chromium 153 names `ambient-light-sensor`, `autofill`, `bluetooth`
+   and more) and ignores it; a name it learns later is denied from that day.
 4. **The shell, on a tab** (`window.top === window`): `window.open` answers null (a `_self`
    target stays a navigation of the document, which the guard decides), and
    `DocumentPictureInPicture.prototype.requestWindow` rejects, both fixed in place. For
