@@ -44,11 +44,7 @@ interface Words {
 const DIALOG_TEXT_LIMITS: TextLimits = { chars: 20_000, nodes: 2_000, depth: 24 };
 
 function carried(heading: string, accept: string, value: unknown, before = ""): Words {
-  // What the bridge passes is plain JSON (`isJsonData`): an object in two places is shown twice.
-  const { text, whole } = formatBounded(value, DIALOG_TEXT_LIMITS, {
-    indent: 2,
-    repeats: "written",
-  });
+  const { text, whole } = formatBounded(value, DIALOG_TEXT_LIMITS, 2);
   return {
     heading,
     accept,
