@@ -4524,6 +4524,30 @@ but `.tab-navigation`, on every engine. Measured then, on a tab: `documentPictur
    its own and an outside site, each in a fresh tab (WebKit sent such a request from a tab's first
    attempt and not always after); the `navigate-ask` control (the rule says yes to everything)
    fails it on WebKit only, as measured, and `navigate-guard` now takes both out.
+   *A tab's links are followed by the shell* (after the next review). Checking a link in the
+   first listener wasn't enough: the browser follows a link with the `href` and `target` it has
+   once every listener ran, so a listener after the shell's could change them (a page's own
+   address to an outside one, `_blank` to `_self`, an `href` added, a `download` dropped), and a
+   link in a shadow root wasn't seen at all (at `window` the event's target is the host). Now the
+   shell's first click listener takes every plain click on a link, found through the event's
+   composed path, from the browser: it cancels it (through the platform's own `preventDefault`),
+   reads `href`, `target` and `download` once, and after every listener ran (a task later), unless
+   content cancelled the click itself (`preventDefault` and `returnValue` are wrapped on a tab to
+   say so; an inline handler's `return false` isn't seen), follows what it read with a detached
+   link of its own, which no listener of content's sees, where the rule lets it: the same document
+   (a fragment jumps), another page of the set (P084), a download of the page's own (same origin,
+   `blob:`, `data:`; the sandbox then refuses it, as before). A link to a new window does nothing
+   (the sandbox refuses it anyway); a modified or middle click is left to the browser (a window or
+   a download, both refused by the sandbox). On a tab a closed shadow root is made open to the
+   platform and kept closed to content (its host's `shadowRoot` is null, its `mode` "closed"),
+   so its links are in the composed path too. `served.domain.tab-links` tries each (an `href`
+   switched, a `target` switched, an `href` added, a `download` dropped, by a listener after the
+   shell's that also stops the rest; a link in an open and in a closed shadow root, every listener
+   after the shell's stopped), each from a fresh tab, and checks a fragment link still jumps and a
+   link content cancels goes nowhere. At e26dff6 WebKit's canary heard five of the six (an `href`
+   switched, a `target` switched, an `href` added, both shadow roots); now none, on any engine.
+   The `link-rule` control (the browser follows links again) fails `.tab-links` and
+   `.tab-navigation` on WebKit only.
    *A lock that doesn't take.* `lock` fixes each wall with a non-configurable property; one that
    something fixed before the shell ran (an extension, an engine's own) can't be, and was
    swallowed. Now each such name goes on the shell's own script element

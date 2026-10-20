@@ -240,36 +240,123 @@ export const SHELL_RUNTIME = String.raw`(() => {
       lock(DocumentPictureInPicture.prototype, "requestWindow", () => Promise.reject(new DOMException("A page here opens no other window", "NotAllowedError")));
     }
   }
+  // A link on a tab (P099) is followed by the shell, never by the browser: WebKit sends a link's
+  // request though the navigate event cancels it (measured), and the browser follows a link with
+  // the href and target it has once every listener ran, which content may change after any check.
+  // So the first click listener there is (the shell's, on window, capturing) takes each plain click
+  // on a link (found through the composed path, shadow roots included) from the browser: it
+  // cancels it, reads the link once, and, after every listener ran and unless content cancelled
+  // the click itself, follows what it read with a link of its own, detached (no listener of
+  // content's sees its click), where the guard's rule lets it go: within the document (a
+  // fragment), another page of the set (P084), a download of the page's own (which the sandbox
+  // decides). A link to a new window does nothing (the sandbox refuses it anyway); a modified or
+  // middle click is left to the browser (a window or a download: the sandbox refuses both).
+  let linksTaken = false;
   if (window.top === window) {
-    // A link that would navigate this tab (no target, _self, _top, _parent) asks the same rule, from
-    // the first click listener there is (window, capturing, the shell's own before any content's):
-    // WebKit sends a link's request though the navigate event cancels it (measured), and content
-    // can step past the shell's own link handling below. Read through the platform's own getters.
-    const eventTarget = getterOf(Event.prototype, "target");
-    const closestOf = Element.prototype.closest;
+    linksTaken = true;
+    const pathOf = Event.prototype.composedPath;
+    const matchesOf = Element.prototype.matches;
     const attributeOf = Element.prototype.getAttribute;
     const attributeNSOf = Element.prototype.getAttributeNS;
+    const hasAttributeOf = Element.prototype.hasAttribute;
+    const setAttributeOf = Element.prototype.setAttribute;
+    const makeElement = Document.prototype.createElement;
+    const clickOf = HTMLElement.prototype.click;
+    const later = window.setTimeout;
+    const addTo = WeakSet.prototype.add;
+    const hasIn = WeakSet.prototype.has;
+    const modifierGetters = [getterOf(MouseEvent.prototype, "ctrlKey"), getterOf(MouseEvent.prototype, "metaKey"), getterOf(MouseEvent.prototype, "shiftKey"), getterOf(MouseEvent.prototype, "altKey")];
+    const buttonOf = getterOf(MouseEvent.prototype, "button");
+    // A click content cancelled itself, through preventDefault or returnValue (the shell's own
+    // cancels call the platform's function, kept above, and aren't counted).
+    const cancelledByContent = new WeakSet();
+    lock(Event.prototype, "preventDefault", function () {
+      callOf(addTo, cancelledByContent, [this]);
+      return callOf(preventNavigation, this, []);
+    });
+    const returnValue = Object.getOwnPropertyDescriptor(Event.prototype, "returnValue");
+    if (returnValue && returnValue.get && returnValue.set) {
+      try {
+        Object.defineProperty(Event.prototype, "returnValue", {
+          configurable: false,
+          enumerable: returnValue.enumerable,
+          get() {
+            return callOf(returnValue.get, this, []);
+          },
+          set(value) {
+            if (!value) {
+              callOf(addTo, cancelledByContent, [this]);
+            }
+            callOf(returnValue.set, this, [value]);
+          },
+        });
+      } catch (_) {
+        unfixed.push("returnValue");
+      }
+    }
+    const follow = (address, download) => {
+      const anchor = callOf(makeElement, document, ["a"]);
+      callOf(setAttributeOf, anchor, ["href", address]);
+      if (download !== null) {
+        callOf(setAttributeOf, anchor, ["download", download]);
+      }
+      callOf(clickOf, anchor, []);
+    };
     window.addEventListener("click", (event) => {
       let link = null;
       try {
-        const element = eventTarget === null ? null : callOf(eventTarget, event, []);
-        link = element ? callOf(closestOf, element, ["a, area"]) : null;
+        const path = callOf(pathOf, event, []);
+        for (let i = 0; i < path.length && link === null; i += 1) {
+          try {
+            if (callOf(matchesOf, path[i], ["a, area"])) {
+              link = path[i];
+            }
+          } catch (_) {}
+        }
       } catch (_) {}
       if (link === null) {
         return;
       }
-      const target = callOf(lowerOf, NativeString(callOf(attributeOf, link, ["target"]) || ""), []);
-      if (target !== "" && target !== "_self" && target !== "_top" && target !== "_parent") {
+      let plain = true;
+      try {
+        plain = callOf(buttonOf, event, []) === 0;
+        for (let i = 0; i < modifierGetters.length; i += 1) {
+          if (callOf(modifierGetters[i], event, [])) {
+            plain = false;
+          }
+        }
+      } catch (_) {}
+      if (!plain) {
         return;
       }
-      const href = callOf(attributeOf, link, ["href"]) || callOf(attributeNSOf, link, ["http://www.w3.org/1999/xlink", "href"]) || "";
-      let asked = { go: false, target: "" };
-      try {
-        asked = mayNavigate(href);
-      } catch (_) {}
-      if (!asked.go) {
-        callOf(preventNavigation, event, []);
-      }
+      callOf(preventNavigation, event, []);
+      // Read once, now: what is followed is what was read.
+      const named = callOf(lowerOf, NativeString(callOf(attributeOf, link, ["target"]) || ""), []);
+      const self = named === "" || named === "_self" || named === "_top" || named === "_parent";
+      const href = callOf(attributeOf, link, ["href"]) ?? callOf(attributeNSOf, link, ["http://www.w3.org/1999/xlink", "href"]);
+      const download = callOf(hasAttributeOf, link, ["download"]) ? NativeString(callOf(attributeOf, link, ["download"]) || "") : null;
+      callOf(later, window, [
+        () => {
+          if (callOf(hasIn, cancelledByContent, [event]) || href === null) {
+            return;
+          }
+          let asked = null;
+          try {
+            asked = mayNavigate(href);
+          } catch (_) {
+            return;
+          }
+          const own = callOf(indexIn, asked.target, [location.origin + "/"]) === 0 || callOf(indexIn, asked.target, ["blob:" + location.origin + "/"]) === 0 || callOf(indexIn, asked.target, ["data:"]) === 0;
+          if (download !== null && own) {
+            follow(asked.target, download);
+          } else if (self && asked.go) {
+            follow(asked.target, null);
+          } else if (self) {
+            navigationBlocked(asked.target);
+          }
+        },
+        0,
+      ]);
     }, true);
   }
 
@@ -394,13 +481,61 @@ export const SHELL_RUNTIME = String.raw`(() => {
   };
   guardRoot(document);
 
-  // Every shadow root content makes, open or closed, is guarded as it is made.
+  // Every shadow root content makes, open or closed, is guarded as it is made. On a tab (P099) a
+  // closed one is made open, to the platform, and closed to content (its host's shadowRoot is
+  // null, its mode "closed"): a click on a link inside it must show the link to the shell's first
+  // listener through the event's composed path, which a closed tree hides.
   const attachShadow = Element.prototype.attachShadow;
+  const shownOpen = new WeakSet();
+  const addShown = WeakSet.prototype.add;
+  const shadowInit = (init) => {
+    if (window.top !== window || init === null || typeof init !== "object" || init.mode !== "closed") {
+      return { init, closed: false };
+    }
+    const copy = { mode: "open" };
+    for (const key of ["delegatesFocus", "slotAssignment", "clonable", "serializable", "customElementRegistry", "referenceTarget"]) {
+      if (init[key] !== undefined) {
+        copy[key] = init[key];
+      }
+    }
+    return { init: copy, closed: true };
+  };
   lock(Element.prototype, "attachShadow", function (init) {
+    const asked = shadowInit(init);
+    init = asked.init;
     const root = attachShadow.call(this, init);
     guardRoot(root);
+    if (asked.closed) {
+      callOf(addShown, shownOpen, [root]);
+    }
     return root;
   });
+  if (window.top === window) {
+    const shadowRootOf = getterOf(Element.prototype, "shadowRoot");
+    const modeOf = typeof ShadowRoot === "function" ? getterOf(ShadowRoot.prototype, "mode") : null;
+    const shown = WeakSet.prototype.has;
+    try {
+      if (shadowRootOf !== null) {
+        Object.defineProperty(Element.prototype, "shadowRoot", {
+          configurable: false,
+          get() {
+            const root = callOf(shadowRootOf, this, []);
+            return root !== null && callOf(shown, shownOpen, [root]) ? null : root;
+          },
+        });
+      }
+      if (modeOf !== null) {
+        Object.defineProperty(ShadowRoot.prototype, "mode", {
+          configurable: false,
+          get() {
+            return callOf(shown, shownOpen, [this]) ? "closed" : callOf(modeOf, this, []);
+          },
+        });
+      }
+    } catch (_) {
+      unfixed.push("shadowRoot");
+    }
+  }
 
   // The parser builds declarative shadow roots (template shadowrootmode) without attachShadow, and
   // a closed one is out of the guard's reach. Fragment parsing doesn't build them, so the entry
@@ -1173,10 +1308,11 @@ export const SHELL_RUNTIME = String.raw`(() => {
         return;
       }
       const href = link.getAttribute("href") || link.getAttributeNS("http://www.w3.org/1999/xlink", "href") || "";
-      if (href === "" || href.charAt(0) === "#") {
+      // On a tab the shell's first listener took it (above).
+      if (linksTaken || href === "" || href.charAt(0) === "#") {
         return;
       }
-      event.preventDefault();
+      callOf(preventNavigation, event, []);
       let url = "";
       try {
         url = new URL(href, document.baseURI).href;

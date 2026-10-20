@@ -44,6 +44,15 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "    return { go: true, target };",
     },
   ],
+  // The shell's following of a tab's links (P099): the browser follows them, after content's
+  // listeners, and WebKit sends a cancelled one's request.
+  "link-rule": [
+    {
+      file: RUNTIME,
+      find: "  if (window.top === window) {\n    linksTaken = true;",
+      replace: "  if (false) {\n    linksTaken = true;",
+    },
+  ],
   "attach-shadow": [
     {
       file: RUNTIME,
@@ -376,7 +385,7 @@ export function weaken(relative: string, text: string): string {
  * navigation guard (P079), whose wall in a served frame is the shell alone for another content
  * origin, and the shell's window.open and device locks on a tab (P099).
  */
-const SERVED = ["navigate-guard", "navigate-ask", "window-open", "device-locks"];
+const SERVED = ["navigate-guard", "navigate-ask", "link-rule", "window-open", "device-locks"];
 
 /** Whether a control asked for edits the served documents' shell (`weakenServed`). */
 export const servedShellWeakened = (): boolean => weakened.some((each) => SERVED.includes(each));

@@ -351,7 +351,8 @@ the attacker (c), and its readers are strangers.
   `assign`, `replace`), a link, `navigation.navigate()` or `open(…, "_self")`. The last three ask
   the guard's rule before they start (WebKit sends a link's and `navigate()`'s request otherwise),
   read the address once, and read it through the platform's own functions, so a page can't
-  hand them one address to check and another to go to. `defineHostConformance`'s `served.domain.tab-*` cases check it through
+  hand them one address to check and another to go to; a link, in a shadow root too, is followed
+  by the shell as it was when clicked, never by the browser as a later listener left it. `defineHostConformance`'s `served.domain.tab-*` cases check it through
   the host's real edge.
 
 **The host must**

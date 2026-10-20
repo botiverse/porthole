@@ -88,6 +88,7 @@ export const TAB_CASES: readonly string[] = [
   "served.domain.tab-escapes",
   "served.domain.tab-opener",
   "served.domain.tab-navigation",
+  "served.domain.tab-links",
   "served.domain.tab-devices",
   "served.domain.tab-prompts",
 ];
@@ -842,6 +843,125 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
           )
         ).filter(([, hits]) => hits > 0);
         expect(heard, "the outside site heard these").toEqual([]);
+      },
+    );
+
+    define(
+      "served.domain.tab-links",
+      "a page on a tab of its own can't send a link elsewhere by changing it after the shell read it, or from a shadow root; its fragment links and its own cancels still work",
+      async ({ page }) => {
+        // The browser follows a link with what it is once every listener ran; the shell follows
+        // what it read in the first. Each in a fresh tab (WebKit sent a cancelled navigation's
+        // request from a tab's first attempt), each outside one with a canary of its own.
+        info?.setTimeout(90_000);
+        const ways = [
+          "switch-href",
+          "switch-target",
+          "add-href",
+          "drop-download",
+          "open-shadow",
+          "closed-shadow",
+        ];
+        const canaries = Object.fromEntries(
+          await Promise.all(ways.map(async (how) => [how, await host.canary(`tab-links-${how}`)])),
+        ) as Record<string, string>;
+        const freshTab = async () => {
+          const located = await host.locate(await host.shell("tab-links"));
+          const tab = await page.context().newPage();
+          expect((await tab.goto(located.url))?.status()).toBe(200);
+          return tab;
+        };
+        for (const how of ways) {
+          const tab = await freshTab();
+          const here = tab.url();
+          await tab.evaluate(
+            ([way, outside]) => {
+              const url = `${outside}?d=secret`;
+              const link = document.createElement("a");
+              link.textContent = "go";
+              if (way === "switch-href") {
+                link.href = location.href;
+              } else if (way === "switch-target") {
+                link.href = url;
+                link.target = "_blank";
+              } else if (way === "drop-download") {
+                link.href = "data.bin";
+                link.setAttribute("download", "data.bin");
+              } else if (way !== "add-href") {
+                link.href = url;
+              }
+              if (way === "open-shadow" || way === "closed-shadow") {
+                const holder = document.createElement("div");
+                document.body.append(holder);
+                const root = holder.attachShadow({
+                  mode: way === "open-shadow" ? "open" : "closed",
+                });
+                root.append(link);
+                // Past every listener after the shell's, the shadow tree's own included.
+                window.addEventListener("click", (event) => event.stopImmediatePropagation(), true);
+              } else {
+                document.body.append(link);
+                // After the shell's first listener, and past every one after it: the link changed
+                // before the browser reads it.
+                window.addEventListener(
+                  "click",
+                  (event) => {
+                    event.stopImmediatePropagation();
+                    if (way === "switch-target") {
+                      link.target = "_self";
+                    } else {
+                      link.href = url;
+                    }
+                    if (way === "drop-download") {
+                      link.removeAttribute("download");
+                    }
+                  },
+                  true,
+                );
+              }
+              setTimeout(() => link.click(), 0);
+            },
+            [how, canaries[how] ?? ""] as const,
+          );
+          await tab.waitForTimeout(SETTLE_MS);
+          expect(tab.url(), `${how}: the tab stays`).toBe(here);
+          await tab.close();
+        }
+        await page.waitForTimeout(SETTLE_MS);
+        const heard = (
+          await Promise.all(
+            ways.map(async (how) => [how, await host.canaryHits(`tab-links-${how}`)] as const),
+          )
+        ).filter(([, hits]) => hits > 0);
+        expect(heard, "the outside site heard these").toEqual([]);
+        // Still as before: a fragment link jumps; a link content cancels goes nowhere.
+        const tab = await freshTab();
+        await tab.evaluate(() => {
+          const below = document.createElement("p");
+          below.id = "porthole-probe-below";
+          const jump = document.createElement("a");
+          jump.id = "porthole-probe-jump";
+          jump.href = "#porthole-probe-below";
+          jump.textContent = "jump";
+          const kept = document.createElement("a");
+          kept.id = "porthole-probe-kept";
+          kept.href = "#porthole-probe-kept";
+          kept.textContent = "kept";
+          kept.addEventListener("click", (event) => event.preventDefault());
+          document.body.append(jump, kept, below);
+          setTimeout(() => jump.click(), 0);
+        });
+        await expect
+          .poll(() => tab.evaluate(() => location.hash), { timeout: 3_000 })
+          .toBe("#porthole-probe-below");
+        await tab.evaluate(() => {
+          setTimeout(() => document.getElementById("porthole-probe-kept")?.click(), 0);
+        });
+        await tab.waitForTimeout(SETTLE_MS);
+        expect(await tab.evaluate(() => location.hash), "a click content cancelled").toBe(
+          "#porthole-probe-below",
+        );
+        await tab.close();
       },
     );
 

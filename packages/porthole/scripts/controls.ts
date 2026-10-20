@@ -102,6 +102,15 @@ export const CONTROLS: Readonly<Record<string, { spec: string; fails: readonly E
     spec: "leak/served/tab.spec.ts",
     fails: [{ title: "served.domain.tab-navigation", on: ["webkit"] }],
   },
+  // A tab's links followed by the shell, as it read them (P099): without it the browser follows
+  // them after content's listeners, and WebKit sends a cancelled one's request.
+  "link-rule": {
+    spec: "leak/served/tab.spec.ts",
+    fails: [
+      { title: "served.domain.tab-links", on: ["webkit"] },
+      { title: "served.domain.tab-navigation", on: ["webkit"] },
+    ],
+  },
   // Its devices, location and full screen (P099): the Permissions-Policy header, and the shell's
   // locks behind it (the only wall where the header isn't applied: WebKit, Firefox).
   "permissions-policy,device-locks": {
