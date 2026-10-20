@@ -172,6 +172,47 @@ export const SHELL_RUNTIME = String.raw`(() => {
     }
   }
 
+  // Nor, on a tab, the camera, the microphone, the screen, location or full screen (P099): a frame
+  // has none of them (its allow grants none), a tab has no allow, and its Permissions-Policy
+  // header, the wall on Chromium, isn't applied to them by WebKit and Firefox (measured). Each
+  // refuses as a denial does, at once, with no prompt.
+  if (window.top === window) {
+    const deniedMedia = () => Promise.reject(new DOMException("Not available here", "NotAllowedError"));
+    if (typeof MediaDevices === "function") {
+      for (const name of ["getUserMedia", "getDisplayMedia", "selectAudioOutput"]) {
+        if (typeof MediaDevices.prototype[name] === "function") {
+          lock(MediaDevices.prototype, name, deniedMedia);
+        }
+      }
+    }
+    for (const name of ["getUserMedia", "webkitGetUserMedia", "mozGetUserMedia"]) {
+      if (typeof Navigator.prototype[name] === "function") {
+        lock(Navigator.prototype, name, function (_constraints, _success, failure) {
+          if (typeof failure === "function") {
+            setTimeout(() => failure(new DOMException("Not available here", "NotAllowedError")), 0);
+          }
+        });
+      }
+    }
+    if (typeof Geolocation === "function") {
+      const deniedPosition = { code: 1, message: "Not available here", PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 };
+      const denyPosition = function (_success, failure) {
+        if (typeof failure === "function") {
+          setTimeout(() => failure(deniedPosition), 0);
+        }
+        return 0;
+      };
+      lock(Geolocation.prototype, "getCurrentPosition", denyPosition);
+      lock(Geolocation.prototype, "watchPosition", denyPosition);
+    }
+    lock(Element.prototype, "requestFullscreen", () => Promise.reject(new TypeError("Full screen isn't available here")));
+    for (const name of ["webkitRequestFullscreen", "webkitRequestFullScreen", "mozRequestFullScreen"]) {
+      if (typeof Element.prototype[name] === "function") {
+        lock(Element.prototype, name, () => undefined);
+      }
+    }
+  }
+
   // No nested frames (each would be a fresh realm with WebRTC intact), no resource hints and no
   // refreshes (they reach the network outside the CSP's fetch directives). Removed as they are
   // added: a mutation observer's microtask runs before a child frame's document loads.

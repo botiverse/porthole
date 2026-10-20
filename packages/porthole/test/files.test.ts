@@ -402,8 +402,9 @@ describe("a file set in a frame (P083)", () => {
     expect(csp).toContain("frame-src 'none'");
     expect(csp).toContain(`frame-ancestors ${HOST}`);
     expect(csp).not.toContain("'self'");
-    // Its frame's sandbox, should its address be opened on a tab of its own (P099).
+    // Its frame's sandbox and denied features, should its address be opened on a tab (P099).
     expect(csp).toContain("; sandbox allow-scripts allow-same-origin;");
+    expect(page.headers.get("permissions-policy")).toContain("camera=()");
     expect(answer.headers.get("content-security-policy")).toContain(
       "; sandbox allow-scripts allow-same-origin;",
     );
@@ -442,6 +443,7 @@ describe("a file set in a frame (P083)", () => {
     expect(script.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
     expect(script.headers.get("content-security-policy")).toContain("worker-src blob: ");
     expect(script.headers.get("content-security-policy")).not.toContain("sandbox");
+    expect(script.headers.get("permissions-policy")).toBeNull();
 
     // An .html uploaded as .txt is text, and never sniffed.
     const notes = await fetchAt(app, `${base}notes.txt`, navigate);

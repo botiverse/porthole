@@ -85,6 +85,12 @@ export const CONTROLS: Readonly<Record<string, { spec: string; fails: readonly s
     spec: "leak/served/tab.spec.ts",
     fails: [...TAB_SANDBOX_FAILS, "served.domain.tab-window-open"],
   },
+  // Its devices, location and full screen (P099): the Permissions-Policy header, and the shell's
+  // locks behind it (the only wall where the header isn't applied: WebKit, Firefox).
+  "permissions-policy,device-locks": {
+    spec: "leak/served/tab.spec.ts",
+    fails: ["served.domain.tab-devices"],
+  },
 };
 
 interface Result {

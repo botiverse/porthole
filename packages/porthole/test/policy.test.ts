@@ -6,7 +6,11 @@ import {
   LIBRARY_CDNS,
   presets,
 } from "../src/index.ts";
-import { servedDocumentCsp, servedSandboxDirective } from "../src/compile/policy.ts";
+import {
+  servedDocumentCsp,
+  servedPermissionsPolicy,
+  servedSandboxDirective,
+} from "../src/compile/policy.ts";
 
 describe("the frame's CSP", () => {
   test("is closed by default: nothing loads, nothing connects, no frames, no forms, no WebRTC", () => {
@@ -140,7 +144,28 @@ describe("a served page's own sandbox (P099, the review's S4)", () => {
       presets.url({ contentOrigins: ["https://*.preview.example.com"] }),
     ]) {
       expect(servedSandboxDirective(config)).toBeNull();
+      expect(servedPermissionsPolicy(config)).toBeNull();
     }
+  });
+
+  test("its Permissions-Policy denies the camera, the microphone, location, full screen and the clipboard", () => {
+    const header =
+      servedPermissionsPolicy(presets.artifact({ isolation: "domain", contentOrigins: CONTENT })) ??
+      "";
+    for (const feature of [
+      "camera",
+      "microphone",
+      "geolocation",
+      "display-capture",
+      "fullscreen",
+      "clipboard-read",
+      "clipboard-write",
+      "payment",
+    ]) {
+      expect(header.split(", "), feature).toContain(`${feature}=()`);
+    }
+    // A video's picture-in-picture is a frame's by default (`*`): left alone, so frames don't change.
+    expect(header).not.toContain("picture-in-picture");
   });
 });
 

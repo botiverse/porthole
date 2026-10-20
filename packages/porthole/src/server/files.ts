@@ -4,6 +4,7 @@ import {
   fileSetCspDirectives,
   INERT_FILE_CSP,
   servedDocumentCsp,
+  servedPermissionsPolicy,
   serializeCsp,
 } from "../compile/policy.ts";
 import { DEFAULT_ENTRY, lookupFile, requestFilePath, type FileLookup } from "../files/paths.ts";
@@ -254,6 +255,10 @@ export async function serveFile(serving: FileServing): Promise<Response> {
     "x-robots-tag": "noindex, nofollow",
     "content-security-policy": `${csp}; frame-ancestors ${serving.frameAncestors}`,
   });
+  const permissions = role === "page" ? servedPermissionsPolicy(serving.compiled.config) : null;
+  if (permissions !== null) {
+    headers.set("permissions-policy", permissions);
+  }
 
   if (role === "page") {
     // Every page of the set in the shell (P081): its hardening, its host functions, its theme.

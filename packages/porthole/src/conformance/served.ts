@@ -88,6 +88,7 @@ export const TAB_CASES: readonly string[] = [
   "served.domain.tab-escapes",
   "served.domain.tab-opener",
   "served.domain.tab-navigation",
+  "served.domain.tab-devices",
 ];
 
 const SETTLE_MS = 800;
@@ -652,6 +653,92 @@ export function servedTests(
         await page.waitForTimeout(SETTLE_MS);
         expect(page.url(), "the tab stays").toBe(before);
         expect(await host.canaryHits("tab-navigation")).toBe(0);
+      },
+    );
+
+    define(
+      "served.domain.tab-devices",
+      "a page on a tab of its own gets no camera, microphone, location or full screen, even with the browser's permission and a click",
+      async ({ page, browserName }) => {
+        const location = await host.locate(await host.shell("tab-devices"));
+        // The browser's permission given (a person who said yes before): only the page's own
+        // policy may refuse. An engine Playwright can't grant a name to asks, and is refused.
+        const context = page.context();
+        for (const name of ["geolocation", "camera", "microphone"]) {
+          await context.grantPermissions([name], { origin: location.origin }).catch(() => {});
+        }
+        await context.setGeolocation({ latitude: 48.8566, longitude: 2.3522 });
+        const warnings: string[] = [];
+        page.on("console", (message) => {
+          if (/permissions.policy/iu.test(message.text())) {
+            warnings.push(message.text());
+          }
+        });
+        const answer = await page.goto(location.url);
+        expect(answer?.status()).toBe(200);
+        await page.evaluate(() => {
+          const button = document.createElement("button");
+          button.id = "porthole-probe-devices";
+          button.textContent = "share";
+          button.addEventListener("click", () => {
+            // Full screen first: it takes the click's activation.
+            const element = document.documentElement;
+            const fullscreen =
+              typeof element.requestFullscreen === "function"
+                ? element.requestFullscreen().then(
+                    () => "entered",
+                    () => "rejected",
+                  )
+                : Promise.resolve("absent");
+            const media =
+              navigator.mediaDevices === undefined
+                ? Promise.resolve("absent")
+                : navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(
+                    (stream) => {
+                      stream.getTracks().forEach((track) => track.stop());
+                      return "granted";
+                    },
+                    (error: unknown) =>
+                      `rejected ${error instanceof Error ? error.name : String(error)}`,
+                  );
+            const position = new Promise<string>((resolve) => {
+              navigator.geolocation.getCurrentPosition(
+                () => resolve("granted"),
+                (error) => resolve(`denied ${error.code}`),
+                { timeout: 3_000 },
+              );
+            });
+            void Promise.all([fullscreen, media, position]).then(([screen, devices, place]) => {
+              if (document.fullscreenElement !== null) {
+                void document.exitFullscreen();
+              }
+              document.body.dataset.devices = JSON.stringify({
+                fullscreen: screen,
+                media: devices,
+                location: place,
+              });
+            });
+          });
+          document.body.append(button);
+        });
+        await press(page, "#porthole-probe-devices");
+        await expect
+          .poll(() => page.evaluate(() => document.body.dataset.devices ?? ""), { timeout: 6_000 })
+          .not.toBe("");
+        const said = JSON.parse(
+          await page.evaluate(() => document.body.dataset.devices ?? "{}"),
+        ) as Record<string, string>;
+        expect(said.location, "location").toBe("denied 1");
+        // No stream, however it is refused: a machine without a camera says NotFoundError even
+        // where the policy would refuse (measured: Chromium, the header alone).
+        expect(said.media, "camera and microphone").not.toBe("granted");
+        expect(["rejected", "absent"], "full screen").toContain(said.fullscreen);
+        if (warnings.length > 0) {
+          info?.annotations.push({
+            type: "measured",
+            description: `${browserName}: ${warnings.slice(0, 3).join(" | ")}`,
+          });
+        }
       },
     );
 

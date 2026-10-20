@@ -20,6 +20,7 @@ import {
   assetCspDirectives,
   INERT_FILE_CSP,
   servedDocumentCsp,
+  servedPermissionsPolicy,
 } from "../compile/policy.ts";
 import { parseViewer, type ViewerInfo } from "../runtime/levels.ts";
 import type { FrameBlock } from "../host/types.ts";
@@ -806,10 +807,12 @@ export function createServer(options: ServerOptions): PortholeServer {
     }
   }
 
-  function documentHeaders(csp: string): Headers {
+  function documentHeaders(csp: string, permissions: string | null): Headers {
     return new Headers({
       "content-type": "text/html; charset=utf-8",
       "content-security-policy": `${csp}; frame-ancestors ${frameAncestors}`,
+      // What the frame's `allow` doesn't grant, denied on a tab of its own too (P099).
+      ...(permissions === null ? {} : { "permissions-policy": permissions }),
       "cache-control": "no-store",
       "referrer-policy": "no-referrer",
       "x-content-type-options": "nosniff",
@@ -1067,6 +1070,7 @@ export function createServer(options: ServerOptions): PortholeServer {
         config,
         served.assets ? assetCspDirectives(config, cspDirectives, access.origin) : cspDirectives,
       ),
+      servedPermissionsPolicy(config),
     );
     if (cookie !== null) {
       headers.set("set-cookie", cookie);

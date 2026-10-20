@@ -248,6 +248,67 @@ export function servedDocumentCsp(
 }
 
 /**
+ * The powerful features a cross-origin frame never has unless its `allow` names them (each one's
+ * default allowlist is `'self'`), and a served page denies itself (P099). Features whose default
+ * is `*` (a video's picture-in-picture, gamepads) are left out: a frame has them, so denying them
+ * on a tab would change the frame too.
+ */
+export const FRAME_DENIED_FEATURES = [
+  "accelerometer",
+  "ambient-light-sensor",
+  "autoplay",
+  "bluetooth",
+  "camera",
+  "clipboard-read",
+  "clipboard-write",
+  "display-capture",
+  "encrypted-media",
+  "fullscreen",
+  "geolocation",
+  "gyroscope",
+  "hid",
+  "identity-credentials-get",
+  "idle-detection",
+  "local-fonts",
+  "magnetometer",
+  "microphone",
+  "midi",
+  "otp-credentials",
+  "payment",
+  "publickey-credentials-create",
+  "publickey-credentials-get",
+  "screen-wake-lock",
+  "serial",
+  "usb",
+  "web-share",
+  "window-management",
+  "xr-spatial-tracking",
+] as const;
+
+/** The features a frame's `allow` attribute grants (`allowAttribute`): none but url mode's. */
+export function delegatedFeatures(config: PortholeConfig): string[] {
+  return config.mode === "url" ? [...(config.permissions ?? [])] : [];
+}
+
+/**
+ * The `Permissions-Policy` header of a served page (P099): every feature of
+ * `FRAME_DENIED_FEATURES` its frame's `allow` doesn't grant, denied (`camera=()`), so a page on
+ * a tab of its own (no `allow` there) can't ask for the camera, the microphone, location or full
+ * screen under the content origin's name. In a frame it changes nothing: the frame's `allow`
+ * grants none of them, and a frame's features are the intersection of the two. Domain isolation
+ * only, as `servedSandboxDirective`.
+ */
+export function servedPermissionsPolicy(config: PortholeConfig): string | null {
+  if (config.isolation !== "domain") {
+    return null;
+  }
+  const granted = new Set(delegatedFeatures(config));
+  return FRAME_DENIED_FEATURES.filter((feature) => !granted.has(feature))
+    .map((feature) => `${feature}=()`)
+    .join(", ");
+}
+
+/**
  * The frame's `allow` attribute (Permissions Policy). No camera, microphone, geolocation,
  * fullscreen or other powerful feature is delegated to the frame, and the clipboard is denied by
  * name (P051): content never writes it, the host does (`copyText`). A url-mode config may

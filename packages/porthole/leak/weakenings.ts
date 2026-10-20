@@ -192,6 +192,17 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "url-origin": "harness",
   // A served page without its CSP's sandbox (P099): on a tab of its own nothing else sandboxes it.
   "tab-sandbox": "harness",
+  // A served page without its Permissions-Policy header (P099): on a tab nothing else denies it
+  // devices, location or full screen, but the shell's locks (`device-locks`, the only wall on
+  // WebKit and Firefox, which don't apply the header to them).
+  "permissions-policy": "harness",
+  "device-locks": [
+    {
+      file: RUNTIME,
+      find: "  if (window.top === window) {\n    const deniedMedia",
+      replace: "  if (false) {\n    const deniedMedia",
+    },
+  ],
   // The shell's window.open on a tab of its own (P099): the second wall behind the sandbox.
   "window-open": [
     {
@@ -348,9 +359,9 @@ export function weaken(relative: string, text: string): string {
  * The weakenings the served harness also applies to the documents its content origins serve
  * (their shell is made in the harness's own process, not loaded from the stripped sources): the
  * navigation guard (P079), whose wall in a served frame is the shell alone for another content
- * origin, and the shell's window.open on a tab (P099).
+ * origin, and the shell's window.open and device locks on a tab (P099).
  */
-const SERVED = ["navigate-guard", "window-open"];
+const SERVED = ["navigate-guard", "window-open", "device-locks"];
 
 /** Whether a control asked for edits the served documents' shell (`weakenServed`). */
 export const servedShellWeakened = (): boolean => weakened.some((each) => SERVED.includes(each));

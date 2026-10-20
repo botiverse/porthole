@@ -223,6 +223,11 @@ describe("tickets and cookies", () => {
         );
         expect(directives.filter((each) => each.startsWith("sandbox"))).toHaveLength(1);
         expect(directives.join("; ")).not.toMatch(/allow-(popups|forms|downloads|modals|top)/u);
+        // And what its frame's allow doesn't grant, denied there too.
+        const permissions = response?.headers.get("permissions-policy") ?? "";
+        expect(permissions, instance.document.kind).toContain("camera=()");
+        expect(permissions).toContain("geolocation=()");
+        expect(permissions).toContain("fullscreen=()");
       }
     }
     // Porthole's own pages (a refusal) are not content, and keep their own policy.
@@ -552,6 +557,8 @@ describe("url mode", () => {
     expect(calls[0]?.request.headers.get("cookie")).toBe("theirs=1");
     expect(response?.headers.getSetCookie()).toEqual(["theirs=1; Path=/"]);
     expect(response?.headers.get("content-security-policy")).toBe(`frame-ancestors ${HOST}`);
+    // The app's own document: its tab is the app's (P099).
+    expect(response?.headers.get("permissions-policy")).toBeNull();
     expect((await porthole.access(get(`${location.origin}/`, { cookie })))?.viewer).toBe("dev");
   });
 
