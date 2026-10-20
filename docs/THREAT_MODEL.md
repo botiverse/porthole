@@ -91,8 +91,9 @@ Porthole does not protect against these.
   opaque frame may share the host page's process (the browser decides), so a loop in it can stall
   the host's tab; a served frame is on another site, which browsers with site isolation put in a
   process of its own. In scope, by contrast: a page or a request that can crash the host's server,
-  and a message from content that makes the host's page do unbounded work (SECURITY.md). On Node,
-  no request ends the process, and the issue endpoint reads at most 64 KiB of a body (P092);
+  and a message from content that makes the host's page do unbounded work (SECURITY.md). Through
+  Porthole's Node adapter no request ends the process, and on any runtime the issue endpoint reads
+  at most 64 KiB of a body (P092);
   content's messages that are read whole before their gate are open until P095.
 - **Browser bugs, and what the leak suite doesn't run on.** The walls are the browser's own (the
   sandbox, CSP, same-origin policy, site isolation): a bug in them is outside Porthole. The suite
@@ -327,7 +328,8 @@ the attacker (c), and its readers are strangers.
 - A public grant opens documents, never url-mode apps.
 - A public grant without a `level` has no viewer. Under a runtime, such a page is refused the
   runtime's own host functions (`user`, `comments`, `artifact`, `assets`, `db`) and every method
-  above `view`; with a declaration, it reads only the `data` names it declared (P094).
+  above `view`; with a declaration, it reads only the `data` names it declared (P094; a `data`
+  without a `resources` list names them all).
 - The page is on a site that isn't the host's (its sibling labels share one until the content
   domain is on the PSL, S3); a label is one DNS label, never of the form IDNA reserves (`xn--`),
   so it is never punycode for another name; pages say `noindex`; a file of a type Porthole
@@ -343,10 +345,11 @@ the attacker (c), and its readers are strangers.
 - On pages shared with signed-in people, not offer `db` writes and `user`, or gate them with
   `consent` or `confirm` (their defaults are rates only: 600 and 60 a minute).
 - Rate-limit the issue endpoint (`rateLimit`: optional, per process). An anonymous request is
-  keyed by an address the client can't set (P092): the socket's peer on Node, `CF-Connecting-IP`
-  on Workers. Behind proxies, say how many append to `X-Forwarded-For`
-  (`rateLimit.trustedProxies`) or key it yourself (`rateLimit.key`); otherwise every anonymous
-  request through a proxy shares that proxy's limit.
+  keyed by an address the client can't set (P092): the socket's peer through Porthole's Node
+  adapter, `CF-Connecting-IP` on Workers. Anywhere else, or behind proxies, every anonymous request
+  shares one limit unless you set `rateLimit.trustedProxies` (how many proxies append to
+  `X-Forwarded-For`; only where the app is reachable through those proxies alone) or
+  `rateLimit.key`.
 - Check pages for secrets before publishing them: `lintContent` has no rule for credentials.
 
 **Not guaranteed**
