@@ -40,6 +40,13 @@ export type ThemeValue = string | { readonly light: string; readonly dark: strin
 export interface CapabilityConfig {
   /** Every gate must pass. Omitted: the capability's default gates. `[]`: ungated. */
   readonly gates?: readonly Gate[];
+  /**
+   * Says that `gates` leaves out the default `show` on purpose (P100: `setModelContext`): the
+   * host's handler shows the person each update itself, or the content is its own. Without it,
+   * such gates earn a warning (`configWarnings`); with `show` in the gates, or no gates named, it
+   * is an error.
+   */
+  readonly withoutShow?: true;
   /** Extra `connect-src` origins this capability needs. */
   readonly connect?: readonly string[];
   /** Extra script/style/img/font/media origins this capability needs. */

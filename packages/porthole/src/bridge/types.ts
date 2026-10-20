@@ -129,9 +129,12 @@ export type Proceed = () => void;
 /**
  * Puts a call's whole effect in front of the person, outside every frame (the `show` gate, P100):
  * a `setModelContext` update's text and structured content, which the model reads at its next
- * turns. It asks nothing; the call goes once it returns (or its promise resolves). One that
- * throws or rejects stops the call: nobody saw it. Each update replaces the display's last (MCP
- * Apps: the host sends the model the last one), so a surface shows the latest per display.
+ * turns. It asks nothing; the call goes once it returns (or its promise resolves), so it resolves
+ * only once this very update is visible: drawn, not queued behind a render (after the review). An
+ * update the person never saw, because a later one of the display replaced it first, rejects:
+ * the call doesn't go. One that throws or rejects stops the call: nobody saw it. Each update
+ * replaces the display's last (MCP Apps: the host sends the model the last one), so a surface
+ * shows the latest per display.
  */
 export type Show = (request: ConfirmRequest) => void | Promise<void>;
 

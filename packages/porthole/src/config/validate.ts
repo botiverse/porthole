@@ -1,9 +1,11 @@
 import {
   CAPABILITY_NAMES,
+  capabilitySpec,
   isCapabilityName,
   type CapabilityName,
   type Gate,
 } from "./capabilities.ts";
+import { configWarnings, type ConfigWarning } from "./warnings.ts";
 import {
   RUNTIME_HOST_FUNCTIONS,
   RUNTIME_VERSIONS,
@@ -295,8 +297,14 @@ function gate(value: unknown, path: string): asserts value is Gate {
 const MODES = ["inline", "artifact", "mcp-app", "url"];
 const ISOLATIONS = ["opaque", "domain", "external"];
 
-/** Returns `input` as a config once every field checks out; throws a `ConfigError` otherwise. */
-export function validateConfig(input: unknown): PortholeConfig {
+/**
+ * Returns `input` as a config once every field checks out; throws a `ConfigError` otherwise.
+ * `onWarning` hears each `ConfigWarning` a valid config earns (`configWarnings`).
+ */
+export function validateConfig(
+  input: unknown,
+  options: { readonly onWarning?: (warning: ConfigWarning) => void } = {},
+): PortholeConfig {
   const config = object(input, "config");
   only(
     config,
@@ -337,7 +345,11 @@ export function validateConfig(input: unknown): PortholeConfig {
       fail(path, `is not a capability (${CAPABILITY_NAMES.join(", ")})`);
     }
     const capability = object(value, path);
-    only(capability, ["gates", "connect", "resource", "guide", "levels", "methodGates"], path);
+    only(
+      capability,
+      ["gates", "connect", "resource", "guide", "levels", "methodGates", "withoutShow"],
+      path,
+    );
     if (capability.methodGates !== undefined) {
       const family = familyOf(name as CapabilityName);
       for (const [method, gates] of Object.entries(
@@ -394,6 +406,21 @@ export function validateConfig(input: unknown): PortholeConfig {
       (capability.gates as unknown[]).forEach((each, index) =>
         gate(each, `${path}.gates[${index}]`),
       );
+    }
+    // Leaving the default `show` out on purpose (P100): only where there is one, left out.
+    if (capability.withoutShow !== undefined) {
+      if (capability.withoutShow !== true) {
+        fail(`${path}.withoutShow`, "must be true: it says the gates leave show out on purpose");
+      }
+      if (!capabilitySpec(name as CapabilityName).defaultGates.includes("show")) {
+        fail(`${path}.withoutShow`, `${name} has no show gate to leave out`);
+      }
+      if (!Array.isArray(capability.gates) || (capability.gates as unknown[]).includes("show")) {
+        fail(
+          `${path}.withoutShow`,
+          "says show is left out, so the gates must be named, without it",
+        );
+      }
     }
     sources(capability.connect, `${path}.connect`);
     sources(capability.resource, `${path}.resource`);
@@ -688,5 +715,8 @@ export function validateConfig(input: unknown): PortholeConfig {
     });
   }
 
+  for (const warning of configWarnings(input as PortholeConfig)) {
+    options.onWarning?.(warning);
+  }
   return input as PortholeConfig;
 }

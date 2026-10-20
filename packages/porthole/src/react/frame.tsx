@@ -50,6 +50,10 @@ import type { PortholeClient } from "../host/client.ts";
  * its height. All the isolation is the core's (`createHost`); this is mounting and lifecycle.
  */
 
+/** Why a model context update didn't go: it was never drawn (the review of P100). */
+const REPLACED_UNSEEN = "a later update of this display replaced it before the person saw it";
+const HIDDEN_UNSEEN = "the person hid this display's notice before the update was drawn";
+
 /** How far off screen a frame starts (and keeps) running. */
 const NEAR_SCREEN = "800px 0px";
 /** The height a display holds before it has reported its own. */
@@ -256,13 +260,28 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
   // The default show (P100): each display's latest model context update, in the notice, outside
   // every frame; the host's own `show` replaces it.
   const [contexts, setContexts] = useState<readonly ContextUpdate[]>([]);
-  // Each show waiting for its notice to be on the page: the next commit has drawn it.
-  const drawn = useRef<(() => void)[]>([]);
+  // Each show waiting for its own update to be on the page (after the review: React may draw two
+  // updates of a display in one render, the latest only). The number orders a display's shows.
+  const unseen = useRef<
+    { entry: ContextUpdate; seq: number; resolve: () => void; reject: (error: Error) => void }[]
+  >([]);
+  const latest = useRef(new Map<string, number>());
+  const sequence = useRef(0);
   useLayoutEffect(() => {
-    for (const resolve of drawn.current.splice(0)) {
-      resolve();
-    }
-  });
+    unseen.current = unseen.current.filter((each) => {
+      const drawn = contexts.find((one) => one.displayId === each.entry.displayId);
+      if (drawn === each.entry) {
+        each.resolve();
+        return false;
+      }
+      // A later update of the display replaced it before it was drawn: never seen, never sent.
+      if ((latest.current.get(each.entry.displayId) ?? 0) > each.seq) {
+        each.reject(new Error(REPLACED_UNSEEN));
+        return false;
+      }
+      return true;
+    });
+  }, [contexts]);
   const ownShow = useRef(props.show);
   useLayoutEffect(() => {
     ownShow.current = props.show;
@@ -276,21 +295,31 @@ export function PortholeProvider(props: PortholeProviderProps): ReactElement {
       // shown, and doesn't go (fail closed).
       throw new Error(`Porthole's notice shows model context only, not ${request.capability}`);
     }
-    const shown: ContextUpdate = {
+    const entry: ContextUpdate = {
       displayId: request.display.id,
       title: request.display.title,
       update: request.args,
     };
-    // The call goes once the notice is on the page, so the handler never has it first.
-    return new Promise<void>((resolve) => {
-      drawn.current.push(resolve);
-      setContexts((each) => [...each.filter((one) => one.displayId !== shown.displayId), shown]);
+    sequence.current += 1;
+    const seq = sequence.current;
+    latest.current.set(entry.displayId, seq);
+    // The call goes once this very update is on the page, so the handler never has it first.
+    return new Promise<void>((resolve, reject) => {
+      unseen.current.push({ entry, seq, resolve, reject });
+      setContexts((each) => [...each.filter((one) => one.displayId !== entry.displayId), entry]);
     });
   }, []);
-  const hideContext = useCallback(
-    (displayId: string) => setContexts((each) => each.filter((one) => one.displayId !== displayId)),
-    [],
-  );
+  const hideContext = useCallback((displayId: string) => {
+    // Hidden by the person: an update of the display not drawn yet never will be.
+    unseen.current = unseen.current.filter((each) => {
+      if (each.entry.displayId !== displayId) {
+        return true;
+      }
+      each.reject(new Error(HIDDEN_UNSEEN));
+      return false;
+    });
+    setContexts((each) => each.filter((one) => one.displayId !== displayId));
+  }, []);
   // Compared by value, and read when used: an inline hostInfo or locator doesn't start every
   // frame again on each render.
   const hostInfo = useByValue(props.hostInfo);

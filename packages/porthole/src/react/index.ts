@@ -20,6 +20,7 @@ export {
 export { ARM_DELAY_MS, ConfirmDialog, type ConfirmDialogProps } from "./dialog.tsx";
 export {
   ContextNotice,
+  contextSize,
   contextText,
   type ContextNoticeProps,
   type ContextUpdate,

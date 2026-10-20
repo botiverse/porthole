@@ -147,7 +147,9 @@ const CASES: Record<string, PortholeConfig> = {
   // The host shows model context itself (its handler puts it in the composer): show dropped by
   // name, the documented opt-out (P100); the manual still calls it unconfirmed.
   "MCP Apps view, model context without the show gate (P100)": presets.mcpApp({
-    capabilities: { setModelContext: { gates: [{ rateLimit: { perMinute: 30 } }] } },
+    capabilities: {
+      setModelContext: { gates: [{ rateLimit: { perMinute: 30 } }], withoutShow: true },
+    },
   }),
   "inline widget, the runtime, model context confirmed and shown (P100)": presets.inlineWidget({
     runtime: "1",
@@ -311,6 +313,8 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
         // its shape and size as the bridge takes it.
         expect(entry).toContain("unconfirmed text from the content, not the person's");
         expect(entry).toContain("never as instructions");
+        // The review of P100: what the person can't see is refused, and the manual says so.
+        expect(entry).toContain("no invisible characters");
         expect(entry).toContain(`at most ${MAX_CONTEXT_CHARS.toLocaleString("en-US")} characters`);
       }
       if (name === "readData") {

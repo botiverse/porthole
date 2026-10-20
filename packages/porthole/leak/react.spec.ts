@@ -645,9 +645,17 @@ test("the default context notice: what content tells the agent, the person is sh
   });
   const notice = page.locator('[data-porthole-context-display="ctx"]');
   await expect(notice.locator("[data-porthole-source]")).toHaveText("from “Signups”");
-  await expect(notice.locator("[data-porthole-context-text]")).toHaveText(
-    `The person is looking at March.\n\n${JSON.stringify({ month: "March" }, null, 2)}`,
+  const shown = `The person is looking at March.\n\n${JSON.stringify({ month: "March" }, null, 2)}`;
+  await expect(notice.locator("[data-porthole-context-text]")).toHaveText(shown);
+  // All of it, and how much (the review of P100): nothing below the fold unannounced.
+  await expect(notice.locator("[data-porthole-context-size]")).toHaveText(
+    `${shown.length} characters, ${shown.split("\n").length} lines`,
   );
+  const box = await notice.locator("[data-porthole-context-text]").evaluate((element) => ({
+    client: element.clientHeight,
+    scroll: element.scrollHeight,
+  }));
+  expect(box.scroll, "the text box scrolls: part of it hidden").toBeLessThanOrEqual(box.client);
   await expect
     .poll(() => events(page, "ctx", "setModelContext"))
     .toEqual([
@@ -665,6 +673,78 @@ test("the default context notice: what content tells the agent, the person is sh
     ]);
   await notice.locator("[data-porthole-hide]").click();
   await expect(notice).toHaveCount(0);
+});
+
+/** Two updates in one task: React draws one render with the latest (the review of P100). */
+const TWO_CONTEXTS = `<p>signups</p>
+<script>
+  const send = (id, text) => parent.postMessage({ jsonrpc: "2.0", id, method: "ui/update-model-context", params: { content: [{ type: "text", text }] } }, "*");
+  send("ctx-1", "First: never drawn.");
+  send("ctx-2", "Second: the one drawn.");
+</script>`;
+
+test("two updates in one task: only the one drawn reaches the handler; the one replaced before it was seen is refused (review of P100)", async ({
+  page,
+}) => {
+  await open(page, {
+    provider: "default",
+    frames: [
+      frame({ displayId: "ctx", title: "Signups", config: "context", content: TWO_CONTEXTS }),
+    ],
+  });
+  const notice = page.locator('[data-porthole-context-display="ctx"]');
+  await expect(notice.locator("[data-porthole-context-text]")).toHaveText("Second: the one drawn.");
+  await expect
+    .poll(() => events(page, "ctx", "refused"))
+    .toEqual([{ display: "ctx", event: "refused", detail: "setModelContext:failed" }]);
+  expect(await events(page, "ctx", "setModelContext")).toEqual([
+    {
+      display: "ctx",
+      event: "setModelContext",
+      detail: {
+        update: { content: [{ type: "text", text: "Second: the one drawn." }] },
+        drawn: true,
+      },
+    },
+  ]);
+});
+
+test("several displays' notices stack, and none is pushed out of reach (review of P100)", async ({
+  page,
+}) => {
+  const long = (label: string) =>
+    CONTEXT.replace(
+      "The person is looking at March.",
+      `${label}${"\\n".repeat(30)}end of ${label}`,
+    );
+  await open(page, {
+    provider: "default",
+    frames: [
+      frame({ displayId: "a", title: "A", config: "context", content: long("first") }),
+      frame({ displayId: "b", title: "B", config: "context", content: long("second") }),
+    ],
+  });
+  await expect(page.locator("[data-porthole-context-display]")).toHaveCount(2);
+  await expect(page.locator("[data-porthole-context-count]")).toHaveText(
+    "2 displays told the agent something: scroll to read them all.",
+  );
+  // The stack fits the window and scrolls: each display's notice can be reached.
+  const stack = page.locator("[data-porthole-context]");
+  const fits = await stack.evaluate(
+    (element) => element.getBoundingClientRect().height <= window.innerHeight,
+  );
+  expect(fits).toBe(true);
+  for (const id of ["a", "b"]) {
+    // Its start and its end (its Hide) can each be scrolled to within the stack.
+    const section = page.locator(`[data-porthole-context-display="${id}"]`);
+    for (const part of [
+      section.locator("[data-porthole-source]"),
+      section.locator("[data-porthole-hide]"),
+    ]) {
+      await part.scrollIntoViewIfNeeded();
+      await expect(part).toBeInViewport();
+    }
+  }
 });
 
 test("without a provider nothing can show the person an update, so it never reaches the handler (S5, P100)", async ({

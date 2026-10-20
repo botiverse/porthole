@@ -6,7 +6,16 @@ import type {
   ConfirmRequest,
   HostFunctionBridge,
 } from "../src/bridge/types.ts";
-import { MAX_CONTEXT_CHARS, compile, presets, type PortholeConfig } from "../src/index.ts";
+import {
+  ConfigError,
+  MAX_CONTEXT_CHARS,
+  compile,
+  configWarnings,
+  presets,
+  validateConfig,
+  type ConfigWarning,
+  type PortholeConfig,
+} from "../src/index.ts";
 import { mcpAppsAdapter } from "../src/mcp/index.ts";
 import type { JsonRpcMessage } from "../src/protocol/jsonrpc.ts";
 import { shellAdapter } from "../src/protocol/shell-adapter.ts";
@@ -196,6 +205,136 @@ describe("S5 / P0.2 (P100): the person sees what content tells the model", () =>
       ).ok,
     ).toBe(true);
     expect(shown).toHaveLength(1);
+  });
+});
+
+describe("review of P100, 1: what the person is shown is what the model gets", () => {
+  // Characters that draw as nothing (or as one glyph with what follows) but a model reads.
+  const UNSEEN = [
+    ["a tag character (U+E0049)", "\u{E0049}"],
+    ["the tag sequence that spells a hidden instruction", "\u{E0069}\u{E0067}\u{E006E}"],
+    ["a zero-width space", "\u200B"],
+    ["a zero-width joiner", "\u200D"],
+    ["a right-to-left override", "\u202E"],
+    ["a first-strong isolate", "\u2068"],
+    ["a byte-order mark", "\uFEFF"],
+    ["a soft hyphen", "\u00AD"],
+    ["a variation selector (U+FE0F)", "\uFE0F"],
+    ["a supplementary variation selector (U+E0100)", "\u{E0100}"],
+    ["a private-use character", "\uE000"],
+    ["a supplementary private-use character", "\u{F0000}"],
+    ["a lone surrogate", "\uD800"],
+    ["a carriage return", "\r"],
+    ["a NUL", "\u0000"],
+    ["an escape (ESC)", "\u001B"],
+    ["a C1 control (U+0085)", "\u0085"],
+  ] as const;
+
+  test.each(UNSEEN)("%s in a text block is refused before it is shown", async (_name, unseen) => {
+    const { bridge, shown, handled } = setup(declared());
+    expect(
+      await bridge.call("setModelContext", {
+        content: [{ type: "text", text: `Weather: sunny${unseen}` }],
+      }),
+    ).toMatchObject({ ok: false, refusal: "invalid" });
+    expect(shown).toEqual([]);
+    expect(handled).toEqual([]);
+  });
+
+  test.each(UNSEEN)(
+    "%s in any string of the structured content, value or key, is refused",
+    async (_name, unseen) => {
+      const { bridge, shown } = setup(declared());
+      for (const structuredContent of [
+        { note: `sunny${unseen}` },
+        { deep: [{ list: ["ok", `x${unseen}`] }] },
+        { [`key${unseen}`]: 1 },
+      ]) {
+        expect(await bridge.call("setModelContext", { structuredContent })).toMatchObject({
+          ok: false,
+          refusal: "invalid",
+        });
+      }
+      expect(shown).toEqual([]);
+    },
+  );
+
+  test("visible text goes as it is: new lines, tabs, accents, scripts, emoji without selectors", async () => {
+    const { bridge, handled } = setup(declared());
+    const text = "Line one\n\tLine two: café, 東京, مرحبا, עברית, 😀 ✓";
+    expect(
+      (
+        await bridge.call("setModelContext", {
+          content: [{ type: "text", text }],
+          structuredContent: { "city name": "東京", list: ["a\tb", "c\nd"] },
+        })
+      ).ok,
+    ).toBe(true);
+    expect(handled).toEqual([
+      {
+        content: [{ type: "text", text }],
+        structuredContent: { "city name": "東京", list: ["a\tb", "c\nd"] },
+      },
+    ]);
+  });
+});
+
+describe("review of P100, 4: dropping show is said, and can be said to be deliberate", () => {
+  const optOut = (extra: Record<string, unknown> = {}) =>
+    presets.mcpApp({
+      capabilities: {
+        setModelContext: { gates: [{ rateLimit: { perMinute: 30 } }], ...extra },
+      },
+    });
+
+  test("named gates without show warn, at validation and in the compiled config", () => {
+    const warned: ConfigWarning[] = [];
+    const config = optOut();
+    validateConfig(config, { onWarning: (warning) => warned.push(warning) });
+    expect(warned).toEqual([
+      {
+        code: "model-context-unshown",
+        path: "config.capabilities.setModelContext.gates",
+        message: expect.stringContaining("withoutShow: true"),
+      },
+    ]);
+    expect(configWarnings(config)).toEqual(warned);
+    expect(compile(config).warnings).toEqual(warned);
+  });
+
+  test("withoutShow: true says it is deliberate: no warning", () => {
+    const config = optOut({ withoutShow: true });
+    expect(configWarnings(config)).toEqual([]);
+    expect(compile(config).warnings).toEqual([]);
+  });
+
+  test("the defaults, or named gates with show, warn of nothing", () => {
+    expect(configWarnings(presets.mcpApp({ capabilities: { setModelContext: {} } }))).toEqual([]);
+    expect(
+      configWarnings(
+        presets.mcpApp({
+          capabilities: { setModelContext: { gates: ["confirm", "show"] } },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  test("withoutShow where show isn't left out is a mistake, refused", () => {
+    expect(() =>
+      presets.mcpApp({ capabilities: { setModelContext: { withoutShow: true } as never } }),
+    ).toThrow(ConfigError);
+    expect(() =>
+      presets.mcpApp({
+        capabilities: { setModelContext: { gates: ["show"], withoutShow: true } as never },
+      }),
+    ).toThrow(ConfigError);
+    expect(() =>
+      presets.mcpApp({
+        capabilities: {
+          setModelContext: { gates: [], withoutShow: "yes" } as never,
+        },
+      }),
+    ).toThrow(ConfigError);
   });
 });
 

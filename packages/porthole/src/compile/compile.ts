@@ -1,5 +1,6 @@
 import type { PortholeConfig } from "../config/schema.ts";
 import { validateConfig } from "../config/validate.ts";
+import type { ConfigWarning } from "../config/warnings.ts";
 import { generateGuide, generateToolDescription, type GuideTopic } from "../guide/guide.ts";
 import { shellDocument, type ShellDocumentOptions } from "../shell/document.ts";
 import { shellPlan, type ShellPlan } from "../shell/plan.ts";
@@ -19,6 +20,11 @@ import {
  */
 export interface CompiledConfig {
   readonly config: PortholeConfig;
+  /**
+   * What the config says that its host likely didn't mean (`configWarnings`): log them at startup.
+   * Empty for a config without any.
+   */
+  readonly warnings: readonly ConfigWarning[];
   /** The frame's CSP, directive by directive; empty in url mode (the app sends its own). */
   readonly cspDirectives: readonly CspDirective[];
   /** The frame's CSP: in the shell's `<meta>`, or a served document's header. */
@@ -43,12 +49,14 @@ export interface CompiledConfig {
 
 /** Validates `config` and derives everything from it. Throws a `ConfigError` on a bad config. */
 export function compile(config: PortholeConfig): CompiledConfig {
-  validateConfig(config);
+  const warnings: ConfigWarning[] = [];
+  validateConfig(config, { onWarning: (warning) => warnings.push(warning) });
   const cspDirectives = frameCspDirectives(config);
   const csp = serializeCsp(cspDirectives);
   const shell = shellPlan(config);
   return {
     config,
+    warnings,
     cspDirectives,
     csp,
     sandbox: sandboxTokens(config).join(" "),

@@ -42,6 +42,7 @@ export {
   originSourceProblem,
   validateConfig,
 } from "./config/validate.ts";
+export { configWarnings, type ConfigWarning } from "./config/warnings.ts";
 export {
   URL_PERMISSIONS,
   URL_SANDBOX_EXTRAS,

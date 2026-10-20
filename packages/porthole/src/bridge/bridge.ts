@@ -166,12 +166,35 @@ function resourceUri(args: unknown): { uri: string } | null {
 const MAX_CONTEXT_BLOCKS = 100;
 
 /**
+ * What a person can't see but a model reads (the review of P100): format characters (zero-width
+ * ones, bidi controls, the tags U+E0000–E007F, a soft hyphen, a byte-order mark), variation
+ * selectors (U+FE00–FE0F, U+E0100–E01EF), private-use characters, lone surrogates, and controls
+ * other than a new line and a tab. An update with any is refused, never escaped: an escaped one
+ * reads to the model differently from what the person was shown.
+ */
+const UNSEEN = /[\p{Cf}\p{Co}\p{Cs}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}]|[^\P{Cc}\n\t]/u;
+
+/** Whether any string in `value`, a key or a value, holds what can't be seen (bounded JSON data). */
+function holdsUnseen(value: unknown): boolean {
+  if (typeof value === "string") {
+    return UNSEEN.test(value);
+  }
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return (value as readonly unknown[]).some(holdsUnseen);
+  }
+  return Object.entries(value).some(([key, each]) => UNSEEN.test(key) || holdsUnseen(each));
+}
+
+/**
  * A model context update (P100), as the person is shown it and the model reads it: text blocks
  * only (what the host offers, `updateModelContext: { text, structuredContent }`), each rebuilt as
  * `{ type, text }` so nothing rides along unshown (`_meta`, `annotations`); structured content
  * JSON data by P095's one rule (`isJsonData`: each object once, no cycles, bounded); at most
  * `MAX_CONTEXT_CHARS` together as the person is shown it, its JSON measured only once that walk
- * has bounded it.
+ * has bounded it; nothing in a text or a string they can't see (`UNSEEN`).
  */
 function modelContext(args: unknown): CapabilityArgs["setModelContext"] | "too_large" | null {
   if (!isRecord(args)) {
@@ -186,7 +209,12 @@ function modelContext(args: unknown): CapabilityArgs["setModelContext"] | "too_l
     }
     blocks = [];
     for (const block of content as unknown[]) {
-      if (!isRecord(block) || block.type !== "text" || typeof block.text !== "string") {
+      if (
+        !isRecord(block) ||
+        block.type !== "text" ||
+        typeof block.text !== "string" ||
+        UNSEEN.test(block.text)
+      ) {
         return null;
       }
       chars += block.text.length;
@@ -204,6 +232,10 @@ function modelContext(args: unknown): CapabilityArgs["setModelContext"] | "too_l
     chars += JSON.stringify(structuredContent).length;
     if (chars > MAX_CONTEXT_CHARS) {
       return "too_large";
+    }
+    // Within the size now: each string, value or key, is walked once.
+    if (holdsUnseen(structuredContent)) {
+      return null;
     }
   }
   return {

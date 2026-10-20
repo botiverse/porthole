@@ -4251,16 +4251,49 @@ manual line said "unconfirmed"), the leak probe `12.model-context`, and two case
    runs it); both React cases fail too (measured on Chromium). The kit's harness is built from the
    unweakened sources, as for every control. DESIGN.md's table has the row.
 
+7. **After the review of ab89241** (two medium findings, two low; each with its test first,
+   failing before):
+   - *Invisible characters* (medium). Tag characters (U+E0000–E007F), variation selectors,
+     zero-width and bidi controls draw as nothing in a notice, and a model reads them: the notice
+     showed "Weather: sunny" while the handler had a hidden instruction. An update is refused
+     (`invalid`) if its text, or any string of its structured content, a value or a key, holds a
+     format character (`\p{Cf}`), a variation selector (U+FE00–FE0F, U+E0100–E01EF), a
+     private-use character, a lone surrogate, or a control other than `\n` and `\t`. Refused, not
+     escaped: an escaped update reads to the model differently from what the person saw. The
+     manual says so; the cost is that emoji written with a selector or a joiner (❤️, 👨‍👩‍👧) are
+     refused, so the agent writes them without, or in words.
+   - *A replaced update still went* (medium). React drew two updates of a display from one task in
+     one render, the latest only, and its layout effect let both calls go: the handler had one the
+     person never saw. The default `show` now resolves only when its own update is in the committed
+     notice, and rejects one a later update of the display replaced first, or one whose notice the
+     person hid before it was drawn; the call is refused (`failed`). The `Show` contract says a
+     show resolves only once its own update is visible. Tested with two updates sent in one task.
+   - *A long payload in a small box* (low). The notice's text box grows instead of scrolling at
+     10em (a payload below blank lines was out of sight), and says its size ("412 characters, 3
+     lines"); the stack of displays scrolls within the window and says so ("2 displays told the
+     agent something: scroll to read them all"), so a later display never pushes an earlier one
+     out of reach.
+   - *A silent opt-out on upgrade* (low). A 0.7 config that named setModelContext's gates (to
+     change the rate) loses `show` without saying so. `withoutShow: true` (`CapabilityConfig`) says
+     the omission is deliberate; without it such gates earn a `ConfigWarning`
+     (`model-context-unshown`), handed to `validateConfig(config, { onWarning })` and kept in
+     `compile(config).warnings` (`host.compiled.warnings`), since library code logs nothing.
+     `withoutShow` where `show` isn't left out (no gates named, or `show` among them, or a
+     capability without it) is an error.
+
 **API.** Additive: `Gate` gains `"show"`, `Refusal` gains `"no-show"`; `Show`, `HostOptions.show`,
-`MAX_CONTEXT_CHARS`, `ContextNotice` (`contextText`), `PortholeProvider.show` and
-`contextClassName`, `LaunchSpec.shows`, `LaunchedDisplay.shown?`. Behavior, deliberately: a host
-that declares `setModelContext` and passes no `show` (outside the React provider) has every update
-refused until it passes one or names its gates; an exhaustive `switch` over `Gate` or `Refusal`
-meets the new members; an update with an image block, or structured content that isn't plain
-JSON, is refused as `invalid` (no host offered them).
+`MAX_CONTEXT_CHARS`, `CapabilityConfig.withoutShow`, `ConfigWarning`, `configWarnings`,
+`CompiledConfig.warnings`, `validateConfig`'s `onWarning`, `ContextNotice` (`contextText`,
+`contextSize`), `PortholeProvider.show` and `contextClassName`, `LaunchSpec.shows`,
+`LaunchedDisplay.shown?`. Behavior, deliberately: a host that declares `setModelContext` and
+passes no `show` (outside the React provider) has every update refused until it passes one or
+names its gates; an exhaustive `switch` over `Gate` or `Refusal` meets the new members; an update
+with an image block, structured content that isn't plain JSON, or an invisible character is
+refused as `invalid` (no host offered the first two; the person can't see the third).
 
 **Threat it re-opens, where a host opts out.** `setModelContext: { gates: [{ rateLimit: {
-perMinute: 30 } }] }` names the gates without `show`, as `gates` always could. Then content writes
+perMinute: 30 } }], withoutShow: true }` names the gates without `show`, and says it means to
+(without `withoutShow` it is warned of). Then content writes
 into the model's turns text nobody saw: a prompt injection that steers the model into tool calls
 or answers on the person's authority. What still bounds it: the rate; the shape and size (text
 blocks rebuilt, plain JSON, 20,000 characters); the manual, which tells the agent that the update

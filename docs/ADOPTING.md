@@ -229,9 +229,17 @@ createHost(config, {
   person's message or as instructions. The manual tells the agent the same.
 - **Send it with the person's next message** (MCP Apps lets a host defer it), so they have seen it
   before the model reads it. If your agent takes turns on its own, add `"confirm"` to the gates.
-- **Opting out**: `setModelContext: { gates: [{ rateLimit: { perMinute: 30 } }] }` names the
-  gates without `show`. Do it only where your handler itself puts the text in front of the person
-  (or the content is your own): otherwise the content writes into your model's turns unseen.
+- **Opting out**: `setModelContext: { gates: [{ rateLimit: { perMinute: 30 } }], withoutShow: true }`
+  names the gates without `show`, and says so on purpose. Do it only where your handler itself puts
+  the text in front of the person (or the content is your own): otherwise the content writes into
+  your model's turns unseen. Gates named without `show` and without `withoutShow` (a 0.7 config
+  that set its own rate) earn a warning: Porthole logs nothing itself, so log
+  `host.compiled.warnings` (or `compile(config).warnings`, `configWarnings(config)`) at startup.
+- **What can't be seen is refused**: an update with an invisible character (zero-width ones, bidi
+  controls, variation selectors, tag or private-use characters, controls other than new lines and
+  tabs), in its text or any string of its structured content, never reaches `show` or your
+  handler. Your own `show` resolves only once that very update is visible: if a later update of
+  the display replaces it before it is drawn, reject, and it doesn't go.
 
 ## 4. Served pages: the host kit
 
