@@ -994,10 +994,11 @@ describe("after the security review of 0.6.0's first cut", () => {
           parts = Math.min(parts, fastest(small[index] as Record<string, string>, 16));
           once = Math.min(once, fastest(files, 1));
         }
-        expect(
-          once / parts,
-          `${JSON.stringify(unit)} ${Object.keys(files).join(" ")}: 1 MB ${once.toFixed(1)} ms, 16 × 64 KB ${parts.toFixed(1)} ms`,
-        ).toBeLessThan(8);
+        const said = `${JSON.stringify(unit)} ${Object.keys(files).join(" ")}: 1 MB ${once.toFixed(1)} ms, 16 × 64 KB ${parts.toFixed(1)} ms`;
+        expect(once / parts, said).toBeLessThan(8);
+        // And a bound beside it, twenty times what a busy machine takes (the slowest 1 MB here: 31 ms
+        // idle, 143 ms at load 52 on 16 CPUs): a scan that grew faster than the text needs minutes.
+        expect(once, said).toBeLessThan(3_000);
       }
     }
     // Over a limit: only the set's problem, nothing read.
