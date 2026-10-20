@@ -3799,8 +3799,14 @@ Apps, three engines), negative control `report-unbounded`.
     makes the text not whole. And `callTool`'s arguments, `setModelContext`'s content and
     `downloadFile`'s contents are plain, bounded JSON only (`isJsonData`,
     `src/bridge/json-data.ts`: no object reached twice, finite numbers, plain prototypes,
-    100,000 values, 64 levels; an `undefined` field as JSON leaves it out): what a handler gets,
-    after a yes or with no confirmation at all (`setModelContext`), is what MCP says it is.
+    100,000 values, 64 levels, 4 MiB of strings and keys together; an `undefined` field, as JSON
+    leaves it out, counts as a value): what a handler gets, after a yes or with no confirmation at
+    all (`setModelContext`), is what MCP says it is. After the re-review: a field without a value
+    and a long string are no longer free (100,000 undefined fields, or 100 MB of strings in one
+    object, are refused), and an object reached twice stays refused: walked again at each place,
+    a reused object was unbounded work (100k undefined fields under 400 places took 13 s; a 1 MB
+    string under 49,990 places passed, about 50 GB as JSON). A call waiting on consent when its
+    run stops asks no one.
 15. **db's byte bound counts JSON's separators** (the review): one more a non-empty object or
     array refused a document of exactly 1,048,576 bytes.
 16. **A stopped display refuses what waits for a confirmation** (the review; predates this
@@ -3831,8 +3837,9 @@ after `JSON.stringify` isn't enough. A gate is only one if what it guards hasn't
   extension point) must remember; in the bridge's validator it is one place, after the one gate.
 - `try { JSON.stringify } catch`, then a cut: exponential before the cut; it bounds nothing.
 - Capping confirmations in the React provider's queue only: a host's own `confirm` queues too.
-- Shared references in a tool's arguments, expanded within a budget: db refuses them (P091), and
-  a dialog that shows an object once where the handler gets it twice isn't showing the call.
+- Accepting an object reached twice, each place counted against the budget (tried, then
+  reverted): each place is walked again, so the work isn't bounded by what was sent; MCP's
+  arguments are JSON, where reuse is rare, and db refuses it too (P091).
 - A catch-all in the adapters that answers any throw: it would hide the next `URIError`; each
   cause is refused up front instead, with its test.
 **Revisit when** a host needs more of a report than 2,000 characters or 16 levels (raise

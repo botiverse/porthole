@@ -3,6 +3,7 @@ import { renderToString } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import { createBridge, type BridgeEvent } from "../src/bridge/bridge.ts";
 import { formatBounded } from "../src/bridge/bounded-text.ts";
+import { JSON_DATA_LIMITS, isJsonData } from "../src/bridge/json-data.ts";
 import type { ConfirmAnswer, ConfirmRequest } from "../src/bridge/types.ts";
 import { createHost, presets, type PlatformHost, type PresetOptions } from "../src/index.ts";
 import { ConfirmDialog } from "../src/react/index.ts";
@@ -504,5 +505,53 @@ describe("re-review: a call waiting on consent when its bridge closes asks no on
     expect(await call).toMatchObject({ ok: false, refusal: "failed" });
     expect(asked).toBe(0);
     expect(ran).toBe(0);
+  });
+});
+
+describe("re-review 2: plain JSON is bounded in values, fields and characters", () => {
+  test("an object reached twice is refused, wherever it is", () => {
+    const opts = { units: "metric" };
+    expect(isJsonData({ a: opts, b: opts })).toBe(false);
+    expect(isJsonData([opts, [opts]])).toBe(false);
+    expect(isJsonData({ a: { units: "metric" }, b: { units: "metric" } })).toBe(true);
+  });
+
+  test("a field left undefined counts against the values: 100,000 of them are too many", () => {
+    const keys = (count: number) =>
+      Object.fromEntries(Array.from({ length: count }, (_, index) => [`k${index}`, undefined]));
+    expect(isJsonData(keys(JSON_DATA_LIMITS.nodes - 1))).toBe(true);
+    expect(isJsonData(keys(JSON_DATA_LIMITS.nodes))).toBe(false);
+  });
+
+  test("strings and keys share a budget of characters: 4 MiB", () => {
+    const most = JSON_DATA_LIMITS.chars;
+    expect(isJsonData({ s: "x".repeat(most - 1) })).toBe(true);
+    expect(isJsonData({ s: "x".repeat(most) })).toBe(false);
+    const MiB = 1_048_576;
+    expect(isJsonData(Array.from({ length: 5 }, () => "y".repeat(MiB)))).toBe(false);
+    const longKeys = Object.fromEntries(
+      Array.from({ length: 5 }, (_, index) => [`${index}`.padEnd(MiB, "k"), 1]),
+    );
+    expect(isJsonData(longKeys)).toBe(false);
+    expect(most).toBe(4 * MiB);
+  });
+
+  test("the bridge refuses a call past either budget before anyone is asked", async () => {
+    const t = bridgeOf({ capabilities: { setModelContext: {}, callTool: {} } });
+    const fields = Object.fromEntries(
+      Array.from({ length: JSON_DATA_LIMITS.nodes }, (_, index) => [`k${index}`, undefined]),
+    );
+    expect(await t.bridge.call("setModelContext", { structuredContent: fields })).toMatchObject({
+      ok: false,
+      refusal: "invalid",
+    });
+    expect(
+      await t.bridge.call("callTool", {
+        name: "t",
+        arguments: { s: "x".repeat(JSON_DATA_LIMITS.chars) },
+      }),
+    ).toMatchObject({ ok: false, refusal: "invalid" });
+    expect(t.asked).toHaveLength(0);
+    expect(t.ran()).toBe(0);
   });
 });

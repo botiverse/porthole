@@ -7,29 +7,46 @@
  * writes its value; a handler gets an object), a Map, a typed array, a Date.
  *
  * Plain data only: null, booleans, finite numbers, strings, arrays and objects whose prototype is
- * Object's or none, each object reached once, at most `nodes` values and `depth` levels. A field
- * left `undefined` is allowed, as JSON leaves it out. Each node is visited once: linear in what
- * was sent, stopped at the budget. Never throws (a value whose read throws is no data).
+ * Object's or none, each object reached once (MCP's arguments are JSON: an object in two places is
+ * refused, the simple bound), at most `nodes` values (a field left `undefined`, allowed as JSON
+ * leaves it out, counts as one), `depth` levels, and `chars` characters of strings and keys
+ * together (after the re-review: neither a field without a value nor a long string is free).
+ * Each node is visited once: linear in what was sent, stopped at the budget. Never throws (a
+ * value whose read throws is no data).
  */
 
 export interface JsonDataLimits {
   readonly nodes: number;
   readonly depth: number;
+  /** The characters of every string and every key, together. */
+  readonly chars: number;
 }
 
-/** A call's: as many values as one db document holds (P091), nested deeper than any real one. */
-export const JSON_DATA_LIMITS: JsonDataLimits = { nodes: 100_000, depth: 64 };
+/**
+ * A call's: as many values as one db document holds (P091), nested deeper than any real one, and
+ * 4 MiB of text.
+ */
+export const JSON_DATA_LIMITS: JsonDataLimits = { nodes: 100_000, depth: 64, chars: 4_194_304 };
 
 export function isJsonData(value: unknown, limits: JsonDataLimits = JSON_DATA_LIMITS): boolean {
   let nodes = limits.nodes;
+  let chars = limits.chars;
   const seen = new WeakSet<object>();
+  /** Takes `length` characters from the budget: whether it still holds. */
+  const text = (length: number): boolean => {
+    chars -= length;
+    return chars >= 0;
+  };
 
   function plain(each: unknown, depth: number): boolean {
     nodes -= 1;
     if (nodes < 0 || depth > limits.depth) {
       return false;
     }
-    if (each === null || typeof each === "boolean" || typeof each === "string") {
+    if (typeof each === "string") {
+      return text(each.length);
+    }
+    if (each === null || typeof each === "boolean") {
       return true;
     }
     if (typeof each === "number") {
@@ -53,8 +70,17 @@ export function isJsonData(value: unknown, limits: JsonDataLimits = JSON_DATA_LI
       return false;
     }
     for (const key of Object.keys(each)) {
+      if (!text(key.length)) {
+        return false;
+      }
       const field = (each as Record<string, unknown>)[key];
-      if (field !== undefined && !plain(field, depth + 1)) {
+      if (field === undefined) {
+        // No value, but a field: it counts.
+        nodes -= 1;
+        if (nodes < 0) {
+          return false;
+        }
+      } else if (!plain(field, depth + 1)) {
         return false;
       }
     }
