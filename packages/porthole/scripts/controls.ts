@@ -22,8 +22,18 @@ const TAB_SANDBOX_FAILS = [
   "a frame's sealed address opened on a tab of its own",
 ];
 
-/** Each control: the spec it is checked by, and the titles (a part of each) it must fail. */
-export const CONTROLS: Readonly<Record<string, { spec: string; fails: readonly string[] }>> = {
+/**
+ * A probe a control must fail: its title (a part of it), on every engine, or only on the engines
+ * named (a wall another engine doesn't need: it holds there for reasons of its own, measured).
+ */
+type Expected = string | { readonly title: string; readonly on: readonly string[] };
+const titleOf = (expected: Expected): string =>
+  typeof expected === "string" ? expected : expected.title;
+const appliesTo = (expected: Expected, project: string): boolean =>
+  typeof expected === "string" || expected.on.includes(project);
+
+/** Each control: the spec it is checked by, and the probes it must fail. */
+export const CONTROLS: Readonly<Record<string, { spec: string; fails: readonly Expected[] }>> = {
   "runtime-declaration": {
     spec: "leak/served/runtime.spec.ts",
     fails: ["an undeclared capability: null from use, refused when sent anyway"],
@@ -89,7 +99,12 @@ export const CONTROLS: Readonly<Record<string, { spec: string; fails: readonly s
   // locks behind it (the only wall where the header isn't applied: WebKit, Firefox).
   "permissions-policy,device-locks": {
     spec: "leak/served/tab.spec.ts",
-    fails: ["served.domain.tab-devices"],
+    fails: [
+      "served.domain.tab-devices",
+      // WebKit refuses each prompt at once without them (no share sheet on desktop, no
+      // authenticator to wait for): measured.
+      { title: "served.domain.tab-prompts", on: ["chromium", "firefox"] },
+    ],
   },
 };
 
@@ -168,7 +183,8 @@ for (const name of names) {
   const problems: string[] = [];
   for (const project of projects) {
     const mine = results.filter((each) => each.project === project);
-    for (const expected of control.fails) {
+    const here = control.fails.filter((expected) => appliesTo(expected, project)).map(titleOf);
+    for (const expected of here) {
       const probe = mine.find((each) => each.title.includes(expected));
       if (probe === undefined) {
         problems.push(`[${project}] no test "${expected}"`);
@@ -177,7 +193,7 @@ for (const name of names) {
       }
     }
     for (const each of mine.filter((one) => !one.ok)) {
-      if (!control.fails.some((expected) => each.title.includes(expected))) {
+      if (!here.some((expected) => each.title.includes(expected))) {
         problems.push(`[${project}] "${each.title}" failed too`);
       }
     }
