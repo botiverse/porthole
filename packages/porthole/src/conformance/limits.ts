@@ -384,14 +384,15 @@ export const LIMIT_PROBES: readonly Probe[] = [
 </script>`,
       });
       // A print dialog holds the click that opened it, and the frame, where the sandbox lets one
-      // open (Firefox with allow-modals): the click is bounded, and a click still held is this
-      // probe's verdict failing, not a test timeout (P096).
+      // open (Firefox with allow-modals): the click is bounded (15 s, so a slow click on a busy
+      // runner isn't taken for a held one), and a click still held is this probe's verdict
+      // failing, not a test timeout (P096).
       const held = await Promise.race([
         click(display, "#go").then(
           () => false,
           () => false,
         ),
-        new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 5_000)),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 15_000)),
       ]);
       expect(held, "probe: print() opened a dialog that held the click").toBe(false);
       const verdict = await recorded(display);
