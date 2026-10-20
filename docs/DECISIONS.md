@@ -3959,7 +3959,9 @@ WebSocket opened, all three), and two prod-shape cases (run with the fix only).
    `trim` read a name with a leading U+00A0, which a sibling's script or server may set with
    `Domain=`, as `__Host-`). What an app's requests and answers are stripped of stays wider: every
    `porthole-`, `__Host-porthole-` and `__Secure-porthole-` name, either scheme
-   (`isPortholeCookie`; a `__Secure-porthole-` cookie reached the upstream before).
+   (`isPortholeCookie`; a `__Secure-porthole-` cookie reached the upstream before), and an app's
+   nameless `Set-Cookie` whose value reads as one (`=__Host-porthole-…=…`, after the review) is
+   kept from the browser too (`setsPortholeCookie`, in `proxyTo` and `upstreamHeaders.response`).
    **Loopback.** Over plain http (loopback only: `createServer` refuses http elsewhere) the names
    stay unprefixed, set and read: `__Host-` needs `Secure`, and WebKit keeps no `Secure` cookie on
    a tab of `http://*.localhost` (measured 2026-10-20, Playwright 1.63: Chromium and Firefox keep
@@ -4015,17 +4017,29 @@ WebSocket opened, all three), and two prod-shape cases (run with the fix only).
 doc says so). What a previewed app loses: a write into it from another site (an OpenID provider's
 `form_post` back to it: a tab's `Lax` cookie didn't go with that either), another origin loading its
 resources with its cookie, a request from an opaque origin (a sandboxed frame inside the app).
-**Residual** (the Public Suffix List entry is the fix for each, P047):
-- Cookie bombing: a sibling can set enough `Domain=` cookies (a few of 4 KB each) that every
-  request to every label exceeds a server's header limit (Node's 16 KB: a 431), until the person
-  clears the domain's cookies. Availability only.
-- A url-mode app's own cookies: Porthole keeps the app's `Set-Cookie` host-only, but a sibling's
-  script can set or shadow the app's names with `Domain=`.
-- An engine that sends a nameless cookie as its value (`=__Host-porthole-…=…`, a prefix bypass
-  the current engines refuse, RFC 6265bis) would let a sibling plant one: the server can't tell.
-- On loopback, a planted copy of a label's own session or entry nonce is read (above): session
-  fixation, or redeeming someone's entry code as them, for someone who holds such a cookie of the
-  developer's own server (HttpOnly, never sent into a frame; a ticket is taken once). Dev only.
+**Residual** (the Public Suffix List entry is the fix for the sibling ones, P047):
+- **Browsers without fetch metadata.** A request with neither `Origin` nor `Sec-Fetch-Site` goes
+  on (Safari before 16.4, older Chromium and Firefox send no fetch metadata). In those browsers a
+  sibling's GET subresource request (a script tag, an image) carries the app's cookie: a GET with
+  side effects (GET CSRF) and responses shaped as script are the exposure. Writes are still
+  refused there: those browsers send `Origin` on a POST.
+- **Nameless cookies.** A sibling's `=__Host-porthole-…=…; Domain=` (a cookie with no name, which
+  an old engine sends as its value alone, reading as Porthole's name) is refused by current
+  browsers (RFC 6265bis); an older one could plant a copy of a session the sibling already holds.
+  The server can't tell it from Porthole's own.
+- **The app's own script.** "The upstream never sets a Porthole-named cookie" holds for headers.
+  A url-mode app's JavaScript can still set a non-`HttpOnly` `__Host-porthole-<key>` on its own
+  origin where no `HttpOnly` one exists: session fixation with a session it holds, the same class
+  as loopback's below.
+- **Loopback.** A planted copy of a label's own session or entry nonce is read (above): fixation,
+  or redeeming someone's entry code as them, for someone who holds such a cookie of the
+  developer's own server (`HttpOnly`, never sent into a frame; a ticket is taken once). Dev only.
+- **Denial of service.** Siblings can overflow the browser's cookie jar for the domain, or set
+  enough `Domain=` cookies (a few of 4 KB) that every request to every label exceeds a server's
+  header limit (Node's 16 KB: a 431), until the person clears the domain's cookies. Availability
+  only.
+- **A url-mode app's own cookies.** Porthole keeps the app's `Set-Cookie` host-only, but a
+  sibling's script can set or shadow the app's names with `Domain=`.
 **Rejected.**
 - Refusing every cross-site request: the host's frame and entry's redirects are cross-site
   navigations.

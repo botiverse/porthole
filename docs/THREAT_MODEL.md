@@ -309,6 +309,9 @@ encrypted into the path, since WebKit keeps no cookie in a frame (P083).
   - on plain http (loopback dev only) the names have no prefix (WebKit keeps no `Secure` cookie
     on a tab there), so a page can plant a copy of a label's own session or entry nonce, for
     whoever hands it one: they are `HttpOnly` and never sent into a frame (P101);
+  - in browsers that refuse no nameless cookie (older than RFC 6265bis), a page can plant a copy
+    of a session it holds as `=__Host-porthole-…`; siblings can overflow the cookie jar or the
+    header size (denial of service only);
   - enough large cookies make every request from that browser to the content domain too large to
     serve ([§5](#5-out-of-scope)).
 - A sealed files address is a bearer credential for its version's files until the session ends
@@ -447,6 +450,11 @@ the attacker (c), and its readers are strangers.
 - The app's network is its own.
 - A page on another origin can still open the app by a navigation (a link, a frame of its own),
   which reaches the app's GET routes as any link does.
+- A request with neither `Origin` nor `Sec-Fetch-Site` goes on: in browsers without fetch
+  metadata (Safari before 16.4, older Chromium and Firefox) a sibling's GET subresource carries
+  the app's cookie (GET CSRF, script-shaped responses); POSTs are still refused, by `Origin`. The
+  app's own script can set a non-`HttpOnly` `__Host-porthole-<key>` where none exists: fixation
+  with a session it holds (P101).
 - Through `proxyTo`, `True-Client-IP` and `CF-Connecting-IP` reach the app as the client sent
   them.
 - The app is a sibling of every other content origin, with no CSP of Porthole's beyond
