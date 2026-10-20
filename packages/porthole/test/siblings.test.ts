@@ -9,6 +9,7 @@ import {
   createContentHost,
   createServer,
   prefixedName,
+  upstreamHeaders,
   type AuthorizeRequest,
   type ServerOptions,
 } from "../src/server/index.ts";
@@ -58,6 +59,9 @@ function server(extra: Partial<ServerOptions> = {}) {
           ["set-cookie", "porthole-z=1; Path=/"],
           ["set-cookie", "__Secure-porthole-z=1; Path=/; Secure"],
           ["set-cookie", "__Host-porthole-z=1; Path=/; Secure"],
+          // Nameless: an engine that sends one as its value would send it as Porthole's.
+          ["set-cookie", "=__Host-porthole-z=1; Path=/; Secure"],
+          ["set-cookie", " =porthole-z=1; Path=/"],
         ],
       });
     },
@@ -132,6 +136,23 @@ describe("P0.3 / S3: under https only __Host- names are Porthole's (P101)", () =
     expect(answer.status).toBe(200);
     expect(upstream[0]?.headers.get("cookie")).toBe("theirs=1");
     expect(pairsOf(answer)).toEqual(["theirs=2"]);
+  });
+
+  it("a relay of its own keeps a nameless Porthole-shaped cookie out too (upstreamHeaders)", () => {
+    const answer = upstreamHeaders.response(
+      [
+        ["set-cookie", "theirs=2; Path=/"],
+        ["set-cookie", "=__Host-porthole-z=1; Path=/; Secure"],
+        ["set-cookie", "=__Secure-porthole-z=1; Path=/; Secure"],
+        ["set-cookie", "=porthole-z=1"],
+        ["set-cookie", "=plain"],
+      ],
+      { origin: `https://a.${DOMAIN}`, target: "http://127.0.0.1:5173" },
+    );
+    expect(answer.filter(([name]) => name === "set-cookie").map(([, value]) => value)).toEqual([
+      "theirs=2; Path=/",
+      "=plain",
+    ]);
   });
 
   it("over plain http (loopback dev) the names are unprefixed, set and read; __Host- ones aren't", async () => {

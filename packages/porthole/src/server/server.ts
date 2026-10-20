@@ -14,7 +14,7 @@ import { isHostLabel, reservedLabels } from "./naming.ts";
 import { enterPage, pageScript, SESSION_PATH, statusPage } from "./pages.ts";
 import { libraryFile } from "./libraries.ts";
 import { ownLoad, serveAsset, serveFile } from "./files.ts";
-import { isPortholeCookie } from "./proxy.ts";
+import { isPortholeCookie, setsPortholeCookie } from "./proxy.ts";
 import {
   assetCodeRuns,
   assetCspDirectives,
@@ -1451,8 +1451,7 @@ export function createServer(options: ServerOptions): PortholeServer {
     const headers = new Headers(response.headers);
     headers.delete("set-cookie");
     for (const cookie of response.headers.getSetCookie()) {
-      const name = cookie.split("=")[0]?.trim() ?? "";
-      if (!isPortholeCookie(name)) {
+      if (!setsPortholeCookie(cookie)) {
         headers.append("set-cookie", cookie);
       }
     }
