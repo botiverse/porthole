@@ -8,6 +8,7 @@ import {
   type AnnotationReport,
   type AnnotationSelector,
 } from "./types.ts";
+import { withoutUnseen } from "../bridge/unseen.ts";
 
 /**
  * The host's checks on what a frame says about annotations (P053), and on anchors a host stores
@@ -60,7 +61,12 @@ function selector(value: unknown): AnnotationSelector | null {
   }
 }
 
-/** An anchor, rebuilt from its known fields; null if any part is malformed or too large. */
+/**
+ * An anchor, rebuilt from its known fields; null if any part is malformed or too large. Its label
+ * is text for the person, so what they couldn't see is taken out of it (P105: a wordless element's
+ * `alt`, `aria-label` or `title`, which the page never shows, can carry bidi controls or zero-width
+ * characters); its selectors' words are kept as they are, to be found again.
+ */
 export function parseAnchor(value: unknown): AnnotationAnchor | null {
   if (!isRecord(value) || (value.kind !== "element" && value.kind !== "text")) {
     return null;
@@ -85,7 +91,7 @@ export function parseAnchor(value: unknown): AnnotationAnchor | null {
   if (value.kind === "text" ? !quote : !css && !quote) {
     return null;
   }
-  return { kind: value.kind, selectors, label: value.label };
+  return { kind: value.kind, selectors, label: withoutUnseen(value.label) };
 }
 
 const coordinate = (value: unknown): value is number =>
@@ -114,10 +120,11 @@ export function parseRect(value: unknown): AnnotationRect | null {
  */
 export function clampRect(
   rect: AnnotationRect,
-  viewport: { readonly width: number; readonly height: number } | undefined,
+  viewport: { readonly width: number; readonly height: number } | null | undefined,
 ): AnnotationRect {
-  const width = viewport !== undefined && Number.isFinite(viewport.width) ? viewport.width : 0;
-  const height = viewport !== undefined && Number.isFinite(viewport.height) ? viewport.height : 0;
+  const known = viewport !== null && typeof viewport === "object";
+  const width = known && Number.isFinite(viewport.width) ? viewport.width : 0;
+  const height = known && Number.isFinite(viewport.height) ? viewport.height : 0;
   const within = (value: number, most: number) => Math.min(Math.max(value, 0), Math.max(0, most));
   const left = within(rect.x, width);
   const top = within(rect.y, height);
