@@ -71,9 +71,14 @@ test("a framed app mid-session: its next request after revocation is denied, and
   browserName,
 }) => {
   // Measured, not assumed from the engine's name (P098: Playwright's WebKit keeps none on Linux,
-  // keeps them on macOS).
+  // keeps them on macOS). Only WebKit was ever measured keeping none: elsewhere a probe that says
+  // so is broken, and the case fails rather than skip (after the review of P098).
+  const kept = await keepsFramedCookies(page, "http:");
+  if (browserName !== "webkit") {
+    expect(kept, "the cookie probe: Chromium and Firefox keep a framed cookie").toBe(true);
+  }
   test.skip(
-    !(await keepsFramedCookies(page, "http:")),
+    !kept,
     "this browser keeps no cookie in a cross-site frame (P025): a framed app never has a session there (blocked: cookies); the ticket and tab cases cover it",
   );
   const served = await harness();
