@@ -4082,10 +4082,11 @@ browsers keep a framed cookie).
      block, so `navigate-guard` (the guard taken out) removes it with every other notice;
    - which loads are the set's own pages is decided by `pagesOfSet` (`host/pages-of-set.ts`) on
      the frame's surface, before anything the frame says reaches the display. The leaving page's
-     notice is taken for the next load within ten seconds, as before; the arriving page's for the
-     next load within `LATE_NOTICE_MS` (2 s) or for the load it came after. A load no notice
-     explained waits `LATE_NOTICE_MS` for a notice naming the mounted version; every other
-     display starts again at once, as before.
+     notice is taken for the next load within ten seconds, as before; the arriving page's too (the
+     host hears a load only once the page's images and modules have loaded, seconds after it
+     spoke), or for the load it came after. A load no notice explained waits `LATE_NOTICE_MS`
+     (2 s) for a notice naming the mounted version; every other display starts again at once, as
+     before. What a new page says before its load is delivered as it comes, as P084 had it.
    Regressions: `test/pages-of-set.test.ts` and `test/files.test.ts` (a notice before or after its
    load spares the restart; nothing answered during the wait; failed before),
    `leak/served/files.spec.ts` (the leaving page's notice dropped, or every notice held until the
@@ -4099,8 +4100,10 @@ browsers keep a framed cookie).
    (measured 0.2-1.3; at most 4.2 with three times more runnable threads than CPUs), quadratic
    sixteen (the scans from before the review: 9.6-16 already at 48 KB). Equal work on both sides
    makes a busy machine slow both alike; a CPU-time clock was the other way, but Linux reports a
-   thread's CPU time in whole ticks here. It is six times the old case's work (9.6 s with 57
-   runnable threads on 16 CPUs), so its cap is a minute, not vitest's 5 s.
+   thread's CPU time in whole ticks here. Beside the ratio, a bound twenty times what a busy
+   machine takes: each 1 MB under 3 s (the slowest 31 ms idle, 143 ms at load 52). It is six
+   times the old case's work (9.6 s with 57 runnable threads on 16 CPUs), so its cap is a minute,
+   not vitest's 5 s.
 3. **Which browsers keep a cookie in a cross-site frame is measured, not named** (the audit's four
    WebKit failures on macOS). P025 measured Playwright's WebKit on Linux: no cookie in a cross-site
    frame. The audit's macOS run of the same WebKit kept them: `served.url.framed` passed where it was
@@ -4112,7 +4115,9 @@ browsers keep a framed cookie).
    one on another, both answered by routes (never the network, never the host under test), the
    frame's answer sets a cookie as Porthole's server sets a framed one (`Secure; SameSite=None;
    Partitioned`, over the display's scheme), and the frame reads whether it was kept. The framed
-   case, the outcome case and the two mid-session revocation cases expect what it says. Nothing
+   case, the outcome case and the two mid-session revocation cases expect what it says; the one
+   that skips (the framed app mid-session) skips only on WebKit, the one engine measured keeping
+   none, and fails elsewhere if the probe says none, so a broken probe can't drop it. Nothing
    that protects is weaker: where the cookie is kept, revocation must deny the next request and the
    next load (403, revoked); where it isn't, the app must be `blocked: cookies` and the reload has
    no session (401); the ticket and tab cases deny a revoked subject on every browser. Measured
@@ -4149,7 +4154,8 @@ frame that did navigate away is started again up to 2 s later than before. Bound
   a load still to come only, as P084 did; never to end a wait.
 - **No host access during the wait.** Everything the frame says is held, not delivered: no call
   is answered, no report, size, annotation or frame status taken; nothing the host sends goes to
-  the frame. A notice for the mounted version delivers it all, in order; a restart drops it.
+  the frame. A notice for the mounted version delivers it all, in order; a restart drops it. At
+  most `HELD_MOST` (1,000) messages each way are held: one more starts the display again.
 - **The wait always ends in a restart unless that notice comes.** Its deadline is the first
   waiting load's: more loads don't put it off. Nothing else clears it but the display's own stop.
 - **The guard's control still fails.** `navigate-guard` removes the guard's block, and with it the
