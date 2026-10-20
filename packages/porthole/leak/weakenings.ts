@@ -179,6 +179,9 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "file-self": "harness",
   // A file set's files without their resource policy (P081): another origin may embed them.
   "file-corp": "harness",
+  // A url-mode app's server without its origin check (P101): the harness drops `Origin` and
+  // `Sec-Fetch-Site` from the app's requests, so another origin's ride on its cookie.
+  "url-origin": "harness",
   // The host's checks on annotation reports (P053): taken only while asked for, within limits.
   "annotation-checks": [
     {

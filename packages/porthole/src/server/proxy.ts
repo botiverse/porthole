@@ -164,6 +164,18 @@ function headersOf(input: HeaderInput): Headers {
 export const isPortholeCookie = (name: string): boolean =>
   /^(?:__Host-|__Secure-)?porthole-/u.test(name);
 
+/**
+ * Whether a `Set-Cookie` header sets one of Porthole's own names. A nameless cookie
+ * (`=__Host-porthole-…=…`) counts by its value: an engine that sends one sends its value alone,
+ * which reads as that name (P101).
+ */
+export function setsPortholeCookie(header: string): boolean {
+  const [pair = ""] = header.split(";");
+  const at = pair.indexOf("=");
+  const name = (at < 0 ? pair : pair.slice(0, at)).trim();
+  return isPortholeCookie(name) || (name === "" && isPortholeCookie(pair.slice(at + 1).trim()));
+}
+
 /** The cookie header without Porthole's own cookies, or null when nothing else is left. */
 export function withoutPortholeCookies(cookie: string | null | undefined): string | null {
   const kept = (cookie ?? "")
@@ -210,9 +222,7 @@ export const upstreamHeaders = {
     options: { readonly origin: string; readonly target: string },
   ): [string, string][] {
     const answer = upstreamResponseHeaders(headersOf(input), options.origin, options.target);
-    const cookies = answer
-      .getSetCookie()
-      .filter((each) => !isPortholeCookie(each.split("=")[0]?.trim() ?? ""));
+    const cookies = answer.getSetCookie().filter((each) => !setsPortholeCookie(each));
     answer.delete("set-cookie");
     return [...answer, ...cookies.map((each): [string, string] => ["set-cookie", each])];
   },

@@ -53,6 +53,7 @@ test.describe(`served modes (${coreHost.name})`, () => {
       "served.url.ticket",
       "served.url.tab",
       "served.url.framed",
+      "served.url.siblings",
       "served.proxy.view",
       "served.proxy.parent-only",
       "served.proxy.egress",

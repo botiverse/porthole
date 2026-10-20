@@ -5,7 +5,7 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes `main` as of 2026-10-19 (0.7.0, with P092, P093, P094 and P097). A review
+**Status.** This describes `main` as of 2026-10-19 (0.7.0, with P092, P093, P094, P097 and P101). A review
 that day found gaps; some of their fixes have merged, and the rest are planned. A note **open until
 P0xx** means the gap exists on `main` today and decision P0xx is its planned fix; once that fix
 merges, the note becomes a guarantee. [§8](#8-fixes-in-flight) lists the decisions.
@@ -276,6 +276,9 @@ encrypted into the path, since WebKit keeps no cookie in a frame (P083).
   as a hash, used once, good for 60 seconds by default and 600 at most, becomes a signed cookie of
   that origin and instance: `HttpOnly`; `__Host-` under https; `Secure` under https and always in
   a frame; in a frame `SameSite=None; Partitioned`, in a tab `Lax`.
+- Only cookies Porthole set are read as its own: under https only `__Host-porthole-` names, which
+  no other label can set; the entered mark names its label. A session names its scope, signed, so
+  another label's session is never read as this one's, under https or on loopback (P101).
 - Pages, files and status pages carry their CSP in headers and `X-Robots-Tag: noindex`, and
   `frame-ancestors` names the app's origins only.
 - Files: from the version's manifest only, typed by Porthole's table, `nosniff`; files other than
@@ -303,12 +306,12 @@ encrypted into the path, since WebKit keeps no cookie in a frame (P083).
   page on one label can attack another (c). A domain-mode page has `allow-same-origin`, so it can
   set cookies for the whole content domain (in a frame, within what the browser allows a
   third-party frame). `__Host-` keeps them off its sessions' cookies, but:
-  - under https Porthole also takes unprefixed `porthole-*` cookies. One of them is the
-    **entered mark**, which a browser gets on coming back to a clean address from the app's
-    authorize route (and its sign-in); seen again, it tells Porthole the browser keeps no cookies
-    there, and the address answers "Open this in a new tab" instead of looping through sign-in.
-    The mark doesn't name its label, so a page can plant it for the whole domain and make other
-    labels' clean addresses answer that way (open until P101);
+  - on plain http (loopback dev only) the names have no prefix (WebKit keeps no `Secure` cookie
+    on a tab there), so a page can plant a copy of a label's own session or entry nonce, for
+    whoever hands it one: they are `HttpOnly` and never sent into a frame (P101);
+  - in browsers that refuse no nameless cookie (older than RFC 6265bis), a page can plant a copy
+    of a session it holds as `=__Host-porthole-…`; siblings can overflow the cookie jar or the
+    header size (denial of service only);
   - enough large cookies make every request from that browser to the content domain too large to
     serve ([§5](#5-out-of-scope)).
 - A sealed files address is a bearer credential for its version's files until the session ends
@@ -420,6 +423,10 @@ the attacker (c), and its readers are strangers.
   session; the viewer can't change it.
 - Porthole's own cookies are removed before a request reaches the host's `upstream` (HTTP), and
   before the Node adapter hands a WebSocket to the host's `appSocket`.
+- The app's cookie opens it only for its own origin (`Origin`, or `Sec-Fetch-Site` `same-origin`
+  or `none`) and for a navigation that opens it (GET or HEAD); anything else another origin sends
+  is a 403 before the upstream. A WebSocket opens from its own origin only: `content.access`, which
+  the Node adapter asks before `appSocket` and a Worker asks on its own upgrade path (P101).
 - `proxyTo`, Porthole's HTTP relay (pass it as `upstream`), also rewrites the headers:
   - requests go with `redirect: "manual"`;
   - `Host`, hop-by-hop headers, `X-Forwarded-*`, `Forwarded` and `X-Real-IP` are dropped;
@@ -441,11 +448,13 @@ the attacker (c), and its readers are strangers.
 **Not guaranteed**
 
 - The app's network is its own.
-- HTTP requests and WebSockets to the app aren't checked for `Origin` or `Sec-Fetch-Site`.
-  Another url-mode app on the same page (framed cookies are `SameSite=None`), or a page on a
-  sibling label in a tab (same-site, so `Lax` cookies go too), can send requests with the app's
-  cookie and open its WebSockets; an app that doesn't check `Origin` itself, as many dev servers
-  don't, can be driven by them (open until P101).
+- A page on another origin can still open the app by a navigation (a link, a frame of its own),
+  which reaches the app's GET routes as any link does.
+- A request with neither `Origin` nor `Sec-Fetch-Site` goes on: in browsers without fetch
+  metadata (Safari before 16.4, older Chromium and Firefox) a sibling's GET subresource carries
+  the app's cookie (GET CSRF, script-shaped responses); POSTs are still refused, by `Origin`. The
+  app's own script can set a non-`HttpOnly` `__Host-porthole-<key>` where none exists: fixation
+  with a session it holds (P101).
 - Through `proxyTo`, `True-Client-IP` and `CF-Connecting-IP` reach the app as the client sent
   them.
 - The app is a sibling of every other content origin, with no CSP of Porthole's beyond
@@ -559,7 +568,7 @@ its row names exists today, and the sections it cites say "open until" that deci
 | P098 | Planned | The leak suite's unstable cases. No guarantee here depends on it, but a red run hides a real regression. | |
 | P099 | Planned | A served page in a tab has no sandbox: `window.open` sends input out. | S4 |
 | P100 | Planned | `setModelContext` is rate-limited only, unseen by the person. | S1, S5 |
-| P101 | Planned | Unprefixed cookies under https; the entered mark carries no label; url mode checks neither `Origin` nor `Sec-Fetch-Site`. | S3, S6 |
+| P101 | Merged | Under https Porthole read unprefixed `porthole-*` cookies a sibling label can plant; the entered mark carried no label; url mode checked neither `Origin` nor `Sec-Fetch-Site`. Now only `__Host-` names are read, the mark names its label, and a url-mode app answers its own origin and navigations. | S3, S6 |
 | P102 | | This document. | |
 | P103 | Merged | A live widget's capabilities could add origins; bearer-mode assets skipped the code re-check; `callTool` had no rate. Now the preset refuses them and its config is frozen, every load asks the current config (its ETag says which answer), and `callTool` has 30 a minute. | S2, S5, §7 |
 

@@ -3935,3 +3935,122 @@ page's calls (PRINCIPLE 1).
 **Revisit when** a host with several artifact configs needs bearer-mode code assets under a mix of
 them (then the asset names its config); or MCP Apps hosts report views that legitimately call
 tools faster than 30 a minute under default gates.
+
+## P101 · 2026-10-19 · Siblings on the content domain: only `__Host-` names are Porthole's, the entered mark is its label's, a url-mode app answers its own origin · Accepted
+
+The 2026-10-19 audit's second round, P0.3 (scenarios S3 and S6; baseline a92adac). Amends P025
+(which cookie names are read), P068 (the entered mark), P020 and P050 (what a url-mode app's cookie
+lets in). Each change has its regression, which failed before: `test/siblings.test.ts` (9 of
+its 14 cases; the other 5 hold what already held, or pin loopback's residual), `test/workers.test.ts`
+(workerd), the served case `served.url.siblings` (failed before on Chromium and Firefox against the
+reference serving, on all three against the kit), `leak/kit.spec.ts`'s socket case (a sibling's
+WebSocket opened, all three), and two prod-shape cases (run with the fix only).
+
+**Decision**, by finding:
+1. **Over https only `__Host-porthole-` names are read** (S3: `ourCookie` took `porthole-*` too).
+   Every label is same-site with every other until the content domain is on the Public Suffix List
+   (P047), and a sibling (a url-mode app, which has no CSP; a domain-mode page, which has
+   `allow-same-origin`; an app's own preview label) can set any name for the whole domain with
+   `Domain=`, never a `__Host-` one. A session's copy (its holder reads it in their own browser) or
+   an entered mark, planted under the name without the prefix, was read on every label: the app or
+   a clean address opened as the planter's viewer (session fixation), or the loop guard answered.
+   Now a session, a mark and a nonce are read only under the exact `__Host-` name, case and every
+   byte counted, and the cookie header's names are trimmed of spaces and tabs only (JavaScript's
+   `trim` read a name with a leading U+00A0, which a sibling's script or server may set with
+   `Domain=`, as `__Host-`). What an app's requests and answers are stripped of stays wider: every
+   `porthole-`, `__Host-porthole-` and `__Secure-porthole-` name, either scheme
+   (`isPortholeCookie`; a `__Secure-porthole-` cookie reached the upstream before), and an app's
+   nameless `Set-Cookie` whose value reads as one (`=__Host-porthole-…=…`, after the review) is
+   kept from the browser too (`setsPortholeCookie`, in `proxyTo` and `upstreamHeaders.response`).
+   **Loopback.** Over plain http (loopback only: `createServer` refuses http elsewhere) the names
+   stay unprefixed, set and read: `__Host-` needs `Secure`, and WebKit keeps no `Secure` cookie on
+   a tab of `http://*.localhost` (measured 2026-10-20, Playwright 1.63: Chromium and Firefox keep
+   `__Host-` there on a tab and partitioned in a frame; WebKit keeps neither, and no framed
+   cookie at all, P025). So dev keeps working on every engine as before, and the one name a
+   sibling can plant there is Porthole's own (pinned by a test, so a change of loopback's names
+   shows).
+   **Another label's session or grant is never this label's**, on either scheme: a session names
+   its scope, signed, and is read only where the scope's label is the request's; an entry code is
+   taken only on its own label, and with its nonce cookie under Porthole's exact name. Tested for
+   what a label's holder can plant with `Domain=` (its own session under its name or another
+   label's, prefixed or not; an entry's nonce for someone's code).
+2. **The entered mark is its label's** (S3): `e.<HMAC of { entered: path, label }>` (it was the
+   path's alone), read from a nonce cookie's name only. A mark redeemed on one label, planted on
+   another, made that label's clean address at the path answer "Open this in a new tab" for as long
+   as the planted cookie lived. A mark made before this change matches nothing: a browser that
+   keeps no cookie takes one more trip through entry, within the mark's 60 s.
+3. **A url-mode app answers its own origin** (S6). `serveApp`, `/__porthole/session` and `access()`
+   checked the cookie and the host's check only. A frame's cookie is `SameSite=None; Partitioned`,
+   so another url-mode app on the same host page (another frame, the same partition) could post to
+   the app, load its scripts with its cookie, and open its WebSocket; on a tab, a sibling label is
+   same-site and the `Lax` cookie went too. A WebSocket has no CORS: an app whose server checks no
+   `Origin` (many dev servers) was hijacked (measured through `nodeHost`, all three engines). Now,
+   before the cookie is read: an `Origin` other than the app's own (an opaque origin's `null`
+   included) is refused; `Sec-Fetch-Site` `same-origin` or `none` goes on; `same-site` or
+   `cross-site` goes on only for a navigation (`Sec-Fetch-Mode: navigate`) by GET or HEAD; anything
+   else (a write, a subresource, a socket) is a 403 page that reaches neither the upstream nor
+   `authorize.check`. A socket (`access`) is never a navigation: its own origin only. A request with
+   neither header goes on: a browser sends `Origin` on every socket and write, and fetch metadata
+   on everything where it sends any, so only a client that holds the cookie itself (curl) sends
+   none.
+   - **Which requests need it.** Everything a url-mode app's cookie lets in but a safe-method
+     navigation: that is how the app is opened (the host's frame, entry's and sign-in's redirects,
+     a link, the address bar), and it carries no body; `Lax`'s rule, enforced by the server, in
+     frames too, where the cookie is `SameSite=None`. The app's own navigations, assets, fetches,
+     forms, event streams and sockets are same-origin and go on (`served.url.tab`,
+     `served.url.framed`, the kit's socket case). A sibling's GET navigation still reaches the
+     app's GET routes, as any link does.
+   - **Both paths.** `access` is the host's upgrade path on Node (`nodeHost` asks it before
+     `appSocket`) and on Workers (a Worker asks it on its own upgrade path: a fetch-style `handle`
+     can't answer a 101), and a socket a Worker passes to `handle` is refused there the same: no
+     change to either adapter (`src/node/index.ts`, `src/server/host.ts`), all in
+     `src/server/server.ts`.
+- **Harness.** `url-origin` (the served harness drops `Origin` and `Sec-Fetch-Site` from a url-mode
+  app's requests) → `served.url.siblings` fails on Chromium and Firefox: the harness's labels are
+  each a site on `*.localhost`, so only the framed half rides a cookie there, and WebKit keeps none
+  in frames (P025). The kit (same-site siblings under `kitcontent.localhost`) runs the case's tab
+  half on every engine, and a socket case through `nodeHost` and a relay of its own (`appSocket`
+  with `upstreamHeaders`) to its running app's `/ws`.
+
+**Threat it re-opens.** None: each change narrows what a cookie or a request opens.
+**Compatibility.** No API change; `access` may now be null for a request it let in before (its
+doc says so). What a previewed app loses: a write into it from another site (an OpenID provider's
+`form_post` back to it: a tab's `Lax` cookie didn't go with that either), another origin loading its
+resources with its cookie, a request from an opaque origin (a sandboxed frame inside the app).
+**Residual** (the Public Suffix List entry is the fix for the sibling ones, P047):
+- **Browsers without fetch metadata.** A request with neither `Origin` nor `Sec-Fetch-Site` goes
+  on (Safari before 16.4, older Chromium and Firefox send no fetch metadata). In those browsers a
+  sibling's GET subresource request (a script tag, an image) carries the app's cookie: a GET with
+  side effects (GET CSRF) and responses shaped as script are the exposure. Writes are still
+  refused there: those browsers send `Origin` on a POST.
+- **Nameless cookies.** A sibling's `=__Host-porthole-…=…; Domain=` (a cookie with no name, which
+  an old engine sends as its value alone, reading as Porthole's name) is refused by current
+  browsers (RFC 6265bis); an older one could plant a copy of a session the sibling already holds.
+  The server can't tell it from Porthole's own.
+- **The app's own script.** "The upstream never sets a Porthole-named cookie" holds for headers.
+  A url-mode app's JavaScript can still set a non-`HttpOnly` `__Host-porthole-<key>` on its own
+  origin where no `HttpOnly` one exists: session fixation with a session it holds, the same class
+  as loopback's below.
+- **Loopback.** A planted copy of a label's own session or entry nonce is read (above): fixation,
+  or redeeming someone's entry code as them, for someone who holds such a cookie of the
+  developer's own server (`HttpOnly`, never sent into a frame; a ticket is taken once). Dev only.
+- **Denial of service.** Siblings can overflow the browser's cookie jar for the domain, or set
+  enough `Domain=` cookies (a few of 4 KB) that every request to every label exceeds a server's
+  header limit (Node's 16 KB: a 431), until the person clears the domain's cookies. Availability
+  only.
+- **A url-mode app's own cookies.** Porthole keeps the app's `Set-Cookie` host-only, but a
+  sibling's script can set or shadow the app's names with `Domain=`.
+**Rejected.**
+- Refusing every cross-site request: the host's frame and entry's redirects are cross-site
+  navigations.
+- `Origin` alone: a GET subresource (a script tag) sends none. `Sec-Fetch-Site` alone: an engine
+  without fetch metadata still sends `Origin` on writes and sockets.
+- Refusing a request with neither header: a client holding the cookie is its holder, and some
+  proxies drop fetch metadata.
+- `__Host-` for the viewer handoff's cookie: it is on the app's origin, not the content domain,
+  scoped to the prefix's path (which `__Host-` forbids), `__Secure-` over https, read by its exact
+  name.
+**Revisit when** the content domain is on the Public Suffix List (siblings become sites; the
+origin check stays, for frames on one host page); when an engine stops sending `Origin` or fetch
+metadata where this relies on them; or when a previewed app needs a write from another site (an
+opt-in per display, with its test).

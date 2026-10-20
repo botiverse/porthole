@@ -430,6 +430,7 @@ const URL_CASES = [
   "served.url.ticket",
   "served.url.tab",
   "served.url.framed",
+  "served.url.siblings",
 ];
 const PROXY_CASES = ["served.proxy.view", "served.proxy.parent-only", "served.proxy.egress"];
 const DOMAIN_CASES = [

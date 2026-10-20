@@ -605,6 +605,70 @@ export function servedTests(
           .toBe("ready");
       },
     );
+
+    define(
+      "served.url.siblings",
+      "another origin's page never rides an app's cookie: its load of the app's script is refused",
+      async ({ page, browserName }) => {
+        // P101: two apps framed on one host page share its cookie partition, and sibling labels
+        // are same-site until the content domain is on the Public Suffix List (P047), so a tab's
+        // Lax cookie goes with a sibling's requests too. The app's own load is the control.
+        const load = (frame: Frame, src: string) =>
+          frame.evaluate(
+            (url) =>
+              new Promise<string>((resolve) => {
+                const script = document.createElement("script");
+                script.addEventListener("load", () => resolve("load"));
+                script.addEventListener("error", () => resolve("error"));
+                script.src = url;
+                document.head.append(script);
+                setTimeout(() => resolve("timeout"), 3_000);
+              }),
+            src,
+          );
+        const ready = (frame: Frame) =>
+          expect
+            .poll(() => frame.evaluate(() => document.documentElement.dataset.app ?? null), {
+              timeout: 3_000,
+            })
+            .toBe("ready");
+        const scriptOf = async (frame: Frame, origin: string): Promise<string> => {
+          const src = await frame.evaluate(
+            () => document.querySelector<HTMLScriptElement>("script[src]")?.src ?? "",
+          );
+          expect(src, "the app's page loads a script").not.toBe("");
+          expect(new URL(src).origin, "from its own origin").toBe(origin);
+          return src;
+        };
+        // Framed side by side, where the engine keeps a framed cookie (WebKit doesn't, P025).
+        if (browserName !== "webkit") {
+          const a = await host.show(page, await host.app("url-siblings-a"));
+          const frameA = await a.frame();
+          await ready(frameA);
+          const script = await scriptOf(frameA, a.origin);
+          expect(await load(frameA, script), "the app's own load").toBe("load");
+          const b = await host.show(page, await host.app("url-siblings-b"));
+          const frameB = await b.frame();
+          await ready(frameB);
+          expect(await load(frameB, script), "another app's frame loading it").toBe("error");
+        }
+        // Each on a tab of its own, in one browser.
+        const c = await host.locate(await host.app("url-siblings-c"));
+        const d = await host.locate(await host.app("url-siblings-d"));
+        const tab = await page.context().newPage();
+        try {
+          await tab.goto(c.url);
+          await ready(tab.mainFrame());
+          const script = await scriptOf(tab.mainFrame(), c.origin);
+          expect(await load(tab.mainFrame(), script), "the app's own load").toBe("load");
+          await tab.goto(d.url);
+          await ready(tab.mainFrame());
+          expect(await load(tab.mainFrame(), script), "another app's tab loading it").toBe("error");
+        } finally {
+          await tab.close();
+        }
+      },
+    );
   }
   return tests;
 }

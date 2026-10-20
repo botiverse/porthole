@@ -208,6 +208,45 @@ describe("/server on Workers", () => {
     expect((await fetchAt(code, { ...top, cookie: nonce })).status).toBe(403);
   });
 
+  test("P0.3 / S6 on workerd: a url-mode app answers its own origin, by HTTP and by socket (P101)", async () => {
+    const location = (await (
+      await mf.dispatchFetch("https://host.test/issue-app?id=app1")
+    ).json()) as {
+      url: string;
+      origin: string;
+    };
+    const entered = await fetchAt(location.url);
+    expect(entered.status).toBe(200);
+    const cookie = (entered.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+    expect(cookie).toMatch(/^__Host-porthole-/u);
+    const own = { cookie, origin: location.origin, "sec-fetch-site": "same-origin" };
+    const sibling = {
+      cookie,
+      origin: "https://a-evil.usercontent.test",
+      "sec-fetch-site": "same-site",
+    };
+    const post = (headers: Record<string, string>) =>
+      mf.dispatchFetch(`${location.origin}/api`, {
+        method: "POST",
+        headers: { "sec-fetch-mode": "cors", "sec-fetch-dest": "empty", ...headers },
+        body: "x",
+      });
+    const ownPost = await post(own);
+    expect(await ownPost.text()).toBe("app: POST /api");
+    expect((await post(sibling)).status).toBe(403);
+    // The planted copy a sibling can set for the whole domain: not Porthole's name over https.
+    expect((await post({ ...own, cookie: cookie.replace(/^__Host-/u, "") })).status).toBe(401);
+    const socket = (headers: Record<string, string>) =>
+      mf.dispatchFetch(`${location.origin}/ws`, {
+        headers: { upgrade: "websocket", "sec-fetch-mode": "websocket", ...headers },
+      });
+    const opened = await socket(own);
+    expect(opened.status).toBe(101);
+    opened.webSocket?.accept();
+    opened.webSocket?.close();
+    expect((await socket(sibling)).status).toBe(404);
+  });
+
   test("another server's namespace and the bare domain go to the host's routes", async () => {
     for (const url of [
       "https://x.f.usercontent.test/",

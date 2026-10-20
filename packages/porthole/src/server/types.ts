@@ -324,8 +324,9 @@ export interface PortholeServer {
   issue(instance: InstanceRef, grant: Grant): Promise<FrameLocation>;
   /**
    * The access a request's cookie carries for a url-mode app on the request's origin, or null
-   * (no good cookie, or the host's check denies it): for a host's own WebSocket upgrade path,
-   * which a fetch-style handler can't take.
+   * (no good cookie, an `Origin` or `Sec-Fetch-Site` of another origin's (P101), or the host's
+   * check denies it): for a host's own WebSocket upgrade path, which a fetch-style handler can't
+   * take.
    */
   access(request: Request): Promise<Access | null>;
   /** The frame source every content origin matches (`https://*.example-usercontent.com`). */

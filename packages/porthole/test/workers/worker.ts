@@ -20,6 +20,9 @@ interface Env {
 }
 
 const CONTENT = "usercontent.test";
+
+/** workerd's WebSocket pair (not in the DOM's types): two ends, one for the client. */
+declare const WebSocketPair: new () => { 0: WebSocket; 1: WebSocket & { accept(): void } };
 const HOST = "https://artifacts.example";
 
 /** A version made of files (P081), its bytes streamed as a store (R2) streams them. */
@@ -74,6 +77,11 @@ function porthole(env: Env) {
         contentOrigins: [`https://*.${CONTENT}`],
       }),
     },
+    // A url-mode app (P101's checks on workerd): the app answers what it was asked.
+    upstream: (request) =>
+      new Response(`app: ${request.method} ${new URL(request.url).pathname}`, {
+        headers: { "content-type": "text/plain" },
+      }),
     artifacts: {
       get: async (id, version) =>
         id === "page"
@@ -172,6 +180,14 @@ export default {
             : { viewer: "person-1", ...(subject === null ? {} : { subject }) };
         return Response.json(await porthole(env).issue(instance, grant));
       }
+      if (url.pathname === "/issue-app") {
+        return Response.json(
+          await porthole(env).issue(
+            { scope: id, document: { kind: "external", url: "http://127.0.0.1:5173/" } },
+            { viewer: "person-1" },
+          ),
+        );
+      }
       if (url.pathname === "/revoke") {
         revoked.add(url.searchParams.get("subject") ?? "");
         return new Response(null, { status: 204 });
@@ -183,6 +199,19 @@ export default {
           process: typeof (globalThis as { process?: unknown }).process,
         });
       }
+    }
+    // A url-mode app's WebSocket, as a Worker takes it (P101): the host's own upgrade path, let in
+    // by `access`; the app's socket here is a stand-in that accepts.
+    if (
+      request.headers.get("upgrade")?.toLowerCase() === "websocket" &&
+      url.hostname.endsWith(`.${CONTENT}`)
+    ) {
+      if ((await porthole(env).access(request)) === null) {
+        return new Response(null, { status: 404 });
+      }
+      const pair = new WebSocketPair();
+      pair[1].accept();
+      return new Response(null, { status: 101, webSocket: pair[0] } as ResponseInit);
     }
     return (
       (await porthole(env).handle(request)) ??
