@@ -248,40 +248,70 @@ export function servedDocumentCsp(
 }
 
 /**
- * The powerful features a cross-origin frame never has unless its `allow` names them (each one's
- * default allowlist is `'self'`), and a served page denies itself (P099). Features whose default
- * is `*` (a video's picture-in-picture, gamepads) are left out: a frame has them, so denying them
- * on a tab would change the frame too.
+ * The features a cross-origin frame never has unless its `allow` names them (each one's default
+ * allowlist is `'self'`), and a served page denies itself (P099): devices, location, full screen,
+ * the clipboard, payments, credentials, sharing, the built-in AI models, WebMCP's `tools`, the
+ * local network, autofill. Every such feature Chromium lists for web pages
+ * (`test/reference/permissions-policy-features.json`), but client hints, `cross-origin-isolated`
+ * and Chromium's sample (`test/permissions-policy.test.ts` says why). Features whose default is
+ * `*` (a video's picture-in-picture, gamepads) are left out: a frame has them, so denying them on
+ * a tab would change the frame too. An engine that doesn't know a name ignores it.
  */
 export const FRAME_DENIED_FEATURES = [
   "accelerometer",
   "ambient-light-sensor",
+  "autofill",
   "autoplay",
   "bluetooth",
   "camera",
+  "captured-surface-control",
   "clipboard-read",
   "clipboard-write",
+  "compute-pressure",
+  "deferred-fetch",
+  "device-attributes",
+  "digital-credentials-create",
+  "digital-credentials-get",
   "display-capture",
   "encrypted-media",
   "fullscreen",
   "geolocation",
   "gyroscope",
+  "haptics",
   "hid",
   "identity-credentials-get",
   "idle-detection",
+  "keyboard-map",
+  "language-detector",
+  "language-model",
   "local-fonts",
+  "local-network",
+  "local-network-access",
+  "loopback-network",
   "magnetometer",
+  "manual-text",
   "microphone",
   "midi",
+  "on-device-speech-recognition",
   "otp-credentials",
   "payment",
   "publickey-credentials-create",
   "publickey-credentials-get",
+  "publickey-credentials-remote-client-data-json",
+  "rewriter",
   "screen-wake-lock",
   "serial",
+  "speaker-selection",
+  "summarizer",
+  "tools",
+  "translator",
+  "unbounded-element",
   "usb",
+  "web-app-installation",
   "web-share",
+  "webnn",
   "window-management",
+  "writer",
   "xr-spatial-tracking",
 ] as const;
 
