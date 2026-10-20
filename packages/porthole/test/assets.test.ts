@@ -219,8 +219,9 @@ describe("/_blob/<id> on the content origin (P089, P091)", () => {
     expect(answer?.headers.get("x-content-type-options")).toBe("nosniff");
     expect(answer?.headers.get("cross-origin-resource-policy")).toBe("same-origin");
     expect(answer?.headers.get("cache-control")).toBe("private, no-cache");
-    expect(answer?.headers.get("etag")).toBe(`"${"a".repeat(64)}"`);
-    expect((await get(ID, { "if-none-match": `"${"a".repeat(64)}"` }))?.status).toBe(304);
+    // Its sha256 and whether it went out as code (P103).
+    expect(answer?.headers.get("etag")).toBe(`"${"a".repeat(64)}-inert"`);
+    expect((await get(ID, { "if-none-match": `"${"a".repeat(64)}-inert"` }))?.status).toBe(304);
     const ranged = await get(ID, { range: "bytes=0-3" });
     expect([ranged?.status, await ranged?.text()]).toEqual([206, "<svg"]);
     const page = await get(OTHER);
@@ -297,6 +298,32 @@ describe("/_blob/<id> on the content origin (P089, P091)", () => {
     // An access names its page's config: that one alone decides.
     const named = serve({}, { configs: { page: strict } });
     expect(await typeOf(named.server, await tabCookie(named.server))).toBe(script);
+  });
+
+  // P103, the review: the ETag carries the decision, so a copy a browser kept as code, asked
+  // again after a stricter config shipped, gets the download whole, never a 304 that keeps it
+  // typed as code.
+  test("a copy kept as code revalidates to the download once the config is stricter (P103)", async () => {
+    const load = (server: ReturnType<typeof serve>["server"], etag?: string) =>
+      server.handle(
+        new Request(at("a-one", `/_blob/${TRUSTED}`), {
+          headers: etag === undefined ? ownLoad : { ...ownLoad, "if-none-match": etag },
+        }),
+      );
+    const before = await load(serve({}, { bearer: true }).server);
+    const kept = before?.headers.get("etag") ?? "";
+    expect(kept).toBe(`"${"a".repeat(64)}-code"`);
+    // The same config: still the copy it kept.
+    expect((await load(serve({}, { bearer: true }).server, kept))?.status).toBe(304);
+    // Anyone who interacts uploads now: the bytes are the same, the answer isn't.
+    const stricter = serve(
+      { capabilities: { assets: { levels: { upload: "interact" } } } },
+      { bearer: true },
+    ).server;
+    const after = await load(stricter, kept);
+    expect(after?.status).toBe(200);
+    expect(after?.headers.get("content-type")).toBe("application/octet-stream");
+    expect(after?.headers.get("etag")).toBe(`"${"a".repeat(64)}-inert"`);
   });
 
   test("a page whose config serves assets opens /_blob/ on its own origin in its CSP", async () => {

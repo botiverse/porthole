@@ -203,6 +203,25 @@ describe("the live widget preset (P079)", () => {
         capabilities: { readData: { gates: [], connect: origin } },
       }),
     ).toBe("options.capabilities.readData.connect");
+    // And after it is made (P103, the review): the config is frozen all the way down, so nothing
+    // writes an origin into it; what the host passed in stays its own.
+    const own = { gates: [] };
+    const made = presets.liveWidget({
+      isolation: "domain",
+      contentOrigins: ["https://*.example-usercontent.com"],
+      capabilities: { openLink: own },
+    });
+    const writable = made as unknown as {
+      egress: { connect?: string[]; libraries?: boolean };
+      capabilities: Record<string, { connect?: string[]; gates?: unknown[] }>;
+    };
+    expect(() => (writable.egress.connect = origin)).toThrow(TypeError);
+    expect(() => (writable.capabilities.readData!.connect = origin)).toThrow(TypeError);
+    expect(() => (writable.capabilities.copyText = { connect: origin })).toThrow(TypeError);
+    expect(() => writable.capabilities.readData!.gates!.pop()).toThrow(TypeError);
+    expect(() => ((made as { egress: unknown }).egress = { connect: origin })).toThrow(TypeError);
+    expect(compile(made).csp).toContain("connect-src 'none'");
+    expect(Object.isFrozen(own)).toBe(false);
     // What a live widget may change about a capability stays open: its gates, its manual entry.
     expect(
       compile(

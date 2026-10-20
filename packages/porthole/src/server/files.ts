@@ -366,8 +366,9 @@ export async function serveAsset(serving: {
   const typed = fileTypeOf(asset.name);
   // Never a page: an asset is the library's, outside the shell (P089); code only where it was
   // trusted when it was uploaded (after the review).
+  const asCode = typed.role !== "page" && isCodeAsset(asset.name) && serving.code;
   const type =
-    typed.role === "page" || (isCodeAsset(asset.name) && !serving.code)
+    typed.role === "page" || (isCodeAsset(asset.name) && !asCode)
       ? "application/octet-stream"
       : typed.type;
   const headers = new Headers({
@@ -385,7 +386,10 @@ export async function serveAsset(serving: {
   if (type === "application/octet-stream") {
     headers.set("content-disposition", "attachment");
   }
-  const etag = HEX.test(asset.sha256) ? `"${asset.sha256}"` : null;
+  // The ETag carries the decision too (P103): once a stricter config ships, a copy the browser
+  // kept as code is a different one, so its revalidation gets the download whole, never a 304
+  // that would leave it typed as code.
+  const etag = HEX.test(asset.sha256) ? `"${asset.sha256}-${asCode ? "code" : "inert"}"` : null;
   if (etag !== null) {
     headers.set("etag", etag);
     if (notModified(request, etag)) {

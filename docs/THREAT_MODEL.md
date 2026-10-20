@@ -169,7 +169,7 @@ Whatever the use:
   | `openLink` | a gesture and a confirmation; http(s) only, no credentials in the URL |
   | `downloadFile` | a gesture and a confirmation |
   | `copyText` | a gesture, 30 a minute; the host writes the clipboard |
-  | `callTool` | a confirmation |
+  | `callTool` | a confirmation, 30 a minute |
   | `setModelContext` | 30 a minute, nothing else |
   | `readData`, `subscribeData` | 120 and 60 a minute (`liveWidget` adds consent) |
   | `reportError` | 10 a minute |
@@ -218,8 +218,9 @@ it.
 **Porthole guarantees**, with the preset's defaults (see the host's duties below for what undoes
 them):
 
-- No network of its own: the preset refuses an `egress` option. Served, the only scripts it may
-  load are Porthole's Chart.js and D3, from its own origin (`/__porthole/lib/`).
+- No network of its own: the preset refuses an `egress` option and a capability's own `connect`
+  or `resource` origins, and the config it returns is frozen (P103). Served, the only scripts it
+  may load are Porthole's Chart.js and D3, from its own origin (`/__porthole/lib/`).
 - Data reaches it only through the host: `readData` and `subscribeData`, each behind `consent`
   (asked once per display; without a consent function every data call is refused) and a rate (120
   reads and 60 subscriptions a minute).
@@ -236,8 +237,8 @@ them):
 - Ask for consent in its own UI, and keep the answer per viewer and widget.
 - Send the page's `frame-src`, and show opaque live widgets only on pages that frame no content
   origins (an opaque frame's only wall against navigating away is that `frame-src`).
-- Not add origins through a capability's own `connect` or `resource` lists: they open the network
-  the preset keeps closed, and the preset doesn't refuse them (open until P103).
+- Not build a config of its own from the preset's (`{ ...presets.liveWidget(), egress }`, a
+  capability with origins): that config isn't the preset, and opens what it names.
 - Not pass `readData` or `subscribeData` in `options.capabilities` without their gates: an entry
   there replaces the preset's, consent included.
 - Follow the composition rule (S7): no url-mode or `anyHttps` displays on the same page.
@@ -379,9 +380,9 @@ the attacker (c), and its readers are strangers.
   public suffix Porthole knows, and anything else, is dropped. `frameDomains` and `baseUriDomains`
   are ignored. Served, the proxy's CSP comes from what the session carries, signed, never from a
   message.
-- The default gates are stricter than the spec's "MAY": `callTool` needs a confirmation,
-  `sendPrompt` and `openLink` a gesture and a confirmation. For a view, the gesture check is the
-  host's (the shell doesn't speak for an MCP view).
+- The default gates are stricter than the spec's "MAY": `callTool` needs a confirmation and has a
+  rate (30 a minute), `sendPrompt` and `openLink` a gesture and a confirmation. For a view, the
+  gesture check is the host's (the shell doesn't speak for an MCP view).
 
 **The host must**
 
@@ -392,7 +393,8 @@ the attacker (c), and its readers are strangers.
   (`_meta.ui.visibility`): that is the host's `callTool` handler's decision alone.
 - Show what a view sets as model context, or gate `setModelContext` with `consent` (until P100
   makes one of them the default).
-- Keep `callTool`'s confirmation.
+- Keep `callTool`'s confirmation. If the host's confirm says yes by itself and a view polls a tool
+  more often than every 2 s, give `callTool` its own `gates` with a rate: they replace the default.
 
 **Not guaranteed**
 
@@ -402,8 +404,7 @@ the attacker (c), and its readers are strangers.
 - `setModelContext` (`ui/update-model-context`) is rate-limited only, 30 a minute. A view can put
   text in the model's next turn without the person seeing it and steer the model to call other
   tools, which the gates on the view's own calls don't catch (open until P100).
-- `callTool` has no rate by default (open until P103), and waiting confirmations have no cap (open
-  until P095), so a view can queue them without end.
+- Waiting confirmations have no cap (open until P095), so a view can queue them without end.
 - The public suffixes Porthole refuses wildcards over are its own short list, not the whole PSL.
 
 ### S6. Previews of a running app
@@ -514,8 +515,9 @@ section.
   (P094).
 - Except in **bearer mode** (`AssetStore.bearer`, an opt-in that serves an asset to anyone with
   its id), assets are served only to an access for their own artifact, after the host's check. A
-  code-typed asset runs as code only when an admin uploaded it where uploaded code may run;
-  anything else is a download.
+  code-typed asset runs as code only when an admin uploaded it where uploaded code may run, and
+  only while the config still lets uploaded code run, asked at every load, in bearer mode too
+  (where every artifact config must; P103); anything else is a download.
 - `comments` is write-only: the page learns only whether the composer opened.
 - `defineRuntimeConformance` checks the host's handlers, and with `api` its own API for `db`,
   `artifact` and `assets`, with a forged context (a viewer claiming to be the owner, no rules).
@@ -539,8 +541,7 @@ section.
   what a viewer types into it, it can store in `db`, where its author (and other viewers, as the
   page's rules allow) can read it.
 - `db` rewrites only paths: an id the page stores inside a document's data is returned as stored.
-- In bearer mode, assets are served by id alone, without the host's check, and a trusted code
-  asset as code even if the config no longer lets uploaded code run (open until P103).
+- In bearer mode, assets are served by id alone, without the host's check.
 
 ## 8. Fixes in flight
 
@@ -560,7 +561,7 @@ its row names exists today, and the sections it cites say "open until" that deci
 | P100 | Planned | `setModelContext` is rate-limited only, unseen by the person. | S1, S5 |
 | P101 | Planned | Unprefixed cookies under https; the entered mark carries no label; url mode checks neither `Origin` nor `Sec-Fetch-Site`. | S3, S6 |
 | P102 | | This document. | |
-| P103 | Planned | A live widget's capabilities can add origins; bearer-mode assets skip the code re-check; `callTool` has no rate. | S2, S5, §7 |
+| P103 | Merged | A live widget's capabilities could add origins; bearer-mode assets skipped the code re-check; `callTool` had no rate. Now the preset refuses them and its config is frozen, every load asks the current config (its ETag says which answer), and `callTool` has 30 a minute. | S2, S5, §7 |
 
 Open with no decision yet; until then they are the host's to cover:
 

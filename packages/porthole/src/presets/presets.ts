@@ -161,6 +161,27 @@ const mergeEgress = (base: EgressConfig, extra: EgressConfig | undefined): Egres
   return merged;
 };
 
+/**
+ * A frozen copy of a config's data, all the way down (P103): what a host passed in stays its own
+ * and mutable; the copy can't be written into (a capability's `connect`, an egress origin).
+ */
+function frozenCopy<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map((each: unknown) => frozenCopy(each))) as T;
+  }
+  if (value !== null && typeof value === "object") {
+    const prototype: unknown = Object.getPrototypeOf(value);
+    if (prototype === Object.prototype || prototype === null) {
+      const copy: Record<string, unknown> = {};
+      for (const [key, each] of Object.entries(value)) {
+        copy[key] = frozenCopy(each);
+      }
+      return Object.freeze(copy) as T;
+    }
+  }
+  return value;
+}
+
 /** The default variables, with the host's changes and additions, less those it dropped (null). */
 function themeVariables(
   changes: Readonly<Record<string, ThemeValue | null>> | undefined,
@@ -258,16 +279,20 @@ export const presets = {
         }
       }
     }
-    return build(
-      "inline",
-      {
-        capabilities: {
-          readData: { gates: ["consent", { rateLimit: { perMinute: 120 } }] },
-          subscribeData: { gates: ["consent", { rateLimit: { perMinute: 60 } }] },
+    // Frozen, all the way down (P103): nothing writes an origin into the preset's config after it
+    // is made. A config a host builds from it (a spread) is the host's own, not this preset.
+    return frozenCopy(
+      build(
+        "inline",
+        {
+          capabilities: {
+            readData: { gates: ["consent", { rateLimit: { perMinute: 120 } }] },
+            subscribeData: { gates: ["consent", { rateLimit: { perMinute: 60 } }] },
+          },
+          egress: options.isolation === "domain" ? { libraries: true } : {},
         },
-        egress: options.isolation === "domain" ? { libraries: true } : {},
-      },
-      options,
+        options,
+      ),
     );
   },
 

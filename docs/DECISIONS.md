@@ -3854,7 +3854,9 @@ a92adac. Amends P021 (`callTool`'s default gates), P079 (what a live widget's op
 P089 (when an asset goes out as code). Each has its regression, which failed before:
 `test/live-data.test.ts` "refuses a capability's own origins too", `test/assets.test.ts` "code
 only while the current config lets uploaded code run, in bearer mode too",
-`test/bridge.test.ts` "callTool is rate limited by default", with two in `test/agreement.test.ts`.
+`test/bridge.test.ts` "callTool is rate limited by default", with two in `test/agreement.test.ts`;
+and, after the branch's review, "a copy kept as code revalidates to the download once the config
+is stricter" and the frozen config's case in the first.
 
 **Decision**, by finding:
 1. **No option opens a live widget's network, a capability's own origins included.** P079 said
@@ -3865,7 +3867,12 @@ only while the current config lets uploaded code run, in bearer mode too",
    options' type says so (`LiveCapabilityConfig`, a capability's config less both). Gates, levels
    and a capability's own manual entry stay the host's to change. Nothing adopter-facing used it:
    no example, test or doc gives a live widget a capability's origins (capability origins appear
-   only on MCP Apps views and inline widgets).
+   only on MCP Apps views and inline widgets). And the preset's result is frozen all the way down
+   (after the review: a copy of the host's options, which stay its own): host code can't write
+   an origin into it afterwards (`config.capabilities.readData.connect = …`, `config.egress.connect
+   = …`, a capability added, a gate dropped). What freezing can't stop is a new config built from
+   it (`{ ...presets.liveWidget(), egress: … }`): that config is the host's own, not the preset,
+   and the guarantee is the preset's. Building one is the host's call.
 2. **A trusted code asset runs only while the current config lets uploaded code run, asked at
    every request** (P089, P091.9 said so; bearer mode skipped it). In bearer mode `/server` served
    a `trusted` script as code on the upload's word alone, whatever the config said now. Now one
@@ -3879,15 +3886,23 @@ only while the current config lets uploaded code run, in bearer mode too",
    the page's own CSP already followed the current config (`assetCspDirectives` opens
    `/_blob/` for scripts only where code runs), so the script ran only in a page whose CSP still
    opened `/_blob/` for scripts: in bearer mode, any page on the scope's origin under another
-   artifact config.
+   artifact config. The ETag carries the decision too (after the review): `"<sha256>-code"` or
+   `"<sha256>-inert"`. With the sha256 alone, a copy the browser kept as code, revalidated after a
+   stricter config shipped, got a 304, and the kept copy could stay typed `text/javascript`; now
+   its ETag no longer matches and it gets the download whole.
 3. **`callTool` has a rate by default: 30 a minute**, with its confirmation (`["confirm", { rateLimit:
-   { perMinute: 30 } }]`), counted before the person is asked. It needs no gesture (an MCP view's
+   { perMinute: 30 } }]`), counted once, before its arguments are read and before the person is
+   asked (P095's `precheck`). It needs no gesture (an MCP view's
    gesture is the host's to check), so a page could call it on load or on a timer; a host whose
    `confirm` says yes by itself (for its app's own tools, say) had no bound at all (P095 caps the
    confirmations waiting at once, not the calls). 30 is what
    the host actions with an effect have (`copyText`, `comments`, `assets`, `setModelContext`);
    reads have more (`readData` 120). A host's own `gates` replace the defaults, as for every
    capability (`callTool: { gates: ["confirm", { rateLimit: { perMinute: 120 } }] }`, or `[]`).
+   What it costs: a host whose `confirm` answers yes on its own reaches 30 tool calls a minute
+   when its view polls a tool more often than every 2 s; past that the calls are refused
+   (`rate_limited`) until a minute has passed. Such a host sets `gates` with its own rate (or
+   none), which replaces the default.
    The manual says "At most 30 a minute." (generated from the gates; the agreement test holds it),
    and a new agreement case holds the class: every capability a page may call without a gesture
    has a rate by default, `resize` alone excepted (it carries nothing out).
@@ -3909,6 +3924,11 @@ page's calls (PRINCIPLE 1).
   exact for a host with several artifact configs, but new contract for the host's store to keep
   right; the strictest-config rule needs nothing from it and fails closed. Never serving code in
   bearer mode: breaks a public artifact's library for no gain where its config lets code run.
+- For 1, a mark on the preset's config that survives a spread, checked where a config is
+  compiled: it would hold a hand-built copy to the preset too, but a hidden field the docs would
+  have to explain, lost in any serialization; a copy built by hand is the host's to decide.
+- For 2, keeping the sha256 alone as the ETag and relying on a 304's headers to retype the kept
+  copy: whether an engine updates a stored `Content-Type` from a 304 is its own choice.
 - For 3, a gesture on `callTool`: an MCP view's gesture is the host's to check (the shell doesn't
   speak for one), and views call tools to refresh their data; a rate bounds a loop without
   changing what a view may do.
