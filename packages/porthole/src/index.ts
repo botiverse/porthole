@@ -7,6 +7,7 @@
 export {
   CAPABILITIES,
   CAPABILITY_NAMES,
+  MAX_CONTEXT_CHARS,
   MAX_COPY_CHARS,
   capabilitySpec,
   isCapabilityName,
@@ -41,6 +42,7 @@ export {
   originSourceProblem,
   validateConfig,
 } from "./config/validate.ts";
+export { configWarnings, type ConfigWarning } from "./config/warnings.ts";
 export {
   URL_PERMISSIONS,
   URL_SANDBOX_EXTRAS,
@@ -268,6 +270,7 @@ export type {
   Proceed,
   HostFunctionBridge,
   Refusal,
+  Show,
   SubscriptionContext,
   DbContext,
 } from "./bridge/types.ts";

@@ -1,6 +1,13 @@
 import type { AnnotateMode, AnnotationMark, AnnotationReport } from "../annotate/types.ts";
 import type { Refused } from "../bridge/refusal.ts";
-import type { Confirm, CapabilityHandlers, Consent, DataCache, Refusal } from "../bridge/types.ts";
+import type {
+  Confirm,
+  CapabilityHandlers,
+  Consent,
+  DataCache,
+  Refusal,
+  Show,
+} from "../bridge/types.ts";
 import type { CompiledConfig } from "../compile/compile.ts";
 import type { CapabilityName } from "../config/capabilities.ts";
 import type { ColorScheme } from "../config/schema.ts";
@@ -30,6 +37,13 @@ export interface HostOptions<C extends AdapterConnection = ShellConnection> {
    * not run, P080).
    */
   readonly consent?: Consent | Refused;
+  /**
+   * Puts a `show`-gated call in front of the person, outside the frame, before its handler has it
+   * (P100): by default, every `setModelContext` update, the content's text for the model's next
+   * turns ("this content updated the agent's context: …", the latest per display). Absent: those
+   * calls are refused.
+   */
+  readonly show?: Show;
   /**
    * What the host last had for a resource (P079): a read of one the content subscribes to is
    * answered with it at once, marked stale, then with the handler's fresh result.

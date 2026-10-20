@@ -2,7 +2,7 @@ import { expect, type Frame } from "@playwright/test";
 import { presets } from "../presets/presets.ts";
 import { resolveTheme } from "../theme/variables.ts";
 import type { LaunchedDisplay } from "./index.ts";
-import { inline, type Probe, type ProbeContext } from "./kit.ts";
+import { inline, js, type Probe, type ProbeContext } from "./kit.ts";
 import { settle } from "./oracles.ts";
 
 /**
@@ -72,6 +72,21 @@ async function bodyData(display: LaunchedDisplay, name: string, timeout = 5_000)
     .not.toBeNull();
   return (await frame.locator("body").getAttribute(`data-${name}`)) ?? "";
 }
+
+/** A model context update (P100): what the view says the person is looking at. */
+const CONTEXT_UPDATE = {
+  content: [{ type: "text", text: "The person is looking at March's signups." }],
+  structuredContent: { month: "March", signups: 412 },
+};
+
+/** Content that sends it as the App SDK does (`ui/update-model-context`), and keeps the answer. */
+const CONTEXT_CONTENT = `<p>signups</p>
+<script>
+  addEventListener("message", (event) => {
+    if (event.data && event.data.id === "ctx-1") document.body.dataset.answer = JSON.stringify(event.data.error ? event.data.error.data : event.data.result);
+  });
+  parent.postMessage({ jsonrpc: "2.0", id: "ctx-1", method: "ui/update-model-context", params: ${js(CONTEXT_UPDATE)} }, "*");
+</script>`;
 
 const PROMPT_CONTENT = `<button id="ask">Explain March</button>
 <script>
@@ -499,6 +514,44 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
       expect(await bodyData(display, "result")).toBe("false");
       expect(await refusals(display)).toContain("sendPrompt:no-confirm");
       expect(await display.calls()).toEqual([]);
+    },
+  },
+  {
+    id: "12.model-context",
+    item: 12,
+    title:
+      "what content tells the model, the person is shown first, whole; a host that can't show it gets none (S5, P100)",
+    async run(context) {
+      const config = inline({ capabilities: { setModelContext: {} } });
+      const display = await context.launch({ config, content: CONTEXT_CONTENT });
+      const said = display.shown?.bind(display);
+      if (said === undefined) {
+        return context.inapplicable(
+          "this host's harness doesn't say what it shows the person (LaunchedDisplay.shown)",
+        );
+      }
+      expect(await bodyData(display, "answer")).toBe("{}");
+      const shown = await said();
+      expect(shown, "the update reached the model unseen").toHaveLength(1);
+      expect(shown[0]).toMatchObject({
+        capability: "setModelContext",
+        args: CONTEXT_UPDATE,
+        display: { title: "Probe" },
+      });
+      expect(await display.calls()).toEqual([
+        { capability: "setModelContext", args: CONTEXT_UPDATE },
+      ]);
+
+      const unseen = await context.launch({ config, shows: false, content: CONTEXT_CONTENT });
+      const answer = JSON.parse(await bodyData(unseen, "answer")) as { code?: string };
+      if (answer.code === undefined && ((await unseen.shown?.()) ?? []).length > 0) {
+        return context.inapplicable(
+          "this host always has a show function (a default surface), so a display without one can't be shown; it showed the person instead",
+        );
+      }
+      expect(answer.code, "an update nobody could see was taken").toBe("not_allowed");
+      expect(await refusals(unseen)).toContain("setModelContext:no-show");
+      expect(await unseen.calls()).toEqual([]);
     },
   },
 ];

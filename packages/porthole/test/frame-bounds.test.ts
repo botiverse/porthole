@@ -70,7 +70,13 @@ describe("P095 1: the confirm dialog shows what a call carries, bounded", () => 
       createElement(ConfirmDialog, {
         request: {
           capability: "setModelContext",
-          args: { content: Array.from({ length: 5_000 }, (_, index) => ({ index })) },
+          // Text blocks: the only content setModelContext takes (P100).
+          args: {
+            content: Array.from({ length: 5_000 }, (_, index) => ({
+              type: "text" as const,
+              text: String(index),
+            })),
+          },
           display,
         },
         onAnswer: () => {},
@@ -108,6 +114,8 @@ function bridgeOf(options: PresetOptions) {
       },
       downloadFile: () => true,
     },
+    // setModelContext is shown to the person by default (P100): shown here to nobody.
+    show: () => {},
     confirm: (_, proceed) =>
       new Promise<ConfirmAnswer>((resolve) => {
         asked.push(resolve);

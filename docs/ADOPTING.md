@@ -206,6 +206,46 @@ counts nor resets the count). The request names the display (`request.display`: 
 `title`, and the `instance` you gave the frame, served or opaque), so the dialog can say what it
 is from your own records. It stays on your side: an opaque frame never gets the instance. `useRunAgain()` gives a "run again" button.
 
+### Context for the agent (`setModelContext`)
+
+A widget or an MCP Apps view may tell the agent what the person is looking at
+(`ui/update-model-context`, the App SDK's `app.updateModelContext`). That is the content's text,
+in your model's next turn, so by default the person is shown every update first (the `show` gate,
+[P100](DECISIONS.md#p100--2026-10-19--what-content-tells-the-model-the-person-is-shown-first-the-show-gate-on-by-default-for-setmodelcontext--accepted)): pass `show`. It gets the whole update (`request.args`: text blocks and
+structured content, at most `MAX_CONTEXT_CHARS` together) and the display, before your handler,
+and draws it outside the frame: the latest per display, since each replaces the last. Without
+`show` every update is refused (fail closed). React: `PortholeProvider` draws `ContextNotice`
+unless you pass your own `show`.
+
+```js
+createHost(config, {
+  handlers: { setModelContext: (update, { displayId }) => modelContext.set(displayId, update) },
+  // Before the handler has it: the person sees what the agent will read.
+  show: ({ args, display }) => composer.contextChip(display.id, display.title, args),
+});
+```
+
+- **Give it to the model as the content's words** ("the view “Signups” says: …"), never as the
+  person's message or as instructions. The manual tells the agent the same.
+- **Send it with the person's next message** (MCP Apps lets a host defer it), so they have seen it
+  before the model reads it. If your agent takes turns on its own, add `"confirm"` to the gates.
+- **Opting out**: `setModelContext: { gates: [{ rateLimit: { perMinute: 30 } }], withoutShow: true }`
+  names the gates without `show`, and says so on purpose. Do it only where your handler itself puts
+  the text in front of the person (or the content is your own): otherwise the content writes into
+  your model's turns unseen. Gates named without `show` and without `withoutShow` (a 0.7 config
+  that set its own rate) earn the warning `model-context-unshown`, which you see only if you read
+  it: Porthole logs nothing, anywhere. Read `host.compiled.warnings` (or `compile(config).warnings`,
+  `configWarnings(config)`) at startup, or pass `validateConfig(config, { onWarning })`, and log
+  or fail on what you find; otherwise nothing tells you.
+- **What can't be seen is refused**: an update with an invisible character (zero-width ones, bidi
+  controls, variation selectors, tag or private-use characters, controls other than new lines and
+  tabs), in its text or any string of its structured content, never reaches `show` or your
+  handler. Real emoji pass (☀️, 👨‍👩‍👧, 👩🏽‍💻, 1️⃣): a selector right after a pictograph or in a
+  keycap, a joiner between two pictographs. So do joiners that shape letters: U+200C or U+200D
+  between two letters or marks of Arabic, Syriac, N'Ko, Mongolian, the Indic scripts, Sinhala or
+  Myanmar (Persian's می‌خواهم). Subdivision flags (tag characters) don't. Your own `show` resolves only once that very update is visible: if a later update of
+  the display replaces it before it is drawn, reject, and it doesn't go.
+
 ## 4. Served pages: the host kit
 
 ### Local development

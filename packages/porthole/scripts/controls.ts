@@ -61,6 +61,11 @@ export const CONTROLS: Readonly<Record<string, { spec: string; fails: readonly s
     spec: "leak/served/runtime.spec.ts",
     fails: ["an asset opened on its own runs nothing"],
   },
+  // The show gate (P100): a model context update reaches the handler unseen.
+  "model-context-show": {
+    spec: "leak/leak.spec.ts",
+    fails: ["[12.model-context]"],
+  },
 };
 
 interface Result {

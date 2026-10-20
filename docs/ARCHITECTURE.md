@@ -14,7 +14,8 @@ Porthole renders **agent-drawn HTML plus a declared set of host functions.**
 - A **host function (capability)** is any power beyond drawing: send a prompt to
   the agent, open a link, read or write state, call a tool, read data, report an
   error. Each is named in the config and carries three facts: its **gate** (needs
-  a user gesture, needs a person's confirmation, is rate-limited), its **egress
+  a user gesture, needs a person's confirmation, is shown to the person first, is
+  rate-limited), its **egress
   needs** (origins it must reach), and its **guide entry** (how the manual
   describes it).
 

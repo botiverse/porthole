@@ -12,6 +12,7 @@ import type { AdapterConnection, AdapterSession, ProtocolAdapter } from "../prot
 import {
   MCP_APPS_METHODS,
   MCP_APPS_PROTOCOL_VERSION,
+  MODEL_CONTEXT_OFFERED,
   type HostContext,
 } from "../protocol/mcp-apps.ts";
 import {
@@ -156,9 +157,7 @@ function connect(session: AdapterSession, options: McpAppsAdapterOptions): McpAp
         ? { serverResources: declared("subscribeData") ? { subscribe: true } : {} }
         : {}),
       ...(declared("sendPrompt") ? { message: { text: {} } } : {}),
-      ...(declared("setModelContext")
-        ? { updateModelContext: { text: {}, structuredContent: {} } }
-        : {}),
+      ...(declared("setModelContext") ? { updateModelContext: MODEL_CONTEXT_OFFERED } : {}),
       sandbox: {
         csp: {
           ...(connectDomains.length > 0 ? { connectDomains } : {}),

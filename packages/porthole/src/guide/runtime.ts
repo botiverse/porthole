@@ -16,7 +16,7 @@ import { MAX_PUBLISH_FILES } from "../runtime/requests.ts";
 import { RUNTIME_TYPES } from "../runtime/types.generated.ts";
 import { REFUSAL_CODES } from "../bridge/refusal.ts";
 import { fileLimits } from "../files/paths.ts";
-import { gateWords } from "./gates.ts";
+import { gateWords, modelContextWords } from "./gates.ts";
 import { sizeWords } from "./limits.ts";
 
 /**
@@ -75,7 +75,7 @@ const WHAT: Readonly<Partial<Record<CapabilityName, (config: PortholeConfig) => 
   subscribeData: () =>
     "keeps the page current: onData(value, { stale }) now and at each change (the first may be the app's last copy, stale: true); returns a function that stops it; onError hears a refusal. Draw from onData every time; don't poll",
   callTool: () => "calls one of the app's tools and resolves with its result",
-  setModelContext: () => "tells you what the person is looking at, for your next turns",
+  setModelContext: (config) => modelContextWords(config.mode === "artifact" ? "page" : "widget"),
   artifact: () =>
     `this artifact itself: get() its current version and files; publish() a new version from a base you read (a patch: text, bytes or null by path, at most ${MAX_PUBLISH_FILES}; base moved: conflict, read again and merge)`,
   assets: (config) =>
@@ -176,7 +176,7 @@ export function runtimeEntries(config: PortholeConfig): string[] {
         own.push("db.onSnapshot needs what get (a document) or query (a collection) needs.");
       }
       entries.push(
-        `- ${calls.join(", ")}: ${what}.${refusals} ${declare} ${levelWords(config, name, methods)} ${gateWords(effectiveGates(config, serves), "it")} ${own.join(" ")}`
+        `- ${calls.join(", ")}: ${what}.${refusals} ${declare} ${levelWords(config, name, methods)} ${gateWords(effectiveGates(config, serves), serves === "setModelContext" ? "every update in full" : "it")} ${own.join(" ")}`
           .replace(/ {2,}/gu, " ")
           .trim(),
       );

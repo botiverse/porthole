@@ -1,4 +1,5 @@
 import {
+  MAX_CONTEXT_CHARS,
   MAX_COPY_CHARS,
   capabilitySpec,
   type CapabilityArgs,
@@ -58,6 +59,7 @@ import type {
   DataCache,
   HostFunctionBridge,
   Refusal,
+  Show,
 } from "./types.ts";
 
 /**
@@ -69,9 +71,9 @@ import type {
  * their limits → who may (P087: the level of each method the call runs for the viewer, a page's
  * named data with or without a viewer, db's rules) → not muted, if confirm-gated → the own rate
  * of each method it runs (P094: a batch's writes count each) → a user gesture, if gated so → the
- * viewer's consent, if gated so → a person's confirmation, if gated so (at most 10 waiting) → the
- * handler (or, for a read, a result the host already gave for it, or for a stale-allowed one the
- * host's cache).
+ * viewer's consent, if gated so → a person's confirmation, if gated so (at most 10 waiting) →
+ * shown to the person, if gated so (P100) → the handler (or, for a read, a result the host already
+ * gave for it, or for a stale-allowed one the host's cache).
  */
 
 export type BridgeEvent =
@@ -94,6 +96,11 @@ export interface BridgeOptions {
    * such call with it, asking nothing (P080).
    */
   readonly consent?: Consent | Refused;
+  /**
+   * Puts a `show`-gated call's whole effect in front of the person before its handler runs (P100).
+   * Absent: those calls are refused.
+   */
+  readonly show?: Show;
   /** The host's cache, for reads that may be answered stale (`CallOptions.stale`, P079). */
   readonly cached?: DataCache;
   /** Whether the embedding page has user activation now; undefined where it can't tell. */
@@ -155,6 +162,139 @@ function resourceUri(args: unknown): { uri: string } | null {
   return typeof uri === "string" && uri !== "" && uri.length <= MAX_URL ? { uri } : null;
 }
 
+/** The most text blocks one model context update holds. */
+const MAX_CONTEXT_BLOCKS = 100;
+
+/**
+ * What a person can't see but a model reads (the review of P100): format characters (zero-width
+ * ones, bidi controls, the tags U+E0000–E007F, a soft hyphen, a byte-order mark), variation
+ * selectors (U+FE00–FE0F, U+E0100–E01EF), private-use characters, lone surrogates, every
+ * default-ignorable code point (the re-check: U+034F, Mongolian's free variation selectors, the
+ * Hangul fillers, Khmer's inherent vowels), and controls other than a new line and a tab. An update with any is refused, never escaped: an escaped one
+ * reads to the model differently from what the person was shown.
+ */
+const UNSEEN =
+  /[\p{Cf}\p{Co}\p{Cs}\p{Default_Ignorable_Code_Point}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}]|[^\P{Cc}\n\t]/u;
+
+/**
+ * The parts of real emoji that draw as nothing alone, allowed only where an emoji has them (the
+ * re-review of P100): U+FE0E or U+FE0F directly after a pictograph, or after a keycap base
+ * (`[0-9#*]`) that U+20E3 follows; U+200D only between two pictographs, a selector or a skin tone
+ * after the first. Each carries at most one choice beside a visible emoji (a selector there or
+ * not, a joiner there or not), never letters a model would read. Tag characters stay refused:
+ * subdivision flags too.
+ */
+const EMOJI_PARTS =
+  "(?<=\\p{Extended_Pictographic})[\\uFE0E\\uFE0F]|(?<=[0-9#*])[\\uFE0E\\uFE0F](?=\\u20E3)|(?<=\\p{Extended_Pictographic}[\\uFE0F\\p{Emoji_Modifier}]?)\\u200D(?=\\p{Extended_Pictographic})";
+
+/**
+ * The scripts whose letters U+200C and U+200D shape (Unicode's notes on the joiners: the cursive
+ * scripts, where they break or make a join, and the Indic ones and Myanmar, where they choose a
+ * conjunct, a half form or a ligature), by Script_Extensions.
+ */
+const SHAPING_SCRIPTS = [
+  "Arabic",
+  "Syriac",
+  "Nko",
+  "Mongolian",
+  "Devanagari",
+  "Bengali",
+  "Gurmukhi",
+  "Gujarati",
+  "Oriya",
+  "Tamil",
+  "Telugu",
+  "Kannada",
+  "Malayalam",
+  "Sinhala",
+  "Myanmar",
+] as const;
+
+const SHAPED = `[${SHAPING_SCRIPTS.map((name) => `\\p{scx=${name}}`).join("")}]`;
+
+/**
+ * A joiner or non-joiner between two letters or marks of those scripts (Persian's می‌خواهم, a
+ * Hindi half form): the shape it chooses is what the person sees. One at a letter boundary, never
+ * doubled, first or last, or beside a letter of another script.
+ */
+const SHAPING_JOINERS = `(?<=[\\p{L}\\p{M}])(?<=${SHAPED})[\\u200C\\u200D](?=[\\p{L}\\p{M}])(?=${SHAPED})`;
+
+/** What may be invisible alone and is allowed where it is seen: one pass, on the text as sent. */
+const SEEN_IN_PLACE = new RegExp(`${EMOJI_PARTS}|${SHAPING_JOINERS}`, "gu");
+
+/** Whether `text` holds what a person can't see, the parts of emoji and shaped letters aside. */
+const unseen = (text: string): boolean => UNSEEN.test(text.replace(SEEN_IN_PLACE, ""));
+
+/** Whether any string in `value`, a key or a value, holds what can't be seen (bounded JSON data). */
+function holdsUnseen(value: unknown): boolean {
+  if (typeof value === "string") {
+    return unseen(value);
+  }
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return (value as readonly unknown[]).some(holdsUnseen);
+  }
+  return Object.entries(value).some(([key, each]) => unseen(key) || holdsUnseen(each));
+}
+
+/**
+ * A model context update (P100), as the person is shown it and the model reads it: text blocks
+ * only (what the host offers, `updateModelContext: { text, structuredContent }`), each rebuilt as
+ * `{ type, text }` so nothing rides along unshown (`_meta`, `annotations`); structured content
+ * JSON data by P095's one rule (`isJsonData`: each object once, no cycles, bounded); at most
+ * `MAX_CONTEXT_CHARS` together as the person is shown it, its JSON measured only once that walk
+ * has bounded it; nothing in a text or a string they can't see (`UNSEEN`).
+ */
+function modelContext(args: unknown): CapabilityArgs["setModelContext"] | "too_large" | null {
+  if (!isRecord(args)) {
+    return null;
+  }
+  const { content, structuredContent } = args;
+  let chars = 0;
+  let blocks: { type: "text"; text: string }[] | undefined;
+  if (content !== undefined) {
+    if (!Array.isArray(content) || content.length > MAX_CONTEXT_BLOCKS) {
+      return null;
+    }
+    blocks = [];
+    for (const block of content as unknown[]) {
+      if (
+        !isRecord(block) ||
+        block.type !== "text" ||
+        typeof block.text !== "string" ||
+        unseen(block.text)
+      ) {
+        return null;
+      }
+      chars += block.text.length;
+      if (chars > MAX_CONTEXT_CHARS) {
+        return "too_large";
+      }
+      blocks.push({ type: "text", text: block.text });
+    }
+  }
+  if (structuredContent !== undefined) {
+    // P095's one rule for JSON data; then this update's own size, as the person is shown it.
+    if (!isRecord(structuredContent) || !isJsonData(structuredContent)) {
+      return null;
+    }
+    chars += JSON.stringify(structuredContent).length;
+    if (chars > MAX_CONTEXT_CHARS) {
+      return "too_large";
+    }
+    // Within the size now: each string, value or key, is walked once.
+    if (holdsUnseen(structuredContent)) {
+      return null;
+    }
+  }
+  return {
+    ...(blocks === undefined ? {} : { content: blocks }),
+    ...(structuredContent === undefined ? {} : { structuredContent }),
+  };
+}
+
 /** A call's arguments checked: the capability's, or null (malformed), or "too_large". */
 type Validator<N extends CapabilityName> = (
   args: unknown,
@@ -198,23 +338,7 @@ const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
   },
   readData: (args) => resourceUri(args),
   subscribeData: (args) => resourceUri(args),
-  setModelContext: (args) => {
-    if (!isRecord(args)) {
-      return null;
-    }
-    const { content, structuredContent } = args;
-    if (
-      (content !== undefined && !Array.isArray(content)) ||
-      (structuredContent !== undefined && !isRecord(structuredContent)) ||
-      !isJsonData({ content, structuredContent })
-    ) {
-      return null;
-    }
-    return {
-      ...(content === undefined ? {} : { content }),
-      ...(structuredContent === undefined ? {} : { structuredContent }),
-    };
-  },
+  setModelContext: (args) => modelContext(args),
   reportError: (args, config) => {
     // A navigation the shell cancelled (P080): Porthole words it, naming the address without its
     // query; the address itself goes to the host whole.
@@ -618,6 +742,39 @@ export function createBridge(options: BridgeOptions): DisplayBridge {
       if (closed) {
         return refuse<Result>(capability, "failed", STOPPED);
       }
+      // Shown to the person first (P100): only a call that will go, so after their yes; nobody
+      // shown it (no `show`, one that failed, a run that stopped meanwhile), it doesn't go.
+      const shows = gates.includes("show");
+      if (shows && options.show === undefined) {
+        return refuse<Result>(capability, "no-show");
+      }
+      const shown = async (): Promise<CallOutcome<Result>> => {
+        let end = () => {};
+        const ended = new Promise<typeof STOPPED>((resolve) => {
+          end = () => resolve(STOPPED);
+          ending.add(end);
+        });
+        try {
+          // Called now (inside a confirm's click, where it runs from `proceed`); a show that never
+          // ends is ended by `close`, like a confirmation.
+          await Promise.race([
+            (async () => options.show?.({ capability, args, display } as ConfirmRequest))(),
+            ended,
+          ]);
+        } catch (error) {
+          return refuse<Result>(
+            capability,
+            "failed",
+            error instanceof Error ? error.message : String(error),
+          );
+        } finally {
+          ending.delete(end);
+        }
+        if (closed) {
+          return refuse<Result>(capability, "failed", STOPPED);
+        }
+        return perform(capability, args, callOptions);
+      };
       // The effect, run once: when the person's "yes" calls `proceed` (inside its own click, so an
       // effect that needs a gesture gets one), or after `confirm` resolves accepted.
       let effect: Promise<CallOutcome<Result>> | null = null;
@@ -625,7 +782,9 @@ export function createBridge(options: BridgeOptions): DisplayBridge {
       const run = (): Promise<CallOutcome<Result>> =>
         (effect ??= closed
           ? Promise.resolve(refuse<Result>(capability, "failed", STOPPED))
-          : perform(capability, args, callOptions));
+          : shows
+            ? shown()
+            : perform(capability, args, callOptions));
       if (confirms) {
         if (options.confirm === undefined) {
           return refuse<Result>(capability, "no-confirm");

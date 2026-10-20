@@ -49,6 +49,11 @@ export interface LaunchSpec {
   };
   /** Whether the host has a `confirm` function (default true): without one, gated calls are refused. */
   readonly confirms?: boolean;
+  /**
+   * Whether the host has a `show` function (default true, P100): without one, `show`-gated calls
+   * (a model context update, by default) are refused.
+   */
+  readonly shows?: boolean;
 }
 
 export interface RecordedCall {
@@ -75,6 +80,11 @@ export interface LaunchedDisplay {
   ): Promise<ConfirmRequest>;
   /** The calls that reached the host's handlers, in order. */
   calls(): Promise<readonly RecordedCall[]>;
+  /**
+   * What the host showed the person for `show`-gated calls (P100: each model context update), in
+   * order. A host whose harness doesn't say has `12.model-context` reported inapplicable.
+   */
+  shown?(): Promise<readonly ConfirmRequest[]>;
   /** The errors the display reported. */
   errors(): Promise<readonly string[]>;
   /** Every event the display emitted, in order. */

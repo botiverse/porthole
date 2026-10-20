@@ -2,7 +2,7 @@
  * `@botiverse/porthole/react`: the thin React binding (TSX: a host's bundler compiles it, or the
  * package's `dist`). Peer: `react` (19.2+, for `useEffectEvent`).
  *
- *   <PortholeProvider>                         // per page: live-frame cap, heights, the dialog, the copy toast
+ *   <PortholeProvider>                         // per page: live-frame cap, heights, the dialog, the copy toast, the context notice
  *     <PortholeFrame config={widgetConfig} displayId={id} title={title} scheme={scheme}
  *       content={code} partial={streaming} handlers={{ sendPrompt, openLink }}
  *       theme={tokensFor} onError={report} />
@@ -18,6 +18,13 @@ export {
   type PortholeProviderProps,
 } from "./frame.tsx";
 export { ARM_DELAY_MS, ConfirmDialog, type ConfirmDialogProps } from "./dialog.tsx";
+export {
+  ContextNotice,
+  contextSize,
+  contextText,
+  type ContextNoticeProps,
+  type ContextUpdate,
+} from "./context-notice.tsx";
 export {
   cssVariableTheme,
   PortholeView,

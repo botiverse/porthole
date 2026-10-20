@@ -12,6 +12,8 @@ import type { DisplayEvents, DisplayHandle } from "../../src/host/types.ts";
 interface Display {
   readonly handle: DisplayHandle;
   readonly calls: RecordedCall[];
+  /** What the host put in front of the person (`show`, P100). */
+  readonly shown: ConfirmRequest[];
   readonly events: RecordedEvent[];
   readonly confirmations: { request: ConfirmRequest; resolve: (accepted: boolean) => void }[];
 }
@@ -60,6 +62,7 @@ const reference = {
       copyText: record("copyText", true),
     };
     const confirmations: Display["confirmations"] = [];
+    const shown: ConfirmRequest[] = [];
     const host = createHost(spec.config, {
       handlers,
       ...(spec.confirms === false
@@ -68,6 +71,9 @@ const reference = {
             confirm: (request: ConfirmRequest) =>
               new Promise<boolean>((resolve) => confirmations.push({ request, resolve })),
           }),
+      ...(spec.shows === false
+        ? {}
+        : { show: (request: ConfirmRequest) => void shown.push(request) }),
       theme: (scheme) => spec.hostTheme?.[scheme] ?? {},
       hostInfo: { name: "porthole-reference", version: "0" },
       // A page served with a nonce-based script-src (`?nonce=1`) gives its nonce (P054).
@@ -90,7 +96,7 @@ const reference = {
         });
       }
     });
-    displays.set(id, { handle, calls, events, confirmations });
+    displays.set(id, { handle, calls, shown, events, confirmations });
     if (spec.document === undefined) {
       await Promise.race([initialized, pause(5_000)]);
       for (const partial of spec.partials ?? []) {
@@ -107,6 +113,7 @@ const reference = {
     displays.get(id)?.handle.setContent(html, { partial });
   },
   calls: (id: number) => displays.get(id)?.calls ?? [],
+  shown: (id: number) => displays.get(id)?.shown ?? [],
   events: (id: number) => displays.get(id)?.events ?? [],
   errors: (id: number) =>
     (displays.get(id)?.events ?? []).flatMap((event) =>

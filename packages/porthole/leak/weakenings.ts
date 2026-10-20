@@ -119,6 +119,14 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "      const confirms = false;",
     },
   ],
+  // The show gate (P100): a model context update goes to the handler without the person shown it.
+  "model-context-show": [
+    {
+      file: BRIDGE,
+      find: '      const shows = gates.includes("show");',
+      replace: "      const shows = false;",
+    },
+  ],
   "host-gesture": [
     {
       file: BRIDGE,
