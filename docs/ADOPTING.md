@@ -342,6 +342,10 @@ nodeServer({ content, app: async (request) => (await routes(request)) ?? app(req
     request's body) is cut off there.
 - **Health:** `health: { probe: nodeProbe(), onServedChange: (served) => … }` checks the content
   domain over the real network and falls back to opaque frames while it doesn't answer.
+- **Behind an edge that rewrites headers** (a CDN, a proxy), pass Porthole's
+  `Content-Security-Policy` on as it is: a served page opened on a tab of its own (a link, a new
+  tab) has no frame, and the header's `sandbox allow-scripts allow-same-origin` is its sandbox
+  there (P099). The conformance runner's `served.domain.tab-*` cases fail if it is lost.
 
 ### Pages made of many files
 

@@ -1,6 +1,7 @@
 import { test } from "@playwright/test";
 import {
   servedTests,
+  TAB_CASES,
   type ServedConformanceHost,
   type ServedDisplay,
 } from "../../src/conformance/served.ts";
@@ -59,7 +60,8 @@ test.describe(`served modes (${coreHost.name})`, () => {
       "served.proxy.egress",
     ].map((id) => [id, OTHERS]),
   );
-  for (const each of servedTests(coreHost, { skip })) {
+  // The tab's cases (P099) open no display: `tab.spec.ts` runs them once.
+  for (const each of servedTests(coreHost, { skip }).filter((one) => !TAB_CASES.includes(one.id))) {
     test(each.title, ({ page, browserName }, info) => each.run({ page, browserName }, info));
   }
 });

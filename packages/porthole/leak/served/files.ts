@@ -12,7 +12,7 @@ import {
   versionedAddress,
   type StoredFiles,
 } from "../../src/server/index.ts";
-import { weakened } from "../weakenings.ts";
+import { servedShellWeakened, weakened, weakenServed } from "../weakenings.ts";
 
 /**
  * File sets for the served cases (P081-P084): a version from a map of paths, the Vite + React
@@ -108,6 +108,54 @@ export function withoutResourcePolicy(response: Response): Response {
   return new Response(response.body, { status: response.status, headers });
 }
 
+/**
+ * The `tab-sandbox` control (P099): a served page without its CSP's `sandbox`, so on a tab of its
+ * own nothing sandboxes it (in a frame, the frame's attribute still does).
+ */
+export function withoutDocumentSandbox(response: Response): Response {
+  const csp = response.headers.get("content-security-policy");
+  if (csp === null || !(response.headers.get("content-type") ?? "").startsWith("text/html")) {
+    return response;
+  }
+  const headers = new Headers(response.headers);
+  headers.set(
+    "content-security-policy",
+    csp
+      .split(";")
+      .filter((directive) => directive.trim().split(/\s+/u)[0] !== "sandbox")
+      .join(";"),
+  );
+  return new Response(response.body, { status: response.status, headers });
+}
+
+/** The `permissions-policy` control (P099): a served page without its `Permissions-Policy`. */
+export function withoutPermissionsPolicy(response: Response): Response {
+  if (!response.headers.has("permissions-policy")) {
+    return response;
+  }
+  const headers = new Headers(response.headers);
+  headers.delete("permissions-policy");
+  return new Response(response.body, { status: response.status, headers });
+}
+
+/** The controls this file's hosts apply to a served answer, in turn. */
+async function weakenAnswer(answer: Response): Promise<Response> {
+  let out = weakened.includes("file-self") ? withSelfForFiles(answer) : answer;
+  if (weakened.includes("tab-sandbox")) {
+    out = withoutDocumentSandbox(out);
+  }
+  if (weakened.includes("permissions-policy")) {
+    out = withoutPermissionsPolicy(out);
+  }
+  if (servedShellWeakened() && (out.headers.get("content-type") ?? "").startsWith("text/html")) {
+    out = new Response(weakenServed(await out.text()), {
+      status: out.status,
+      headers: out.headers,
+    });
+  }
+  return out;
+}
+
 /** A host whose clean addresses follow the usual convention: `/` the latest, `/v/<n>/` pinned. */
 export interface TabHost {
   /** A scope's origin (`http://a-<scope>.files.localhost:<port>`). */
@@ -179,7 +227,7 @@ async function start(): Promise<TabHost> {
       const answer = await fetchContent(
         weakened.includes("service-worker") ? asServiceWorkerAllowed(request) : request,
       );
-      return answer !== null && weakened.includes("file-self") ? withSelfForFiles(answer) : answer;
+      return answer === null ? null : weakenAnswer(answer);
     },
   });
   return {

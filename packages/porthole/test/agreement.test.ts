@@ -25,7 +25,12 @@ import { assetCspDirectives } from "../src/compile/policy.ts";
 import { RUNTIME_TYPES } from "../src/runtime/types.generated.ts";
 import { familyOf, methodGates, offeredCapabilities } from "../src/runtime/contract.ts";
 import { sizeWords } from "../src/guide/limits.ts";
-import { librarySources } from "../src/compile/policy.ts";
+import {
+  delegatedFeatures,
+  FRAME_DENIED_FEATURES,
+  librarySources,
+  servedPermissionsPolicy,
+} from "../src/compile/policy.ts";
 
 /**
  * The agreement test (P003, OBJECTIVE 2): for every preset, the CSP, the shell's wiring and the
@@ -430,6 +435,30 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
         config.capabilities.downloadFile !== undefined,
       );
     }
+  });
+
+  test("a served page denies itself, on a tab too, exactly what its frame's allow doesn't grant (P099)", () => {
+    const header = servedPermissionsPolicy(config);
+    if (config.isolation !== "domain") {
+      expect(header, "never served: no header").toBeNull();
+      return;
+    }
+    const denied = new Set((header ?? "").split(", ").map((each) => each.replace(/=\(\)$/u, "")));
+    // What the frame's allow names, and what it grants (an allowlist other than 'none').
+    const named = compiled.allow
+      .split(";")
+      .map((each) => each.trim().split(/\s+/u))
+      .filter(([feature]) => feature !== undefined && feature !== "");
+    const granted = named.filter(([, list]) => list !== "'none'").map(([feature]) => feature);
+    expect(granted, "a served frame is granted nothing").toEqual(delegatedFeatures(config));
+    for (const [feature, list] of named) {
+      if (list === "'none'") {
+        expect(denied, `${feature}: denied in the frame, denied on a tab`).toContain(feature);
+      }
+    }
+    expect([...denied].sort()).toEqual(
+      FRAME_DENIED_FEATURES.filter((feature) => !granted.includes(feature)).sort(),
+    );
   });
 
   test("the manual states the config's limits and theme event", () => {

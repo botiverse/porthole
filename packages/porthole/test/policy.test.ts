@@ -6,6 +6,11 @@ import {
   LIBRARY_CDNS,
   presets,
 } from "../src/index.ts";
+import {
+  servedDocumentCsp,
+  servedPermissionsPolicy,
+  servedSandboxDirective,
+} from "../src/compile/policy.ts";
 
 describe("the frame's CSP", () => {
   test("is closed by default: nothing loads, nothing connects, no frames, no forms, no WebRTC", () => {
@@ -106,6 +111,61 @@ describe("the frame's attributes", () => {
         /allow-(popups|downloads|modals|top-navigation)/u,
       );
     }
+  });
+});
+
+describe("a served page's own sandbox (P099, the review's S4)", () => {
+  const CONTENT = ["https://*.example-usercontent.com"];
+  test("is the frame's own tokens, in the page's CSP header, for every served preset", () => {
+    for (const config of [
+      presets.inlineWidget({ isolation: "domain", contentOrigins: CONTENT }),
+      presets.artifact({ isolation: "domain", contentOrigins: CONTENT }),
+      presets.mcpApp({ isolation: "domain", contentOrigins: CONTENT }),
+      presets.liveWidget({ isolation: "domain", contentOrigins: CONTENT }),
+    ]) {
+      const compiled = compile(config);
+      expect(servedSandboxDirective(config)).toEqual(["sandbox", ...compiled.sandbox.split(" ")]);
+      expect(servedSandboxDirective(config)).toEqual([
+        "sandbox",
+        "allow-scripts",
+        "allow-same-origin",
+      ]);
+      expect(servedDocumentCsp(config, compiled.cspDirectives)).toBe(
+        `${compiled.csp}; sandbox allow-scripts allow-same-origin`,
+      );
+      // The frame's CSP (an opaque frame's <meta>, where browsers ignore a sandbox) has none.
+      expect(compiled.csp).not.toContain("sandbox");
+    }
+  });
+
+  test("is none for content never served (opaque) and for a url-mode app's own documents", () => {
+    for (const config of [
+      presets.inlineWidget(),
+      presets.url({ contentOrigins: ["https://*.preview.example.com"] }),
+    ]) {
+      expect(servedSandboxDirective(config)).toBeNull();
+      expect(servedPermissionsPolicy(config)).toBeNull();
+    }
+  });
+
+  test("its Permissions-Policy denies the camera, the microphone, location, full screen and the clipboard", () => {
+    const header =
+      servedPermissionsPolicy(presets.artifact({ isolation: "domain", contentOrigins: CONTENT })) ??
+      "";
+    for (const feature of [
+      "camera",
+      "microphone",
+      "geolocation",
+      "display-capture",
+      "fullscreen",
+      "clipboard-read",
+      "clipboard-write",
+      "payment",
+    ]) {
+      expect(header.split(", "), feature).toContain(`${feature}=()`);
+    }
+    // A video's picture-in-picture is a frame's by default (`*`): left alone, so frames don't change.
+    expect(header).not.toContain("picture-in-picture");
   });
 });
 

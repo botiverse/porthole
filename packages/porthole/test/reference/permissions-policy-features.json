@@ -1,0 +1,532 @@
+{
+  "source": "https://chromium.googlesource.com/chromium/src/+/main/services/network/public/cpp/permissions_policy/permissions_policy_features.json5 (read through https://raw.githubusercontent.com/chromium/chromium/main/...)",
+  "read": "2026-10-20",
+  "note": "Each policy-controlled feature Chromium knows: its default allowlist (feature_default: EnableForSelf is 'self', EnableForAll is '*') and whether a web page has it (visibility: IsolatedContext is false). Refresh: fetch the file again and regenerate; test/permissions-policy.test.ts then names each feature to classify.",
+  "features": [
+    {
+      "name": "accelerometer",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "all-screens-capture",
+      "default": "self",
+      "web": false
+    },
+    {
+      "name": "ambient-light-sensor",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "aria-notify",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "autofill",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "autoplay",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "bluetooth",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "browsing-topics",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "camera",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "captured-surface-control",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "ch-device-memory",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "ch-downlink",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "ch-dpr",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "ch-ect",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "ch-prefers-color-scheme",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "ch-prefers-reduced-motion",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "ch-prefers-reduced-transparency",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "ch-rtt",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "ch-save-data",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "ch-ua",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "ch-ua-arch",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "ch-ua-bitness",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "ch-ua-form-factors",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "ch-ua-full-version",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "ch-ua-full-version-list",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "ch-ua-high-entropy-values",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "ch-ua-mobile",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "ch-ua-model",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "ch-ua-platform",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "ch-ua-platform-version",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "ch-ua-wow64",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "ch-viewport-height",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "ch-viewport-width",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "ch-width",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "clipboard-read",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "clipboard-write",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "compute-pressure",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "controlled-frame",
+      "default": "self",
+      "web": false
+    },
+    {
+      "name": "cross-origin-isolated",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "deferred-fetch",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "deferred-fetch-minimal",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "device-attributes",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "digital-credentials-create",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "digital-credentials-get",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "direct-sockets",
+      "default": "self",
+      "web": false
+    },
+    {
+      "name": "direct-sockets-multicast",
+      "default": "self",
+      "web": false
+    },
+    {
+      "name": "display-capture",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "encrypted-media",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "execution-while-not-rendered",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "execution-while-out-of-viewport",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "focus-without-user-activation",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "frobulate",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "fullscreen",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "gamepad",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "geolocation",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "gyroscope",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "haptics",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "hid",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "identity-credentials-get",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "idle-detection",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "interest-cohort",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "keyboard-map",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "language-detector",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "language-model",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "local-fonts",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "local-network",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "local-network-access",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "loopback-network",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "magnetometer",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "manual-text",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "media-playback-while-not-visible",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "microphone",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "midi",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "on-device-speech-recognition",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "otp-credentials",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "payment",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "picture-in-picture",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "private-state-token-issuance",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "private-state-token-redemption",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "publickey-credentials-create",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "publickey-credentials-get",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "publickey-credentials-remote-client-data-json",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "rewriter",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "screen-wake-lock",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "serial",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "smart-card",
+      "default": "self",
+      "web": false
+    },
+    {
+      "name": "speaker-selection",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "storage-access",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "sub-apps",
+      "default": "self",
+      "web": false
+    },
+    {
+      "name": "summarizer",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "sync-xhr",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "tools",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "translator",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "unbounded-element",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "unload",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "usb",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "usb-unrestricted",
+      "default": "self",
+      "web": false
+    },
+    {
+      "name": "vertical-scroll",
+      "default": "*",
+      "web": true
+    },
+    {
+      "name": "web-app-installation",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "web-printing",
+      "default": "self",
+      "web": false
+    },
+    {
+      "name": "web-share",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "webnn",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "window-management",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "writer",
+      "default": "self",
+      "web": true
+    },
+    {
+      "name": "xr-spatial-tracking",
+      "default": "self",
+      "web": true
+    }
+  ]
+}

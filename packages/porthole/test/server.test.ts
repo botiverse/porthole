@@ -182,13 +182,59 @@ describe("tickets and cookies", () => {
     const response = await porthole.handle(get(location.url));
     expect(response?.status).toBe(200);
     const csp = response?.headers.get("content-security-policy") ?? "";
-    expect(csp).toBe(`${compile(configs.inlineWidget).csp}; frame-ancestors ${HOST}`);
+    // With the frame's own sandbox (P099): the same in its frame, the only one on a tab.
+    expect(csp).toBe(
+      `${compile(configs.inlineWidget).csp}; sandbox allow-scripts allow-same-origin; frame-ancestors ${HOST}`,
+    );
     expect(response?.headers.get("cache-control")).toBe("no-store");
     expect(response?.headers.get("referrer-policy")).toBe("no-referrer");
     const body = (await response?.text()) ?? "";
     expect(body).toContain('id="porthole-root"');
     expect(body).not.toContain("Content-Security-Policy");
     expect(body).not.toContain("person-1");
+  });
+
+  it("sandboxes every served page as its frame is, on a tab of its own too (P099, S4)", async () => {
+    const porthole = server();
+    const artifact: InstanceRef = {
+      scope: "conversation-1",
+      document: { kind: "artifact", id: "page", version: "1" },
+    };
+    const proxied: InstanceRef = { scope: "app-1", document: { kind: "mcp-proxy" } };
+    for (const instance of [shell, artifact, proxied]) {
+      // In a frame, on a tab, and from a client that sends no fetch metadata at all.
+      for (const headers of [
+        { "sec-fetch-dest": "iframe" },
+        { "sec-fetch-dest": "document" },
+        { "sec-fetch-dest": "" },
+      ]) {
+        const { url } = await porthole.issue(instance, { viewer: "v" });
+        const response = await porthole.handle(
+          new Request(url, {
+            headers: Object.fromEntries(Object.entries(headers).filter(([, v]) => v !== "")),
+          }),
+        );
+        expect(response?.status, instance.document.kind).toBe(200);
+        const directives = (response?.headers.get("content-security-policy") ?? "")
+          .split(";")
+          .map((each) => each.trim());
+        expect(directives, instance.document.kind).toContain(
+          "sandbox allow-scripts allow-same-origin",
+        );
+        expect(directives.filter((each) => each.startsWith("sandbox"))).toHaveLength(1);
+        expect(directives.join("; ")).not.toMatch(/allow-(popups|forms|downloads|modals|top)/u);
+        // And what its frame's allow doesn't grant, denied there too.
+        const permissions = response?.headers.get("permissions-policy") ?? "";
+        expect(permissions, instance.document.kind).toContain("camera=()");
+        expect(permissions).toContain("geolocation=()");
+        expect(permissions).toContain("fullscreen=()");
+      }
+    }
+    // Porthole's own pages (a refusal) are not content, and keep their own policy.
+    const refused = await porthole.handle(
+      get(`${porthole.originFor("conversation-1")}/__porthole/d/aaaaaaaaaaaaaaaa`),
+    );
+    expect(refused?.headers.get("content-security-policy")).not.toContain("allow-same-origin");
   });
 
   it("sets a cookie of that origin only: __Host-, HttpOnly, partitioned in a frame", async () => {
@@ -511,6 +557,8 @@ describe("url mode", () => {
     expect(calls[0]?.request.headers.get("cookie")).toBe("theirs=1");
     expect(response?.headers.getSetCookie()).toEqual(["theirs=1; Path=/"]);
     expect(response?.headers.get("content-security-policy")).toBe(`frame-ancestors ${HOST}`);
+    // The app's own document: its tab is the app's (P099).
+    expect(response?.headers.get("permissions-policy")).toBeNull();
     expect((await porthole.access(get(`${location.origin}/`, { cookie })))?.viewer).toBe("dev");
   });
 

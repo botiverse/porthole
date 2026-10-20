@@ -28,6 +28,30 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       find: '  if (navigationApi && typeof navigationApi.addEventListener === "function"',
       replace: '  if (false && typeof navigationApi.addEventListener === "function"',
     },
+    // The calls that ask the guard's rule first (P099): they start what they're asked.
+    {
+      file: RUNTIME,
+      find: '    return { go: before(target, "#") === before(location.href, "#") || ownPage(target), target };',
+      replace: "    return { go: true, target };",
+    },
+  ],
+  // Only the guard's rule asked first (P099): navigation.navigate() and open(…, "_self") start
+  // what they're asked, and the navigate event alone stops them (WebKit sends the request anyway).
+  "navigate-ask": [
+    {
+      file: RUNTIME,
+      find: '    return { go: before(target, "#") === before(location.href, "#") || ownPage(target), target };',
+      replace: "    return { go: true, target };",
+    },
+  ],
+  // The shell's following of a tab's links (P099): the browser follows them, after content's
+  // listeners, and WebKit sends a cancelled one's request.
+  "link-rule": [
+    {
+      file: RUNTIME,
+      find: "  if (window.top === window) {\n    linksTaken = true;",
+      replace: "  if (false) {\n    linksTaken = true;",
+    },
   ],
   "attach-shadow": [
     {
@@ -190,6 +214,27 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   // A url-mode app's server without its origin check (P101): the harness drops `Origin` and
   // `Sec-Fetch-Site` from the app's requests, so another origin's ride on its cookie.
   "url-origin": "harness",
+  // A served page without its CSP's sandbox (P099): on a tab of its own nothing else sandboxes it.
+  "tab-sandbox": "harness",
+  // A served page without its Permissions-Policy header (P099): on a tab nothing else denies it
+  // devices, location or full screen, but the shell's locks (`device-locks`, the only wall on
+  // WebKit and Firefox, which don't apply the header to them).
+  "permissions-policy": "harness",
+  "device-locks": [
+    {
+      file: RUNTIME,
+      find: "  if (window.top === window) {\n    const deny",
+      replace: "  if (false) {\n    const deny",
+    },
+  ],
+  // The shell's window.open on a tab of its own (P099): the second wall behind the sandbox.
+  "window-open": [
+    {
+      file: RUNTIME,
+      find: "  if (window.top === window) {\n    const openWindow = window.open;",
+      replace: "  if (false) {\n    const openWindow = window.open;",
+    },
+  ],
   // The host's checks on annotation reports (P053): taken only while asked for, within limits.
   "annotation-checks": [
     {
@@ -338,9 +383,12 @@ export function weaken(relative: string, text: string): string {
  * The weakenings the served harness also applies to the documents its content origins serve
  * (their shell is made in the harness's own process, not loaded from the stripped sources): the
  * navigation guard (P079), whose wall in a served frame is the shell alone for another content
- * origin.
+ * origin, and the shell's window.open and device locks on a tab (P099).
  */
-const SERVED = ["navigate-guard"];
+const SERVED = ["navigate-guard", "navigate-ask", "link-rule", "window-open", "device-locks"];
+
+/** Whether a control asked for edits the served documents' shell (`weakenServed`). */
+export const servedShellWeakened = (): boolean => weakened.some((each) => SERVED.includes(each));
 
 export function weakenServed(html: string): string {
   let out = html;

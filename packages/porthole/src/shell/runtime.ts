@@ -47,11 +47,25 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // script the shell runs for the content carries it.
   const nonce = document.currentScript && document.currentScript.nonce ? document.currentScript.nonce : "";
   const declared = (name) => Object.prototype.hasOwnProperty.call(plan.capabilities, name);
-  // Fixed in place: content can neither restore what is removed nor replace what is wrapped.
+  // Fixed in place: content can neither restore what is removed nor replace what is wrapped. A
+  // property something fixed before the shell ran (an extension, an engine's own) can't be: each
+  // such name goes on the shell's own script element (data-porthole-unfixed, for a test or a
+  // person to see) and, once the shell can speak, to the host as an error report.
+  const shellScript = document.currentScript;
+  const unfixed = [];
+  let tellUnfixed = (_name) => {};
   const lock = (target, name, value) => {
     try {
       Object.defineProperty(target, name, { configurable: false, writable: false, value });
-    } catch (_) {}
+    } catch (_) {
+      unfixed.push(String(name));
+      try {
+        if (shellScript) {
+          shellScript.setAttribute("data-porthole-unfixed", unfixed.join(" "));
+        }
+      } catch (_) {}
+      tellUnfixed(String(name));
+    }
   };
 
   if (plan.storage === "memory") {
@@ -113,13 +127,28 @@ export const SHELL_RUNTIME = String.raw`(() => {
     }
     return out.replace(SEALED, "./");
   };
+  // The platform's own string and URL functions, kept now (P099): the rules that decide where this
+  // document may go must read an address as the platform does, whatever content later puts on
+  // String.prototype, URL or Reflect.
+  const callOf = Reflect.apply;
+  const NativeString = String;
+  const NativeURL = URL;
+  const urlHref = Object.getOwnPropertyDescriptor(URL.prototype, "href").get;
+  const indexIn = String.prototype.indexOf;
+  const lastIndexIn = String.prototype.lastIndexOf;
+  const sliceOf = String.prototype.slice;
+  const lowerOf = String.prototype.toLowerCase;
+  const before = (text, mark) => {
+    const at = callOf(indexIn, text, [mark]);
+    return at < 0 ? text : callOf(sliceOf, text, [0, at]);
+  };
   const ownPage = (url) => {
-    if (filesBase === null || typeof url !== "string" || url.indexOf(filesBase) !== 0) {
+    if (filesBase === null || typeof url !== "string" || callOf(indexIn, url, [filesBase]) !== 0) {
       return false;
     }
-    const path = url.slice(filesBase.length).split("#")[0].split("?")[0];
-    const last = path.slice(path.lastIndexOf("/") + 1);
-    return last === "" || last.indexOf(".") < 0 || /\.html?$/i.test(last);
+    const path = before(before(callOf(sliceOf, url, [filesBase.length]), "#"), "?");
+    const last = callOf(lowerOf, callOf(sliceOf, path, [callOf(lastIndexIn, path, ["/"]) + 1]), []);
+    return last === "" || callOf(indexIn, last, ["."]) < 0 || callOf(sliceOf, last, [-5]) === ".html" || callOf(sliceOf, last, [-4]) === ".htm";
   };
   const navigationApi = window.navigation;
   const getterOf = (proto, name) => {
@@ -153,6 +182,257 @@ export const SHELL_RUNTIME = String.raw`(() => {
         navigationBlocked(url);
       }
     }, true);
+  }
+
+  // The calls that start a navigation and can be asked first ask the guard's rule before they
+  // start one (P099): WebKit sends navigation.navigate()'s request though the navigate event
+  // cancels it (measured on a tab: an outside site heard it). Within the document (a fragment, the
+  // same address) or another page of its own set (P084) goes on, as the guard lets it; anything
+  // else is stopped here, before any request, and the host told, as the guard does.
+  // The address is read once (String() and resolved here), and the call is given that address,
+  // absolute: what was checked is what goes, whatever an object's toString says the next time.
+  const mayNavigate = (url) => {
+    const text = NativeString(url);
+    let target = "";
+    try {
+      target = callOf(urlHref, new NativeURL(text, document.baseURI), []);
+    } catch (_) {
+      throw new DOMException("Not a URL", "SyntaxError");
+    }
+    return { go: before(target, "#") === before(location.href, "#") || ownPage(target), target };
+  };
+  const navigationProto = typeof Navigation === "function" ? Navigation.prototype : null;
+  if (navigationProto !== null && typeof navigationProto.navigate === "function") {
+    const navigateOriginal = navigationProto.navigate;
+    lock(navigationProto, "navigate", function (url, options) {
+      const asked = mayNavigate(url);
+      if (asked.go) {
+        return applyOf(navigateOriginal, this, [asked.target, options]);
+      }
+      navigationBlocked(asked.target);
+      const aborted = Promise.reject(new DOMException("Navigation was aborted", "AbortError"));
+      aborted.catch(() => {});
+      return { committed: aborted, finished: aborted };
+    });
+  }
+
+  // A page on a tab of its own opens no window (P099): a window would carry what a visitor typed
+  // out in its address. Its document's CSP sandbox is the wall (no allow-popups); this is the
+  // second, for an edge that drops the header. In a frame the frame's sandbox answers already
+  // (null; a throw on Firefox). "_self" stays a navigation of this document, where the guard's
+  // rule lets one (mayNavigate, above); every other target opens nothing. Nor a picture-in-picture document (Chromium,
+  // Firefox): a window of this origin in a fresh realm, where nothing above ever ran (only a
+  // top-level page may open one, so a frame can't).
+  if (window.top === window) {
+    const openWindow = window.open;
+    lock(window, "open", function (url, target, features) {
+      if (typeof target !== "string" || target.trim().toLowerCase() !== "_self") {
+        return null;
+      }
+      const asked = mayNavigate(url);
+      if (!asked.go) {
+        navigationBlocked(asked.target);
+        return null;
+      }
+      return applyOf(openWindow, window, [asked.target, "_self", features]);
+    });
+    if (typeof DocumentPictureInPicture === "function") {
+      lock(DocumentPictureInPicture.prototype, "requestWindow", () => Promise.reject(new DOMException("A page here opens no other window", "NotAllowedError")));
+    }
+  }
+  // A link on a tab (P099) is followed by the shell, never by the browser: WebKit sends a link's
+  // request though the navigate event cancels it (measured), and the browser follows a link with
+  // the href and target it has once every listener ran, which content may change after any check.
+  // So the first click listener there is (the shell's, on window, capturing) takes each plain click
+  // on a link (found through the composed path, shadow roots included) from the browser: it
+  // cancels it, reads the link once, and, after every listener ran and unless content cancelled
+  // the click itself, follows what it read with a link of its own, detached (no listener of
+  // content's sees its click), where the guard's rule lets it go: within the document (a
+  // fragment), another page of the set (P084), a download of the page's own (which the sandbox
+  // decides). A link to a new window does nothing (the sandbox refuses it anyway); a modified or
+  // middle click is left to the browser (a window or a download: the sandbox refuses both).
+  let linksTaken = false;
+  if (window.top === window) {
+    linksTaken = true;
+    const pathOf = Event.prototype.composedPath;
+    const matchesOf = Element.prototype.matches;
+    const attributeOf = Element.prototype.getAttribute;
+    const attributeNSOf = Element.prototype.getAttributeNS;
+    const hasAttributeOf = Element.prototype.hasAttribute;
+    const setAttributeOf = Element.prototype.setAttribute;
+    const makeElement = Document.prototype.createElement;
+    const clickOf = HTMLElement.prototype.click;
+    const later = window.setTimeout;
+    const addTo = WeakSet.prototype.add;
+    const hasIn = WeakSet.prototype.has;
+    const modifierGetters = [getterOf(MouseEvent.prototype, "ctrlKey"), getterOf(MouseEvent.prototype, "metaKey"), getterOf(MouseEvent.prototype, "shiftKey"), getterOf(MouseEvent.prototype, "altKey")];
+    const buttonOf = getterOf(MouseEvent.prototype, "button");
+    // A click content cancelled itself, through preventDefault or returnValue (the shell's own
+    // cancels call the platform's function, kept above, and aren't counted).
+    const cancelledByContent = new WeakSet();
+    lock(Event.prototype, "preventDefault", function () {
+      callOf(addTo, cancelledByContent, [this]);
+      return callOf(preventNavigation, this, []);
+    });
+    const returnValue = Object.getOwnPropertyDescriptor(Event.prototype, "returnValue");
+    if (returnValue && returnValue.get && returnValue.set) {
+      try {
+        Object.defineProperty(Event.prototype, "returnValue", {
+          configurable: false,
+          enumerable: returnValue.enumerable,
+          get() {
+            return callOf(returnValue.get, this, []);
+          },
+          set(value) {
+            if (!value) {
+              callOf(addTo, cancelledByContent, [this]);
+            }
+            callOf(returnValue.set, this, [value]);
+          },
+        });
+      } catch (_) {
+        unfixed.push("returnValue");
+      }
+    }
+    const follow = (address, download) => {
+      const anchor = callOf(makeElement, document, ["a"]);
+      callOf(setAttributeOf, anchor, ["href", address]);
+      if (download !== null) {
+        callOf(setAttributeOf, anchor, ["download", download]);
+      }
+      callOf(clickOf, anchor, []);
+    };
+    window.addEventListener("click", (event) => {
+      let link = null;
+      try {
+        const path = callOf(pathOf, event, []);
+        for (let i = 0; i < path.length && link === null; i += 1) {
+          try {
+            if (callOf(matchesOf, path[i], ["a, area"])) {
+              link = path[i];
+            }
+          } catch (_) {}
+        }
+      } catch (_) {}
+      if (link === null) {
+        return;
+      }
+      let plain = true;
+      try {
+        plain = callOf(buttonOf, event, []) === 0;
+        for (let i = 0; i < modifierGetters.length; i += 1) {
+          if (callOf(modifierGetters[i], event, [])) {
+            plain = false;
+          }
+        }
+      } catch (_) {}
+      if (!plain) {
+        return;
+      }
+      callOf(preventNavigation, event, []);
+      // Read once, now: what is followed is what was read.
+      const named = callOf(lowerOf, NativeString(callOf(attributeOf, link, ["target"]) || ""), []);
+      const self = named === "" || named === "_self" || named === "_top" || named === "_parent";
+      const href = callOf(attributeOf, link, ["href"]) ?? callOf(attributeNSOf, link, ["http://www.w3.org/1999/xlink", "href"]);
+      const download = callOf(hasAttributeOf, link, ["download"]) ? NativeString(callOf(attributeOf, link, ["download"]) || "") : null;
+      callOf(later, window, [
+        () => {
+          if (callOf(hasIn, cancelledByContent, [event]) || href === null) {
+            return;
+          }
+          let asked = null;
+          try {
+            asked = mayNavigate(href);
+          } catch (_) {
+            return;
+          }
+          const own = callOf(indexIn, asked.target, [location.origin + "/"]) === 0 || callOf(indexIn, asked.target, ["blob:" + location.origin + "/"]) === 0 || callOf(indexIn, asked.target, ["data:"]) === 0;
+          if (download !== null && own) {
+            follow(asked.target, download);
+          } else if (self && asked.go) {
+            follow(asked.target, null);
+          } else if (self) {
+            navigationBlocked(asked.target);
+          }
+        },
+        0,
+      ]);
+    }, true);
+  }
+
+  // Nor, on a tab, the camera, the microphone, the screen, location, full screen, passkeys, the
+  // share sheet or payments (P099): a frame has none of them (its allow grants none), a tab has
+  // no allow, and its Permissions-Policy header, the wall on Chromium, isn't applied to them by
+  // WebKit and Firefox (measured). Each refuses as a denial does, at once, with no prompt.
+  if (window.top === window) {
+    const deny = () => Promise.reject(new DOMException("Not available here", "NotAllowedError"));
+    if (typeof MediaDevices === "function") {
+      for (const name of ["getUserMedia", "getDisplayMedia", "selectAudioOutput"]) {
+        if (typeof MediaDevices.prototype[name] === "function") {
+          lock(MediaDevices.prototype, name, deny);
+        }
+      }
+    }
+    for (const name of ["getUserMedia", "webkitGetUserMedia", "mozGetUserMedia"]) {
+      if (typeof Navigator.prototype[name] === "function") {
+        lock(Navigator.prototype, name, function (_constraints, _success, failure) {
+          if (typeof failure === "function") {
+            setTimeout(() => failure(new DOMException("Not available here", "NotAllowedError")), 0);
+          }
+        });
+      }
+    }
+    if (typeof Geolocation === "function") {
+      const deniedPosition = { code: 1, message: "Not available here", PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 };
+      const denyPosition = function (_success, failure) {
+        if (typeof failure === "function") {
+          setTimeout(() => failure(deniedPosition), 0);
+        }
+        return 0;
+      };
+      lock(Geolocation.prototype, "getCurrentPosition", denyPosition);
+      lock(Geolocation.prototype, "watchPosition", denyPosition);
+    }
+    lock(Element.prototype, "requestFullscreen", () => Promise.reject(new TypeError("Full screen isn't available here")));
+    for (const name of ["webkitRequestFullscreen", "webkitRequestFullScreen", "mozRequestFullScreen"]) {
+      if (typeof Element.prototype[name] === "function") {
+        lock(Element.prototype, name, () => undefined);
+      }
+    }
+    // A video's own full screen (WebKit), passkeys and saved passwords, the share sheet, and
+    // payments (whose method's address the browser fetches outside the CSP; WebKit's Apple Pay
+    // sheet): each a prompt or a way out a frame never has.
+    const notHere = () => {
+      throw new DOMException("Not available here", "NotAllowedError");
+    };
+    if (typeof HTMLVideoElement === "function") {
+      for (const name of ["webkitEnterFullscreen", "webkitEnterFullScreen"]) {
+        if (typeof HTMLVideoElement.prototype[name] === "function") {
+          lock(HTMLVideoElement.prototype, name, notHere);
+        }
+      }
+    }
+    if (typeof CredentialsContainer === "function") {
+      for (const name of ["create", "get", "store"]) {
+        if (typeof CredentialsContainer.prototype[name] === "function") {
+          lock(CredentialsContainer.prototype, name, deny);
+        }
+      }
+    }
+    if (typeof Navigator.prototype.share === "function") {
+      lock(Navigator.prototype, "share", deny);
+      lock(Navigator.prototype, "canShare", () => false);
+    }
+    if (typeof PaymentRequest === "function") {
+      lock(window, "PaymentRequest", function () {
+        throw new DOMException("Payments aren't available here", "SecurityError");
+      });
+    }
+    if (typeof ApplePaySession === "function") {
+      lock(window, "ApplePaySession", function () {
+        throw new DOMException("Payments aren't available here", "SecurityError");
+      });
+    }
   }
 
   // No nested frames (each would be a fresh realm with WebRTC intact), no resource hints and no
@@ -201,13 +481,61 @@ export const SHELL_RUNTIME = String.raw`(() => {
   };
   guardRoot(document);
 
-  // Every shadow root content makes, open or closed, is guarded as it is made.
+  // Every shadow root content makes, open or closed, is guarded as it is made. On a tab (P099) a
+  // closed one is made open, to the platform, and closed to content (its host's shadowRoot is
+  // null, its mode "closed"): a click on a link inside it must show the link to the shell's first
+  // listener through the event's composed path, which a closed tree hides.
   const attachShadow = Element.prototype.attachShadow;
+  const shownOpen = new WeakSet();
+  const addShown = WeakSet.prototype.add;
+  const shadowInit = (init) => {
+    if (window.top !== window || init === null || typeof init !== "object" || init.mode !== "closed") {
+      return { init, closed: false };
+    }
+    const copy = { mode: "open" };
+    for (const key of ["delegatesFocus", "slotAssignment", "clonable", "serializable", "customElementRegistry", "referenceTarget"]) {
+      if (init[key] !== undefined) {
+        copy[key] = init[key];
+      }
+    }
+    return { init: copy, closed: true };
+  };
   lock(Element.prototype, "attachShadow", function (init) {
+    const asked = shadowInit(init);
+    init = asked.init;
     const root = attachShadow.call(this, init);
     guardRoot(root);
+    if (asked.closed) {
+      callOf(addShown, shownOpen, [root]);
+    }
     return root;
   });
+  if (window.top === window) {
+    const shadowRootOf = getterOf(Element.prototype, "shadowRoot");
+    const modeOf = typeof ShadowRoot === "function" ? getterOf(ShadowRoot.prototype, "mode") : null;
+    const shown = WeakSet.prototype.has;
+    try {
+      if (shadowRootOf !== null) {
+        Object.defineProperty(Element.prototype, "shadowRoot", {
+          configurable: false,
+          get() {
+            const root = callOf(shadowRootOf, this, []);
+            return root !== null && callOf(shown, shownOpen, [root]) ? null : root;
+          },
+        });
+      }
+      if (modeOf !== null) {
+        Object.defineProperty(ShadowRoot.prototype, "mode", {
+          configurable: false,
+          get() {
+            return callOf(shown, shownOpen, [this]) ? "closed" : callOf(modeOf, this, []);
+          },
+        });
+      }
+    } catch (_) {
+      unfixed.push("shadowRoot");
+    }
+  }
 
   // The parser builds declarative shadow roots (template shadowrootmode) without attachShadow, and
   // a closed one is out of the guard's reach. Fragment parsing doesn't build them, so the entry
@@ -567,7 +895,10 @@ export const SHELL_RUNTIME = String.raw`(() => {
       nativeFetch(filesBase + "__porthole/renew", { credentials: "omit", cache: "no-store" })
         .then((answer) => (answer.ok ? answer.json() : null))
         .then((renewed) => {
-          if (!renewed || typeof renewed.base !== "string" || typeof renewed.expires !== "number" || renewed.base.indexOf(location.origin + "/__porthole/f/") !== 0 || renewed.base.slice(-1) !== "/") {
+          // Checked through the platform's own functions: content may have replaced a prototype's,
+          // and the base decides where this page may go (ownPage).
+          const prefix = location.origin + "/__porthole/f/";
+          if (!renewed || typeof renewed.base !== "string" || typeof renewed.expires !== "number" || callOf(indexIn, renewed.base, [prefix]) !== 0 || callOf(indexIn, callOf(sliceOf, renewed.base, [prefix.length, -1]), ["/"]) !== -1 || callOf(sliceOf, renewed.base, [-1]) !== "/") {
             return;
           }
           const here = location.href;
@@ -584,6 +915,10 @@ export const SHELL_RUNTIME = String.raw`(() => {
     };
     setTimeout(renew, renewIn(plan.files.expires));
   }
+
+  // What the shell couldn't fix in place (above), told to the host now that it can be, and after.
+  tellUnfixed = (name) => report("Porthole couldn't fix " + name + " in place: a defense here may be missing");
+  unfixed.forEach((name) => tellUnfixed(name));
 
   // A parsed tree's scripts are held (each replaced by a numbered marker) and run later, in order,
   // as the page's parser would run them: each made again, live, in its marker's place, and each
@@ -973,10 +1308,11 @@ export const SHELL_RUNTIME = String.raw`(() => {
         return;
       }
       const href = link.getAttribute("href") || link.getAttributeNS("http://www.w3.org/1999/xlink", "href") || "";
-      if (href === "" || href.charAt(0) === "#") {
+      // On a tab the shell's first listener took it (above).
+      if (linksTaken || href === "" || href.charAt(0) === "#") {
         return;
       }
-      event.preventDefault();
+      callOf(preventNavigation, event, []);
       let url = "";
       try {
         url = new URL(href, document.baseURI).href;

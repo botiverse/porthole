@@ -225,6 +225,120 @@ export function sandboxTokens(config: PortholeConfig): string[] {
 }
 
 /**
+ * The `sandbox` a served document's CSP header carries (P099): the frame's own tokens, so a page
+ * opened on a tab of its own (a public link, a new tab, a bookmark, a frame's address opened
+ * outside it) holds no power it lacks in its frame: scripts on its own origin, and no popups,
+ * forms, downloads, modals, or navigation of another window (its opener's included). In a frame
+ * it repeats the frame's attribute, so it changes nothing there; it is sent on every served page,
+ * not only on a `Sec-Fetch-Dest: document` request, so a client that sends no fetch metadata is
+ * sandboxed too and one address needs no `Vary`. Domain isolation only: url mode serves the app's
+ * own documents, and opaque content is never served. Never in a `<meta>` (browsers ignore it there).
+ */
+export function servedSandboxDirective(config: PortholeConfig): CspDirective | null {
+  return config.isolation === "domain" ? ["sandbox", ...sandboxTokens(config)] : null;
+}
+
+/** A served page's CSP header: the page's directives, then its sandbox (P099). */
+export function servedDocumentCsp(
+  config: PortholeConfig,
+  directives: readonly CspDirective[],
+): string {
+  const sandbox = servedSandboxDirective(config);
+  return serializeCsp(sandbox === null ? directives : [...directives, sandbox]);
+}
+
+/**
+ * The features a cross-origin frame never has unless its `allow` names them (each one's default
+ * allowlist is `'self'`), and a served page denies itself (P099): devices, location, full screen,
+ * the clipboard, payments, credentials, sharing, the built-in AI models, WebMCP's `tools`, the
+ * local network, autofill. Every such feature Chromium lists for web pages
+ * (`test/reference/permissions-policy-features.json`), but client hints, `cross-origin-isolated`
+ * and Chromium's sample (`test/permissions-policy.test.ts` says why). Features whose default is
+ * `*` (a video's picture-in-picture, gamepads) are left out: a frame has them, so denying them on
+ * a tab would change the frame too. An engine that doesn't know a name ignores it.
+ */
+export const FRAME_DENIED_FEATURES = [
+  "accelerometer",
+  "ambient-light-sensor",
+  "autofill",
+  "autoplay",
+  "bluetooth",
+  "camera",
+  "captured-surface-control",
+  "clipboard-read",
+  "clipboard-write",
+  "compute-pressure",
+  "deferred-fetch",
+  "device-attributes",
+  "digital-credentials-create",
+  "digital-credentials-get",
+  "display-capture",
+  "encrypted-media",
+  "fullscreen",
+  "geolocation",
+  "gyroscope",
+  "haptics",
+  "hid",
+  "identity-credentials-get",
+  "idle-detection",
+  "keyboard-map",
+  "language-detector",
+  "language-model",
+  "local-fonts",
+  "local-network",
+  "local-network-access",
+  "loopback-network",
+  "magnetometer",
+  "manual-text",
+  "microphone",
+  "midi",
+  "on-device-speech-recognition",
+  "otp-credentials",
+  "payment",
+  "publickey-credentials-create",
+  "publickey-credentials-get",
+  "publickey-credentials-remote-client-data-json",
+  "rewriter",
+  "screen-wake-lock",
+  "serial",
+  "speaker-selection",
+  "summarizer",
+  "tools",
+  "translator",
+  "unbounded-element",
+  "usb",
+  "web-app-installation",
+  "web-share",
+  "webnn",
+  "window-management",
+  "writer",
+  "xr-spatial-tracking",
+] as const;
+
+/** The features a frame's `allow` attribute grants (`allowAttribute`): none but url mode's. */
+export function delegatedFeatures(config: PortholeConfig): string[] {
+  return config.mode === "url" ? [...(config.permissions ?? [])] : [];
+}
+
+/**
+ * The `Permissions-Policy` header of a served page (P099): every feature of
+ * `FRAME_DENIED_FEATURES` its frame's `allow` doesn't grant, denied (`camera=()`), so a page on
+ * a tab of its own (no `allow` there) can't ask for the camera, the microphone, location or full
+ * screen under the content origin's name. In a frame it changes nothing: the frame's `allow`
+ * grants none of them, and a frame's features are the intersection of the two. Domain isolation
+ * only, as `servedSandboxDirective`.
+ */
+export function servedPermissionsPolicy(config: PortholeConfig): string | null {
+  if (config.isolation !== "domain") {
+    return null;
+  }
+  const granted = new Set(delegatedFeatures(config));
+  return FRAME_DENIED_FEATURES.filter((feature) => !granted.has(feature))
+    .map((feature) => `${feature}=()`)
+    .join(", ");
+}
+
+/**
  * The frame's `allow` attribute (Permissions Policy). No camera, microphone, geolocation,
  * fullscreen or other powerful feature is delegated to the frame, and the clipboard is denied by
  * name (P051): content never writes it, the host does (`copyText`). A url-mode config may

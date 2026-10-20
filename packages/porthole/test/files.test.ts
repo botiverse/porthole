@@ -402,6 +402,12 @@ describe("a file set in a frame (P083)", () => {
     expect(csp).toContain("frame-src 'none'");
     expect(csp).toContain(`frame-ancestors ${HOST}`);
     expect(csp).not.toContain("'self'");
+    // Its frame's sandbox and denied features, should its address be opened on a tab (P099).
+    expect(csp).toContain("; sandbox allow-scripts allow-same-origin;");
+    expect(page.headers.get("permissions-policy")).toContain("camera=()");
+    expect(answer.headers.get("content-security-policy")).toContain(
+      "; sandbox allow-scripts allow-same-origin;",
+    );
     const html = await page.text();
     // The page is in the shell, as data, with the base its navigations may stay under.
     expect(html).toContain('"files":{"base":');
@@ -437,6 +443,7 @@ describe("a file set in a frame (P083)", () => {
     expect(script.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
     expect(script.headers.get("content-security-policy")).toContain("worker-src blob: ");
     expect(script.headers.get("content-security-policy")).not.toContain("sandbox");
+    expect(script.headers.get("permissions-policy")).toBeNull();
 
     // An .html uploaded as .txt is text, and never sniffed.
     const notes = await fetchAt(app, `${base}notes.txt`, navigate);
@@ -737,6 +744,8 @@ describe("a file set on a tab (P081)", () => {
     const csp = answer.headers.get("content-security-policy") ?? "";
     expect(csp).toContain(`script-src 'unsafe-inline' 'unsafe-eval' blob: ${origin("abc")}/v/1/`);
     expect(csp).not.toContain(`${origin("abc")}/v/2/`);
+    // On a tab no frame sandboxes it: its own CSP does, with the frame's tokens (P099).
+    expect(csp).toContain("; sandbox allow-scripts allow-same-origin;");
     // Its version named for the host's notices (P098), no ticket's address.
     expect(await answer.text()).toContain(
       `"files":{"base":"${origin("abc")}/v/1/","set":{"id":"abc","version":"1"}}`,

