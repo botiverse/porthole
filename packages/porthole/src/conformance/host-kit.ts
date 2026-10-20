@@ -11,7 +11,12 @@ import type { ConformanceHarness } from "./harness/page.ts";
 import type { FrameOutcome } from "../host/types.ts";
 import type { ConformanceHost, LaunchedDisplay, LaunchSpec } from "./index.ts";
 import { leakTests, type ConformanceFixtures, type ConformanceTest } from "./probes.ts";
-import { servedTests, type ServedConformanceHost, type ServedDisplay } from "./served.ts";
+import {
+  servedTests,
+  TAB_CASES,
+  type ServedConformanceHost,
+  type ServedDisplay,
+} from "./served.ts";
 
 /**
  * The conformance runner (P066): an app points it at its real page (its CSP, its nonce, its
@@ -442,6 +447,8 @@ const DOMAIN_CASES = [
   "served.domain.address",
   "served.domain.storage-scope",
   "served.domain.ticket-once",
+  "served.domain.self-navigation",
+  ...TAB_CASES,
   "served.domain.frame-ancestors",
   "served.domain.egress",
 ];

@@ -155,6 +155,23 @@ export const SHELL_RUNTIME = String.raw`(() => {
     }, true);
   }
 
+  // A page on a tab of its own opens no window (P099): a window would carry what a visitor typed
+  // out in its address. Its document's CSP sandbox is the wall (no allow-popups); this is the
+  // second, for an edge that drops the header. In a frame the frame's sandbox answers already
+  // (null; a throw on Firefox). "_self" stays a navigation of this document, which the guard above
+  // decides; every other target opens nothing. Nor a picture-in-picture document (Chromium,
+  // Firefox): a window of this origin in a fresh realm, where nothing above ever ran (only a
+  // top-level page may open one, so a frame can't).
+  if (window.top === window) {
+    const openWindow = window.open;
+    lock(window, "open", function (url, target, features) {
+      return typeof target === "string" && target.trim().toLowerCase() === "_self" ? applyOf(openWindow, window, [url, target, features]) : null;
+    });
+    if (typeof DocumentPictureInPicture === "function") {
+      lock(DocumentPictureInPicture.prototype, "requestWindow", () => Promise.reject(new DOMException("A page here opens no other window", "NotAllowedError")));
+    }
+  }
+
   // No nested frames (each would be a fresh realm with WebRTC intact), no resource hints and no
   // refreshes (they reach the network outside the CSP's fetch directives). Removed as they are
   // added: a mutation observer's microtask runs before a child frame's document loads.

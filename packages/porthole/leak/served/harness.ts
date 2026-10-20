@@ -29,8 +29,19 @@ import {
   type StoredAsset,
   type StoredFiles,
 } from "../../src/server/index.ts";
-import { checkWeakenings, weaken, weakenServed, weakened } from "../weakenings.ts";
-import { asServiceWorkerAllowed, withoutResourcePolicy, withSelfForFiles } from "./files.ts";
+import {
+  checkWeakenings,
+  servedShellWeakened,
+  weaken,
+  weakenServed,
+  weakened,
+} from "../weakenings.ts";
+import {
+  asServiceWorkerAllowed,
+  withoutDocumentSandbox,
+  withoutResourcePolicy,
+  withSelfForFiles,
+} from "./files.ts";
 
 /**
  * Porthole's reference serving for the served-mode cases, started in each test worker on ports of
@@ -532,9 +543,13 @@ async function start(): Promise<Harness> {
       if (weakened.includes("file-corp")) {
         answer = withoutResourcePolicy(answer);
       }
-      // A negative control on the shell's navigation guard reaches served shells too (P079).
+      if (weakened.includes("tab-sandbox")) {
+        answer = withoutDocumentSandbox(answer);
+      }
+      // A negative control on the served shell (its navigation guard, P079; its window.open on a
+      // tab, P099) reaches served shells too.
       if (
-        weakened.includes("navigate-guard") &&
+        servedShellWeakened() &&
         (answer.headers.get("content-type") ?? "").startsWith("text/html")
       ) {
         answer = new Response(weakenServed(await answer.text()), {

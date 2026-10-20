@@ -82,6 +82,14 @@ export interface ServedSuiteOptions {
 
 type Fixtures = { page: Page; browserName: string };
 
+/** The cases of a served page on a tab of its own (P099), one per wall. */
+export const TAB_CASES: readonly string[] = [
+  "served.domain.tab-window-open",
+  "served.domain.tab-escapes",
+  "served.domain.tab-opener",
+  "served.domain.tab-navigation",
+];
+
 const SETTLE_MS = 800;
 
 /** What a served shell is given to draw (`ServedConformanceHost.show`'s `content`). */
@@ -377,6 +385,273 @@ export function servedTests(
         } finally {
           await fresh.close();
         }
+      },
+    );
+
+    define(
+      "served.domain.self-navigation",
+      "a served frame can't navigate itself away, to an outside site or another content origin, even after a click",
+      async ({ page }) => {
+        // Data in the address of a navigation the frame starts itself (P079). Another content
+        // origin first: the embedding page's frame-src must let content origins in, so the shell's
+        // guard is the only wall there, and the frame's document must stay. Then an outside site,
+        // which frame-src stops too (where it does, an engine may show its error page in the
+        // frame): no request may reach it.
+        const display = await host.show(page, await host.shell("self-navigation"), {
+          content: SHELL_CONTENT,
+        });
+        const frame = await display.frame();
+        const sibling = `${(await host.locate(await host.shell("self-navigation-sibling"))).origin}/?d=secret`;
+        const outside = `${await host.canary("self-navigation")}?d=secret`;
+        const away = async (url: string): Promise<void> => {
+          await frame.evaluate((target) => {
+            (window as unknown as { portholeProbeStays?: boolean }).portholeProbeStays = true;
+            document.getElementById("porthole-probe-self")?.remove();
+            const button = document.createElement("button");
+            button.id = "porthole-probe-self";
+            button.textContent = "go";
+            button.addEventListener("click", () => {
+              location.href = target;
+            });
+            document.body.append(button);
+          }, url);
+          await frame.click("#porthole-probe-self");
+          await page.waitForTimeout(SETTLE_MS);
+        };
+        await away(sibling);
+        const stays = await frame
+          .evaluate(
+            () =>
+              (window as unknown as { portholeProbeStays?: boolean }).portholeProbeStays === true,
+          )
+          .catch(() => false);
+        expect(stays, "another content origin: the frame's document stays").toBe(true);
+        expect(new URL(frame.url()).origin, "another content origin").toBe(display.origin);
+        await away(outside);
+        expect(await host.canaryHits("self-navigation"), "the outside site").toBe(0);
+      },
+    );
+
+    // A served page on a tab of its own (P099, the review's S4): a public link, "open in a new
+    // tab", a bookmark. No frame's sandbox is there: the page's own (its CSP's `sandbox`) must
+    // hold what the frame's holds, and a click (a visitor's, after typing into the page) must open
+    // nothing either. One case per wall, so each negative control fails its own.
+    const onTab = async (page: Page, scope: string): Promise<void> => {
+      const location = await host.locate(await host.shell(scope));
+      const answer = await page.goto(location.url);
+      expect(answer?.status()).toBe(200);
+      expect(new URL(page.url()).origin).toBe(location.origin);
+    };
+    /**
+     * Clicks `selector` with raw input: a person's click (user activation), and an action that
+     * doesn't wait on what the click starts (a navigation refused, a popup that never commits).
+     */
+    const press = async (page: Page, selector: string): Promise<void> => {
+      const box = await page.locator(selector).boundingBox();
+      expect(box, selector).not.toBeNull();
+      await page.mouse.click(
+        (box?.x ?? 0) + (box?.width ?? 0) / 2,
+        (box?.y ?? 0) + (box?.height ?? 0) / 2,
+      );
+    };
+    /** Windows, downloads and browser dialogs the page's context starts from now on. */
+    const watchWindows = (page: Page) => {
+      const opened: string[] = [];
+      const downloads: string[] = [];
+      const dialogs: string[] = [];
+      page.context().on("page", (each) => opened.push(each.url()));
+      page.on("download", (each) => downloads.push(each.url()));
+      page.on("dialog", (each) => {
+        dialogs.push(`${each.type()}: ${each.message()}`);
+        void each.dismiss();
+      });
+      return { opened, downloads, dialogs };
+    };
+
+    define(
+      "served.domain.tab-window-open",
+      "a page on a tab of its own can't open a window (window.open, a picture-in-picture document), even after a click",
+      async ({ page }) => {
+        await onTab(page, "tab-window-open");
+        const target = await host.canary("tab-window-open");
+        const { opened } = watchWindows(page);
+        const programmatic = await page.evaluate((url) => {
+          // Chromium and WebKit answer null, Firefox throws: either way nothing opens.
+          const open = () => {
+            try {
+              return window.open(`${url}?d=secret`) !== null;
+            } catch {
+              return false;
+            }
+          };
+          // A picture-in-picture document (Chromium, Firefox) is a window of this origin, in a
+          // fresh realm the shell never hardened: measured, on a tab it opened with WebRTC there.
+          const pip = (
+            window as unknown as {
+              documentPictureInPicture?: { requestWindow(options?: object): Promise<Window> };
+            }
+          ).documentPictureInPicture;
+          const button = document.createElement("button");
+          button.id = "porthole-probe-open";
+          button.textContent = "send";
+          button.addEventListener("click", () => {
+            document.body.dataset.popup = String(open());
+            if (pip === undefined) {
+              document.body.dataset.pip = "absent";
+              return;
+            }
+            pip.requestWindow({ width: 120, height: 120 }).then(
+              (shown) => {
+                document.body.dataset.pip = "opened";
+                shown.close();
+              },
+              () => {
+                document.body.dataset.pip = "refused";
+              },
+            );
+          });
+          document.body.append(button);
+          return open();
+        }, target);
+        await press(page, "#porthole-probe-open");
+        await page.waitForTimeout(SETTLE_MS);
+        expect(programmatic, "on load").toBe(false);
+        expect(await page.evaluate(() => document.body.dataset.popup), "after a click").toBe(
+          "false",
+        );
+        expect(["absent", "refused"], "picture-in-picture").toContain(
+          await page.evaluate(() => document.body.dataset.pip),
+        );
+        expect(opened, "a window opened").toEqual([]);
+        expect(await host.canaryHits("tab-window-open")).toBe(0);
+      },
+    );
+
+    define(
+      "served.domain.tab-escapes",
+      "a page on a tab of its own can't open a link in a new window, submit a form, start a download or ask in a browser dialog, even after a click",
+      async ({ page }) => {
+        await onTab(page, "tab-escapes");
+        const kinds = ["link", "form", "blank-form"] as const;
+        const urls = Object.fromEntries(
+          await Promise.all(kinds.map(async (kind) => [kind, await host.canary(`tab-${kind}`)])),
+        ) as Record<(typeof kinds)[number], string>;
+        const { opened, downloads, dialogs } = watchWindows(page);
+        await page.evaluate((each) => {
+          const box = document.createElement("div");
+          box.innerHTML = `<a id="porthole-probe-blank" href="${each.link}?d=secret" target="_blank">blank</a>
+<form id="porthole-probe-form" action="${each.form}" method="get"><input name="d" value="secret"></form>
+<form id="porthole-probe-blank-form" action="${each["blank-form"]}" target="_blank"><input name="d" value="secret"></form>`;
+          document.body.append(box);
+          // Links clicked past the shell's own click handling, as content may click them.
+          window.addEventListener(
+            "click",
+            (event) => {
+              if (event.target instanceof Element && event.target.closest("a") !== null) {
+                event.stopImmediatePropagation();
+              }
+            },
+            true,
+          );
+          const button = document.createElement("button");
+          button.id = "porthole-probe-escape";
+          button.textContent = "send";
+          button.addEventListener("click", () => {
+            document.getElementById("porthole-probe-blank")?.click();
+            for (const id of ["porthole-probe-form", "porthole-probe-blank-form"]) {
+              try {
+                (document.getElementById(id) as HTMLFormElement).submit();
+              } catch {
+                // Refused: what we want.
+              }
+            }
+            const save = document.createElement("a");
+            save.href = URL.createObjectURL(new Blob(["secret"]));
+            save.download = "secret.txt";
+            document.body.append(save);
+            save.click();
+            // The browser's own dialog, asking for what a phishing page wants (no allow-modals).
+            window.prompt("Your password, to go on");
+          });
+          document.body.append(button);
+        }, urls);
+        await press(page, "#porthole-probe-escape");
+        await page.waitForTimeout(SETTLE_MS);
+        expect(opened, "a window opened").toEqual([]);
+        expect(downloads, "a download started").toEqual([]);
+        expect(dialogs, "a browser dialog showed").toEqual([]);
+        expect(new URL(page.url()).pathname, "the page stays").not.toMatch(/canary/u);
+        for (const kind of kinds) {
+          expect(await host.canaryHits(`tab-${kind}`), kind).toBe(0);
+        }
+      },
+    );
+
+    /** A served shell on a tab opened by another page that keeps a reference to it. */
+    const fromOpener = async (page: Page, scope: string): Promise<Page> => {
+      const location = await host.locate(await host.shell(scope));
+      await page.goto("about:blank");
+      await page.setContent('<button id="porthole-probe-opener" type="button">open</button>');
+      await page.evaluate((url) => {
+        document
+          .getElementById("porthole-probe-opener")
+          ?.addEventListener("click", () => void window.open(url));
+      }, location.url);
+      const [tab] = await Promise.all([
+        page.waitForEvent("popup"),
+        press(page, "#porthole-probe-opener"),
+      ]);
+      await tab.waitForURL((url) => url.origin === location.origin);
+      await tab.waitForLoadState("load");
+      return tab;
+    };
+    /** Adds a button to `page` that sends itself or its opener to `url` when clicked; clicks it. */
+    const clickAway = async (page: Page, url: string, which: "self" | "opener") => {
+      await page.evaluate(
+        ([target, whose]) => {
+          const button = document.createElement("button");
+          button.id = "porthole-probe-away";
+          button.textContent = "go";
+          button.addEventListener("click", () => {
+            try {
+              (whose === "opener" ? (window.opener as Window) : window).location.href = target;
+            } catch {
+              // Refused: what we want.
+            }
+          });
+          document.body.append(button);
+        },
+        [url, which] as const,
+      );
+      await press(page, "#porthole-probe-away");
+    };
+
+    define(
+      "served.domain.tab-opener",
+      "a page on a tab of its own can't navigate the page that opened it, even after a click",
+      async ({ page }) => {
+        // `window.open` without noopener: the opener keeps a reference to the tab, and the tab to
+        // it, which an unsandboxed page may send elsewhere (reverse tabnabbing).
+        const tab = await fromOpener(page, "tab-opener");
+        const away = await host.canary("tab-opener");
+        await clickAway(tab, `${away}?d=secret`, "opener");
+        await page.waitForTimeout(SETTLE_MS);
+        expect(page.url(), "the opener stays").toBe("about:blank");
+        expect(await host.canaryHits("tab-opener")).toBe(0);
+      },
+    );
+
+    define(
+      "served.domain.tab-navigation",
+      "a page on a tab of its own can't navigate itself away, even after a click",
+      async ({ page }) => {
+        await onTab(page, "tab-navigation");
+        const before = page.url();
+        const away = await host.canary("tab-navigation");
+        await clickAway(page, `${away}?d=secret`, "self");
+        await page.waitForTimeout(SETTLE_MS);
+        expect(page.url(), "the tab stays").toBe(before);
+        expect(await host.canaryHits("tab-navigation")).toBe(0);
       },
     );
 

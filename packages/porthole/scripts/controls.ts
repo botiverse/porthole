@@ -14,6 +14,14 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+/** What the CSP sandbox alone holds on a tab (P099), every engine. */
+const TAB_SANDBOX_FAILS = [
+  "served.domain.tab-escapes",
+  "served.domain.tab-opener",
+  "a file set's page on a tab of its own",
+  "a frame's sealed address opened on a tab of its own",
+];
+
 /** Each control: the spec it is checked by, and the titles (a part of each) it must fail. */
 export const CONTROLS: Readonly<Record<string, { spec: string; fails: readonly string[] }>> = {
   "runtime-declaration": {
@@ -65,6 +73,17 @@ export const CONTROLS: Readonly<Record<string, { spec: string; fails: readonly s
   "model-context-show": {
     spec: "leak/leak.spec.ts",
     fails: ["[12.model-context]"],
+  },
+  // A served page on a tab of its own (P099): its CSP's sandbox is the wall for links and forms
+  // in new windows, downloads, browser dialogs and its opener; window.open and picture-in-picture
+  // have the shell's lock behind it too, so their case fails only with both out.
+  "tab-sandbox": {
+    spec: "leak/served/tab.spec.ts",
+    fails: TAB_SANDBOX_FAILS,
+  },
+  "tab-sandbox,window-open": {
+    spec: "leak/served/tab.spec.ts",
+    fails: [...TAB_SANDBOX_FAILS, "served.domain.tab-window-open"],
   },
 };
 

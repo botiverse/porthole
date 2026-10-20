@@ -19,7 +19,7 @@ import {
   assetCodeRuns,
   assetCspDirectives,
   INERT_FILE_CSP,
-  serializeCsp,
+  servedDocumentCsp,
 } from "../compile/policy.ts";
 import { parseViewer, type ViewerInfo } from "../runtime/levels.ts";
 import type { FrameBlock } from "../host/types.ts";
@@ -516,10 +516,13 @@ export function createServer(options: ServerOptions): PortholeServer {
     }
   }
 
-  async function documentOf(
-    instance: InstanceRef,
-  ): Promise<
-    | { readonly html: string; readonly csp: string; readonly compiled?: CompiledConfig }
+  async function documentOf(instance: InstanceRef): Promise<
+    | {
+        readonly html: string;
+        readonly compiled: CompiledConfig;
+        /** Whether its CSP opens its artifact's asset library (P089): an artifact's page. */
+        readonly assets: boolean;
+      }
     | { readonly files: StoredFiles; readonly compiled: CompiledConfig }
     | null
   > {
@@ -531,7 +534,11 @@ export function createServer(options: ServerOptions): PortholeServer {
     const origins = options.hostOrigins;
     switch (document.kind) {
       case "shell":
-        return { html: config.shellDocument({ origins, cspMeta: false }), csp: config.csp };
+        return {
+          html: config.shellDocument({ origins, cspMeta: false }),
+          compiled: config,
+          assets: false,
+        };
       case "artifact": {
         const stored = await options.artifacts?.get(document.id, document.version);
         if (stored === null || stored === undefined) {
@@ -546,12 +553,12 @@ export function createServer(options: ServerOptions): PortholeServer {
         }
         return {
           html: config.shellDocument({ origins, document: stored.html, cspMeta: false }),
-          csp: config.csp,
           compiled: config,
+          assets: true,
         };
       }
       case "mcp-proxy":
-        return { html: sandboxProxyDocument(config, origins), csp: config.csp };
+        return { html: sandboxProxyDocument(config, origins), compiled: config, assets: false };
       case "external":
         return null;
     }
@@ -1052,17 +1059,14 @@ export function createServer(options: ServerOptions): PortholeServer {
     if (at !== undefined && at.rest !== "") {
       return page(404, "Not found", "This page, or this version of it, doesn't exist.", method);
     }
-    // A page that may use its artifact's assets loads them from its own origin (P089).
+    // A page that may use its artifact's assets loads them from its own origin (P089); every
+    // served page carries its frame's sandbox, a tab of its own included (P099).
+    const { config, cspDirectives } = served.compiled;
     const headers = documentHeaders(
-      served.compiled === undefined
-        ? served.csp
-        : serializeCsp(
-            assetCspDirectives(
-              served.compiled.config,
-              served.compiled.cspDirectives,
-              access.origin,
-            ),
-          ),
+      servedDocumentCsp(
+        config,
+        served.assets ? assetCspDirectives(config, cspDirectives, access.origin) : cspDirectives,
+      ),
     );
     if (cookie !== null) {
       headers.set("set-cookie", cookie);

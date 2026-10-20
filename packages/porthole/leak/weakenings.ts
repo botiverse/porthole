@@ -190,6 +190,16 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   // A url-mode app's server without its origin check (P101): the harness drops `Origin` and
   // `Sec-Fetch-Site` from the app's requests, so another origin's ride on its cookie.
   "url-origin": "harness",
+  // A served page without its CSP's sandbox (P099): on a tab of its own nothing else sandboxes it.
+  "tab-sandbox": "harness",
+  // The shell's window.open on a tab of its own (P099): the second wall behind the sandbox.
+  "window-open": [
+    {
+      file: RUNTIME,
+      find: "  if (window.top === window) {\n    const openWindow = window.open;",
+      replace: "  if (false) {\n    const openWindow = window.open;",
+    },
+  ],
   // The host's checks on annotation reports (P053): taken only while asked for, within limits.
   "annotation-checks": [
     {
@@ -338,9 +348,12 @@ export function weaken(relative: string, text: string): string {
  * The weakenings the served harness also applies to the documents its content origins serve
  * (their shell is made in the harness's own process, not loaded from the stripped sources): the
  * navigation guard (P079), whose wall in a served frame is the shell alone for another content
- * origin.
+ * origin, and the shell's window.open on a tab (P099).
  */
-const SERVED = ["navigate-guard"];
+const SERVED = ["navigate-guard", "window-open"];
+
+/** Whether a control asked for edits the served documents' shell (`weakenServed`). */
+export const servedShellWeakened = (): boolean => weakened.some((each) => SERVED.includes(each));
 
 export function weakenServed(html: string): string {
   let out = html;

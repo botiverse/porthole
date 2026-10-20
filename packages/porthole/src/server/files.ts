@@ -3,6 +3,7 @@ import {
   assetCspDirectives,
   fileSetCspDirectives,
   INERT_FILE_CSP,
+  servedDocumentCsp,
   serializeCsp,
 } from "../compile/policy.ts";
 import { DEFAULT_ENTRY, lookupFile, requestFilePath, type FileLookup } from "../files/paths.ts";
@@ -232,21 +233,26 @@ export async function serveFile(serving: FileServing): Promise<Response> {
       ? "same-origin"
       : "no-referrer";
   // Its version's files (P082), and its artifact's assets where the config serves them (P089).
-  const frameCsp = serializeCsp(
-    assetCspDirectives(
-      serving.compiled.config,
-      fileSetCspDirectives(serving.compiled.cspDirectives, serving.source),
-      serving.origin,
-    ),
+  const directives = assetCspDirectives(
+    serving.compiled.config,
+    fileSetCspDirectives(serving.compiled.cspDirectives, serving.source),
+    serving.origin,
   );
+  // A page and a script (a worker's policy is its script's) get the page's CSP, a page with its
+  // frame's sandbox, on a tab of its own too (P099); anything else runs nothing when opened on
+  // its own.
+  const csp =
+    role === "file"
+      ? INERT_FILE_CSP
+      : role === "page"
+        ? servedDocumentCsp(serving.compiled.config, directives)
+        : serializeCsp(directives);
   const headers = new Headers({
     "content-type": type,
     "x-content-type-options": "nosniff",
     "referrer-policy": referrer,
     "x-robots-tag": "noindex, nofollow",
-    // A page and a script (a worker's policy is its script's) get the page's CSP; anything else
-    // runs nothing when opened on its own.
-    "content-security-policy": `${role === "file" ? INERT_FILE_CSP : frameCsp}; frame-ancestors ${serving.frameAncestors}`,
+    "content-security-policy": `${csp}; frame-ancestors ${serving.frameAncestors}`,
   });
 
   if (role === "page") {

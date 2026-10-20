@@ -243,6 +243,9 @@ several displays on one page are in [THREAT_MODEL.md](THREAT_MODEL.md).
      realm) reach the network outside a frame's own `connect-src`. These are
      closed by in-shell defenses and by the embedding page's own policy, each
      proven by a leak-suite probe (DESIGN.md lists them).
+   - *A served page outside its frame* (a public link, a new tab) has no frame's sandbox and no
+     embedding page: its own CSP header carries the frame's sandbox tokens, and the shell closes
+     `window.open` and stops it navigating away (P099).
    - *An opaque frame is as closed as its page.* A `srcdoc` frame inherits the
      embedding page's whole policy as well as its own, so on a page with
      `default-src 'none'` and a tight `connect-src`/`img-src` its content is more

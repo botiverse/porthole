@@ -225,6 +225,29 @@ export function sandboxTokens(config: PortholeConfig): string[] {
 }
 
 /**
+ * The `sandbox` a served document's CSP header carries (P099): the frame's own tokens, so a page
+ * opened on a tab of its own (a public link, a new tab, a bookmark, a frame's address opened
+ * outside it) holds no power it lacks in its frame: scripts on its own origin, and no popups,
+ * forms, downloads, modals, or navigation of another window (its opener's included). In a frame
+ * it repeats the frame's attribute, so it changes nothing there; it is sent on every served page,
+ * not only on a `Sec-Fetch-Dest: document` request, so a client that sends no fetch metadata is
+ * sandboxed too and one address needs no `Vary`. Domain isolation only: url mode serves the app's
+ * own documents, and opaque content is never served. Never in a `<meta>` (browsers ignore it there).
+ */
+export function servedSandboxDirective(config: PortholeConfig): CspDirective | null {
+  return config.isolation === "domain" ? ["sandbox", ...sandboxTokens(config)] : null;
+}
+
+/** A served page's CSP header: the page's directives, then its sandbox (P099). */
+export function servedDocumentCsp(
+  config: PortholeConfig,
+  directives: readonly CspDirective[],
+): string {
+  const sandbox = servedSandboxDirective(config);
+  return serializeCsp(sandbox === null ? directives : [...directives, sandbox]);
+}
+
+/**
  * The frame's `allow` attribute (Permissions Policy). No camera, microphone, geolocation,
  * fullscreen or other powerful feature is delegated to the frame, and the clipboard is denied by
  * name (P051): content never writes it, the host does (`copyText`). A url-mode config may
