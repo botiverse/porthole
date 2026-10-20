@@ -645,14 +645,48 @@ export function servedTests(
 
     define(
       "served.domain.tab-navigation",
-      "a page on a tab of its own can't navigate itself away, even after a click",
-      async ({ page }) => {
-        await onTab(page, "tab-navigation");
+      "a page on a tab of its own can't navigate itself away, to an outside site or a blob: document of its own, even after a click",
+      async ({ page, browserName }) => {
+        const located = await host.locate(await host.shell("tab-navigation"));
+        // Location granted by the browser, so a document the shell never ran in would get it.
+        await page
+          .context()
+          .grantPermissions(["geolocation"], { origin: located.origin })
+          .catch(() => {});
+        await page.context().setGeolocation({ latitude: 48.8566, longitude: 2.3522 });
+        expect((await page.goto(located.url))?.status()).toBe(200);
         const before = page.url();
+        // A document it wrote itself: its own origin and CSP (sandbox included), no shell.
+        await page.evaluate(() => {
+          const html = `<!doctype html><title>blob</title><script>
+const said = { rtc: typeof RTCPeerConnection };
+const done = () => { document.title = JSON.stringify(said); };
+navigator.geolocation.getCurrentPosition(() => { said.location = "granted"; done(); }, (e) => { said.location = "denied " + e.code; done(); });
+navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).then(() => { said.media = "granted"; done(); }, (e) => { said.media = "rejected " + e.name; done(); });
+</script>`;
+          const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+          const button = document.createElement("button");
+          button.id = "porthole-probe-blob";
+          button.textContent = "open";
+          button.addEventListener("click", () => {
+            location.href = url;
+          });
+          document.body.append(button);
+        });
+        await press(page, "#porthole-probe-blob");
+        await page.waitForTimeout(SETTLE_MS * 2);
+        if (page.url().startsWith("blob:")) {
+          // What such a document gets, where nothing stopped it (no Navigation API: P099's limit).
+          info?.annotations.push({
+            type: "measured",
+            description: `${browserName}: a blob: document of its own got ${await page.title()}`,
+          });
+        }
+        expect(page.url(), "a blob: document: the tab stays").toBe(before);
         const away = await host.canary("tab-navigation");
         await clickAway(page, `${away}?d=secret`, "self");
         await page.waitForTimeout(SETTLE_MS);
-        expect(page.url(), "the tab stays").toBe(before);
+        expect(page.url(), "an outside site: the tab stays").toBe(before);
         expect(await host.canaryHits("tab-navigation")).toBe(0);
       },
     );

