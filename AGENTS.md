@@ -75,6 +75,10 @@ PORTHOLE_ENGINES=chromium pnpm --filter @botiverse/porthole exec playwright test
 pnpm exec oxfmt <file>                          # format (never prettier)
 ```
 
+CI runs on pushes to main, on pull requests, and by hand (P096): pushes to `agent/*`
+branches (any branch but main) no longer run CI until a pull request exists. To get CI
+before opening one: `stamp workflow run ci.yml --repo botiverse/porthole --ref <branch>`.
+
 WebKit and Firefox need system libraries a shared Linux box may lack (no sudo
 there): run them on a machine that has them (`playwright install --with-deps webkit
 firefox`). Scratch files go under `.dev/scratch/` (gitignored).
