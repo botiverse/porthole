@@ -645,7 +645,7 @@ export function servedTests(
 
     define(
       "served.domain.tab-navigation",
-      'a page on a tab of its own can\'t navigate itself away, to a blob: document of its own or an outside site, by location, navigation.navigate() or open(…, "_self"), even after a click',
+      'a page on a tab of its own can\'t navigate itself away, to a blob: document of its own or an outside site, by location, a link, navigation.navigate() or open(…, "_self"), however the address is given',
       async ({ page, browserName }) => {
         const located = await host.locate(await host.shell("tab-navigation"));
         // Location granted by the browser, so a document the shell never ran in would get it.
@@ -654,78 +654,194 @@ export function servedTests(
           .grantPermissions(["geolocation"], { origin: located.origin })
           .catch(() => {});
         await page.context().setGeolocation({ latitude: 48.8566, longitude: 2.3522 });
-        expect((await page.goto(located.url))?.status()).toBe(200);
-        const before = page.url();
         // A document it wrote itself (its own origin and CSP, sandbox included, no shell), then an
         // outside site; each by `location`, by `navigation.navigate()` (WebKit sent its request though
         // the navigate event cancelled it: measured) and by `open(…, "_self")`.
-        const away = await host.canary("tab-navigation");
-        await page.evaluate((outside) => {
-          const html = `<!doctype html><title>blob</title><script>
+        // Every way a page starts its own navigation: `location` (set, assign, replace), a
+        // target=_self link clicked past the shell, `navigation.navigate()`, `open(…, "_self")`,
+        // and the last two given an object whose address is a page of its own the first time it
+        // is read and the outside site after, and both again with String.prototype, URL, closest
+        // and an event's target replaced by liars that say the address is the page's own. Each
+        // outside one has a canary of its own: WebKit was measured sending the request of
+        // navigation.navigate() and of a link though the navigate event cancelled them.
+        info?.setTimeout(90_000);
+        const ways = [
+          "location",
+          "assign",
+          "replace",
+          "link",
+          "navigate",
+          "open",
+          "navigate-twice",
+          "open-twice",
+          "navigate-lying",
+          "link-lying",
+        ];
+        const canaries = Object.fromEntries(
+          await Promise.all(ways.map(async (how) => [how, await host.canary(`tab-nav-${how}`)])),
+        ) as Record<string, string>;
+        /** The tab, loaded again (its session cookie serves it), with one button armed. */
+        const arm = (tab: Page, kind: string, way: string) =>
+          tab.evaluate(
+            ([outside, name, how]) => {
+              const html = `<!doctype html><title>blob</title><script>
 const said = { rtc: typeof RTCPeerConnection };
 const done = () => { document.title = JSON.stringify(said); };
 navigator.geolocation.getCurrentPosition(() => { said.location = "granted"; done(); }, (e) => { said.location = "denied " + e.code; done(); });
 navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).then(() => { said.media = "granted"; done(); }, (e) => { said.media = "rejected " + e.name; done(); });
 </script>`;
-          const targets: Record<string, string> = {
-            blob: URL.createObjectURL(new Blob([html], { type: "text/html" })),
-            outside: `${outside}?d=secret`,
-          };
-          const navigation = (
-            window as unknown as { navigation?: { navigate(url: string): unknown } }
-          ).navigation;
-          for (const [name, url] of Object.entries(targets)) {
-            for (const how of ["location", "navigate", "open"]) {
-              const button = document.createElement("button");
-              button.id = `porthole-probe-${name}-${how}`;
-              button.textContent = `${name} by ${how}`;
-              button.addEventListener("click", () => {
-                if (how === "location") {
-                  location.href = url;
-                } else if (how === "open") {
-                  window.open(url, "_self");
-                } else if (navigation !== undefined) {
-                  try {
-                    const result = navigation.navigate(url) as {
-                      committed?: Promise<unknown>;
-                      finished?: Promise<unknown>;
-                    };
-                    result.committed?.catch(() => {});
-                    result.finished?.catch(() => {});
-                  } catch {
-                    // Refused: what we want.
+              const blob = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+              const navigation = (
+                window as unknown as { navigation?: { navigate(url: unknown): unknown } }
+              ).navigation;
+              // Links clicked past the shell's own click handling, as content may click them.
+              window.addEventListener(
+                "click",
+                (event) => {
+                  if (event.target instanceof Element && event.target.closest("a") !== null) {
+                    event.stopImmediatePropagation();
+                  }
+                },
+                true,
+              );
+              const twoFaced = (url: string) => {
+                let reads = 0;
+                return {
+                  toString: () => {
+                    reads += 1;
+                    return reads === 1 ? location.href : url;
+                  },
+                };
+              };
+              // Built-ins replaced for the length of one call, each lying in the page's favour.
+              const lying = (run: () => void) => {
+                const here = location.href;
+                const liars: [object, string, unknown][] = [
+                  [String.prototype, "indexOf", () => 0],
+                  [String.prototype, "split", () => [here]],
+                  [
+                    window,
+                    "URL",
+                    function () {
+                      return { href: here };
+                    },
+                  ],
+                  [Element.prototype, "closest", () => null],
+                ];
+                const kept = liars.map(
+                  ([owner, key]) =>
+                    [owner, key, Object.getOwnPropertyDescriptor(owner, key)] as const,
+                );
+                const target = Object.getOwnPropertyDescriptor(Event.prototype, "target");
+                for (const [owner, key, value] of liars) {
+                  Object.defineProperty(owner, key, { configurable: true, writable: true, value });
+                }
+                Object.defineProperty(Event.prototype, "target", {
+                  configurable: true,
+                  get: () => document.body,
+                });
+                try {
+                  run();
+                } finally {
+                  for (const [owner, key, descriptor] of kept) {
+                    if (descriptor !== undefined) {
+                      Object.defineProperty(owner, key, descriptor);
+                    }
+                  }
+                  if (target !== undefined) {
+                    Object.defineProperty(Event.prototype, "target", target);
                   }
                 }
-              });
-              document.body.append(button);
-            }
-          }
-        }, away);
+              };
+              const quiet = (result: unknown) => {
+                const started = result as {
+                  committed?: Promise<unknown>;
+                  finished?: Promise<unknown>;
+                } | null;
+                started?.committed?.catch(() => {});
+                started?.finished?.catch(() => {});
+              };
+              {
+                {
+                  const url = name === "blob" ? blob : `${outside[how]}?d=secret`;
+                  const button = document.createElement("button");
+                  button.id = `porthole-probe-${name}-${how}`;
+                  button.textContent = `${name} by ${how}`;
+                  button.addEventListener("click", () => {
+                    try {
+                      if (how === "location") {
+                        location.href = url;
+                      } else if (how === "assign") {
+                        location.assign(url);
+                      } else if (how === "replace") {
+                        location.replace(url);
+                      } else if (how === "link" || how === "link-lying") {
+                        const link = document.createElement("a");
+                        link.href = url;
+                        link.target = "_self";
+                        document.body.append(link);
+                        if (how === "link") {
+                          link.click();
+                        } else {
+                          lying(() => link.click());
+                        }
+                      } else if (how === "navigate-lying") {
+                        lying(() => quiet(navigation?.navigate(url)));
+                      } else if (how === "open") {
+                        window.open(url, "_self");
+                      } else if (how === "open-twice") {
+                        window.open(twoFaced(url) as unknown as string, "_self");
+                      } else if (navigation !== undefined) {
+                        quiet(navigation.navigate(how === "navigate" ? url : twoFaced(url)));
+                      }
+                    } catch {
+                      // Refused: what we want.
+                    }
+                  });
+                  document.body.append(button);
+                }
+              }
+            },
+            [canaries, kind, way] as const,
+          );
         for (const name of ["blob", "outside"]) {
-          for (const how of ["location", "navigate", "open"]) {
+          for (const how of ways) {
+            // A tab of its own each time, from a fresh ticket: WebKit was measured sending a
+            // cancelled navigation's request from a tab's first, and not from one after another.
+            const fresh = await host.locate(await host.shell("tab-navigation"));
+            const tab = await page.context().newPage();
+            expect((await tab.goto(fresh.url))?.status()).toBe(200);
+            const here = tab.url();
+            await arm(tab, name, how);
             const id = `porthole-probe-${name}-${how}`;
-            // A person's click for `location`; the others need none, and a click's action may
-            // wait on a navigation the engine started and then dropped.
-            if (how === "location") {
-              await press(page, `#${id}`);
-            } else {
-              await page.evaluate((each) => document.getElementById(each)?.click(), id);
-            }
-            await page.waitForTimeout(SETTLE_MS * 2);
-            if (page.url().startsWith("blob:")) {
+            // Clicked by the page itself, after the evaluation returns: none of these needs a
+            // person's click, and a Playwright action may wait on a navigation the engine started
+            // and dropped (measured: WebKit, a mouse click after these, never returned).
+            await tab.evaluate((each) => {
+              setTimeout(() => document.getElementById(each)?.click(), 0);
+            }, id);
+            await tab.waitForTimeout(SETTLE_MS);
+            if (tab.url().startsWith("blob:")) {
               // What such a document gets, where nothing stopped it (P099's accepted limit).
               info?.annotations.push({
                 type: "measured",
-                description: `${browserName}: a blob: document of its own, by ${how}, got ${await page.title()}`,
+                description: `${browserName}: a blob: document of its own, by ${how}, got ${await tab.title()}`,
               });
             }
             expect(
-              page.url(),
+              tab.url(),
               `a ${name === "blob" ? "blob: document" : "outside site"} by ${how}: the tab stays`,
-            ).toBe(before);
+            ).toBe(here);
+            await tab.close();
           }
         }
-        expect(await host.canaryHits("tab-navigation"), "the outside site").toBe(0);
+        await page.waitForTimeout(SETTLE_MS);
+        const heard = (
+          await Promise.all(
+            ways.map(async (how) => [how, await host.canaryHits(`tab-nav-${how}`)] as const),
+          )
+        ).filter(([, hits]) => hits > 0);
+        expect(heard, "the outside site heard these").toEqual([]);
       },
     );
 

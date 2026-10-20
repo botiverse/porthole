@@ -347,9 +347,11 @@ the attacker (c), and its readers are strangers.
   lacks by default). The shell adds its own walls there, the only ones on engines that don't apply
   that header (WebKit, Firefox): `window.open` answers null; picture-in-picture windows, devices,
   location, full screen, passkeys, the share sheet and payments (Apple Pay too) are refused at
-  once; and its navigation guard stops the page navigating itself away, by `location`,
-  `navigation.navigate()` (which asks the guard's rule before it starts: WebKit sends its request
-  otherwise) or `open(…, "_self")`. `defineHostConformance`'s `served.domain.tab-*` cases check it through
+  once; and its navigation guard stops the page navigating itself away, by `location` (set,
+  `assign`, `replace`), a link, `navigation.navigate()` or `open(…, "_self")`. The last three ask
+  the guard's rule before they start (WebKit sends a link's and `navigate()`'s request otherwise),
+  read the address once, and read it through the platform's own functions, so a page can't
+  hand them one address to check and another to go to. `defineHostConformance`'s `served.domain.tab-*` cases check it through
   the host's real edge.
 
 **The host must**

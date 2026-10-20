@@ -4503,10 +4503,27 @@ but `.tab-navigation`, on every engine. Measured then, on a tab: `documentPictur
    tab's `open(…, "_self")`, with the guard's own rule (`mayNavigate`: the same address, a
    fragment, or another page of the set, P084, go on; anything else is stopped before any request,
    answered as an aborted navigation, and told to the host as the guard tells it).
-   `served.domain.tab-navigation` sends the tab to a `blob:` document of its own and to an outside
-   site, each by `location`, `navigation.navigate()` and `open(…, "_self")`; the `navigate-ask`
-   control (the wrapper alone out) fails it on WebKit only, as measured, and `navigate-guard` now
-   takes both out.
+   After the next review: the address is read once (`String()` and resolved there) and the call is
+   given that address, absolute, so an object whose `toString` names a page of its own the first
+   time and an outside site the next can't pass the rule and then go elsewhere (it did on WebKit:
+   the canary heard it). The rule reads through the platform's own functions, kept at the start
+   (`String`, `URL`, the `href` getter, `String.prototype`'s `indexOf`, `slice`, `lastIndexOf`,
+   `toLowerCase`; `ownPage` too, which the guard and P084's links share, and the renewal's check
+   of a sealed base), so a page that replaces them can't make an outside address look like its
+   own. And a link that would navigate a tab (no target, `_self`, `_top`, `_parent`) asks the same
+   rule from the first click listener there is (the shell's, on `window`, capturing, reading the
+   event's target, `closest` and `getAttribute` through the platform's own), before content can
+   step past the shell's own link handling: WebKit sent a link's request though the navigate event
+   cancelled it. Measured on WebKit, each way from a tab of its own: `location.href`,
+   `location.assign`, `location.replace` and `open(…, "_self")` sent nothing (the navigate event
+   stops them before any request); a link and `navigation.navigate()` did, until the rule asked
+   first. At 6cbaeb8 the canary heard a link, a two-faced `navigate()`, and both with the
+   built-ins lying; now none, on any engine. `served.domain.tab-navigation` tries each way
+   (`location`, `assign`, `replace`, a link past the shell, `navigate()`, `open(…, "_self")`, both
+   two-faced, and a link and `navigate()` with the built-ins lying) toward a `blob:` document of
+   its own and an outside site, each in a fresh tab (WebKit sent such a request from a tab's first
+   attempt and not always after); the `navigate-ask` control (the rule says yes to everything)
+   fails it on WebKit only, as measured, and `navigate-guard` now takes both out.
    *A lock that doesn't take.* `lock` fixes each wall with a non-configurable property; one that
    something fixed before the shell ran (an extension, an engine's own) can't be, and was
    swallowed. Now each such name goes on the shell's own script element

@@ -31,7 +31,7 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
     // The calls that ask the guard's rule first (P099): they start what they're asked.
     {
       file: RUNTIME,
-      find: '    return { go: target.split("#")[0] === location.href.split("#")[0] || ownPage(target), target };',
+      find: '    return { go: before(target, "#") === before(location.href, "#") || ownPage(target), target };',
       replace: "    return { go: true, target };",
     },
   ],
@@ -40,7 +40,7 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "navigate-ask": [
     {
       file: RUNTIME,
-      find: '    return { go: target.split("#")[0] === location.href.split("#")[0] || ownPage(target), target };',
+      find: '    return { go: before(target, "#") === before(location.href, "#") || ownPage(target), target };',
       replace: "    return { go: true, target };",
     },
   ],

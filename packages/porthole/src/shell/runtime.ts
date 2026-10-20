@@ -127,13 +127,28 @@ export const SHELL_RUNTIME = String.raw`(() => {
     }
     return out.replace(SEALED, "./");
   };
+  // The platform's own string and URL functions, kept now (P099): the rules that decide where this
+  // document may go must read an address as the platform does, whatever content later puts on
+  // String.prototype, URL or Reflect.
+  const callOf = Reflect.apply;
+  const NativeString = String;
+  const NativeURL = URL;
+  const urlHref = Object.getOwnPropertyDescriptor(URL.prototype, "href").get;
+  const indexIn = String.prototype.indexOf;
+  const lastIndexIn = String.prototype.lastIndexOf;
+  const sliceOf = String.prototype.slice;
+  const lowerOf = String.prototype.toLowerCase;
+  const before = (text, mark) => {
+    const at = callOf(indexIn, text, [mark]);
+    return at < 0 ? text : callOf(sliceOf, text, [0, at]);
+  };
   const ownPage = (url) => {
-    if (filesBase === null || typeof url !== "string" || url.indexOf(filesBase) !== 0) {
+    if (filesBase === null || typeof url !== "string" || callOf(indexIn, url, [filesBase]) !== 0) {
       return false;
     }
-    const path = url.slice(filesBase.length).split("#")[0].split("?")[0];
-    const last = path.slice(path.lastIndexOf("/") + 1);
-    return last === "" || last.indexOf(".") < 0 || /\.html?$/i.test(last);
+    const path = before(before(callOf(sliceOf, url, [filesBase.length]), "#"), "?");
+    const last = callOf(lowerOf, callOf(sliceOf, path, [callOf(lastIndexIn, path, ["/"]) + 1]), []);
+    return last === "" || callOf(indexIn, last, ["."]) < 0 || callOf(sliceOf, last, [-5]) === ".html" || callOf(sliceOf, last, [-4]) === ".htm";
   };
   const navigationApi = window.navigation;
   const getterOf = (proto, name) => {
@@ -174,14 +189,17 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // cancels it (measured on a tab: an outside site heard it). Within the document (a fragment, the
   // same address) or another page of its own set (P084) goes on, as the guard lets it; anything
   // else is stopped here, before any request, and the host told, as the guard does.
+  // The address is read once (String() and resolved here), and the call is given that address,
+  // absolute: what was checked is what goes, whatever an object's toString says the next time.
   const mayNavigate = (url) => {
+    const text = NativeString(url);
     let target = "";
     try {
-      target = new URL(String(url), document.baseURI).href;
+      target = callOf(urlHref, new NativeURL(text, document.baseURI), []);
     } catch (_) {
-      return { go: true, target };
+      throw new DOMException("Not a URL", "SyntaxError");
     }
-    return { go: target.split("#")[0] === location.href.split("#")[0] || ownPage(target), target };
+    return { go: before(target, "#") === before(location.href, "#") || ownPage(target), target };
   };
   const navigationProto = typeof Navigation === "function" ? Navigation.prototype : null;
   if (navigationProto !== null && typeof navigationProto.navigate === "function") {
@@ -189,7 +207,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
     lock(navigationProto, "navigate", function (url, options) {
       const asked = mayNavigate(url);
       if (asked.go) {
-        return applyOf(navigateOriginal, this, [url, options]);
+        return applyOf(navigateOriginal, this, [asked.target, options]);
       }
       navigationBlocked(asked.target);
       const aborted = Promise.reject(new DOMException("Navigation was aborted", "AbortError"));
@@ -216,11 +234,41 @@ export const SHELL_RUNTIME = String.raw`(() => {
         navigationBlocked(asked.target);
         return null;
       }
-      return applyOf(openWindow, window, [url, target, features]);
+      return applyOf(openWindow, window, [asked.target, "_self", features]);
     });
     if (typeof DocumentPictureInPicture === "function") {
       lock(DocumentPictureInPicture.prototype, "requestWindow", () => Promise.reject(new DOMException("A page here opens no other window", "NotAllowedError")));
     }
+    // A link that would navigate this tab (no target, _self, _top, _parent) asks the same rule, from
+    // the first click listener there is (window, capturing, the shell's own before any content's):
+    // WebKit sends a link's request though the navigate event cancels it (measured), and content
+    // can step past the shell's own link handling below. Read through the platform's own getters.
+    const eventTarget = getterOf(Event.prototype, "target");
+    const closestOf = Element.prototype.closest;
+    const attributeOf = Element.prototype.getAttribute;
+    const attributeNSOf = Element.prototype.getAttributeNS;
+    window.addEventListener("click", (event) => {
+      let link = null;
+      try {
+        const element = eventTarget === null ? null : callOf(eventTarget, event, []);
+        link = element ? callOf(closestOf, element, ["a, area"]) : null;
+      } catch (_) {}
+      if (link === null) {
+        return;
+      }
+      const target = callOf(lowerOf, NativeString(callOf(attributeOf, link, ["target"]) || ""), []);
+      if (target !== "" && target !== "_self" && target !== "_top" && target !== "_parent") {
+        return;
+      }
+      const href = callOf(attributeOf, link, ["href"]) || callOf(attributeNSOf, link, ["http://www.w3.org/1999/xlink", "href"]) || "";
+      let asked = { go: false, target: "" };
+      try {
+        asked = mayNavigate(href);
+      } catch (_) {}
+      if (!asked.go) {
+        callOf(preventNavigation, event, []);
+      }
+    }, true);
   }
 
   // Nor, on a tab, the camera, the microphone, the screen, location, full screen, passkeys, the
@@ -710,7 +758,10 @@ export const SHELL_RUNTIME = String.raw`(() => {
       nativeFetch(filesBase + "__porthole/renew", { credentials: "omit", cache: "no-store" })
         .then((answer) => (answer.ok ? answer.json() : null))
         .then((renewed) => {
-          if (!renewed || typeof renewed.base !== "string" || typeof renewed.expires !== "number" || renewed.base.indexOf(location.origin + "/__porthole/f/") !== 0 || renewed.base.slice(-1) !== "/") {
+          // Checked through the platform's own functions: content may have replaced a prototype's,
+          // and the base decides where this page may go (ownPage).
+          const prefix = location.origin + "/__porthole/f/";
+          if (!renewed || typeof renewed.base !== "string" || typeof renewed.expires !== "number" || callOf(indexIn, renewed.base, [prefix]) !== 0 || callOf(indexIn, callOf(sliceOf, renewed.base, [prefix.length, -1]), ["/"]) !== -1 || callOf(sliceOf, renewed.base, [-1]) !== "/") {
             return;
           }
           const here = location.href;
