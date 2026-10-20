@@ -28,6 +28,21 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       find: '  if (navigationApi && typeof navigationApi.addEventListener === "function"',
       replace: '  if (false && typeof navigationApi.addEventListener === "function"',
     },
+    // The calls that ask the guard's rule first (P099): they start what they're asked.
+    {
+      file: RUNTIME,
+      find: '    return { go: target.split("#")[0] === location.href.split("#")[0] || ownPage(target), target };',
+      replace: "    return { go: true, target };",
+    },
+  ],
+  // Only the guard's rule asked first (P099): navigation.navigate() and open(…, "_self") start
+  // what they're asked, and the navigate event alone stops them (WebKit sends the request anyway).
+  "navigate-ask": [
+    {
+      file: RUNTIME,
+      find: '    return { go: target.split("#")[0] === location.href.split("#")[0] || ownPage(target), target };',
+      replace: "    return { go: true, target };",
+    },
   ],
   "attach-shadow": [
     {
@@ -361,7 +376,7 @@ export function weaken(relative: string, text: string): string {
  * navigation guard (P079), whose wall in a served frame is the shell alone for another content
  * origin, and the shell's window.open and device locks on a tab (P099).
  */
-const SERVED = ["navigate-guard", "window-open", "device-locks"];
+const SERVED = ["navigate-guard", "navigate-ask", "window-open", "device-locks"];
 
 /** Whether a control asked for edits the served documents' shell (`weakenServed`). */
 export const servedShellWeakened = (): boolean => weakened.some((each) => SERVED.includes(each));

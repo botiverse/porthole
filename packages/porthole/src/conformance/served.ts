@@ -645,7 +645,7 @@ export function servedTests(
 
     define(
       "served.domain.tab-navigation",
-      "a page on a tab of its own can't navigate itself away, to an outside site or a blob: document of its own, even after a click",
+      'a page on a tab of its own can\'t navigate itself away, to a blob: document of its own or an outside site, by location, navigation.navigate() or open(…, "_self"), even after a click',
       async ({ page, browserName }) => {
         const located = await host.locate(await host.shell("tab-navigation"));
         // Location granted by the browser, so a document the shell never ran in would get it.
@@ -656,38 +656,76 @@ export function servedTests(
         await page.context().setGeolocation({ latitude: 48.8566, longitude: 2.3522 });
         expect((await page.goto(located.url))?.status()).toBe(200);
         const before = page.url();
-        // A document it wrote itself: its own origin and CSP (sandbox included), no shell.
-        await page.evaluate(() => {
+        // A document it wrote itself (its own origin and CSP, sandbox included, no shell), then an
+        // outside site; each by `location`, by `navigation.navigate()` (WebKit sent its request though
+        // the navigate event cancelled it: measured) and by `open(…, "_self")`.
+        const away = await host.canary("tab-navigation");
+        await page.evaluate((outside) => {
           const html = `<!doctype html><title>blob</title><script>
 const said = { rtc: typeof RTCPeerConnection };
 const done = () => { document.title = JSON.stringify(said); };
 navigator.geolocation.getCurrentPosition(() => { said.location = "granted"; done(); }, (e) => { said.location = "denied " + e.code; done(); });
 navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).then(() => { said.media = "granted"; done(); }, (e) => { said.media = "rejected " + e.name; done(); });
 </script>`;
-          const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
-          const button = document.createElement("button");
-          button.id = "porthole-probe-blob";
-          button.textContent = "open";
-          button.addEventListener("click", () => {
-            location.href = url;
-          });
-          document.body.append(button);
-        });
-        await press(page, "#porthole-probe-blob");
-        await page.waitForTimeout(SETTLE_MS * 2);
-        if (page.url().startsWith("blob:")) {
-          // What such a document gets, where nothing stopped it (no Navigation API: P099's limit).
-          info?.annotations.push({
-            type: "measured",
-            description: `${browserName}: a blob: document of its own got ${await page.title()}`,
-          });
+          const targets: Record<string, string> = {
+            blob: URL.createObjectURL(new Blob([html], { type: "text/html" })),
+            outside: `${outside}?d=secret`,
+          };
+          const navigation = (
+            window as unknown as { navigation?: { navigate(url: string): unknown } }
+          ).navigation;
+          for (const [name, url] of Object.entries(targets)) {
+            for (const how of ["location", "navigate", "open"]) {
+              const button = document.createElement("button");
+              button.id = `porthole-probe-${name}-${how}`;
+              button.textContent = `${name} by ${how}`;
+              button.addEventListener("click", () => {
+                if (how === "location") {
+                  location.href = url;
+                } else if (how === "open") {
+                  window.open(url, "_self");
+                } else if (navigation !== undefined) {
+                  try {
+                    const result = navigation.navigate(url) as {
+                      committed?: Promise<unknown>;
+                      finished?: Promise<unknown>;
+                    };
+                    result.committed?.catch(() => {});
+                    result.finished?.catch(() => {});
+                  } catch {
+                    // Refused: what we want.
+                  }
+                }
+              });
+              document.body.append(button);
+            }
+          }
+        }, away);
+        for (const name of ["blob", "outside"]) {
+          for (const how of ["location", "navigate", "open"]) {
+            const id = `porthole-probe-${name}-${how}`;
+            // A person's click for `location`; the others need none, and a click's action may
+            // wait on a navigation the engine started and then dropped.
+            if (how === "location") {
+              await press(page, `#${id}`);
+            } else {
+              await page.evaluate((each) => document.getElementById(each)?.click(), id);
+            }
+            await page.waitForTimeout(SETTLE_MS * 2);
+            if (page.url().startsWith("blob:")) {
+              // What such a document gets, where nothing stopped it (P099's accepted limit).
+              info?.annotations.push({
+                type: "measured",
+                description: `${browserName}: a blob: document of its own, by ${how}, got ${await page.title()}`,
+              });
+            }
+            expect(
+              page.url(),
+              `a ${name === "blob" ? "blob: document" : "outside site"} by ${how}: the tab stays`,
+            ).toBe(before);
+          }
         }
-        expect(page.url(), "a blob: document: the tab stays").toBe(before);
-        const away = await host.canary("tab-navigation");
-        await clickAway(page, `${away}?d=secret`, "self");
-        await page.waitForTimeout(SETTLE_MS);
-        expect(page.url(), "an outside site: the tab stays").toBe(before);
-        expect(await host.canaryHits("tab-navigation")).toBe(0);
+        expect(await host.canaryHits("tab-navigation"), "the outside site").toBe(0);
       },
     );
 
@@ -779,7 +817,7 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
 
     define(
       "served.domain.tab-prompts",
-      "a page on a tab of its own can't ask for a passkey, a payment or a share, or put a video in full screen, even after a click",
+      "a page on a tab of its own can't ask for a passkey, a payment (Apple Pay too) or a share, or put a video in full screen, even after a click",
       async ({ page }) => {
         // Each where the engine has it, refused at once (a prompt would wait for the person, up
         // to the request's own timeout). A payment method's address is fetched by the browser,
@@ -834,6 +872,36 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
                 ? navigator.share({ title: "Probe", url: `${payTo}?via=share` })
                 : undefined,
             );
+            // WebKit's Apple Pay sheet, where it has one: a session begun from a click.
+            const ApplePay = (
+              window as unknown as {
+                ApplePaySession?: new (
+                  version: number,
+                  request: object,
+                ) => EventTarget & {
+                  begin(): void;
+                };
+              }
+            ).ApplePaySession;
+            const applePay = timed(() => {
+              if (ApplePay === undefined) {
+                return undefined;
+              }
+              const session = new ApplePay(3, {
+                countryCode: "US",
+                currencyCode: "USD",
+                supportedNetworks: ["visa"],
+                merchantCapabilities: ["supports3DS"],
+                total: { label: "Probe", amount: "1.00" },
+              });
+              return new Promise((resolve, reject) => {
+                session.addEventListener("cancel", () =>
+                  reject(new DOMException("cancelled", "AbortError")),
+                );
+                session.begin();
+                setTimeout(() => resolve("begun"), 1_000);
+              });
+            });
             const video = document.createElement("video");
             document.body.append(video);
             const enter = (video as unknown as { webkitEnterFullscreen?: () => void })
@@ -847,17 +915,20 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
                 videoFullscreen = `refused ${error instanceof Error ? error.name : "error"}`;
               }
             }
-            void Promise.all([passkey, payment, share]).then(([key, pay, sent]) => {
-              document.body.dataset.prompts = JSON.stringify({
-                passkey: key,
-                payment: pay,
-                share: sent,
-                video: videoFullscreen,
-                shown:
-                  (video as unknown as { webkitDisplayingFullscreen?: boolean })
-                    .webkitDisplayingFullscreen === true,
-              });
-            });
+            void Promise.all([passkey, payment, share, applePay]).then(
+              ([key, pay, sent, apple]) => {
+                document.body.dataset.prompts = JSON.stringify({
+                  passkey: key,
+                  payment: pay,
+                  share: sent,
+                  applePay: apple,
+                  video: videoFullscreen,
+                  shown:
+                    (video as unknown as { webkitDisplayingFullscreen?: boolean })
+                      .webkitDisplayingFullscreen === true,
+                });
+              },
+            );
           });
           document.body.append(button);
         }, canary);
@@ -875,6 +946,7 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
         expect(atOnce(said.passkey), `a passkey: ${String(said.passkey)}`).toBe(true);
         expect(atOnce(said.payment), `a payment: ${String(said.payment)}`).toBe(true);
         expect(atOnce(said.share), `a share: ${String(said.share)}`).toBe(true);
+        expect(atOnce(said.applePay), `Apple Pay: ${String(said.applePay)}`).toBe(true);
         expect(
           said.video === "absent" || String(said.video).startsWith("refused"),
           `a video's full screen: ${String(said.video)}`,

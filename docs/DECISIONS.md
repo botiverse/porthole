@@ -4495,6 +4495,26 @@ but `.tab-navigation`, on every engine. Measured then, on a tab: `documentPictur
    sandbox refuses it, on Chromium (`InvalidStateError`) and Firefox (`UnknownError`, no window
    made). In a frame the frame's sandbox stays the wall, and
    row 6's `sandbox` control still fails `6.open`.
+   *`navigation.navigate()` asks first, in every shell.* WebKit sends its request though the
+   navigate event cancels the navigation (measured on a tab: the canary heard an outside site
+   while the page stayed and the call rejected with `AbortError`; `location.href` sent nothing,
+   and a `blob:` target, which has no request, stayed too; live.spec.ts had seen WebKit start it
+   in a frame without the event first). So the shell wraps `Navigation.prototype.navigate`, and a
+   tab's `open(…, "_self")`, with the guard's own rule (`mayNavigate`: the same address, a
+   fragment, or another page of the set, P084, go on; anything else is stopped before any request,
+   answered as an aborted navigation, and told to the host as the guard tells it).
+   `served.domain.tab-navigation` sends the tab to a `blob:` document of its own and to an outside
+   site, each by `location`, `navigation.navigate()` and `open(…, "_self")`; the `navigate-ask`
+   control (the wrapper alone out) fails it on WebKit only, as measured, and `navigate-guard` now
+   takes both out.
+   *A lock that doesn't take.* `lock` fixes each wall with a non-configurable property; one that
+   something fixed before the shell ran (an extension, an engine's own) can't be, and was
+   swallowed. Now each such name goes on the shell's own script element
+   (`data-porthole-unfixed`) and, once the shell can speak, to the host as an error report. The
+   tab case "the shell fixes each of its walls in place" finds none in a frame or on a tab on any
+   engine, and names `open` where a script fixed it first. WebKit's `ApplePaySession` is locked
+   with the other payments (absent in Playwright's WebKit on Linux: `.tab-prompts` asks where it
+   is).
 5. **Probes**, in the served conformance suite (shipped: `defineHostConformance` runs them against
    an app's real page and edge): `served.domain.tab-window-open`, `.tab-escapes`, `.tab-opener`,
    `.tab-navigation` (an outside site, then a `blob:` document of its own), `.tab-devices`

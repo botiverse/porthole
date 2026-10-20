@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Frame, type Page } from "@playwright/test";
 import type { PortholeConfig } from "../../src/index.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
 import { servedTests, TAB_CASES } from "../../src/conformance/served.ts";
@@ -162,4 +162,33 @@ test("a frame's sealed address opened on a tab of its own is sandboxed as its fr
   await expect(tab.locator("#sealed")).toHaveText("sealed");
   expect(await tryEscapes(tab, unique("tab-sealed-escape"))).toEqual(CLOSED);
   await tab.close();
+});
+
+test("the shell fixes each of its walls in place, and says which it couldn't", async ({ page }) => {
+  const instance: InstanceRef = {
+    scope: unique("tab-locks"),
+    document: { kind: "shell", preset: "inlineWidget" },
+  };
+  const unfixed = (where: Page | Frame) =>
+    where.evaluate(
+      () =>
+        document
+          .querySelector("script[data-porthole-unfixed]")
+          ?.getAttribute("data-porthole-unfixed") ?? null,
+    );
+  // In a frame and on a tab, as every page is: each one fixed.
+  const shown = await servedHost.show(page, instance);
+  expect(await unfixed(await shown.frame()), "in a frame").toBeNull();
+  await page.goto((await servedHost.locate(instance)).url);
+  expect(await unfixed(page), "on a tab").toBeNull();
+  // A property fixed before the shell ran (an extension's, an engine's own): the shell says so.
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "open", {
+      configurable: false,
+      writable: false,
+      value: window.open,
+    });
+  });
+  await page.goto((await servedHost.locate(instance)).url);
+  expect((await unfixed(page))?.split(" ")).toContain("open");
 });

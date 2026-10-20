@@ -47,11 +47,25 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // script the shell runs for the content carries it.
   const nonce = document.currentScript && document.currentScript.nonce ? document.currentScript.nonce : "";
   const declared = (name) => Object.prototype.hasOwnProperty.call(plan.capabilities, name);
-  // Fixed in place: content can neither restore what is removed nor replace what is wrapped.
+  // Fixed in place: content can neither restore what is removed nor replace what is wrapped. A
+  // property something fixed before the shell ran (an extension, an engine's own) can't be: each
+  // such name goes on the shell's own script element (data-porthole-unfixed, for a test or a
+  // person to see) and, once the shell can speak, to the host as an error report.
+  const shellScript = document.currentScript;
+  const unfixed = [];
+  let tellUnfixed = (_name) => {};
   const lock = (target, name, value) => {
     try {
       Object.defineProperty(target, name, { configurable: false, writable: false, value });
-    } catch (_) {}
+    } catch (_) {
+      unfixed.push(String(name));
+      try {
+        if (shellScript) {
+          shellScript.setAttribute("data-porthole-unfixed", unfixed.join(" "));
+        }
+      } catch (_) {}
+      tellUnfixed(String(name));
+    }
   };
 
   if (plan.storage === "memory") {
@@ -155,17 +169,54 @@ export const SHELL_RUNTIME = String.raw`(() => {
     }, true);
   }
 
+  // The calls that start a navigation and can be asked first ask the guard's rule before they
+  // start one (P099): WebKit sends navigation.navigate()'s request though the navigate event
+  // cancels it (measured on a tab: an outside site heard it). Within the document (a fragment, the
+  // same address) or another page of its own set (P084) goes on, as the guard lets it; anything
+  // else is stopped here, before any request, and the host told, as the guard does.
+  const mayNavigate = (url) => {
+    let target = "";
+    try {
+      target = new URL(String(url), document.baseURI).href;
+    } catch (_) {
+      return { go: true, target };
+    }
+    return { go: target.split("#")[0] === location.href.split("#")[0] || ownPage(target), target };
+  };
+  const navigationProto = typeof Navigation === "function" ? Navigation.prototype : null;
+  if (navigationProto !== null && typeof navigationProto.navigate === "function") {
+    const navigateOriginal = navigationProto.navigate;
+    lock(navigationProto, "navigate", function (url, options) {
+      const asked = mayNavigate(url);
+      if (asked.go) {
+        return applyOf(navigateOriginal, this, [url, options]);
+      }
+      navigationBlocked(asked.target);
+      const aborted = Promise.reject(new DOMException("Navigation was aborted", "AbortError"));
+      aborted.catch(() => {});
+      return { committed: aborted, finished: aborted };
+    });
+  }
+
   // A page on a tab of its own opens no window (P099): a window would carry what a visitor typed
   // out in its address. Its document's CSP sandbox is the wall (no allow-popups); this is the
   // second, for an edge that drops the header. In a frame the frame's sandbox answers already
-  // (null; a throw on Firefox). "_self" stays a navigation of this document, which the guard above
-  // decides; every other target opens nothing. Nor a picture-in-picture document (Chromium,
+  // (null; a throw on Firefox). "_self" stays a navigation of this document, where the guard's
+  // rule lets one (mayNavigate, above); every other target opens nothing. Nor a picture-in-picture document (Chromium,
   // Firefox): a window of this origin in a fresh realm, where nothing above ever ran (only a
   // top-level page may open one, so a frame can't).
   if (window.top === window) {
     const openWindow = window.open;
     lock(window, "open", function (url, target, features) {
-      return typeof target === "string" && target.trim().toLowerCase() === "_self" ? applyOf(openWindow, window, [url, target, features]) : null;
+      if (typeof target !== "string" || target.trim().toLowerCase() !== "_self") {
+        return null;
+      }
+      const asked = mayNavigate(url);
+      if (!asked.go) {
+        navigationBlocked(asked.target);
+        return null;
+      }
+      return applyOf(openWindow, window, [url, target, features]);
     });
     if (typeof DocumentPictureInPicture === "function") {
       lock(DocumentPictureInPicture.prototype, "requestWindow", () => Promise.reject(new DOMException("A page here opens no other window", "NotAllowedError")));
@@ -212,8 +263,8 @@ export const SHELL_RUNTIME = String.raw`(() => {
       }
     }
     // A video's own full screen (WebKit), passkeys and saved passwords, the share sheet, and
-    // payments (whose method's address the browser fetches outside the CSP): each a prompt or a
-    // way out a frame never has.
+    // payments (whose method's address the browser fetches outside the CSP; WebKit's Apple Pay
+    // sheet): each a prompt or a way out a frame never has.
     const notHere = () => {
       throw new DOMException("Not available here", "NotAllowedError");
     };
@@ -237,6 +288,11 @@ export const SHELL_RUNTIME = String.raw`(() => {
     }
     if (typeof PaymentRequest === "function") {
       lock(window, "PaymentRequest", function () {
+        throw new DOMException("Payments aren't available here", "SecurityError");
+      });
+    }
+    if (typeof ApplePaySession === "function") {
+      lock(window, "ApplePaySession", function () {
         throw new DOMException("Payments aren't available here", "SecurityError");
       });
     }
@@ -671,6 +727,10 @@ export const SHELL_RUNTIME = String.raw`(() => {
     };
     setTimeout(renew, renewIn(plan.files.expires));
   }
+
+  // What the shell couldn't fix in place (above), told to the host now that it can be, and after.
+  tellUnfixed = (name) => report("Porthole couldn't fix " + name + " in place: a defense here may be missing");
+  unfixed.forEach((name) => tellUnfixed(name));
 
   // A parsed tree's scripts are held (each replaced by a numbered marker) and run later, in order,
   // as the page's parser would run them: each made again, live, in its marker's place, and each
