@@ -239,6 +239,8 @@ export const SHELL_RUNTIME = String.raw`(() => {
     if (typeof DocumentPictureInPicture === "function") {
       lock(DocumentPictureInPicture.prototype, "requestWindow", () => Promise.reject(new DOMException("A page here opens no other window", "NotAllowedError")));
     }
+  }
+  if (window.top === window) {
     // A link that would navigate this tab (no target, _self, _top, _parent) asks the same rule, from
     // the first click listener there is (window, capturing, the shell's own before any content's):
     // WebKit sends a link's request though the navigate event cancels it (measured), and content
