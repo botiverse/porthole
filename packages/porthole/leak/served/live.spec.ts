@@ -182,11 +182,29 @@ test.describe("a live widget (P079)", () => {
       // Then the frame: kept, or started again from its content (P031) where the engine
       // replaced its document on a navigation the page's frame-src blocked (measured: WebKit,
       // for navigation.navigate() to an outside site, which fires no navigate event first).
-      const record = await shown.read();
       // The host was told (P080): the sibling's address whole, and a content error naming it
-      // without its query (where the secret is).
-      expect(record.navigationsBlocked).toContain(sibling);
-      const told = record.contentErrors.find((message) => message.includes("navigate its frame"));
+      // without its query (where the secret is). Waited for, not read once after the settle: on
+      // a busy machine the report can come later than it (P098).
+      const toldOf = async () =>
+        (await shown.read()).contentErrors.find((message) =>
+          message.includes("navigate its frame"),
+        );
+      await expect.poll(async () => (await shown.read()).navigationsBlocked).toContain(sibling);
+      await expect.poll(toldOf).toBeDefined();
+      const told = await toldOf();
+      // Its script ran to the end in the frame, or the frame was started again (its document
+      // replaced, so the script never ends): which one, once it is so.
+      await expect
+        .poll(
+          async () =>
+            (await shown.read()).outcomes.length > 1 ||
+            (await frame
+              .evaluate(() => document.documentElement.dataset.done === "1")
+              .catch(() => false)),
+          { timeout: 20_000 },
+        )
+        .toBe(true);
+      const record = await shown.read();
       expect(told).toContain(`http://sibling-${name}.localhost:${port}/?…`);
       expect(told).not.toContain("secret");
       if (record.outcomes.length > 1) {

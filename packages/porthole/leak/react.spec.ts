@@ -270,16 +270,34 @@ test("the default dialog: the whole text and the display's title, Cancel focused
     ],
   });
   const inside = frameOf(page, "p");
+  // A press the moment it opens (a click meant for the content) does nothing. Pressed as the
+  // dialog's buttons are put in, before any timer can run, so it is the moment it opens however
+  // slow the machine (a click after the checks below came after the arming delay on a busy one,
+  // P098).
+  await page.evaluate(() => {
+    const observer = new MutationObserver(() => {
+      const accept = document.querySelector<HTMLButtonElement>(
+        "dialog[data-porthole-confirm=sendPrompt] [data-porthole-accept]",
+      );
+      if (accept !== null) {
+        observer.disconnect();
+        (window as unknown as { pressed: string | null }).pressed = accept.dataset.armed ?? null;
+        accept.click();
+      }
+    });
+    observer.observe(document.body, { subtree: true, childList: true });
+  });
   await inside.locator("#ask").click();
   const dialog = page.locator("dialog[data-porthole-confirm=sendPrompt]");
   await expect(dialog).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { pressed: unknown }).pressed)).toBe(
+    "false",
+  );
   await expect(dialog.locator("[data-porthole-detail]")).toHaveText(
     "Explain why signups doubled in March",
   );
   await expect(dialog.locator("[data-porthole-source]")).toHaveText("From “Ask about March”");
   await expect(dialog.locator("[data-porthole-cancel]")).toBeFocused();
-  // A press the moment it opens (a click meant for the content) does nothing.
-  await dialog.locator("[data-porthole-accept]").click();
   await expect(dialog).toBeVisible();
   // Escape cancels: nothing goes.
   await page.keyboard.press("Escape");

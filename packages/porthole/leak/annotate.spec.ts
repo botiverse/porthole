@@ -391,6 +391,11 @@ test("a hostile page fakes reports: the host takes none it didn't ask for, nothi
   });
   await fake("anchored", { results: [{ id: "not-a-mark", state: "attached", rect }] });
   await fake("granted", { permission: "admin" });
+  // The three malformed ones are refused once the host has handled them: waited for, not
+  // counted once after a fixed wait (P098). What was dropped stays dropped.
+  await expect
+    .poll(async () => (await refusals(display)).filter((each) => each === "annotate:invalid"))
+    .toHaveLength(3);
   await page.waitForTimeout(500);
   expect(await reports(display)).toEqual([]);
   expect((await refusals(display)).filter((each) => each === "annotate:invalid")).toHaveLength(3);
