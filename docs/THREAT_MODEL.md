@@ -7,9 +7,7 @@ guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 
 **Status.** This describes Porthole 0.9.0 (2026-10-20). A review on 2026-10-19 found gaps, and every
 decision it led to has merged. P096 came after 0.9.0: it changed the negative-control runner and CI,
-and the shipped conformance probes' messages and timing, not what they check. P105 came after it
-too, from the review of P104 (2026-10-20): it narrows what content can do with annotations and
-adds a duty for hosts that show them. [§8](#8-fixes-in-flight) lists the decisions.
+and the shipped conformance probes' messages and timing, not what they check. [§8](#8-fixes-in-flight) lists the decisions.
 
 ## 1. Two layers
 
@@ -148,10 +146,13 @@ Whatever the use:
 - Guard a view that a frame's report opens or moves (`activated`, `anchored`, `selected`: a
   comment's bubble, a composer). The content chooses when it appears and where, so it can bring it
   under a press the person meant for the content (a double click on the content's own button whose
-  second click lands on the bubble's). Such a view takes no press for 500 ms after it appears or
-  moves, ignores a press that began before that, opens beside the frame rather than over the
-  report's box where the layout allows, takes no focus when it opens, and puts no destructive
-  action (resolve, delete) one click away (P105; ADOPTING.md § Annotations has the code).
+  second click lands on the bubble's). Such a view takes no press of any kind for 500 ms after it
+  appears or moves (not a `click` only: menu triggers act on `pointerdown`, and menu items click
+  themselves on a release), ignores a press that began before that, opens beside the frame rather
+  than over the report's box where the layout allows, takes no focus when it opens, and puts no
+  destructive action (resolve, delete) one click away. Its menus and popovers are part of it,
+  portaled ones too (P105; ADOPTING.md § Annotations has the code: the view `inert` while it
+  arms).
 - List every app origin in `appOrigins` (`hostOrigins` in `/server`): only those may frame content,
   and only those are checked against the content domain for a shared site.
 - Under the app runtime, run `defineRuntimeConformance` with `api` in CI (§7).
@@ -550,16 +551,20 @@ its realm with the content, so:
   The host takes each report only for what it asked for and its own shown ids, rebuilt within
   `ANNOTATION_LIMITS`, at 120 a minute; `activated` for a mark without a marker, or an id it
   doesn't show, is dropped (negative control `annotation-activated`). `activated` is also taken
-  only while the host's page has transient user activation, which a real marker click gives it
-  (P105, measured on all three engines; control `annotation-activated-gesture`): a page can no
-  longer open the host's view at load, on a timer or on a scroll. It still can on the person's own
-  press in the content, under their pointer, which is why the host guards that view (§6). Where
-  the platform can't tell (a custom one whose `userActivation()` answers undefined), the report
-  passes, as the gesture gate does.
+  only while the host's page has transient user activation, which a real marker click or tap gives
+  it (P105, measured on all three engines; control `annotation-activated-gesture`). That stops a
+  page opening the host's view with no gesture at all, nothing more: activation lasts 5 s after any
+  gesture anywhere on the page (a click on the host's own UI, typing in the content, the click that
+  opened the display), and a fake posted then, on a timer or a scroll, is taken; one posted on the
+  person's own press in the content lands under their pointer. The guard on the host's view (§6) is
+  the defence, not this. Where the platform can't tell (a custom one whose `userActivation()`
+  answers undefined), the report passes, as the gesture gate does.
 - *Labels.* An anchor's `label` is the page's text: the words selected, or an element's own words,
   else its `alt`, `aria-label` or `title`, which the person never sees on the page. The host takes
-  out of every label what a person can't see (zero-width characters, bidi controls, tag and
-  private-use characters, controls: P100's rule, P105), so what it shows is what it has. A text
+  out of every label everything a person can't see (every format character, bidi controls and
+  zero-width ones among them, every default-ignorable code point, variation selector, tag,
+  private-use character and control: P105, with none of P100's exceptions for emoji and shaped
+  letters, whose surroundings a page can fake), so what it shows is what it has. A text
   anchor's quote (`exact`) keeps them, to be found again: a host that hands a quote or a label to
   a model hands it the page's words, to be read as that, never as instructions.
 - *Boxes.* Every box a report carries (`selected`, `activated`, `anchored`) is the page's word.
@@ -590,7 +595,12 @@ its realm with the content, so:
   layer is secret: it holds only what `show` sent, which the content can read anyway.
 - *What content can always do.* Hide, shrink, move or cover the layer (its scripts can rewrite the
   layer's style, lay elements over it, or transform the page it sits in), change its words so a
-  mark is orphaned, or flood the shared rate so real reports are refused. An honest page's
+  mark is orphaned, or flood the shared rate so real reports are refused. It can also make the
+  shell's own work dear by its layout: finding marks again and placing markers after a change of
+  the content runs in the frame, once per quiet run of changes, and each marker in view is placed
+  by a bounded number of hit tests (measured with 300 marks with counts in view: about 20 ms a
+  change; 200 in a 3,000-line block: 25 to 50 ms; P105). In an opaque frame that shares the host's
+  process, that time is the host's too ([§5](#5-out-of-scope)). An honest page's
   follow-up reports, of the marks (while one has a marker) and of the person's selection after a
   scroll, share one clock: at most one a second together, each only when its box moved (P105).
 - So `activated` opens the host's own view of a mark it already shows, placed within the frame's
@@ -655,10 +665,9 @@ section.
 
 ## 8. Fixes in flight
 
-The decisions below come from the 2026-10-19 review, and P105 from the review of P104 (2026-10-20).
-"Planned" means not in 0.9.0: the gap its row names exists today, and the sections it cites say
-"open until" that decision. Each merged row says what was wrong, what holds now, and the limit its
-decision accepts, if any.
+The decisions below come from the 2026-10-19 review. "Planned" means not in 0.9.0: the gap its
+row names exists today, and the sections it cites say "open until" that decision. Each merged row
+says what was wrong, what holds now, and the limit its decision accepts, if any.
 
 | Decision | State | What it closes | Sections |
 | --- | --- | --- | --- |
@@ -674,7 +683,6 @@ decision accepts, if any.
 | P101 | Merged | Under https Porthole read unprefixed `porthole-*` cookies a sibling label can plant; the entered mark carried no label; url mode checked neither `Origin` nor `Sec-Fetch-Site`. Now only `__Host-` names are read, the mark names its label, and a url-mode app answers its own origin and navigations. | S3, S6 |
 | P102 | Merged | This document. | |
 | P103 | Merged | A live widget's capabilities could add origins; bearer-mode assets skipped the code re-check; `callTool` had no rate. Now the preset refuses them and its config is frozen, every load asks the current config (its ETag says which answer), and `callTool` has 30 a minute. | S2, S5, §7 |
-| P105 | Merged | From the review of P104 (2026-10-20). A page could open the host's annotation view at any moment, and under a press; honest text-mode scrolling spent the budget a marker's click needed; three shell guarantees were stated without their limit; a platform's `viewport()` that threw raised out of the listener; labels carried what the person can't see. Now `activated` needs a gesture and hosts guard the view (§6), follow-ups share one clock, the guarantees say what they hold against, a failing `viewport()` clamps to nothing, labels lose invisible characters. Accepted: a fake on the person's own press passes; patched built-ins reach the layer. | §6, §7 |
 
 Open with no decision yet; until then they are the host's to cover:
 

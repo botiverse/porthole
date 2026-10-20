@@ -4907,8 +4907,11 @@ and Firefox 155.
    a page's own post at load or on a timer has none (measured: a sandboxed frame's timer posts
    arrive with the host inactive; a click in it, its `mousedown` cancelled, activates the host).
    Playwright's `evaluate` is itself a gesture and activation lasts 5 s on all three, so the test
-   asks nothing of either page for 7.5 s first. It stops a view opened with no gesture at all, not
-   R4: the press itself gives activation, which is why the host's duty above stays. A custom
+   asks nothing of either page for 7.5 s first. It stops a view opened with no gesture at all, and
+   no more: activation lasts 5 s after any gesture anywhere on the page (a click on the host's own
+   UI, typing in the content, the click that opened the display), and a fake posted then, on a
+   timer or a scroll, is taken (point 9); one on the person's own press is R4. The host's duty
+   above is the defence. A custom
    platform's `userActivation()` (already required) that answers false drops every marker click,
    as it refuses every gesture-gated call.
 3. **#36: a text marker beside its line, not over the next word.** P104 drew it at the words' end,
@@ -4971,19 +4974,76 @@ and Firefox 155.
    `aria-label` or `title`, text the person never sees on the page, which could carry bidi
    controls or zero-width characters into the host's UI, or a model's context through a host
    that forwards it. `parseAnchor` (so `parseReport` and `checkMarks`) takes out of every label
-   the characters P100 refuses in a model context update (the parts of real emoji and joiners
-   between shaped letters stay), now one definition in `src/bridge/unseen.ts`. Selectors keep
-   theirs, to be found again; THREAT_MODEL says a quote handed to a model is the page's words.
+   every character P100's rule names, with none of its exceptions (point 9), now one definition in
+   `src/bridge/unseen.ts`. Selectors keep theirs, to be found again; THREAT_MODEL says a quote
+   handed to a model is the page's words.
 8. **P3-4 and P3-6: written down.** The frame's size is read for each report the host takes,
    before its rate: one forced layout of the host's page per message, which a repeated
    `ui/initialize` already causes (accepted; the clamp after the gate would sit in the bridge's
    delivery). A box is in the frame's own CSS px: a host that scales or transforms the frame maps
    it through that transform (THREAT_MODEL §7, ADOPTING.md, `AnnotationRect`).
 
+9. **After the review of 3969ebc** (no P0 or P1; R5, R1 and R2 hold, every control fails exactly
+   its probes):
+   - **P2-A: the guard in ADOPTING.md let presses through.** It caught `click` alone, and let one
+     with `detail` 0 pass: a menu item that clicks itself when a press that began elsewhere ends
+     on it (Radix's pattern; Base UI's items click on `mouseup`), and a trigger that acts on
+     `pointerdown`, fired within 500 ms (the review's R9). Now the guard makes the view `inert`
+     (and `pointer-events: none`) while it arms, so nothing in it takes a press, a click or focus, and
+     after that it drops the end of a press that didn't begin on it (`pointerup`, `mouseup`,
+     `touchend`, `click`) until one does, or a key. Portaled menus and popovers are outside the
+     view: they go in a container inside it, or are guarded too, and close when it moves. §6 says
+     a press of any kind. A leak test runs the snippet as ADOPTING.md has it (the review's three
+     cases, a press held past the arming, then a press and a key that are taken); the old snippet
+     fails it by the menu item's release.
+   - **P2-B: a tap on a marker was never reported on WebKit** (since 0.9.0): WebKit made no click
+     of a tap on the marker, whose only listener was the window's, though it did for a button.
+     Each marker now has a click listener of its own, which never runs (the window's first
+     listener stops every click on the layer): WebKit then clicks. A tap reports on all three
+     engines, with a touch screen and in a phone's emulation (iPhone 13 on WebKit, Pixel 5 on
+     Chromium; Firefox has none), after 6 s of nothing: the tap's own activation is what the host
+     takes it by (measured: the host's page is active when the report arrives). The reference
+     host's page now has a viewport meta, as a phone's page has: without it the emulation lays the
+     page out 980 px wide at 0.4, and Playwright's taps land beside the frame. Control `marker-tap`
+     (the listener out) fails the test on WebKit; Chromium and Firefox click a tap without it.
+   - **P3-A: the label strip wasn't closed.** It kept P100's exceptions (the parts of emoji, a
+     joiner between two shaped letters), and a Mongolian variation selector, itself a mark of a
+     shaping script and default-ignorable, made a joiner beside it look shaped, then was taken out
+     itself: a 107-character label kept 48 joiners, `rm -rf` in bits. Now every code point the rule
+     names goes, no exceptions: an emoji in a label loses its joiners and selectors (its faces
+     stay). Tested with that label, and 20,000 random ones from the review's pool, none of which
+     leaves anything `unseen` refuses.
+   - **P3-B:** THREAT_MODEL and point 2 said a page could no longer open the host's view at load, on
+     a timer or on a scroll; within 5 s of any gesture anywhere on the page it can (the review's
+     R7b). Both now say so, and that the guard is the defence.
+   - **P3-C: placing markers after a change of the content was dear** (the longest task, 300
+     paragraphs with counts: 44, 53 and 19 ms on Chromium, WebKit and Firefox; 200 marks in one
+     3,000-line `<pre>`: 168, 163 and 102 ms). A line's end was read from the whole rest of its
+     block, for each marker; each hit test walked every mark and marker the last draw left in the
+     layer (0.13 ms a test, measured); a mark's block was found again on every change. Now the
+     line's end is read 64 characters at a time, only until the text leaves the line; the layer's
+     marks and markers are out of the hit tests while places are tested (hidden in one task, never
+     taken out of the page); a marker whose line is out of view is placed without a measure or a
+     test; a block is kept while it still holds the words. Measured again: 18, 22 and 16 ms; 24,
+     48 and 40 ms (without counts: 5, 6 and 11; 13, 25 and 37). THREAT_MODEL and DESIGN say what it
+     costs and that it is bounded.
+   - **P3-D: nothing pinned #36.** A leak test now reads every word's glyph boxes against the points
+     the layer takes (a 2 px grid) on the column page, all of its cases, and on the phone page's
+     lines with one marker each: no marker covers a word, on all three engines. Control
+     `marker-place` (the marker just past its words, centred on the line, as 0.9.0 placed it
+     across) fails it. The press test's drag goes round the paragraph, so it holds wherever the
+     marker is.
+   - **P3-E:** CHANGELOG.md's Unreleased section says what a host sees change, what to act on first.
+   - **P3-F:** THREAT_MODEL had P105 in §8 as merged and its status line naming it. As P104's own
+     change did, it now describes what P105 does where it does it, without a §8 row; the release
+     commit says what the document describes.
+
 **API.** No signature changes. What a host may see change: `activated` is dropped while its page
 has no transient activation; the exported `parseAnchor` returns a label without invisible
 characters; `selected` comes again after a scroll only when its box moved, on the follow-ups'
-clock; text markers are elsewhere (`activated`'s box is the marker's, wherever it is drawn).
+clock; text markers are elsewhere (`activated`'s box is the marker's, wherever it is drawn); a
+tap on a marker is reported on WebKit; ADOPTING.md's `guardPresses` takes `...parts` and returns
+`{ placed }` as before.
 
 **Tested.** `test/annotate.test.ts`, on `createHost` over a stand-in platform: `activated` dropped
 where `userActivation()` answers false or throws, taken where it answers true or undefined; a
@@ -5004,6 +5064,11 @@ takes the pointer. Negative controls, each alone, failing exactly their test on 
 `annotation-activated-gesture`; and `marker-click` (now also failing the patched-prototypes case),
 `marker-trusted`, `annotation-activated`, `annotation-activated-count`, `annotation-checks` and
 `annotation-rect-clamp` again, as before.
+
+**Tested, after the review of 3969ebc.** Unit: the review's label and the 20,000 random ones.
+Leak, on all three engines: the tap test (touch screen, iPhone 13, Pixel 5), the placement test,
+the guard test. Controls `marker-tap` and `marker-place`, and every control P105 added or touched,
+again.
 
 **Threat it re-opens.** None: each point narrows what content can do or says what holds; no
 default, gate or policy loosens.

@@ -3,6 +3,50 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## Unreleased
+
+After the review of P104 (P105): a host guards the view a marker's click opens, `activated` needs
+a gesture, follow-ups share one clock, and text markers sit beside their line instead of over the
+next word. What a host must act on comes first.
+
+- **Act on these when upgrading:**
+  - **Guard the view a report opens or moves** (P105, THREAT_MODEL §6): a comment's bubble opened
+    on `activated`, or a composer placed by `selected` or `anchored`, takes no press of any kind
+    for 500 ms after it appears or moves, ignores a press that began before that, opens beside the
+    frame where the layout allows, takes no focus, and has no destructive action one click away.
+    The content chooses when it appears and where, and can bring it under the person's own press
+    in the content. ADOPTING.md § Annotations has the code (`guardPresses`: the view `inert` while
+    it arms); its portaled menus and popovers go in a container inside it, or are guarded too.
+  - **`activated` is taken only within a gesture** (P105): while the host's page has transient
+    user activation, as a real click or tap on a marker gives it. A custom `PlatformHost` whose
+    `userActivation()` answers `false` (rather than `undefined`, can't tell) drops every marker
+    click, as it refuses every gesture-gated call. A gesture anywhere on the page in the last 5 s
+    lets a fake through: the guard above is the defence.
+  - **`selected` comes again after a scroll only when its box moved** more than 0.5 px, and on the
+    same clock as `anchored`'s follow-ups: at most one report a second together (P105). A host's
+    button placed by the selection's box can lag a scroll by up to a second; the person's own new
+    selections are told at once, as before.
+  - **`parseAnchor` takes out of a label everything the person can't see** (P105): every format
+    character (bidi controls, zero-width ones), default-ignorable code point, variation selector,
+    tag, private-use character and control. A label stored before may come back shorter;
+    selectors are kept as they are.
+- **Text markers beside their line** (P105, #36): centred on the anchor's last line, in the line's
+  gutter past its block; at the frame's right edge where the frame is too narrow; past the line's
+  last word where something else is beside the block (a table's cell, a card). Never over another
+  word but where two or three anchors end on one full line of a narrow screen; the number alone
+  where the bubble with its glyph doesn't fit. The pointer on a marker lights its words. A tap on a
+  marker is reported on WebKit too (it was never, since 0.9.0).
+- **What the shell guarantees, said against what** (P105): a marker's press is unheard and can't
+  be cancelled, and the layer out of reach, against content that patches none of the built-ins.
+  The shell now reads and stops a press through the platform's own functions, so patching
+  `Event`'s or `MouseEvent`'s prototypes no longer lets content hear or suppress it; reaching the
+  layer's nodes through other built-ins still works (nothing there is secret).
+- **A custom platform's `viewport()` that answers no size or throws** clamps every box to nothing
+  at the frame's corner, and nothing throws out of the frame's listener (it raised a TypeError).
+- Negative controls `marker-prevent`, `marker-originals`, `marker-tap`, `marker-place`,
+  `follow-throttle`, `follow-count`, `selection-follow` and `annotation-activated-gesture`, in
+  `scripts/controls.ts`.
+
 ## 0.9.0
 
 Annotation markers (P104): a host can show how many comments sit at each anchor, hear a click
