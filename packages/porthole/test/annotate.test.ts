@@ -10,6 +10,7 @@ import {
 } from "../src/annotate/validate.ts";
 import { ANNOTATION_LIMITS, type AnnotationAnchor } from "../src/annotate/types.ts";
 import { createBridge, type BridgeEvent } from "../src/bridge/bridge.ts";
+import { unseen, withoutUnseen } from "../src/bridge/unseen.ts";
 import {
   compile,
   createHost,
@@ -65,10 +66,24 @@ describe("the host's checks on what a frame reports", () => {
     const picked = parseAnchor({ ...element, label });
     expect(picked?.label).toBe("img#chart htnoM by month");
     expect(picked?.selectors).toEqual(element.selectors);
-    // The parts of real emoji, and a joiner between letters a script shapes, are seen: kept.
+    // No exceptions: an emoji's joiners and selectors go too (its faces stay), and so does a
+    // joiner between letters a script shapes, whose surroundings a page can fake.
     expect(parseAnchor({ ...text, label: "family 👨‍👩‍👧, 1️⃣, می‌خواهم" })?.label).toBe(
-      "family 👨‍👩‍👧, 1️⃣, می‌خواهم",
+      "family 👨👩👧, 1⃣, میخواهم",
     );
+    // The review of P105: "rm -rf" in joiners, each beside a Mongolian free variation selector,
+    // which a strip with the emoji and shaping exceptions kept (48 of them).
+    const bits = Array.from(new TextEncoder().encode("rm -rf")).flatMap((byte) =>
+      Array.from(byte.toString(2).padStart(8, "0")),
+    );
+    let payload = "img.chart \u180B";
+    for (const bit of bits) {
+      payload += (bit === "1" ? "\u200D" : "\u200C") + "\u180B";
+    }
+    payload = payload.slice(0, ANNOTATION_LIMITS.label);
+    const cleaned = parseAnchor({ ...element, label: payload })?.label ?? "";
+    expect(cleaned).toBe("img.chart ");
+    expect(unseen(cleaned)).toBe(false);
     // A text anchor's words keep what they have, so the text is found again where it is.
     const soft = { type: "TextQuoteSelector" as const, exact: "co­operate" };
     expect(parseAnchor({ kind: "text", selectors: [soft], label: "co­operate" })).toEqual({
@@ -80,6 +95,65 @@ describe("the host's checks on what a frame reports", () => {
     expect(checkMarks([{ id: "m1", anchor: { ...element, label } }])[0]?.anchor.label).toBe(
       "img#chart htnoM by month",
     );
+  });
+
+  test("a label's strip is closed: nothing unseen is left, whatever the label holds (P105)", () => {
+    // The review's pool: letters, spaces, every kind of invisible character, the parts of emoji,
+    // shaped letters and their joiners, Mongolian selectors, lone surrogates, controls.
+    const pool = [
+      "a",
+      "Z",
+      " ",
+      "\u200B",
+      "\u200C",
+      "\u200D",
+      "\u202E",
+      "\u2066",
+      "\u00AD",
+      "\uFEFF",
+      "\uFE0F",
+      "\uFE0E",
+      "\u20E3",
+      "1",
+      "#",
+      "\u{1F600}",
+      "\u{1F469}",
+      "\u{1F3FD}",
+      "\u{E0041}",
+      "\u{E0100}",
+      "\u{F0000}",
+      "\uD800",
+      "\uDC00",
+      "\u0000",
+      "\u0007",
+      "\n",
+      "\t",
+      "م",
+      "ی",
+      "क",
+      "्",
+      "\u034F",
+      "\u115F",
+      "\u17B4",
+      "\u180B",
+      "\u2060",
+      "\u061C",
+      "\u200E",
+    ];
+    let seed = 105;
+    const random = () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    for (let i = 0; i < 20_000; i += 1) {
+      let label = "";
+      for (let n = 1 + Math.floor(random() * 12); n > 0; n -= 1) {
+        label += pool[Math.floor(random() * pool.length)];
+      }
+      const out = withoutUnseen(label);
+      expect(unseen(out), JSON.stringify(label)).toBe(false);
+      expect(out.length).toBeLessThanOrEqual(label.length);
+    }
   });
 
   test("anything malformed or too large is dropped whole", () => {

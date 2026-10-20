@@ -63,21 +63,20 @@ const SEEN_IN_PLACE = new RegExp(`${EMOJI_PARTS}|${SHAPING_JOINERS}`, "gu");
 /** Whether `text` holds what a person can't see, the parts of emoji and shaped letters aside. */
 export const unseen = (text: string): boolean => UNSEEN.test(text.replace(SEEN_IN_PLACE, ""));
 
-/** Every character of `UNSEEN` in `text` taken out, but the parts of emoji and shaped letters. */
+/** Every code point `UNSEEN` names, each on its own. */
 const UNSEEN_EACH = new RegExp(UNSEEN.source, "gu");
 
 /**
- * `text` without what a person can't see (P105): for text Porthole only shows, never matches, as
- * a wordless element's label is (an `alt`, `aria-label` or `title` the person never sees on the
- * page). The parts of real emoji and a joiner between shaped letters stay, as `unseen` lets them.
+ * `text` without anything a person can't see (P105), for text Porthole only shows, never matches,
+ * as a wordless element's label is (an `alt`, `aria-label` or `title` the person never sees on the
+ * page): every format character (bidi controls and the zero-width ones among them), every
+ * default-ignorable code point, variation selector, private-use character and lone surrogate, and
+ * every control but a new line and a tab. No exceptions: not the parts of emoji, nor the joiners
+ * between shaped letters that `unseen` lets by, whose surroundings a page can fake (the review of
+ * P105: a Mongolian variation selector beside each joiner carried 48 of them through, a payload
+ * of six bytes). An emoji may lose its joiners (a family shows as its faces). Nothing `unseen`
+ * refuses is left.
  */
 export function withoutUnseen(text: string): string {
-  const kept: string[] = [];
-  let at = 0;
-  for (const match of text.matchAll(SEEN_IN_PLACE)) {
-    kept.push(text.slice(at, match.index).replace(UNSEEN_EACH, ""), match[0]);
-    at = match.index + match[0].length;
-  }
-  kept.push(text.slice(at).replace(UNSEEN_EACH, ""));
-  return kept.join("");
+  return text.replace(UNSEEN_EACH, "");
 }
