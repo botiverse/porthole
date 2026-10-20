@@ -5,10 +5,10 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes `main` as of 2026-10-19 (0.7.0, with P092, P093, P094, P097 and P101). A review
-that day found gaps; some of their fixes have merged, and the rest are planned. A note **open until
-P0xx** means the gap exists on `main` today and decision P0xx is its planned fix; once that fix
-merges, the note becomes a guarantee. [§8](#8-fixes-in-flight) lists the decisions.
+**Status.** This describes Porthole 0.8.0 (2026-10-20). A review on 2026-10-19 found gaps, and every
+decision it led to has merged but P096. A note **open until P096** means the gap exists in 0.8.0 and
+P096 is its planned fix; once it merges, the note becomes a guarantee. [§8](#8-fixes-in-flight)
+lists the decisions.
 
 ## 1. Two layers
 
@@ -93,8 +93,8 @@ Porthole does not protect against these.
   process of its own. In scope, by contrast: a page or a request that can crash the host's server,
   and a message from content that makes the host's page do unbounded work (SECURITY.md). Through
   Porthole's Node adapter no request ends the process, and on any runtime the issue endpoint reads
-  at most 64 KiB of a body (P092);
-  content's messages that are read whole before their gate are open until P095.
+  at most 64 KiB of a body (P092). What content sends is read after its gate, into bounded text,
+  and nothing it sends throws out of an adapter (P095).
 - **Browser bugs, and what the leak suite doesn't run on.** The walls are the browser's own (the
   sandbox, CSP, same-origin policy, site isolation): a bug in them is outside Porthole. The suite
   runs Chromium, WebKit and Firefox through Playwright; other engines, versions and embedded
@@ -122,7 +122,7 @@ Porthole does not protect against these.
 | [S2](#s2-live-widgets-content-that-reads-the-hosts-data) | Live widgets that read the host's data | `liveWidget` | (a), (e) | as S1, and the page follows S7 |
 | [S3](#s3-private-artifacts) | Private artifacts | `artifact`, domain | (a), (c) | the content domain is the host's alone, the secret is random, `authorize` revokes |
 | [S4](#s4-public-links-and-pages-that-are-apps) | Public links, and pages that are apps | `artifact`, domain, public grants; `runtime` | (a), (c) | the host handles abuse |
-| [S5](#s5-third-party-mcp-apps) | Third-party MCP Apps | `mcpApp` | (b) | the host shows a view's domains and its model context |
+| [S5](#s5-third-party-mcp-apps) | Third-party MCP Apps | `mcpApp` | (b) | the host shows a view's domains |
 | [S6](#s6-previews-of-a-running-app) | Previews of a running app | `url` | (d), (c) | the code is the host's own |
 | [S7](#s7-several-displays-on-one-page) | Several displays on one page | any | (e) | the page follows the composition rule |
 
@@ -170,16 +170,22 @@ Whatever the use:
   | `downloadFile` | a gesture and a confirmation |
   | `copyText` | a gesture, 30 a minute; the host writes the clipboard |
   | `callTool` | a confirmation, 30 a minute |
-  | `setModelContext` | 30 a minute, nothing else |
+  | `setModelContext` | 30 a minute, then the host's `show`: the person sees the whole update first |
   | `readData`, `subscribeData` | 120 and 60 a minute (`liveWidget` adds consent) |
   | `reportError` | 10 a minute |
 
-- A confirmation needs the host's confirm function: without one, the call is refused (consent
-  likewise). Three declined confirmations in a row mute the display's confirm-gated calls.
+- A confirmation needs the host's confirm function: without one, the call is refused (consent and
+  `show` likewise). Three declined confirmations in a row mute the display's confirm-gated calls,
+  and at most 10 confirmations wait per display: more are refused (P095).
+- Model context (`setModelContext`) goes only once the host's `show` has shown it, after every
+  other gate. An update is text blocks and plain JSON, at most 20,000 characters, with no
+  invisible characters, and the manual tells the agent it is the content's unconfirmed text,
+  never instructions (P100).
 - The shell takes messages only from its parent window, and the host only from its frame's
   window and origin; both validate every message.
 - A frame that navigates is started again, at most three times; the next navigation stops the
-  display.
+  display. A display of a file set may hold such a frame for up to 2 s first, in case it was a page
+  of its own set, delivering nothing either way while it waits (P098).
 
 **The host must**
 
@@ -202,9 +208,10 @@ Whatever the use:
 - `copyText` needs only a gesture, not a confirmation: a widget can put text the person didn't
   choose on their clipboard when they click in it (pastejacking). The notice above is what tells
   them.
-- `setModelContext`, where the host declares it, is rate-limited only: a widget can put text in
-  the model's next turn without the person seeing it, and the runtime's manual tells the agent
-  that this text "tells you what the person is looking at" (open until P100; see S5).
+- Shown isn't read: the person may not look at a model-context update, or not see an injection
+  in it for what it is, and characters that draw as a blank (a no-break space, the wide spaces)
+  pass, a few bits each, bounded by the length limit (P100, accepted). A host that opts out of
+  `show` (`withoutShow: true`) lets content write into the model's turns text nobody saw (S5).
 - The host's gesture check reads its own page's `navigator.userActivation` (in an engine without
   it, the check passes). A gesture shows a moment of intent, not consent: the person may have
   clicked the host a moment before.
@@ -352,8 +359,8 @@ the attacker (c), and its readers are strangers.
   the guard's rule before they start (WebKit sends a link's and `navigate()`'s request otherwise),
   read the address once, and read it through the platform's own functions, so a page can't
   hand them one address to check and another to go to; a link, in a shadow root too, is followed
-  by the shell as it was when clicked, never by the browser as a later listener left it. `defineHostConformance`'s `served.domain.tab-*` cases check it through
-  the host's real edge.
+  by the shell as it was when clicked, never by the browser as a later listener left it.
+  `defineHostConformance`'s `served.domain.tab-*` cases check it through the host's real edge.
 
 **The host must**
 
@@ -415,8 +422,10 @@ the attacker (c), and its readers are strangers.
   and `viewEgress()` give them; the spec says hosts SHOULD warn). Porthole has no prompt for it.
 - Route `callTool` only to the view's own server, and refuse the tools the view may not call
   (`_meta.ui.visibility`): that is the host's `callTool` handler's decision alone.
-- Show what a view sets as model context, or gate `setModelContext` with `consent` (until P100
-  makes one of them the default).
+- Keep `setModelContext`'s `show` gate. The React provider shows each update whole outside every
+  frame (`ContextNotice`); a host's own `show` must show it whole too. Opt out
+  (`withoutShow: true`) only where the handler itself puts the text in front of the person, or the
+  content is the host's own (P100).
 - Keep `callTool`'s confirmation. If the host's confirm says yes by itself and a view polls a tool
   more often than every 2 s, give `callTool` its own `gates` with a rate: they replace the default.
 
@@ -425,10 +434,10 @@ the attacker (c), and its readers are strangers.
 - Declaring is allowing: what the person sees or types in the view may go to its
   `connectDomains`.
 - Code from `resourceDomains` runs in the frame (still isolated).
-- `setModelContext` (`ui/update-model-context`) is rate-limited only, 30 a minute. A view can put
-  text in the model's next turn without the person seeing it and steer the model to call other
-  tools, which the gates on the view's own calls don't catch (open until P100).
-- Waiting confirmations have no cap (open until P095), so a view can queue them without end.
+- Model context (`ui/update-model-context`) is shown before it goes, but showing isn't reading:
+  text the person let pass can still steer the model into calling other tools, which the gates on
+  the view's own calls don't catch. The manual's words (the content's unconfirmed text, never
+  instructions) are the second wall (P100, accepted).
 - The public suffixes Porthole refuses wildcards over are its own short list, not the whole PSL.
 
 ### S6. Previews of a running app
@@ -575,22 +584,23 @@ section.
 
 ## 8. Fixes in flight
 
-The decisions below come from the 2026-10-19 review. "Planned" means not yet on `main`: the gap
-its row names exists today, and the sections it cites say "open until" that decision.
+The decisions below come from the 2026-10-19 review. "Planned" means not in 0.8.0: the gap its
+row names exists today, and the sections it cites say "open until" that decision. Each merged row
+says what was wrong, what holds now, and the limit its decision accepts, if any.
 
 | Decision | State | What it closes | Sections |
 | --- | --- | --- | --- |
 | P092 | Merged | A request with a method `fetch` refuses (`TRACE`) could end a Node process through the Node adapter; the issue endpoint read a JSON body without a byte limit; its rate limit keyed anonymous requests on headers a client sets. Now no request ends the process, a body is read to 64 KiB at most, and the key is an address the client can't set. | §5, S4 |
 | P093 | Merged | `intersectDeclarations` compared rules name by name, so a current wildcard didn't narrow a version's named rule, and a collection named `__proto__` was lost. Now the result allows exactly what both sides allow. | §7 |
 | P094 | Merged | Without a viewer, a page's declared `data` names weren't held; a pushed result answered a read past `readData`'s gates; `db.batch` and `db.watch` skipped their inner methods' `methodGates`. Now each holds. | §4, S2, S4, §7 |
-| P095 | Planned | What content sends is read before its gate: a log or error report is serialized whole first; waiting confirmations have no cap. | §5, S5 |
+| P095 | Merged | What content sent was read before its gate: a log or error report was serialized whole first; waiting confirmations had no cap. Now the bridge reads it after the gate into bounded text, nothing a page sends throws out of an adapter, and at most 10 confirmations wait per display. | §5, S1, S5 |
 | P096 | Planned | The negative-control runner counts a control that didn't run as passed, and CI runs the runtime's controls only. | §4 |
 | P097 | Merged | A release waits for the same commit's CI. No guarantee here depends on it. | |
-| P098 | Planned | The leak suite's unstable cases. No guarantee here depends on it, but a red run hides a real regression. | |
+| P098 | Merged | A set's page whose notice came late was taken for a navigation away (red on Chromium since 0.6.0), and tests that waited a fixed time. Accepted: a files display may hold a frame that did navigate away for up to 2 s before starting it again, delivering nothing while it waits. | S1 |
 | P099 | Merged | A served page in a tab had no sandbox: `window.open` sent input out, it could navigate its opener, open a picture-in-picture window, and ask for the camera, location or full screen. Now its headers carry its frame's sandbox and deny what its frame's `allow` doesn't grant, and the shell closes those on a tab too; the served suite probes self-navigation in frames and tabs. A browser without the Navigation API is an accepted limit. | S4 |
-| P100 | Planned | `setModelContext` is rate-limited only, unseen by the person. | S1, S5 |
+| P100 | Merged | `setModelContext` was rate-limited only, unseen by the person. Now it needs the host's `show` by default. Accepted: shown isn't read, and characters that draw as blanks pass, bounded by the length. | S1, S5 |
 | P101 | Merged | Under https Porthole read unprefixed `porthole-*` cookies a sibling label can plant; the entered mark carried no label; url mode checked neither `Origin` nor `Sec-Fetch-Site`. Now only `__Host-` names are read, the mark names its label, and a url-mode app answers its own origin and navigations. | S3, S6 |
-| P102 | | This document. | |
+| P102 | Merged | This document. | |
 | P103 | Merged | A live widget's capabilities could add origins; bearer-mode assets skipped the code re-check; `callTool` had no rate. Now the preset refuses them and its config is frozen, every load asks the current config (its ETag says which answer), and `callTool` has 30 a minute. | S2, S5, §7 |
 
 Open with no decision yet; until then they are the host's to cover:
