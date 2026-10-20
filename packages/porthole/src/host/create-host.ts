@@ -58,6 +58,7 @@ const REPORTS: Readonly<Record<string, AnnotationReport["type"]>> = {
   [ANNOTATE_METHODS.unselected]: "unselected",
   [ANNOTATE_METHODS.cancelled]: "cancelled",
   [ANNOTATE_METHODS.anchored]: "anchored",
+  [ANNOTATE_METHODS.activated]: "activated",
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -195,7 +196,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       };
       /**
        * A report from the frame: checked, taken only while the host asked for it (a selection
-       * only in select mode, results only for its own marks), then through the bridge's gates.
+       * only in select mode, results only for its own marks, a marker's click only for a mark it
+       * shows with one), then through the bridge's gates.
        */
       const onAnnotation = (raw: unknown, through: HostFunctionBridge) => {
         if (
@@ -248,6 +250,13 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
               return;
             }
             report = { type: "anchored", results };
+            break;
+          }
+          case "activated": {
+            const { id } = report;
+            if (!marks.some((mark) => mark.id === id && mark.count !== undefined)) {
+              return;
+            }
             break;
           }
         }

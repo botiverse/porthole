@@ -1027,13 +1027,14 @@ chooses), and the annotation runtime is in the shell only then.
 |-----------|---------|--------|
 | host → frame | `porthole/annotate.start` | `{ elements, text }`: picking elements (the one under the pointer or finger outlined with its name; a click or tap picks it, never reaching the content; Escape cancels; one pick), selecting text (each settled selection), or both (a click picks, a drag selects) |
 | host → frame | `porthole/annotate.stop` | — |
-| host → frame | `porthole/annotate.show` | `{ marks: [{ id, anchor }], active? }`: drawn over the content in the shell's own layer (a closed shadow root), found again whenever the content changes |
+| host → frame | `porthole/annotate.show` | `{ marks: [{ id, anchor, count? }], active? }`: drawn over the content in the shell's own layer (a closed shadow root), found again whenever the content changes; a mark with a `count` (0 to 999) also gets a marker (P104) |
 | host → frame | `porthole/annotate.focus` | `{ id }`: scrolled into view inside the frame, made the active mark, flashed |
 | host → frame | `porthole/annotate.clear` | — |
 | frame → host | `porthole/annotate.selected` | `{ anchor, rect }` |
 | frame → host | `porthole/annotate.unselected` | — (the text selection went away) |
 | frame → host | `porthole/annotate.cancelled` | — (Escape) |
-| frame → host | `porthole/annotate.anchored` | `{ results: [{ id, state: "attached" \| "orphaned", rect? }] }`: every mark after `show`, the one after `focus`, and when the content changed, only if a state did |
+| frame → host | `porthole/annotate.anchored` | `{ results: [{ id, state: "attached" \| "orphaned", rect? }] }`: every mark after `show`, the one after `focus`, every mark when the content changed a state, and once a scroll, a resize or a change of the content has settled (150 ms quiet), only the marks that moved more than 0.5 px since the host was last told (P104) |
+| frame → host | `porthole/annotate.activated` | `{ id, rect }`: the person clicked a mark's marker; `rect` is the marker's (P104) |
 
 - **Anchors** are W3C Web Annotation selectors, at most one of each:
   `CssSelector` (unique: the nearest id, else a path of `nth-of-type` steps),
@@ -1047,13 +1048,26 @@ chooses), and the annotation runtime is in the shell only then.
   selector is an id, or it has no words), else the element holding its words. What
   can't be found is `orphaned`, said so; a host keeps the comment and shows it apart.
 - **Rects** are in the frame's viewport, CSS px: add the frame element's position.
+- **Markers** (P104). A mark with a `count` gets a bubble glyph and its number ("99+"
+  above 99; 0 the bubble alone) at the end of a text anchor's last line, raised, or on
+  an element's top right corner, inside the frame's width; its element mark is then a
+  thin line. The layer takes no pointer but on markers: a press on one is stopped in
+  the shell's first window listener (none of the content's handlers, nor what is
+  under it, sees it) and a trusted click is reported `activated`. Markers step aside
+  while elements are picked. No tab stop, and the layer stays `aria-hidden`: the
+  host's own list of marks is the keyboard path.
+- **Following** (P104). Each mark keeps what the host was last told (state and box);
+  a settled scroll or resize (any scroller), or a quiet run of content changes,
+  reports only what moved, in one report.
 - **Settled.** Nothing is reported before the content is in place (marks shown
   before it arrives are anchored once it has), nor while a run of changes settles; a
   `focus` asked for meanwhile waits for anchoring, then scrolls and reports, so a
   focus right after `show` says where the mark is, never `orphaned` first (P057).
 - **Trust.** The shell shares its realm with the content, which can interfere with
-  all of it or fake any report. The host takes a selection only while it asked for
-  that kind, a cancel only while picking, results only for its own marks; it
+  all of it, read what `show` sends (ids, anchors, counts), or fake any report. The
+  host takes a selection only while it asked for that kind, a cancel only while
+  picking, results only for its own marks, a marker's click only for a mark it shows
+  with a count; it
   rebuilds each from known fields within `ANNOTATION_LIMITS` and drops the rest,
   through the bridge's rate limit. UI hints only, never permissions: what a
   report says decides where a comment is drawn, never who may see or do anything.
@@ -1069,7 +1083,13 @@ view, one orphaned, all cleared; re-anchoring on a revised page (by id, by words
 moved, by words respaced, one deleted and orphaned); live changes reported only as
 they change; an MCP Apps view; and a hostile page faking every report (not asked,
 malformed, too large, the wrong kind, no such mark, a flood), whose negative
-control is `annotation-checks`.
+control is `annotation-checks`. Markers (P104): drawn with their numbers, a click
+reported with its id and box and heard by none of the content's listeners
+(`marker-click` → that case), none without a count, stepping aside while picking;
+a run of scrolls reported once with only the marks that moved, a fixed one never;
+a content change that moves one mark reports it alone; and a hostile page faking a
+marker's click for no mark, an unknown id or a mark without a marker
+(`annotation-activated` → that case).
 
 ## The shell runtime
 

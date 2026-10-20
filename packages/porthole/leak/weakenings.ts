@@ -253,6 +253,23 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: '  if (typeof value.label !== "string") {',
     },
   ],
+  // A marker's click (P104): the host takes it only for a mark it shows with a marker.
+  "annotation-activated": [
+    {
+      file: "src/host/create-host.ts",
+      find: "            if (!marks.some((mark) => mark.id === id && mark.count !== undefined)) {",
+      replace: "            if (id === null) {",
+    },
+  ],
+  // A marker's click (P104): the shell's first listener keeps it from the content.
+  "marker-click": [
+    {
+      file: "src/shell/annotate.ts",
+      find: "        if (layer === null || event.target !== layer) {\n          return;\n        }\n        event.stopImmediatePropagation();\n",
+      replace:
+        "        if (layer === null || event.target !== layer) {\n          return;\n        }\n",
+    },
+  ],
   // The host's nonce, not given to an opaque frame's shell (P054): on a strict host page the
   // inherited policy stops the shell, so nothing the suite asks of it happens.
   nonce: [

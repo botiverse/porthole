@@ -79,6 +79,15 @@ export const CONTROLS: Readonly<Record<string, { spec: string; fails: readonly E
     spec: "leak/served/runtime.spec.ts",
     fails: ["an asset opened on its own runs nothing"],
   },
+  // A marker's click (P104): the host's check of its id, and the shell keeping it from content.
+  "annotation-activated": {
+    spec: "leak/annotate.spec.ts",
+    fails: ["a hostile page fakes a marker's click"],
+  },
+  "marker-click": {
+    spec: "leak/annotate.spec.ts",
+    fails: ["markers: a mark with a count gets a numbered bubble"],
+  },
   // The show gate (P100): a model context update reaches the handler unseen.
   "model-context-show": {
     spec: "leak/leak.spec.ts",

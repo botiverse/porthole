@@ -3,6 +3,22 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## Unreleased
+
+- **Annotation markers** (P104): `AnnotationMark.count` (0 to 999, `ANNOTATION_LIMITS.count`)
+  draws a small bubble with the number ("99+" above 99, the bubble alone for 0) at the end of a
+  text anchor and on an element's top right corner; that element's outline is then a thin line.
+  A click on a marker reaches none of the content's handlers and is reported as a new
+  `AnnotationReport`, `{ type: "activated", id, rect }` (`porthole/annotate.activated`), taken by
+  the host only for a mark it shows with a count. Open the host's own view of that mark with it,
+  never act on it: the content can fake it, and can read every mark's count. Markers have no tab
+  stop; the host's own list of marks is the keyboard path.
+- **Marks follow a scroll** (P104): once a scroll or a resize has settled (150 ms), and after a
+  quiet run of content changes, `anchored` reports only the marks that moved since the host was
+  last told. A host that treated every `anchored` as following `show`, `focus` or a lost mark now
+  also gets these, partial.
+- Negative controls `annotation-activated` and `marker-click`, in `scripts/controls.ts`.
+
 ## 0.8.0
 
 The fixes from the security review of 0.7.0 (2026-10-19): P092–P095, P098–P101 and P103, each

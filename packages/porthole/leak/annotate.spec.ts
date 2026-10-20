@@ -534,3 +534,345 @@ test("marks shown before the content arrives are reported once it has, not orpha
     expect.objectContaining({ id: "fell", state: "attached" }) as unknown as AnchorResult,
   ]);
 });
+
+// Markers (P104): a mark with a count gets a bubble with its number, which a person can click.
+
+const MARKED = `<h2 id="title" style="margin: 40px 0 24px">Quarterly notes</h2>
+<p id="p1" style="font-size: 18px">Costs <b>fell</b><span id="after"> by three percent this quarter, again and again.</span></p>
+<p id="p2" style="font-size: 18px"><i id="plain">Nothing</i><span id="after2"> else is marked on this line.</span></p>
+<button id="more" style="margin: 24px 60px">Read more</button>
+<script>
+  for (const type of ["pointerdown", "pointerup", "mousedown", "mouseup", "click"]) {
+    window.addEventListener(type, () => (document.body.dataset[type] = "yes"), true);
+  }
+  document.getElementById("after").addEventListener("click", () => (document.body.dataset.after = "yes"));
+  document.getElementById("after2").addEventListener("click", () => (document.body.dataset.after2 = "yes"));
+</script>`;
+
+const elementMark = (id: string, css: string, count?: number) => ({
+  id,
+  anchor: { kind: "element", selectors: [{ type: "CssSelector", value: css }], label: css },
+  ...(count === undefined ? {} : { count }),
+});
+const textMark = (id: string, exact: string, count?: number) => ({
+  id,
+  anchor: { kind: "text", selectors: [{ type: "TextQuoteSelector", exact }], label: exact },
+  ...(count === undefined ? {} : { count }),
+});
+
+/** The markers' labels in the shell's closed layer, as Chromium's inspector sees them. */
+async function markerLabels(page: Page, frame: Frame): Promise<string[]> {
+  interface Node {
+    nodeName: string;
+    nodeValue?: string;
+    attributes?: string[];
+    children?: Node[];
+    shadowRoots?: Node[];
+    contentDocument?: Node;
+  }
+  let session;
+  try {
+    session = await page.context().newCDPSession(frame);
+  } catch {
+    session = await page.context().newCDPSession(page);
+  }
+  const { root } = (await session.send("DOM.getDocument", { depth: -1, pierce: true })) as {
+    root: Node;
+  };
+  const labels: string[] = [];
+  const text = (node: Node): string =>
+    node.nodeName === "#text"
+      ? (node.nodeValue ?? "")
+      : (node.children ?? []).map((child) => text(child)).join("");
+  const walk = (node: Node) => {
+    const attributes = node.attributes ?? [];
+    const classAt = attributes.indexOf("class");
+    if (classAt !== -1 && /\bmarker\b/u.test(attributes[classAt + 1] ?? "")) {
+      labels.push(text(node));
+    }
+    for (const child of [
+      ...(node.children ?? []),
+      ...(node.shadowRoots ?? []),
+      ...(node.contentDocument ? [node.contentDocument] : []),
+    ]) {
+      walk(child);
+    }
+  };
+  walk(root);
+  await session.detach();
+  return labels;
+}
+
+/** Where on the page a text anchor's marker is: just past the end of `selector`, raised. */
+async function textMarkerPoint(frame: Frame, selector: string) {
+  const box = await frame.locator(selector).boundingBox();
+  if (box === null) {
+    throw new Error(`${selector} isn't on screen`);
+  }
+  return { x: box.x + box.width + 10, y: box.y };
+}
+
+test("markers: a mark with a count gets a numbered bubble; its click is reported and never reaches the content", async ({
+  page,
+  browserName,
+}) => {
+  const display = await referenceHost.launch(page, { config: annotated(), content: MARKED });
+  const frame = await display.frame();
+  await expect(frame.locator("#more")).toBeVisible();
+  const plainBefore = await look(page, frame, "#p2");
+  await display.annotate("show", [
+    elementMark("title", "#title", 0),
+    textMark("fell", "fell", 3),
+    elementMark("more", "#more", 120),
+    textMark("plain", "Nothing"),
+  ]);
+  const shown = await next(display, "anchored");
+  expect(shown.results.map((each) => each.state)).toEqual([
+    "attached",
+    "attached",
+    "attached",
+    "attached",
+  ]);
+  if (browserName === "chromium") {
+    // The number, "99+" past 99, the bubble alone for 0; a mark without a count has none.
+    await expect.poll(() => markerLabels(page, frame)).toEqual(["", "3", "99+"]);
+  }
+
+  // A click on the text's marker: reported with its box; nothing of the content's hears it.
+  const fell = await textMarkerPoint(frame, "#p1 b");
+  await page.mouse.click(fell.x, fell.y);
+  const activated = await next(display, "activated");
+  expect(activated.id).toBe("fell");
+  // Its box is the marker's, in the frame's viewport: around where it was clicked.
+  const frameBox = await (await frame.frameElement()).boundingBox();
+  const left = activated.rect.x + (frameBox?.x ?? 0);
+  const top = activated.rect.y + (frameBox?.y ?? 0);
+  expect(left).toBeLessThanOrEqual(fell.x);
+  expect(left + activated.rect.width).toBeGreaterThanOrEqual(fell.x);
+  expect(top).toBeLessThanOrEqual(fell.y);
+  expect(top + activated.rect.height).toBeGreaterThanOrEqual(fell.y);
+  for (const attribute of [
+    "data-pointerdown",
+    "data-pointerup",
+    "data-mousedown",
+    "data-mouseup",
+    "data-click",
+    "data-after",
+  ]) {
+    expect(await frame.locator("body").getAttribute(attribute), attribute).toBeNull();
+  }
+
+  // The element's marker sits on its top right corner; the numbers make each wider.
+  const more = await frame.locator("#more").boundingBox();
+  const title = await frame.locator("#title").boundingBox();
+  if (more === null || title === null) {
+    throw new Error("no button or title");
+  }
+  let count = (await reports(display)).length;
+  await page.mouse.click(more.x + more.width, more.y);
+  const wide = await next(display, "activated", count);
+  expect(wide.id).toBe("more");
+  count = (await reports(display)).length;
+  // The title spans the frame: its marker is kept inside it.
+  await page.mouse.click(title.x + title.width - 10, title.y);
+  const bare = await next(display, "activated", count);
+  expect(bare.id).toBe("title");
+  expect(bare.rect.width).toBeLessThan(activated.rect.width);
+  expect(activated.rect.width).toBeLessThan(wide.rect.width);
+  expect(await frame.locator("body").getAttribute("data-click")).toBeNull();
+
+  // A mark without a count: its anchor is marked, but no marker takes the click there.
+  expect((await look(page, frame, "#p2")).equals(plainBefore)).toBe(false);
+  count = (await reports(display)).length;
+  const plain = await textMarkerPoint(frame, "#plain");
+  await page.mouse.click(plain.x, plain.y);
+  await expect(frame.locator("body")).toHaveAttribute("data-after2", "yes");
+  await page.waitForTimeout(400);
+  expect((await reports(display)).slice(count).filter((each) => each.type === "activated")).toEqual(
+    [],
+  );
+
+  // While the person picks an element, markers step aside: the click picks what lies under one.
+  await display.annotate("start", { elements: true, text: false });
+  count = (await reports(display)).length;
+  await page.mouse.click(fell.x, fell.y);
+  const picked = await next(display, "selected", count);
+  expect(picked.anchor.kind).toBe("element");
+});
+
+const SCROLLING = `<!doctype html><html><head><title>Long</title></head><body style="margin: 0">
+<div id="pinned" style="position: fixed; top: 0; right: 0; padding: 4px">Pinned note</div>
+<h1 id="top" style="margin: 40px 8px">Report</h1>
+<p id="near" style="margin: 8px">The near paragraph.</p>
+<div style="height: 1600px">spacer</div>
+<p id="far" style="margin: 8px">The far paragraph says hello to everyone.</p>
+</body></html>`;
+
+test("following: once a scroll settles, one report with only the marks that moved", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    content: SCROLLING,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#far")).toBeAttached();
+  await display.annotate("show", [
+    elementMark("top", "#top", 1),
+    textMark("near", "near paragraph", 2),
+    textMark("pinned", "Pinned note", 1),
+    elementMark("far", "#far"),
+  ]);
+  const shown = await next(display, "anchored");
+  const before = new Map(shown.results.map((each) => [each.id, each.rect]));
+  await page.waitForTimeout(400);
+  const count = (await reports(display)).length;
+  expect(count, "nothing more until something moves").toBe(1);
+
+  // A run of scrolls, as a wheel gives them: a report once it has settled, with the marks that
+  // moved, the pinned one never. One for the run unless the run itself paused (measured: under
+  // load an engine may hold a step back past the shell's 150 ms, and then that pause settled).
+  const gaps = await frame.evaluate(async () => {
+    const times: number[] = [];
+    for (let i = 0; i < 8; i += 1) {
+      window.scrollBy(0, 50);
+      times.push(performance.now());
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    return times.slice(1).map((time, i) => time - (times[i] ?? time));
+  });
+  const anchoredSince = async (after: number) =>
+    (await reports(display))
+      .slice(after)
+      .filter(
+        (each): each is Extract<AnnotationReport, { type: "anchored" }> => each.type === "anchored",
+      );
+  await expect
+    .poll(async () => {
+      const last = (await anchoredSince(count)).at(-1);
+      const top = last?.results.find((each) => each.id === "top")?.rect?.y;
+      return top === undefined ? null : Math.round((before.get("top")?.y ?? 0) - top);
+    })
+    .toBe(400);
+  await page.waitForTimeout(600);
+  const run = await anchoredSince(count);
+  expect(run.length).toBeGreaterThanOrEqual(1 + gaps.filter((gap) => gap >= 170).length);
+  expect(
+    run.length,
+    `one report per settle (steps ${gaps.map(Math.round).join(", ")} ms apart)`,
+  ).toBeLessThanOrEqual(1 + gaps.filter((gap) => gap >= 130).length);
+  for (const report of run) {
+    expect(report.results.map((each) => each.id).sort()).toEqual(["far", "near", "top"]);
+  }
+  for (const each of run.at(-1)?.results ?? []) {
+    expect(each.state).toBe("attached");
+    expect((before.get(each.id)?.y ?? 0) - (each.rect?.y ?? 0)).toBeCloseTo(400, 0);
+  }
+
+  // Down and back in the next frame: nothing moved since the host was last told, so nothing is.
+  const told = (await reports(display)).length;
+  const apart = await frame.evaluate(
+    () =>
+      new Promise<number>((resolve) => {
+        window.scrollBy(0, 120);
+        const start = performance.now();
+        requestAnimationFrame(() => {
+          window.scrollBy(0, -120);
+          resolve(performance.now() - start);
+        });
+      }),
+  );
+  await page.waitForTimeout(600);
+  if (apart < 130) {
+    expect(await anchoredSince(told)).toEqual([]);
+  }
+  await frame.evaluate(() => window.scrollTo(0, 0));
+  await expect
+    .poll(async () => {
+      const last = (await anchoredSince(told)).at(-1);
+      return last?.results.find((each) => each.id === "top")?.rect?.y;
+    })
+    .toBeCloseTo(before.get("top")?.y ?? 0, 0);
+});
+
+test("a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, { config: annotated(), content: MARKED });
+  const frame = await display.frame();
+  await expect(frame.locator("#more")).toBeVisible();
+  const fake = (params: unknown) =>
+    frame.evaluate(
+      (given) =>
+        parent.postMessage(
+          { jsonrpc: "2.0", method: "porthole/annotate.activated", params: given },
+          "*",
+        ),
+      params,
+    );
+  const rect = { x: 0, y: 0, width: 10, height: 10 };
+
+  // No marks: nothing taken.
+  await fake({ id: "fell", rect });
+  await page.waitForTimeout(400);
+  expect(await reports(display)).toEqual([]);
+
+  await display.annotate("show", [textMark("fell", "fell", 3), textMark("plain", "Nothing")]);
+  await next(display, "anchored");
+  const count = (await reports(display)).length;
+  // An id it doesn't show, one shown without a marker: dropped. Malformed: refused as invalid.
+  await fake({ id: "admin", rect });
+  await fake({ id: "plain", rect });
+  await fake({ id: "fell" });
+  await fake({ id: "fell", rect: { ...rect, width: -1 } });
+  await expect
+    .poll(async () => (await refusals(display)).filter((each) => each === "annotate:invalid"))
+    .toHaveLength(2);
+  await page.waitForTimeout(400);
+  expect((await reports(display)).slice(count)).toEqual([]);
+
+  // A well-formed fake for a mark with a marker gets through, rebuilt: a UI hint only.
+  await fake({ id: "fell", rect, delete: true });
+  expect(await next(display, "activated", count)).toEqual({ type: "activated", id: "fell", rect });
+
+  // Content's own synthetic click on the shell's layer reports nothing.
+  const after = (await reports(display)).length;
+  await frame.evaluate(() => {
+    const layer = document.querySelector("[data-porthole-annotations]");
+    const box = document.querySelector("#p1 b")?.getBoundingClientRect();
+    layer?.dispatchEvent(
+      new MouseEvent("click", {
+        bubbles: true,
+        clientX: (box?.right ?? 0) + 10,
+        clientY: (box?.top ?? 0) + 2,
+      }),
+    );
+  });
+  await page.waitForTimeout(400);
+  expect((await reports(display)).length).toBe(after);
+});
+
+test("following: a change of the content that moves a mark, but loses none, reports the moved marks once quiet", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: annotated(),
+    content: `<p id="a">alpha beta</p><p id="b">gamma delta</p>`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#b")).toBeVisible();
+  await display.annotate("show", [textMark("a", "alpha beta"), textMark("b", "gamma delta", 1)]);
+  const shown = await next(display, "anchored");
+  const count = (await reports(display)).length;
+  // A line inserted between them: b moves down, a stays.
+  await frame.evaluate(() => {
+    const line = document.createElement("p");
+    line.textContent = "an inserted line";
+    document.getElementById("b")?.before(line);
+  });
+  const moved = await next(display, "anchored", count);
+  expect(moved.results.map((each) => each.id)).toEqual(["b"]);
+  expect(moved.results[0]?.rect?.y ?? 0).toBeGreaterThan(
+    shown.results.find((each) => each.id === "b")?.rect?.y ?? 0,
+  );
+});

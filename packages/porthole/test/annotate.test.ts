@@ -1,5 +1,5 @@
 import { Script } from "node:vm";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   annotateMode,
   checkMarks,
@@ -9,7 +9,14 @@ import {
 } from "../src/annotate/validate.ts";
 import { ANNOTATION_LIMITS, type AnnotationAnchor } from "../src/annotate/types.ts";
 import { createBridge, type BridgeEvent } from "../src/bridge/bridge.ts";
-import { compile, presets } from "../src/index.ts";
+import {
+  compile,
+  createHost,
+  presets,
+  type AnnotationReport,
+  type DisplayHandle,
+  type PlatformHost,
+} from "../src/index.ts";
 import { ANNOTATE_RUNTIME } from "../src/shell/annotate.ts";
 import { SHELL_RUNTIME } from "../src/shell/runtime.ts";
 
@@ -141,7 +148,17 @@ describe("the host's checks on what a frame reports", () => {
         { id: "b", state: "orphaned" },
       ],
     });
+    expect(parseReport({ type: "activated", id: "c1", rect, extra: true })).toEqual({
+      type: "activated",
+      id: "c1",
+      rect,
+    });
     for (const bad of [
+      { type: "activated", id: "c1" },
+      { type: "activated", id: "", rect },
+      { type: "activated", id: "x".repeat(ANNOTATION_LIMITS.id + 1), rect },
+      { type: "activated", id: 7, rect },
+      { type: "activated", id: "c1", rect: { ...rect, height: -1 } },
       { type: "anchored", results: [{ id: "a", state: "lost" }] },
       { type: "anchored", results: [{ id: "", state: "orphaned" }] },
       {
@@ -165,9 +182,100 @@ describe("the host's checks on what a frame reports", () => {
     expect(() => checkMarks([{ id: "c1", anchor: { ...text, kind: "page" } as never }])).toThrow(
       /anchor/u,
     );
+    // A marker's count (P104): a whole number from 0 to the limit, kept; absent, no key.
+    expect(checkMarks([{ id: "c1", anchor: element, count: 0 }])).toEqual([
+      { id: "c1", anchor: element, count: 0 },
+    ]);
+    expect(checkMarks([{ id: "c1", anchor: text, count: ANNOTATION_LIMITS.count }])).toEqual([
+      { id: "c1", anchor: text, count: ANNOTATION_LIMITS.count },
+    ]);
+    expect(Object.keys(checkMarks([{ id: "c1", anchor: text }])[0] ?? {})).toEqual([
+      "id",
+      "anchor",
+    ]);
+    for (const count of [-1, 1.5, ANNOTATION_LIMITS.count + 1, Number.NaN, Infinity, "3", null]) {
+      expect(
+        () => checkMarks([{ id: "c1", anchor: text, count: count as number }]),
+        String(count),
+      ).toThrow(/count/u);
+    }
     expect(annotateMode(undefined)).toEqual({ elements: true, text: true });
     expect(annotateMode({ text: false })).toEqual({ elements: true, text: false });
     expect(() => annotateMode({ elements: false, text: false })).toThrow(/elements, text/u);
+  });
+});
+
+describe("a marker's click (P104), on createHost over a stand-in platform", () => {
+  const mounted: DisplayHandle[] = [];
+  afterEach(() => {
+    for (const display of mounted.splice(0)) {
+      display.destroy();
+    }
+  });
+  const mount = () => {
+    const listeners = new Set<(message: unknown) => void>();
+    const platform: PlatformHost = {
+      name: "stand-in",
+      createSurface: () => ({
+        transport: {
+          send: () => {},
+          listen: (listener) => {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+          },
+          close: () => listeners.clear(),
+        },
+        element: null,
+        setHeight: () => {},
+        setColorScheme: () => {},
+        userActivation: () => undefined,
+        onNavigated: () => () => {},
+        onLoad: () => () => {},
+        destroy: () => {},
+      }),
+    };
+    const container = {
+      ownerDocument: {
+        defaultView: { location: { origin: "https://app.example" }, navigator: { language: "en" } },
+      },
+      getBoundingClientRect: () => ({ width: 600 }),
+    } as unknown as HTMLElement;
+    const display = createHost(presets.artifact({ capabilities: { annotate: {} } }), {
+      platform,
+    }).mount(container, { displayId: "d1", title: "Notes", scheme: "light" });
+    mounted.push(display);
+    const reports: AnnotationReport[] = [];
+    const refused: string[] = [];
+    display.on("annotation", (report) => reports.push(report));
+    display.on("refused", (detail) => refused.push(detail.refusal));
+    const activate = async (params: unknown) => {
+      for (const listener of listeners) {
+        listener({ jsonrpc: "2.0", method: "porthole/annotate.activated", params });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    };
+    return { display, reports, refused, activate };
+  };
+  const rect = { x: 10, y: 20, width: 30, height: 18 };
+
+  test("is taken only for a mark the host shows with a marker", async () => {
+    const t = mount();
+    t.display.annotations.show([
+      { id: "c1", anchor: text, count: 2 },
+      { id: "c2", anchor: element },
+    ]);
+    await t.activate({ id: "nope", rect });
+    await t.activate({ id: "c2", rect });
+    expect(t.reports).toEqual([]);
+    await t.activate({ id: "c1", rect, admin: true });
+    expect(t.reports).toEqual([{ type: "activated", id: "c1", rect }]);
+    // Malformed: refused as invalid, never delivered.
+    await t.activate({ id: "c1" });
+    expect(t.refused).toEqual(["invalid"]);
+    // Once cleared, no mark is shown: its id is no longer taken.
+    t.display.annotations.clear();
+    await t.activate({ id: "c1", rect });
+    expect(t.reports).toHaveLength(1);
   });
 });
 

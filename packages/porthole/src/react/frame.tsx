@@ -585,7 +585,10 @@ export interface PortholeFrameProps {
    * again to pick again.
    */
   readonly annotating?: AnnotateMode | null;
-  /** The anchors to mark in the frame (the host's comments). Keep it stable (memoized). */
+  /**
+   * The anchors to mark in the frame (the host's comments). A mark with a `count` gets a
+   * clickable marker (P104). Compared by value.
+   */
   readonly annotations?: readonly AnnotationMark[];
   /**
    * The mark to bring into view and make the active one; each new id focuses it. To focus the
@@ -597,7 +600,8 @@ export interface PortholeFrameProps {
     | null;
   /**
    * What the frame reported: a selection (an anchor and where it is), its clearing, a cancelled
-   * pick, where marks are. The content's word: UI hints, never permissions.
+   * pick, where marks are (again once a scroll settles: those that moved), a marker clicked
+   * (`activated`). The content's word: UI hints, never permissions.
    */
   readonly onAnnotation?: (report: AnnotationReport) => void;
   /** Draws the placeholder instead of the default one. */

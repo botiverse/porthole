@@ -142,6 +142,8 @@ Whatever the use:
   host's own UI. A copy notice of its own shows what went on the clipboard (S1).
 - Show the text content reports (its errors, a blocked navigation's address, an annotation's
   quoted text) only as text, never as HTML.
+- Take what the frame reports about annotations as UI hints (where to draw, what to open), never
+  as permissions, and put nothing in a mark the page may not know (§7).
 - List every app origin in `appOrigins` (`hostOrigins` in `/server`): only those may frame content,
   and only those are checked against the content domain for a shared site.
 - Under the app runtime, run `defineRuntimeConformance` with `api` in CI (§7).
@@ -525,6 +527,28 @@ wall on three engines, and `defineHostConformance` runs it against a host's own 
 
 **The host must** do what [every host](#what-every-host-must-do) does, write the handlers (their
 effects are its own), and group displays by page (S7).
+
+**Annotations** (`annotate`, P053, P104). The shell that draws marks and reports anchors shares
+its realm with the content, so:
+
+- *What content learns.* Everything the host sends in a `show` is posted into the frame's window,
+  where the content can listen: each mark's id, anchor and, where given, `count` (the number on
+  its marker). A host gives ids that say nothing (never a person's name or a comment's words), and
+  a count only where the page may know how many there are. Who commented and what they wrote stay
+  in the host's own UI, outside the frame.
+- *What content can fake.* Any report: a selection while the host asks for one, where marks are,
+  and a marker's click (`activated`) for any mark the host shows with a count, with no click and
+  any box. It can draw look-alike markers, or lay its own elements over Porthole's. The host takes
+  each report only for what it asked for and its own shown ids, rebuilt within
+  `ANNOTATION_LIMITS`, at 120 a minute; `activated` for a mark without a marker, or an id it
+  doesn't show, is dropped (negative control `annotation-activated`).
+- *What holds.* A real click on a marker reaches none of the content's handlers (the shell's
+  first listener stops it; control `marker-click`). Content can't read or restyle the shell's
+  layer (a closed shadow root), but it can cover it, change its words so a mark is orphaned, or
+  flood the shared rate so real reports are refused.
+- So `activated` opens the host's own view of a mark it already shows, placed within the frame's
+  box, and never acts on it (no resolve, delete or reply); an anchor or a rect decides where
+  something is drawn, never who may see or do anything.
 
 ### The app runtime
 

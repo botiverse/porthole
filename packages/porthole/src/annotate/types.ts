@@ -1,6 +1,7 @@
 /**
  * Annotations (P053): a person points at part of a display (an element, or text they select) to
- * comment on it, and the host marks the anchors already made. The host drives the shell with
+ * comment on it, and the host marks the anchors already made, each with a clickable marker and a
+ * number where it gives a count (P104). The host drives the shell with
  * Porthole's own messages (`porthole/annotate.*`); the shell answers with anchors and where they
  * are. An anchor is a set of W3C Web Annotation selectors, so it can be found again after the
  * content changes; finding it is best-effort, and says so (`orphaned`).
@@ -62,10 +63,21 @@ export interface AnnotateMode {
   readonly text?: boolean;
 }
 
-/** An anchor the host marks in the frame, under its own id. */
+/**
+ * An anchor the host marks in the frame, under its own id. Everything here is sent into the
+ * frame, so the content can read it: give ids that say nothing (never a person's name or the
+ * comment's words).
+ */
 export interface AnnotationMark {
   readonly id: string;
   readonly anchor: AnnotationAnchor;
+  /**
+   * A marker (P104): with a count, the shell also draws a small bubble with this number (0 to
+   * `ANNOTATION_LIMITS.count`; above 99 it reads "99+", 0 draws the bubble alone) at the end of a
+   * text anchor and the top right of an element. The person can click it: the frame reports
+   * `activated`. The content can read the number; give one only where the page may know it.
+   */
+  readonly count?: number;
 }
 
 /** Whether a mark's anchor was found in the content as it is now. */
@@ -90,8 +102,18 @@ export type AnnotationReport =
   | { readonly type: "unselected" }
   /** The person pressed Escape while picking an element. */
   | { readonly type: "cancelled" }
-  /** Where the marked anchors are now, after `show`, `focus`, or a change of the content. */
-  | { readonly type: "anchored"; readonly results: readonly AnchorResult[] };
+  /**
+   * Where the marked anchors are now: every mark after `show`, the focused one after `focus`,
+   * every mark when the content changed one's state, and, once a scroll, a resize or a change of
+   * the content has settled, only the marks that moved since the host was last told (P104).
+   */
+  | { readonly type: "anchored"; readonly results: readonly AnchorResult[] }
+  /**
+   * The person clicked the marker of a mark the host shows with a `count` (P104); `rect` is the
+   * marker's box, to open the host's own UI beside it. The content can fake it for any mark the
+   * host shows: open the host's own view of that mark, never act on it.
+   */
+  | { readonly type: "activated"; readonly id: string; readonly rect: AnnotationRect };
 
 /** Porthole's own messages for annotations (own-prefixed, P002). */
 export const ANNOTATE_METHODS = {
@@ -110,6 +132,8 @@ export const ANNOTATE_METHODS = {
   unselected: "porthole/annotate.unselected",
   cancelled: "porthole/annotate.cancelled",
   anchored: "porthole/annotate.anchored",
+  /** Frame → host: a mark's marker was clicked (P104). */
+  activated: "porthole/annotate.activated",
 } as const;
 
 /** The most of each part of an anchor or report the host takes. */
@@ -123,4 +147,6 @@ export const ANNOTATION_LIMITS = {
   id: 128,
   position: 50_000_000,
   coordinate: 10_000_000,
+  /** The largest `count` a mark's marker takes (P104). */
+  count: 999,
 } as const;

@@ -152,6 +152,10 @@ export function parseReport(value: unknown): AnnotationReport | null {
       const checked = results(value.results);
       return checked === null ? null : { type: "anchored", results: checked };
     }
+    case "activated": {
+      const rect = parseRect(value.rect);
+      return !markId(value.id) || rect === null ? null : { type: "activated", id: value.id, rect };
+    }
     default:
       return null;
   }
@@ -180,7 +184,12 @@ export function checkMarks(marks: readonly AnnotationMark[]): AnnotationMark[] {
         `annotations.show: mark ${index} needs a unique id (1 to ${LIMITS.id} characters) and a valid anchor`,
       );
     }
+    if (mark.count !== undefined && !count(mark.count, LIMITS.count)) {
+      throw new TypeError(
+        `annotations.show: mark ${index}'s count is a whole number from 0 to ${LIMITS.count}`,
+      );
+    }
     seen.add(mark.id);
-    return { id: mark.id, anchor };
+    return { id: mark.id, anchor, ...(mark.count === undefined ? {} : { count: mark.count }) };
   });
 }
