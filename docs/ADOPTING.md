@@ -239,7 +239,9 @@ createHost(config, {
   controls, variation selectors, tag or private-use characters, controls other than new lines and
   tabs), in its text or any string of its structured content, never reaches `show` or your
   handler. Real emoji pass (☀️, 👨‍👩‍👧, 👩🏽‍💻, 1️⃣): a selector right after a pictograph or in a
-  keycap, a joiner between two pictographs. Subdivision flags (tag characters) don't. Your own `show` resolves only once that very update is visible: if a later update of
+  keycap, a joiner between two pictographs. So do joiners that shape letters: U+200C or U+200D
+  between two letters or marks of Arabic, Syriac, N'Ko, Mongolian, the Indic scripts, Sinhala or
+  Myanmar (Persian's می‌خواهم). Subdivision flags (tag characters) don't. Your own `show` resolves only once that very update is visible: if a later update of
   the display replaces it before it is drawn, reject, and it doesn't go.
 
 ## 4. Served pages: the host kit

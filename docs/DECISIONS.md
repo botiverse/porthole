@@ -4266,9 +4266,23 @@ manual line said "unconfirmed"), the leak probe `12.model-context`, and two case
      digit draws nothing and would hide a bit per digit); U+200D only between two pictographs, a
      U+FE0F or a skin tone after the first. Every other variation selector (U+FE00–FE0D,
      U+E0100–E01EF), a joiner anywhere else (between letters, in a run, first or last), and tag
-     characters (U+E0000–E007F, subdivision flags such as 🏴 England's among them) stay refused,
-     as does U+200C (so Persian text with a non-joiner, and Indic text with a joiner, is refused:
-     the agent writes it without). **The bound:** what the allowance lets through is at most two
+     characters (U+E0000–E007F, subdivision flags such as 🏴 England's among them) stay refused.
+     Joiners that shape letters pass too (refusing Persian and Indic text was too high a cost):
+     U+200C or U+200D directly between two letters or marks (`[\p{L}\p{M}]`) of a script whose
+     shaping they change, by Script_Extensions: Arabic, Syriac, N'Ko, Mongolian (the cursive
+     scripts, where they break or make a join), Devanagari, Bengali, Gurmukhi, Gujarati, Oriya,
+     Tamil, Telugu, Kannada, Malayalam, Sinhala and Myanmar (a conjunct, a half form, a ligature),
+     after Unicode's notes on the joiners; anywhere else (between Latin or Greek letters, beside a
+     space or a digit, first, last, doubled, between two scripts' letters) they are refused. Their
+     bound: one joiner per letter boundary of those scripts, between letters the person sees, and
+     where the letters join or form a conjunct it changes how they look, so it is seen. Where they
+     wouldn't (after an Arabic letter that never joins to the left, between consonants without a
+     virama) it changes nothing, and is one choice of three at that boundary: never letters a
+     model reads, as it reads tags. Tested: Persian with its non-joiner, Hindi with a joiner and a
+     non-joiner, each script once; the misplacements above; 2,000 random strings, where every
+     joiner that passes sits between two of those scripts' letters or marks. Atomic chillus
+     replaced Malayalam's word-final joiner (Unicode 5.1); a joiner at a word's end is refused.
+     **The emoji bound:** what that allowance lets through is at most two
      code points per visible emoji (a selector there or not, a joiner there or not): a bit or two
      of choice beside something the person sees, never characters a model reads as letters, as it
      reads tag characters. A hidden instruction of 40 letters would need hundreds of emoji in a

@@ -375,6 +375,81 @@ describe("review of P100, 1b: real emoji sequences pass; selectors and joiners c
   });
 });
 
+describe("review of P100, 1c: joiners that shape a script's letters pass; anywhere else they are refused", () => {
+  const many = () => setup(declared({ gates: [{ rateLimit: { perMinute: 10_000 } }, "show"] }));
+  const goes = async (text: string) => {
+    const { bridge } = many();
+    const asText = (await bridge.call("setModelContext", { content: [{ type: "text", text }] })).ok;
+    const asData = (await bridge.call("setModelContext", { structuredContent: { [text]: text } }))
+      .ok;
+    expect(asData, "text and structured content alike").toBe(asText);
+    return asText;
+  };
+
+  test.each([
+    ["Persian with a non-joiner (I want)", "می\u200Cخواهم"],
+    ["Persian in a sentence", "من می\u200Cخواهم بروم، نامه\u200Cها را ببینم"],
+    ["Hindi with a joiner after a virama (half form)", "क्\u200Dष"],
+    ["Hindi with a non-joiner after a virama", "क्\u200Cष"],
+    ["Syriac", "ܐ\u200Dܒ"],
+    ["N'Ko", "ߊ\u200Dߋ"],
+    ["Mongolian", "ᠠ\u200Dᠡ"],
+    ["Malayalam", "ന്\u200Dറ"],
+    ["Sinhala (a yansaya)", "ශ්\u200Dර"],
+    ["Myanmar", "က\u200Cခ"],
+    ["Bengali", "র\u200D্য"],
+  ])("%s passes", async (_name, text) => {
+    expect(await goes(text)).toBe(true);
+  });
+
+  test.each([
+    ["a non-joiner between Latin letters", "a\u200Cb"],
+    ["a joiner between Latin letters", "a\u200Db"],
+    ["a non-joiner doubled in Persian", "می\u200C\u200Cخواهم"],
+    ["a joiner doubled in Hindi", "क्\u200D\u200Dष"],
+    ["a non-joiner then a joiner", "می\u200C\u200Dخواهم"],
+    ["a non-joiner first", "\u200Cمی"],
+    ["a non-joiner last", "می\u200C"],
+    ["from Persian to Latin", "ی\u200Cb"],
+    ["from Latin to Hindi", "a\u200Dक"],
+    ["beside a space", "می \u200Cخواهم"],
+    ["beside a digit of the script", "۱\u200C۲"],
+    ["in a script it doesn't shape (Greek)", "α\u200Cβ"],
+  ])("%s is refused", async (_name, text) => {
+    expect(await goes(text)).toBe(false);
+  });
+
+  test("whatever passes has at most one joiner per letter boundary of those scripts (random strings)", async () => {
+    const { bridge } = many();
+    const alphabet = ["م", "ی", "خ", "क", "्", "ष", "a", "b", " ", "\u200C", "\u200D"];
+    const shaped = /[\p{scx=Arabic}\p{scx=Devanagari}]/u;
+    let state = 20_261_020;
+    const next = () => {
+      state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return state;
+    };
+    let passed = 0;
+    for (let index = 0; index < 2_000; index += 1) {
+      const chars = Array.from(
+        { length: 1 + (next() % 16) },
+        () => alphabet[next() % alphabet.length]!,
+      );
+      const text = chars.join("");
+      if ((await bridge.call("setModelContext", { content: [{ type: "text", text }] })).ok) {
+        passed += 1;
+        chars.forEach((each, at) => {
+          if (each === "\u200C" || each === "\u200D") {
+            // Between two of the script's letters or marks: never first, last, doubled or Latin.
+            expect(shaped.test(chars[at - 1] ?? ""), JSON.stringify(text)).toBe(true);
+            expect(shaped.test(chars[at + 1] ?? ""), JSON.stringify(text)).toBe(true);
+          }
+        });
+      }
+    }
+    expect(passed).toBeGreaterThan(100);
+  });
+});
+
 describe("review of P100, 4: dropping show is said, and can be said to be deliberate", () => {
   const optOut = (extra: Record<string, unknown> = {}) =>
     presets.mcpApp({

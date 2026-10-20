@@ -183,10 +183,45 @@ const UNSEEN = /[\p{Cf}\p{Co}\p{Cs}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}]|[^\P{Cc
  * subdivision flags too.
  */
 const EMOJI_PARTS =
-  /(?<=\p{Extended_Pictographic})[\uFE0E\uFE0F]|(?<=[0-9#*])[\uFE0E\uFE0F](?=\u20E3)|(?<=\p{Extended_Pictographic}[\uFE0F\p{Emoji_Modifier}]?)\u200D(?=\p{Extended_Pictographic})/gu;
+  "(?<=\\p{Extended_Pictographic})[\\uFE0E\\uFE0F]|(?<=[0-9#*])[\\uFE0E\\uFE0F](?=\\u20E3)|(?<=\\p{Extended_Pictographic}[\\uFE0F\\p{Emoji_Modifier}]?)\\u200D(?=\\p{Extended_Pictographic})";
 
-/** Whether `text` holds what a person can't see, the parts of real emoji aside. */
-const unseen = (text: string): boolean => UNSEEN.test(text.replace(EMOJI_PARTS, ""));
+/**
+ * The scripts whose letters U+200C and U+200D shape (Unicode's notes on the joiners: the cursive
+ * scripts, where they break or make a join, and the Indic ones and Myanmar, where they choose a
+ * conjunct, a half form or a ligature), by Script_Extensions.
+ */
+const SHAPING_SCRIPTS = [
+  "Arabic",
+  "Syriac",
+  "Nko",
+  "Mongolian",
+  "Devanagari",
+  "Bengali",
+  "Gurmukhi",
+  "Gujarati",
+  "Oriya",
+  "Tamil",
+  "Telugu",
+  "Kannada",
+  "Malayalam",
+  "Sinhala",
+  "Myanmar",
+] as const;
+
+const SHAPED = `[${SHAPING_SCRIPTS.map((name) => `\\p{scx=${name}}`).join("")}]`;
+
+/**
+ * A joiner or non-joiner between two letters or marks of those scripts (Persian's می‌خواهم, a
+ * Hindi half form): the shape it chooses is what the person sees. One at a letter boundary, never
+ * doubled, first or last, or beside a letter of another script.
+ */
+const SHAPING_JOINERS = `(?<=[\\p{L}\\p{M}])(?<=${SHAPED})[\\u200C\\u200D](?=[\\p{L}\\p{M}])(?=${SHAPED})`;
+
+/** What may be invisible alone and is allowed where it is seen: one pass, on the text as sent. */
+const SEEN_IN_PLACE = new RegExp(`${EMOJI_PARTS}|${SHAPING_JOINERS}`, "gu");
+
+/** Whether `text` holds what a person can't see, the parts of emoji and shaped letters aside. */
+const unseen = (text: string): boolean => UNSEEN.test(text.replace(SEEN_IN_PLACE, ""));
 
 /** Whether any string in `value`, a key or a value, holds what can't be seen (bounded JSON data). */
 function holdsUnseen(value: unknown): boolean {
