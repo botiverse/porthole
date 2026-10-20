@@ -1,6 +1,7 @@
-import { randomBytes } from "node:crypto";
-import { createServer as createHttpServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { createHash, randomBytes } from "node:crypto";
+import { createServer as createHttpServer, type IncomingMessage, type Server } from "node:http";
+import { connect, type AddressInfo } from "node:net";
+import type { Duplex } from "node:stream";
 import { entryTarget, presets, type PortholeConfig } from "../../src/index.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
 import { nodeHost, nodeListener, nodeProbe } from "../../src/node/index.ts";
@@ -9,6 +10,8 @@ import {
   createContentHost,
   prefixedName,
   proxyTo,
+  upstreamHeaders,
+  type Access,
   type ContentHost,
   type ContentHostEvent,
 } from "../../src/server/index.ts";
@@ -71,7 +74,10 @@ const PAGES = new Map(
 const SCOPE = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/u;
 const VIEWER = /^[a-z0-9-]{1,32}$/u;
 
-/** A running app for url mode: its page loads a script from its own origin. */
+/**
+ * A running app for url mode: its page loads a script from its own origin; `/ws` is a WebSocket
+ * that opens (and checks no Origin of its own, as many dev servers' don't).
+ */
 async function runningApp(): Promise<{ readonly url: string; readonly server: Server }> {
   const server = createHttpServer((request, response) => {
     const pathname = new URL(request.url ?? "/", "http://app").pathname;
@@ -87,8 +93,51 @@ async function runningApp(): Promise<{ readonly url: string; readonly server: Se
         : "not found",
     );
   });
+  server.on("upgrade", (request: IncomingMessage, socket: Duplex) => {
+    const key = request.headers["sec-websocket-key"];
+    if (new URL(request.url ?? "/", "http://app").pathname !== "/ws" || typeof key !== "string") {
+      socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+      return;
+    }
+    const accept = createHash("sha1")
+      .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest("base64");
+    socket.write(
+      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
+    );
+    socket.on("error", () => socket.destroy());
+  });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/`, server };
+}
+
+/**
+ * A url-mode app's WebSocket, relayed to the running app as an adopter's relay does (P072):
+ * `nodeHost` passes it here once its cookie and its origin check out (P101).
+ */
+function relaySocket(appUrl: string) {
+  return (access: Access, request: IncomingMessage, socket: Duplex, head: Buffer): void => {
+    const target = new URL(appUrl);
+    const upstream = connect(Number(target.port), target.hostname, () => {
+      const headers = upstreamHeaders.request(request.headers, {
+        origin: access.origin,
+        target: target.origin,
+        websocket: true,
+      });
+      upstream.write(
+        `GET ${request.url ?? "/"} HTTP/1.1\r\n${headers.map(([name, value]) => `${name}: ${value}\r\n`).join("")}\r\n`,
+      );
+      upstream.write(head);
+      upstream.pipe(socket);
+      socket.pipe(upstream);
+    });
+    const close = () => {
+      upstream.destroy();
+      socket.destroy();
+    };
+    upstream.on("error", close);
+    socket.on("error", close);
+  };
 }
 
 const viewerOf = (request: Request): string | null => {
@@ -304,6 +353,7 @@ export async function startKit(settings: KitSettings): Promise<Kit> {
   };
 
   const porthole = nodeHost(content, {
+    appSocket: relaySocket(app.url),
     // As an app behind a TLS edge sees itself: http, whatever the browser used (P074).
     request: nodeListener(appRoutes, { scheme: "http" }),
   });

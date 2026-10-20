@@ -140,6 +140,68 @@ test.describe("prod shape", () => {
     expect(await page.locator("#artifact").count()).toBe(0);
   });
 
+  test("P0.3 / S3: a session copied under an unprefixed name, planted by a sibling, opens nothing (P101)", async ({
+    page,
+  }) => {
+    // Someone's own session for an app (here the probe's): its holder can read its value. Copied
+    // under the name without __Host-, for the whole content domain, from a sibling label.
+    await kit.begin(page);
+    await page.goto(`${APP}/login?as=probe`);
+    const location = await kit.served.locate(await kit.served.app("planted-a"));
+    await page.goto(location.url);
+    await expect(page.locator("html")).toHaveAttribute("data-app", "ready");
+    const session = (await page.context().cookies(location.origin)).find((each) =>
+      each.name.startsWith("__Host-porthole-"),
+    );
+    expect(session).toBeDefined();
+    await page.context().clearCookies();
+    await page.goto(`${content("p-evil")}/`);
+    await expect(page.locator("#preview")).toBeVisible();
+    await page.evaluate(
+      ([name, value]) => {
+        document.cookie = `${name}=${value}; Path=/; Secure; SameSite=Lax; Domain=content.test`;
+      },
+      [session!.name.slice("__Host-".length), session!.value] as const,
+    );
+    const planted = await page.context().cookies(location.origin);
+    expect(planted.some((each) => each.name === session!.name.slice("__Host-".length))).toBe(true);
+    // Signed out at the app: the copy opens nothing; the app's sign-in instead.
+    await page.goto(`${location.origin}/`);
+    await page.waitForTimeout(800);
+    expect(await page.locator("#sign-in-page").count(), `ended at ${page.url()}`).toBe(1);
+    expect(await page.locator("html").getAttribute("data-app")).toBeNull();
+  });
+
+  test("P0.3 / S6: a url-mode app's WebSocket opens from its own page, never a sibling's (P101)", async ({
+    page,
+  }) => {
+    await kit.begin(page);
+    await page.goto(`${APP}/login?as=probe`);
+    const a = await kit.served.locate(await kit.served.app("socket-a"));
+    const b = await kit.served.locate(await kit.served.app("socket-b"));
+    const socket = `${a.origin.replace(/^https/u, "wss")}/ws`;
+    const from = () =>
+      page.evaluate(
+        (target) =>
+          new Promise<string>((resolve) => {
+            const each = new WebSocket(target);
+            each.addEventListener("open", () => {
+              resolve("open");
+              each.close();
+            });
+            each.addEventListener("error", () => resolve("error"));
+            setTimeout(() => resolve("timeout"), 3_000);
+          }),
+        socket,
+      );
+    await page.goto(a.url);
+    await expect(page.locator("html")).toHaveAttribute("data-app", "ready");
+    expect(await from(), "the app's own socket").toBe("open");
+    await page.goto(b.url);
+    await expect(page.locator("html")).toHaveAttribute("data-app", "ready");
+    expect(await from(), "a sibling app's socket to it").toBe("error");
+  });
+
   for (const [who, framer] of [
     ["a sibling label (an app's preview)", content("p-evil")],
     ["another site", "https://evil.test"],

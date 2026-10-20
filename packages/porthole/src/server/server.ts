@@ -14,6 +14,7 @@ import { isHostLabel, reservedLabels } from "./naming.ts";
 import { enterPage, pageScript, SESSION_PATH, statusPage } from "./pages.ts";
 import { libraryFile } from "./libraries.ts";
 import { ownLoad, serveAsset, serveFile } from "./files.ts";
+import { isPortholeCookie } from "./proxy.ts";
 import {
   assetCodeRuns,
   assetCspDirectives,
@@ -231,14 +232,19 @@ function seconds(value: number | undefined, fallback: number, max: number, what:
   return value;
 }
 
-/** The cookies a request carries, as name → values (a name may come twice: partitioned or not). */
+/**
+ * The cookies a request carries, as name → values (a name may come twice: partitioned or not).
+ * Only spaces and tabs are trimmed, as browsers trim them (P101): a name a sibling set with a
+ * leading U+00A0 is no `__Host-` name, though JavaScript's `trim` would make it one.
+ */
 function cookiesOf(request: Request): [string, string][] {
   const header = request.headers.get("cookie") ?? "";
   const pairs: [string, string][] = [];
+  const blank = /^[ \t]+|[ \t]+$/gu;
   for (const part of header.split(";")) {
     const at = part.indexOf("=");
     if (at > 0) {
-      pairs.push([part.slice(0, at).trim(), part.slice(at + 1).trim()]);
+      pairs.push([part.slice(0, at).replace(blank, ""), part.slice(at + 1).replace(blank, "")]);
     }
   }
   return pairs;
@@ -547,8 +553,21 @@ export function createServer(options: ServerOptions): PortholeServer {
 
   const cookieName = (key: string): string =>
     secure ? `__Host-porthole-${key}` : `porthole-${key}`;
+  /**
+   * Whether a cookie is one this server set, by its name (P101). Over https only `__Host-` names:
+   * every label is same-site with every other (P047), and a sibling label (a url-mode app, an
+   * app's preview) can set any other name for the whole content domain (`Domain=`), never a
+   * `__Host-` one, which the browser keeps to the origin that set it. Over plain http (loopback
+   * dev only: `createServer` refuses http elsewhere) the names have no prefix, set and read:
+   * `__Host-` needs `Secure`, and WebKit keeps no `Secure` cookie on a tab of http://*.localhost
+   * (measured). A sibling there can set the very name, so a copy of one of this label's own
+   * sessions or nonces is read: someone must hold one to plant it, on a developer's own server.
+   * Another label's session is never this label's, either scheme (its signed scope). Case and
+   * every byte count: `__host-` or a name with anything before the prefix is not ours. What
+   * Porthole strips from an app's requests and answers is wider (`isPortholeCookie`).
+   */
   const ourCookie = (name: string): boolean =>
-    name.startsWith("porthole-") || name.startsWith("__Host-porthole-");
+    name.startsWith(secure ? "__Host-porthole-" : "porthole-");
 
   /**
    * The cookie a taken ticket buys: this origin only (`__Host-` over https), never readable by the
@@ -591,8 +610,38 @@ export function createServer(options: ServerOptions): PortholeServer {
 
   /** The cookie a redirect entry's browser holds while it is away (P068), by its nonce. */
   const nonceCookie = (nonce: string): string => cookieName(`n-${nonce}`);
-  /** What an entered path's nonce cookie says after its code was redeemed: the loop guard. */
-  const enteredMark = (pathname: string): string => `e.${keys.instanceKey({ entered: pathname })}`;
+  /**
+   * What an entered path's nonce cookie says after its code was redeemed: the loop guard. Its
+   * label's and its path's (P101): a mark redeemed on one label, planted on another, is nothing.
+   */
+  const enteredMark = (label: string, pathname: string): string =>
+    `e.${keys.instanceKey({ entered: pathname, label })}`;
+
+  /**
+   * Whether a url-mode app's request may ride its cookie (P101): what the app's own origin asks
+   * (its `Origin`, or `Sec-Fetch-Site` `same-origin`; `none` is the person's own address bar),
+   * and, where `navigable`, a navigation that opens it (GET or HEAD: the host's frame, a link, a
+   * redirect back from sign-in). Another origin (a sibling label's app, another frame on the
+   * host's page, an opaque origin's `null`) gets no write, no subresource, no socket. A request
+   * with neither header is no browser's (a browser always sends `Origin` on a socket and on a
+   * write, and fetch metadata on everything, where it sends them at all).
+   */
+  function fromItsOwnOrigin(request: Request, label: string, navigable: boolean): boolean {
+    const origin = request.headers.get("origin");
+    if (origin !== null && origin !== originOfLabel(label)) {
+      return false;
+    }
+    const site = request.headers.get("sec-fetch-site");
+    if (site === null || site === "same-origin" || site === "none") {
+      return true;
+    }
+    const method = request.method.toUpperCase();
+    return (
+      navigable &&
+      request.headers.get("sec-fetch-mode") === "navigate" &&
+      (method === "GET" || method === "HEAD")
+    );
+  }
 
   /** The access a request's own cookies give on `label`'s origin, for `key`'s instance or the app. */
   function accessOf(request: Request, label: string, key: string | null): Access | null {
@@ -1214,8 +1263,9 @@ export function createServer(options: ServerOptions): PortholeServer {
     if (path.length > MAX_PATH) {
       return page(414, "Address too long", "This address is too long to open.", method);
     }
-    const mark = enteredMark(url.pathname);
-    if (cookiesOf(request).some(([name, value]) => ourCookie(name) && value === mark)) {
+    const mark = enteredMark(label, url.pathname);
+    const marked = cookieName("n-");
+    if (cookiesOf(request).some(([name, value]) => name.startsWith(marked) && value === mark)) {
       return page(
         401,
         "Open this in a new tab",
@@ -1323,7 +1373,7 @@ export function createServer(options: ServerOptions): PortholeServer {
     headers.append(
       "set-cookie",
       [
-        `${named}=${enteredMark(target.pathname)}`,
+        `${named}=${enteredMark(label, target.pathname)}`,
         "Path=/",
         "HttpOnly",
         `Max-Age=${ENTERED_SECONDS}`,
@@ -1386,7 +1436,7 @@ export function createServer(options: ServerOptions): PortholeServer {
   function forUpstream(request: Request): Request {
     const headers = new Headers(request.headers);
     const kept = cookiesOf(request)
-      .filter(([name]) => !ourCookie(name))
+      .filter(([name]) => !isPortholeCookie(name))
       .map(([name, value]) => `${name}=${value}`);
     if (kept.length > 0) {
       headers.set("cookie", kept.join("; "));
@@ -1402,7 +1452,7 @@ export function createServer(options: ServerOptions): PortholeServer {
     headers.delete("set-cookie");
     for (const cookie of response.headers.getSetCookie()) {
       const name = cookie.split("=")[0]?.trim() ?? "";
-      if (!ourCookie(name)) {
+      if (!isPortholeCookie(name)) {
         headers.append("set-cookie", cookie);
       }
     }
@@ -1417,6 +1467,15 @@ export function createServer(options: ServerOptions): PortholeServer {
 
   async function serveApp(request: Request, label: string): Promise<Response> {
     const method = request.method.toUpperCase();
+    // Before the cookie is read: another origin's request is refused whatever it carries.
+    if (!fromItsOwnOrigin(request, label, true)) {
+      return page(
+        403,
+        "Not from this app",
+        "A request from another site doesn't ride this app's sign-in.",
+        method,
+      );
+    }
     const access = accessOf(request, label, null);
     if (access === null) {
       return page(
@@ -1667,7 +1726,13 @@ export function createServer(options: ServerOptions): PortholeServer {
 
     async access(request) {
       const at = labelOf(request);
-      if (at === null || at === "mismatch" || !ours(at.label)) {
+      // A socket is never a navigation: the app's own origin only (P101).
+      if (
+        at === null ||
+        at === "mismatch" ||
+        !ours(at.label) ||
+        !fromItsOwnOrigin(request, at.label, false)
+      ) {
         return null;
       }
       const access = accessOf(request, at.label, null);
@@ -1704,7 +1769,11 @@ export function createServer(options: ServerOptions): PortholeServer {
           return script;
         }
         if (url.pathname === SESSION_PATH) {
-          // Whether this request's cookie opens its origin's app: the entry page asks.
+          // Whether this request's cookie opens its origin's app: the entry page asks, from the
+          // app's origin (P101).
+          if (!fromItsOwnOrigin(request, label, false)) {
+            return new Response(null, { status: 403, headers: { "cache-control": "no-store" } });
+          }
           const access = accessOf(request, label, null);
           const status =
             access === null ? 401 : (await denied(request, access)) === null ? 204 : 403;

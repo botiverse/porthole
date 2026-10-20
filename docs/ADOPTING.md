@@ -555,6 +555,17 @@ same parts: `upstreamHeaders.request(headers, { origin, target, websocket })` an
 detail, reason, hostOrigins })` (a page that tells the frame's host why it shows nothing, desktop
 schemes included), and `nodeHost`'s `appSocket` (a WebSocket, Porthole's cookies already removed).
 
+What a url-mode app gets from another origin (P101): its cookie opens it for what its own origin
+asks (`Origin` its own, or `Sec-Fetch-Site` `same-origin` or `none`) and for a navigation that
+opens it (GET or HEAD: your frame, a link, the way back from sign-in); anything else another origin
+sends (a sibling app's fetch, form post, script tag or image, an opaque origin's `null`) is a 403
+that never reaches the app or your `authorize.check`. A WebSocket opens from the app's own origin
+only: `access(request)`, which `nodeHost` asks before `appSocket` and a Worker asks on its own
+upgrade path, is null for any other `Origin`. A client that sends neither header (curl with the
+cookie) is no browser and goes on. An app whose sign-in posts back from another site (OpenID's
+`form_post`) can't sign in through the preview; a tab's `Lax` cookie didn't go with that post
+before either.
+
 ## 5. Cloudflare Workers
 
 ```js
@@ -740,7 +751,8 @@ prints each reason at the end; so does `--reporter=json`.
   (`'unsafe-inline'`), so eval adds no capability, and libraries content uses compile with it
   (Vue's in-browser build, Alpine.js, Vega's expressions, WebAssembly). Egress, the sandbox and the
   origin are what isolate it (P071).
-- On `http` loopback the session cookies are `porthole-<key>`; on `https`, `__Host-porthole-<key>`.
+- On `http` loopback the session cookies are `porthole-<key>`; on `https`, `__Host-porthole-<key>`,
+  and only that name is read (P101: a sibling label can set any other for the whole domain).
   A frame's are `Secure; SameSite=None; Partitioned` on loopback too: browsers keep `Secure`
   cookies on `localhost`.
 - A served frame is one iframe on the content's own origin (no frame inside it), first loaded at

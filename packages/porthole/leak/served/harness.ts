@@ -492,7 +492,11 @@ async function start(): Promise<Harness> {
       return new Promise<Response>(() => {});
     }
     const served = await porthole.handle(
-      weakened.includes("service-worker") ? asServiceWorkerAllowed(request) : request,
+      weakened.includes("service-worker")
+        ? asServiceWorkerAllowed(request)
+        : weakened.includes("url-origin")
+          ? withoutOriginOfApps(request)
+          : request,
     );
     if (served !== null) {
       // The harness's controls, each applied in turn, so several combine (after the review).
@@ -646,6 +650,22 @@ function withAssetScripts(served: Response, request: Request): Response {
       .join("; "),
   );
   return new Response(served.body, { status: served.status, headers });
+}
+
+/**
+ * The `url-origin` control (P101): a url-mode app's requests (every path but Porthole's own and
+ * assets) reach `/server` without `Origin` and `Sec-Fetch-Site`, so it can't tell another
+ * origin's request from the app's own.
+ */
+function withoutOriginOfApps(request: Request): Request {
+  const { pathname } = new URL(request.url);
+  if (pathname.startsWith("/__porthole/") || pathname.startsWith("/_blob/")) {
+    return request;
+  }
+  const headers = new Headers(request.headers);
+  headers.delete("origin");
+  headers.delete("sec-fetch-site");
+  return new Request(request, { headers });
 }
 
 let started: Promise<Harness> | null = null;
