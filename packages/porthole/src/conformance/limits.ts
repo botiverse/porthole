@@ -24,15 +24,16 @@ async function recorded(
   timeoutMs = 10_000,
 ): Promise<Record<string, unknown>> {
   const frame = await display.frame();
-  await expect
-    .poll(
-      () =>
-        frame
-          .evaluate(() => (window as unknown as { r?: { done?: boolean } }).r?.done === true)
-          .catch(() => false),
-      { timeout: timeoutMs },
-    )
-    .toBe(true);
+  // Each look is bounded: a frame a dialog holds (a print dialog, where the sandbox lets one open)
+  // answers no evaluation, and the probe fails by its assertion, not a test timeout (P096).
+  const done = (): Promise<boolean> =>
+    Promise.race([
+      frame
+        .evaluate(() => (window as unknown as { r?: { done?: boolean } }).r?.done === true)
+        .catch(() => false),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1_000)),
+    ]);
+  await expect.poll(done, { timeout: timeoutMs }).toBe(true);
   return frame.evaluate(() => (window as unknown as { r: Record<string, unknown> }).r);
 }
 
@@ -321,7 +322,13 @@ export const LIMIT_PROBES: readonly Probe[] = [
   });
 </script>`,
       });
-      await click(display, "#go");
+      // A print dialog holds the click that opened it, and the frame, where the sandbox lets one
+      // open (Firefox with allow-modals): the click is bounded, so that is this probe's failure by
+      // its assertion, not a test timeout (P096).
+      await Promise.race([
+        click(display, "#go").catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, 5_000)),
+      ]);
       const verdict = await recorded(display);
       expect(verdict.print).toBe("undefined");
       expect(verdict.beforeprint).toBeUndefined();

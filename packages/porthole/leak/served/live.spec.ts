@@ -38,10 +38,20 @@ async function showLive(
     instance,
     { content, live },
   );
+  // A display started again has no frame for a moment: a look to repeat, so a frame that never
+  // settles on its origin fails this poll by its assertion (P096: under navigate-guard, WebKit's
+  // restart threw here instead).
+  const seen: { frame?: Frame | null } = {};
   await expect
-    .poll(async () => (await shown.frame()).url(), { timeout: 10_000 })
+    .poll(
+      async () => {
+        seen.frame = await shown.frame().catch(() => null);
+        return seen.frame?.url() ?? "";
+      },
+      { timeout: 10_000 },
+    )
     .toContain(location.origin);
-  const frame = await shown.frame();
+  const frame = seen.frame ?? (await shown.frame());
   await frame.waitForLoadState("load");
   return { frame, origin: location.origin, shown };
 }

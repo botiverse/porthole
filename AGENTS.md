@@ -66,6 +66,7 @@ pnpm test             # unit tests (vitest; packages/porthole/test), with /serve
 pnpm test:leak        # every Playwright suite (leak, served, MCP examples, React) on Chromium, WebKit, Firefox
 PORTHOLE_LEAK_ENGINES=chromium pnpm test:leak   # a subset, where an engine can't run
 PORTHOLE_LEAK_WEAKEN=sync-guard pnpm test:leak  # a negative control: its probes must fail (P032)
+pnpm --filter @botiverse/porthole test:controls # every control fails exactly its probes (leak/controls.ts, P096)
 ops/prod-shape/run.sh # the prod-shape profile in docker compose (TLS edge, DNS, siblings; three engines)
 PORTHOLE_PROD_ENGINES=chromium ops/prod-shape/run.sh   # a subset
 pnpm --filter @botiverse/porthole build         # dist/ (JS + .d.ts, the conformance harness) for packing
@@ -120,8 +121,10 @@ ops/prod-shape/          docker compose: Caddy, CoreDNS, the kit app, the browse
 2. If you touched isolation, egress, the shell, the CSP generator, or any
    host-function gate, run `pnpm test:leak` on every engine it supports. A
    hardening item without a passing test does not exist (PRINCIPLE 5). A new
-   defense gets a negative control in `leak/server.ts` and DESIGN.md's table says
-   which probes it fails (P032).
+   defense gets a negative control (its weakening in `leak/weakenings.ts`, its
+   entry in `leak/controls.ts` with the probes it fails per engine, and that row
+   in DESIGN.md's table: `node packages/porthole/scripts/controls.ts --table`),
+   and `pnpm --filter @botiverse/porthole test:controls <name>` passes (P032, P096).
 3. If you changed the config schema, regenerate and re-read the example CSP,
    shell and guide, and confirm all three still agree (`test/agreement.test.ts`
    must pass, and must still cover what you added).

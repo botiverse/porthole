@@ -86,9 +86,14 @@ const childSetup = (stun: string) => `
     const child = ${js(childDocument(stun))};
     const makeFrame = () => { const f = document.createElement("iframe"); f.setAttribute("srcdoc", child); return f; };`;
 
-/** A navigated document's beacon to an allowed witness: heard only if that document ran. */
+/**
+ * A navigated document's beacon to an allowed witness, heard only if that document ran: its first
+ * act, a real beacon, which the browser delivers even when the frame is removed a moment later (the
+ * display started again). A fetch at its end raced that restart: the embedder-csp control saw
+ * blob: and data: documents run only some of the time (P096).
+ */
 const witnessScript = (origin: string): string =>
-  `<script>fetch(${js(`${origin}/ran`)}).catch(() => {});</script>`;
+  `<script>navigator.sendBeacon(${js(`${origin}/ran`)}) || fetch(${js(`${origin}/ran`)}, { keepalive: true }).catch(() => {});</script>`;
 
 /**
  * A document the frame navigates to must never run: it would be a fresh realm without the shell's
@@ -793,7 +798,7 @@ export const PROBES: readonly Probe[] = [
       const canary = await context.http();
       const udp = await context.udp();
       const witness = await context.http();
-      const page = `<p id="blob">blob</p>${childDocument(udp.stun)}${witnessScript(witness.origin)}`;
+      const page = `${witnessScript(witness.origin)}<p id="blob">blob</p>${childDocument(udp.stun)}`;
       const display = await context.launch({
         config: inline({ egress: { connect: [witness.origin] } }),
         content: attack(`
@@ -812,7 +817,7 @@ export const PROBES: readonly Probe[] = [
       const canary = await context.http();
       const udp = await context.udp();
       const witness = await context.http();
-      const page = `<p id="data">data</p>${childDocument(udp.stun)}${witnessScript(witness.origin)}`;
+      const page = `${witnessScript(witness.origin)}<p id="data">data</p>${childDocument(udp.stun)}`;
       const display = await context.launch({
         config: inline({ egress: { connect: [witness.origin] } }),
         content: attack(`

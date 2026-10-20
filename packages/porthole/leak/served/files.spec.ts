@@ -240,17 +240,24 @@ go("text", "notes.txt"); go("root", "/"); go("away", "/__porthole/d/aaaaaaaaaaaa
     const served = await harness();
     const { frame, shown } = await showFiles(page, id, "1");
     const before = served.requests.length;
+    const opened = () =>
+      served.requests
+        .slice(before)
+        .map((each) => new URL(each).pathname)
+        .filter(
+          (each) =>
+            each.endsWith("/notes.txt") || each === "/" || each.startsWith("/__porthole/d/"),
+        );
+    // Each click is checked before the next: a page that went away takes the next button with it,
+    // and the guard's control (navigate-guard) must fail this by its assertion (P096).
     for (const target of ["#file", "#text", "#root", "#away"]) {
       await frame.locator(target).click();
+      await page.waitForTimeout(500);
+      expect(opened(), `${target} opened nothing`).toEqual([]);
     }
-    await frame.waitForTimeout(1_000);
+    await page.waitForTimeout(1_000);
     await expect(frame.locator("#here")).toHaveText("here");
-    const asked = served.requests.slice(before).map((each) => new URL(each).pathname);
-    expect(
-      asked.filter(
-        (each) => each.endsWith("/notes.txt") || each === "/" || each.startsWith("/__porthole/d/"),
-      ),
-    ).toEqual([]);
+    expect(opened()).toEqual([]);
     expect((await shown.read()).outcomes).toEqual([{ state: "loaded" }]);
   });
 
@@ -406,7 +413,8 @@ setTimeout(() => Promise.reject(new Error("at " + location.href)), 50);
         return record.errors.length + record.navigationsBlocked.length;
       })
       .toBeGreaterThanOrEqual(5);
-    await frame.waitForTimeout(500);
+    // The host page's clock, not the frame's: a frame that navigated away is gone (P096).
+    await page.waitForTimeout(500);
     const record = await shown.read();
     const said = [...record.errors, ...record.contentErrors, ...record.navigationsBlocked];
     expect(said.filter((each) => each.includes("/__porthole/f/"))).toEqual([]);
