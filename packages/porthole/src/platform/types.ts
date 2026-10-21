@@ -35,13 +35,15 @@ export interface Surface {
   setColorScheme(scheme: ColorScheme): void;
   /**
    * Whether the embedding page has transient user activation now (a gesture in the frame
-   * activates its ancestors), or undefined where the platform can't tell.
+   * activates its ancestors), or undefined where the platform can't tell. The gesture gate reads
+   * it, and so does a marker's click (P105): false, or a throw, drops it.
    */
   userActivation(): boolean | undefined;
   /**
    * The frame's viewport now, CSS px (its content box): what a box the frame reports is clamped
    * to (P104). Undefined, or absent, where the platform can't tell: every reported box is then
-   * clamped to nothing, at the frame's corner.
+   * clamped to nothing, at the frame's corner, as it is for an answer that isn't a size, or a
+   * throw (P105).
    */
   viewport?(): { readonly width: number; readonly height: number } | undefined;
   /**

@@ -1109,7 +1109,7 @@ clipboard is closed to them otherwise. Item 1 of 0.1.3.
 shows the text); writing from inside the frame (P051).
 **Revisit when** MCP Apps defines a clipboard request (then the adapter maps it).
 
-## P053 · 2026-10-11 · Annotations are mechanism: the host's comments, anchored in content it can't trust · Accepted; amended by P104
+## P053 · 2026-10-11 · Annotations are mechanism: the host's comments, anchored in content it can't trust · Accepted; amended by P104, P105
 
 **Decision.** A new optional capability, `annotate`, declared by the host. It is for inline widgets
 and artifact pages, and for MCP Apps views where the host chooses. With it, the host can:
@@ -1148,6 +1148,11 @@ host therefore:
 
 What a frame reports is a UI hint, never a permission. It decides where a comment is drawn,
 never who may see or do anything.
+
+A pick's click never reaches the content's own handlers only while the content patches none of
+the built-ins the shell calls then (P105): content that replaces `Event.prototype`'s
+`stopImmediatePropagation` hears it. Nothing it learns so is more than what it could tell anyway
+(that the person clicked, and where).
 
 **Measured** (`leak/annotate.spec.ts`, on Chromium, WebKit and Firefox):
 - picking, cancelling, selecting, and both together;
@@ -4590,7 +4595,7 @@ second wall on a tab); a host needs a served page to open windows from a tab (th
 `'self'` default (it joins `FRAME_DENIED_FEATURES`); or WebKit and Firefox apply
 `Permissions-Policy` to these features (the shell's device locks become the second wall there too).
 
-## P104 · 2026-10-20 · Annotation markers: a number at an anchor, a click the host hears, marks that follow a scroll · Accepted
+## P104 · 2026-10-20 · Annotation markers: a number at an anchor, a click the host hears, marks that follow a scroll · Accepted; amended by P105
 
 A host that shows its comments beside an artifact page wants, at each comment's anchor in the page,
 a small marker (a bubble and how many comments are there) that scrolls with the content; a click on
@@ -4675,20 +4680,27 @@ outline plain and unclear on its own.
 - What content can fake: an `activated` report for any mark the host shows with a count, without
   a click, and with any `rect` inside its frame (point 8); and look-alike markers drawn by its own elements (which
   report nothing unless it fakes one), or elements laid over Porthole's markers. The host takes a
-  fake only for its own shown ids, at the bridge's rate. So `activated` opens the host's own view
-  of that mark, placed near the rect within the frame's box, and never acts (no resolve, delete,
-  approve or reply on it).
+  fake only for its own shown ids, at the bridge's rate (and, since P105, only within a gesture).
+  So `activated` opens the host's own view of that mark, placed near the rect within the frame's
+  box, and never acts (no resolve, delete, approve or reply on it). After the review of P104
+  (P105): content can time a fake to the person's own press in the content, under their pointer,
+  so that view also takes no press for 500 ms after it appears or moves, ignores a press that
+  began before that, opens beside the frame where the layout allows, and has no destructive
+  action one click away (THREAT_MODEL §6).
 - What content can tell: that a marker was pressed, and roughly where, though it gets none of the
   press's events. The pointer leaving its own element names the layer (`relatedTarget`), the layer
-  matches `:hover` and `:active`, and the frame gets user activation. It can't act on the click or
-  cancel it.
-- What content can do to the layer: not read or reach inside it (a closed shadow root), but hide,
-  shrink, move or cover it. Its inline `!important` style holds against the content's style
-  sheets, and is set again at each draw, but the content's scripts can rewrite it in between, lay
-  elements over it, or transform the document it sits in. A host can't rely on a marker being
-  seen.
+  matches `:hover` and `:active`, and the frame gets user activation. Content that patches none of
+  the built-ins can't act on the click or cancel it; content that does could, until P105 read the
+  press through the platform's own functions (it can still cover the layer).
+- What content can do to the layer: hide, shrink, move or cover it, and (P105: by patching a
+  built-in the shell's insertion guards call on the layer's nodes, `Element.prototype.matches`)
+  reach inside the closed shadow root, read the markers and rewrite them; nothing there is secret.
+  Its inline `!important` style holds against the content's style sheets, and is set again at
+  each draw, but the content's scripts can rewrite it in between, lay elements over it, or
+  transform the document it sits in. A host can't rely on a marker being seen.
 - The rate limit is shared: a page that floods reports can crowd out real ones; it could before.
-  An honest page's follow-ups take at most 60 a minute (point 5).
+  An honest page's follow-ups take at most 60 a minute (point 5; P105: the selection's re-reports
+  after a scroll were outside that clock, and are on it now).
 
 **Tested.** `test/annotate.test.ts`: a count's bounds (0 and 999 kept; -1, 1.5, 1,000, NaN,
 Infinity, a string, null refused), the `activated` report's shape, and on `createHost` over a
@@ -4857,3 +4869,238 @@ when someone remembered, and what DESIGN.md said they fail had drifted from what
 **Revisit when** Playwright's JSON report changes shape (the judge's tests pin the fields it reads),
 a control's run makes a CI job too long (shard the controls across jobs), or the kit's app gains
 a weakening seam (then its controls join the registry).
+
+## P105 · 2026-10-20 · After the review of P104: a marker's click within a gesture and the host's view guarded, one clock for follow-ups, text markers beside their line · Accepted
+
+Amends P104 (its points 1, 3, 5 and 7, and its Trust) and P053's Trust. From the independent
+review of P104 and 0.9.0 (botiverse/porthole#37: no P0 or P1, two P2s, six P3s) and from #36
+(Ferry, taking 0.9.0: a text marker covered the next word). Measured on Chromium 153, WebKit 26.6
+and Firefox 155.
+
+**Decision**, by finding:
+1. **P2-2: the selection's re-report is a follow-up too.** After every settled scroll the shell
+   sent the person's selection again (`selected`, since P053), whether its box had moved or not,
+   outside P104's one-a-second clock. P104's own honest session (140 wheel turns 200 ms apart, a
+   mark with a count) in comment mode (text selection on, one selection) sent 120 reports, the
+   bridge's 120 a minute, and the marker's click after it was refused (`annotate:rate-limited`):
+   the review's R5 on all three engines, and the extended test, failing first with 120 taken
+   (Chromium, Firefox). Now the selection is told
+   again only when its box moved more than 0.5 px since it was last told (or it changed, or went),
+   and on the follow-ups' clock, which both kinds share: at most one report a second together, the
+   latest (two in one tick leave the next second empty). The same session now gives 15 `anchored`
+   and 15 `selected`, none refused, and the click is taken, on all three. A selection the person
+   makes is told at once, as before; only the re-reports wait. A host without counts still hears
+   the `anchored` reports 0.8 sent, and its selection again after a scroll only if it moved.
+2. **P2-1: the host's view of a mark is the host's to guard, and `activated` needs a gesture.** A
+   page can post `activated` for a shown mark on its own `pointerdown`, with the pointer's
+   coordinates; the host had it 9 to 121 ms into the press (R4), so a double click asked for on
+   the content's own button lands its second click on the bubble's Resolve. THREAT_MODEL §6 asked a
+   500 ms guard of confirmations only. Now it asks, of every host: a view that a frame's report
+   opens or moves (`activated`, `anchored`, `selected`) takes no press for 500 ms after it appears
+   or moves, ignores a press that began before that, opens beside the frame rather than over the
+   report's box where the layout allows, takes no focus, and puts no destructive action one click
+   away. ADOPTING.md § Annotations has the guard (`guardPresses`), P104's Trust says so.
+   The narrowing, which holds: `createHost` takes `activated` only while `surface.userActivation()`
+   isn't false (the gesture gate's reading: undefined, where a platform can't tell, passes; a
+   throw drops it). A real marker click gives the host's page transient activation on all three
+   engines, though the shell cancels the press (activation comes before the event is dispatched);
+   a page's own post at load or on a timer has none (measured: a sandboxed frame's timer posts
+   arrive with the host inactive; a click in it, its `mousedown` cancelled, activates the host).
+   Playwright's `evaluate` is itself a gesture and activation lasts 5 s on all three, so the test
+   asks nothing of either page for 7.5 s first. It stops a view opened with no gesture at all, and
+   no more: activation lasts 5 s after any gesture anywhere on the page (a click on the host's own
+   UI, typing in the content, the click that opened the display), and a fake posted then, on a
+   timer or a scroll, is taken (point 9); one on the person's own press is R4. The host's duty
+   above is the defence. A custom
+   platform's `userActivation()` (already required) that answers false drops every marker click,
+   as it refuses every gesture-gated call.
+3. **#36: a text marker beside its line, not over the next word.** P104 drew it at the words' end,
+   raised (left at their right + 2, top 12 px above the line): its lower 6 px lay over the next
+   word's first letters, and on a narrow page, when the words ended at a wrapped line's start,
+   between two lines. Now it is centred on the anchor's last line, at the first of these places
+   that is inside the frame, clear of that line's words, and over nothing of the content's but a
+   box holding the anchor, with nothing else between the words and it (the shell hit-tests the
+   place with `elementsFromPoint`, its own layer aside): the line's gutter, just past the right
+   edge of the anchor's block (its content box); where the frame is too narrow for that, the
+   frame's right edge; where something else is beside the block (a table's next cell, a card in a
+   row), just past the line's last word. Markers ending on one line of one block go together, in
+   the order their words end. Where the bubble with its glyph fits in none of these, its number
+   alone does (compact: 18 px for one digit, inside a phone page's 20 px padding); where that fits
+   nowhere either, the group goes as far right as nothing else stands in the way, over the line's
+   end. The pointer on a marker lights its words as the active mark's are. A draw now measures
+   every marker before it changes a node, and leaves each marker that stays where it is in the
+   layer: one taken out and put back mid-press lost its click on WebKit (seen once the pointer's
+   arrival lit a mark and redrew). Element markers are placed as they were.
+   Judged on screen (16 px text, line height 1.6; a centred 640 px column, and a 390 px page with
+   full-width text and 20 px padding; anchors ending mid-line, at a line's end, at a wrapped line's
+   start, two and three on one line, in a card, in a table cell, and elements; Chromium, Firefox,
+   WebKit): on the column, no marker covers a glyph (0.9.0's touched 14 words); on the phone none
+   does but where two or three anchors end on one full line, which covers that line's last letters
+   (0.9.0's touched 13 words there, and sat between lines). The gutter is worse than 0.9.0's place
+   in one way: a marker for words that end mid-line, or on a short line, sits up to the column's
+   width from them, tied to them by the line, its order and their highlight (and, with a pointer,
+   by the light on hover). Taken for the column it gives: which lines have comments reads at a
+   glance, and a marker doesn't move as the line's words reflow.
+4. **P3-1: the shell's guarantees say what they hold against.** The shell shares the content's
+   realm and, at a marker's press, called the live prototypes: content that replaced
+   `Event.prototype.stopImmediatePropagation` heard a real press (R1), one that redefined the
+   `MouseEvent.prototype.clientX` getter made the shell miss the click (R2), and one that wrapped
+   `Element.prototype.matches` got the closed shadow root from the shell's insertion guards and
+   rewrote a marker (R3), on all three engines. Restated in THREAT_MODEL §7, P104's Trust, P053's
+   Trust, DESIGN.md and the shell's comments: a press is unheard and can't be cancelled, and the
+   layer is out of reach, against content that patches none of the built-ins (CHANGELOG 0.9.0's
+   wording is the release's). The narrowing, small and a reading of the same functions: the
+   marker's listener reads and stops a press through the platform's own functions and getters,
+   kept before content runs, as the navigation guard does (`stopImmediatePropagation`;
+   `preventDefault` as kept before a tab's shell locks its own; `target`, `type`, `button`,
+   `clientX`, `clientY`; DOMRect's sides; `Reflect.apply`), and `tell` reads `window.parent` once
+   (it is `[Replaceable]`). R1 and R2 no longer work (test and control `marker-originals`). R3
+   still does, and picking's listeners still read the live prototypes. Nothing in the layer is
+   secret.
+5. **P3-2: controls for what had none.** `marker-prevent` (the press's `preventDefault` out: focus
+   moves, on every engine). Its selection probe was blind: a click on a marker never changes a
+   selection, with or without the cancel, since markers aren't selectable. So it now also drags
+   from the marker over the next line's words, which WebKit then selects; Chromium and Firefox
+   don't, either way (measured). `follow-throttle` (`FOLLOW_EVERY` 0: the honest session's count,
+   now a `probe:` verdict); `follow-count`, with a test of its own (marks without counts, a scroll:
+   nothing after the settle); `selection-follow` (0.9.0's re-report after every settle). DESIGN.md
+   said `marker-click` covered focus and selection: it covers the handlers, `marker-prevent` focus
+   and the selection.
+6. **P3-3: a platform's `viewport()` that answers no size or throws** raised a TypeError out of the
+   transport's listener (the report was dropped: closed, but out of the listener). Now
+   `createHost` reads it in a `try` and takes only numbers, and `clampRect` takes null as unknown:
+   every box is nothing at the frame's corner, and nothing throws.
+7. **P3-5: labels lose what the person can't see.** P104 named a wordless element by its `alt`,
+   `aria-label` or `title`, text the person never sees on the page, which could carry bidi
+   controls or zero-width characters into the host's UI, or a model's context through a host
+   that forwards it. `parseAnchor` (so `parseReport` and `checkMarks`) takes out of every label
+   every character P100's rule names, with none of its exceptions (point 9), now one definition in
+   `src/bridge/unseen.ts`. Selectors keep theirs, to be found again; THREAT_MODEL says a quote
+   handed to a model is the page's words.
+8. **P3-4 and P3-6: written down.** The frame's size is read for each report the host takes,
+   before its rate: one forced layout of the host's page per message, which a repeated
+   `ui/initialize` already causes (accepted; the clamp after the gate would sit in the bridge's
+   delivery). A box is in the frame's own CSS px: a host that scales or transforms the frame maps
+   it through that transform (THREAT_MODEL §7, ADOPTING.md, `AnnotationRect`).
+
+9. **After the review of 3969ebc** (no P0 or P1; R5, R1 and R2 hold, every control fails exactly
+   its probes):
+   - **P2-A: the guard in ADOPTING.md let presses through.** It caught `click` alone, and let one
+     with `detail` 0 pass: a menu item that clicks itself when a press that began elsewhere ends
+     on it (Radix's pattern; Base UI's items click on `mouseup`), and a trigger that acts on
+     `pointerdown`, fired within 500 ms (the review's R9). Now the guard makes the view `inert`
+     (and `pointer-events: none`) while it arms, so nothing in it takes a press, a click or focus, and
+     after that it drops the end of a press that didn't begin on it (`pointerup`, `mouseup`,
+     `touchend`, `click`) until one does, or a key. Portaled menus and popovers are outside the
+     view: they go in a container inside it, or are guarded too, and close when it moves. §6 says
+     a press of any kind. A leak test runs the snippet as ADOPTING.md has it (the review's three
+     cases, a press held past the arming, then a press and a key that are taken); the old snippet
+     fails it by the menu item's release.
+   - **P2-B: a tap on a marker was never reported on WebKit** (since 0.9.0): WebKit made no click
+     of a tap on the marker, whose only listener was the window's, though it did for a button.
+     Each marker now has a click listener of its own, which never runs (the window's first
+     listener stops every click on the layer): WebKit then clicks. A tap reports on all three
+     engines, with a touch screen and in a phone's emulation (iPhone 13 on WebKit, Pixel 5 on
+     Chromium; Firefox has none), after 6 s of nothing: the tap's own activation is what the host
+     takes it by (measured: the host's page is active when the report arrives). The reference
+     host's page now has a viewport meta, as a phone's page has: without it the emulation lays the
+     page out 980 px wide at 0.4, and Playwright's taps land beside the frame. Control `marker-tap`
+     (the listener out) fails the test on WebKit; Chromium and Firefox click a tap without it.
+   - **P3-A: the label strip wasn't closed.** It kept P100's exceptions (the parts of emoji, a
+     joiner between two shaped letters), and a Mongolian variation selector, itself a mark of a
+     shaping script and default-ignorable, made a joiner beside it look shaped, then was taken out
+     itself: a 107-character label kept 48 joiners, `rm -rf` in bits. Now every code point the rule
+     names goes, no exceptions: an emoji in a label loses its joiners and selectors (its faces
+     stay). Tested with that label, and 20,000 random ones from the review's pool, none of which
+     leaves anything `unseen` refuses.
+   - **P3-B:** THREAT_MODEL and point 2 said a page could no longer open the host's view at load, on
+     a timer or on a scroll; within 5 s of any gesture anywhere on the page it can (the review's
+     R7b). Both now say so, and that the guard is the defence.
+   - **P3-C: placing markers after a change of the content was dear** (the longest task, 300
+     paragraphs with counts: 44, 53 and 19 ms on Chromium, WebKit and Firefox; 200 marks in one
+     3,000-line `<pre>`: 168, 163 and 102 ms). A line's end was read from the whole rest of its
+     block, for each marker; each hit test walked every mark and marker the last draw left in the
+     layer (0.13 ms a test, measured); a mark's block was found again on every change. Now the
+     line's end is read 64 characters at a time, only until the text leaves the line; the layer's
+     marks and markers are out of the hit tests while places are tested (hidden in one task, never
+     taken out of the page); a marker whose line is out of view is placed without a measure or a
+     test; a block is kept while it still holds the words. Measured again: 18, 22 and 16 ms; 24,
+     48 and 40 ms (without counts: 5, 6 and 11; 13, 25 and 37). THREAT_MODEL and DESIGN say what it
+     costs and that it is bounded.
+   - **P3-D: nothing pinned #36.** A leak test now reads every word's glyph boxes against the points
+     the layer takes (a 2 px grid) on the column page, all of its cases, and on the phone page's
+     lines with one marker each: no marker covers a word, on all three engines. Control
+     `marker-place` (the marker just past its words, centred on the line, as 0.9.0 placed it
+     across) fails it. The press test's drag goes round the paragraph, so it holds wherever the
+     marker is.
+   - **P3-E:** CHANGELOG.md's Unreleased section says what a host sees change, what to act on first.
+   - **CI's WebKit (PR #38):** `selection-follow` and `follow-throttle` failed nothing there: the
+     honest session's verdict was a count of follow-ups over 140 wheel turns, and a slower runner
+     settles fewer of them, so a shell without the clock stayed under it. The test now also
+     scrolls eight times 300 ms apart from inside the frame, each a settle on any machine, and the
+     host page notes when each follow-up arrives: the selection's re-reports, and the marks'
+     follow-ups, must each come at least 700 ms apart (the clock keeps them 1 s apart; without it
+     they come 300 ms apart). Both controls fail it on WebKit pinned to one CPU. That run also
+     showed P104's settle test counting the script's steps, 30 ms apart, while a starved
+     engine's scroll events bunched across a late frame: it counts the events now.
+   - **P3-F:** THREAT_MODEL had P105 in §8 as merged and its status line naming it. As P104's own
+     change did, it now describes what P105 does where it does it, without a §8 row; the release
+     commit says what the document describes.
+
+**API.** No signature changes. What a host may see change: `activated` is dropped while its page
+has no transient activation; the exported `parseAnchor` returns a label without invisible
+characters; `selected` comes again after a scroll only when its box moved, on the follow-ups'
+clock; text markers are elsewhere (`activated`'s box is the marker's, wherever it is drawn); a
+tap on a marker is reported on WebKit; ADOPTING.md's `guardPresses` takes `...parts` and returns
+`{ placed }` as before.
+
+**Tested.** `test/annotate.test.ts`, on `createHost` over a stand-in platform: `activated` dropped
+where `userActivation()` answers false or throws, taken where it answers true or undefined; a
+`viewport()` answering null, a string, sizes as strings, throwing, or with a throwing getter: every
+box nothing at the corner, nothing thrown out of the listener; `clampRect(rect, null)`; a label's
+bidi override, zero-width, tag, soft hyphen and control characters taken out, emoji and a Persian
+joiner kept, a quote's soft hyphen kept, the host's own marks checked the same way.
+`leak/annotate.spec.ts`, on Chromium, WebKit and Firefox: the honest session in comment mode (its
+follow-ups, the selection's too, at most 45 in 28 s, nothing refused, the click after it taken;
+failed first with 120 on Chromium and Firefox); marks without counts told nothing after a scroll; a
+drag from a marker leaves the selection as it was; a page that patches
+`Event.prototype.stopImmediatePropagation` and `MouseEvent`'s `clientX` and `clientY` neither hears
+a marker's press nor stops its report; a page's `activated` posted 6.5 s after the marks arrived,
+with no gesture, not taken, and one on the person's own press in the content taken (the duty's
+case); the marker helpers find a marker where it is, by the points along its line where the layer
+takes the pointer. Negative controls, each alone, failing exactly their test on all three engines:
+`marker-prevent`, `marker-originals`, `follow-throttle`, `selection-follow`, `follow-count`,
+`annotation-activated-gesture`; and `marker-click` (now also failing the patched-prototypes case),
+`marker-trusted`, `annotation-activated`, `annotation-activated-count`, `annotation-checks` and
+`annotation-rect-clamp` again, as before.
+
+**Tested, after the review of 3969ebc.** Unit: the review's label and the 20,000 random ones.
+Leak, on all three engines: the tap test (touch screen, iPhone 13, Pixel 5), the placement test,
+the guard test. Controls `marker-tap` and `marker-place`, and every control P105 added or touched,
+again.
+
+**Threat it re-opens.** None: each point narrows what content can do or says what holds; no
+default, gate or policy loosens.
+
+**Rejected.**
+- A budget of its own for `activated` (the review's other way for point 1): one clock keeps an
+  honest page's follow-ups at half the shared rate, which leaves a click its room, without a second
+  rate in the bridge (P104's reason). Two clocks, one a kind, would together be 120 a minute, the
+  whole budget, on a session longer than a minute.
+- A token in each marker's report, so a host takes only the shell's: the content shares the
+  shell's realm and would read it.
+- The marker at the line's last word everywhere: it covers nothing on the column either, but its
+  place moves with each line's length and each reflow. It is the place in a cell or a card, where
+  the gutter is someone else's.
+- #36's other way, a dot without a number by the words and the number on hover: there is no hover
+  on a phone, and the number is what P104 is for. Compact keeps it.
+- Capturing `matches` and `querySelectorAll` for the insertion guards (R3): they run on every node
+  the page inserts, through three prototypes; done right that is a change of its own to the
+  shell's guards, for nothing secret.
+- Refusing a label with an invisible character, as P100 refuses an update: a label is only shown,
+  and a selection with a soft hyphen is ordinary.
+
+**Revisit when** a layout puts text beside a block that hit testing can't see (`pointer-events:
+none`), a host shows right-to-left text (the gutter is on the right), a host needs to place
+markers itself (then it draws them from `anchored`), an engine changes what gives a page
+activation, or MCP Apps defines annotations.

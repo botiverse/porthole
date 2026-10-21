@@ -282,17 +282,91 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "marker-trusted": [
     {
       file: "src/shell/annotate.ts",
-      find: '        if (event.type === "click" && event.isTrusted && event.button === 0) {',
-      replace: '        if (event.type === "click" && event.button === 0) {',
+      find: '        if (type === "click" && event.isTrusted && callOf(buttonOf, event, []) === 0) {',
+      replace: '        if (type === "click" && callOf(buttonOf, event, []) === 0) {',
     },
   ],
   // A marker's click (P104): the shell's first listener keeps it from the content.
   "marker-click": [
     {
       file: "src/shell/annotate.ts",
-      find: "        if (layer === null || event.target !== layer) {\n          return;\n        }\n        event.stopImmediatePropagation();\n",
+      find: "        if (layer === null || callOf(targetOf, event, []) !== layer) {\n          return;\n        }\n        callOf(stopPress, event, []);\n",
       replace:
-        "        if (layer === null || event.target !== layer) {\n          return;\n        }\n",
+        "        if (layer === null || callOf(targetOf, event, []) !== layer) {\n          return;\n        }\n",
+    },
+  ],
+  // A text marker's place (P105, #36): just past its words, as 0.9.0 had it (centred on the line).
+  "marker-place": [
+    {
+      file: "src/shell/annotate.ts",
+      find: "            found = placeLine(line, false, GAP, placed, room);",
+      replace: "            found = { left: line.at.right + 2 };",
+    },
+  ],
+  // A marker's tap (P105): without a listener of its own, WebKit makes no click of a tap on it.
+  "marker-tap": [
+    {
+      file: "src/shell/annotate.ts",
+      find: '          callOf(listenOn, marker, ["click", tapTarget]);\n',
+      replace: "",
+    },
+  ],
+  // A marker's press (P104, P105): what the browser would do with it (focus, selection) goes on.
+  "marker-prevent": [
+    {
+      file: "src/shell/annotate.ts",
+      find: "        if (CANCELLED[type] === 1) {\n          callOf(cancelPress, event, []);\n        }\n",
+      replace: "",
+    },
+  ],
+  // A marker's press read through the live prototypes (P105): content that patched them hears
+  // it, or makes the shell misread it.
+  "marker-originals": [
+    {
+      file: "src/shell/annotate.ts",
+      find: "        if (layer === null || callOf(targetOf, event, []) !== layer) {\n          return;\n        }\n        callOf(stopPress, event, []);\n",
+      replace:
+        "        if (layer === null || event.target !== layer) {\n          return;\n        }\n        event.stopImmediatePropagation();\n",
+    },
+    {
+      file: "src/shell/annotate.ts",
+      find: "          const hit = markerAt(callOf(clientXOf, event, []), callOf(clientYOf, event, []));\n          if (hit !== null && isShown(hit.id)) {",
+      replace:
+        "          const hit = markerAt(event.clientX, event.clientY);\n          if (hit !== null && isShown(hit.id)) {",
+    },
+  ],
+  // Follow-ups at most one a second (P104): every settle reports.
+  "follow-throttle": [
+    {
+      file: "src/shell/annotate.ts",
+      find: "      const FOLLOW_EVERY = 1000;",
+      replace: "      const FOLLOW_EVERY = 0;",
+    },
+  ],
+  // Follow-ups only while a mark has a marker (P104): a host without counts hears them too.
+  "follow-count": [
+    {
+      file: "src/shell/annotate.ts",
+      find: "      const counted = () => marks.some((mark) => mark.count !== null);",
+      replace: "      const counted = () => marks.length > 0;",
+    },
+  ],
+  // The selection's re-report after a scroll on the follow-ups' clock (P105): as 0.9, after every
+  // settle, whether its box moved or not.
+  "selection-follow": [
+    {
+      file: "src/shell/annotate.ts",
+      find: "        if (reported !== null) {\n          selectionScrolled = true;\n          settle();\n        }",
+      replace:
+        '        if (reported !== null) {\n          clearTimeout(selectionTimer);\n          selectionTimer = setTimeout(() => {\n            reported = "";\n            reportSelection(false);\n          }, 150);\n        }',
+    },
+  ],
+  // A marker's click only within a gesture (P105): the host takes one a page posts by itself.
+  "annotation-activated-gesture": [
+    {
+      file: "src/host/create-host.ts",
+      find: "            if (noGesture()) {\n              return;\n            }\n",
+      replace: "",
     },
   ],
   // The host's nonce, not given to an opaque frame's shell (P054): on a strict host page the

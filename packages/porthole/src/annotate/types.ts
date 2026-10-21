@@ -50,7 +50,9 @@ export interface AnnotationAnchor {
 /**
  * A box in the frame's viewport, CSS px: add the frame element's position to place it on the page.
  * The page's word: the host clamps each it reports to the frame's viewport (P104), so one wholly
- * outside is a box of no size on the nearest edge. A positioning hint only.
+ * outside is a box of no size on the nearest edge. A positioning hint only. It is in the frame's
+ * own layout px: a host that scales or transforms the frame maps it through that transform too
+ * (P105).
  */
 export interface AnnotationRect {
   readonly x: number;

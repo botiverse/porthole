@@ -1,4 +1,5 @@
-import { expect, test, type Frame, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { devices, expect, test, type Frame, type Page } from "@playwright/test";
 import {
   presets,
   type AnchorResult,
@@ -657,13 +658,54 @@ async function markerLabels(page: Page, frame: Frame): Promise<string[]> {
   return labels;
 }
 
-/** Where on the page a text anchor's marker is: just past the end of `selector`, raised. */
-async function textMarkerPoint(frame: Frame, selector: string) {
-  const box = await frame.locator(selector).boundingBox();
-  if (box === null) {
-    throw new Error(`${selector} isn't on screen`);
+/**
+ * Where the markers are on the line of `selector`'s last words (P105: beside that line, in its
+ * gutter, at the frame's edge or past its last word), in the frame's viewport: the runs of points
+ * along the line's middle where the shell's layer takes the pointer, which only a marker does.
+ */
+async function markersOnLine(frame: Frame, selector: string) {
+  return frame.evaluate((where) => {
+    const element = document.querySelector(where);
+    const layer = document.querySelector("[data-porthole-annotations]");
+    if (element === null || layer === null) {
+      return { y: 0, runs: [] };
+    }
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const last = Array.from(range.getClientRects())
+      .filter((rect) => rect.width > 0)
+      .at(-1);
+    if (last === undefined) {
+      return { y: 0, runs: [] };
+    }
+    const y = last.top + last.height / 2;
+    const runs: { left: number; right: number }[] = [];
+    let start = -1;
+    for (let x = 0; x <= document.documentElement.clientWidth; x += 1) {
+      const on = document.elementFromPoint(x, y) === layer;
+      if (on && start < 0) {
+        start = x;
+      } else if (!on && start >= 0) {
+        runs.push({ left: start, right: x - 1 });
+        start = -1;
+      }
+    }
+    if (start >= 0) {
+      runs.push({ left: start, right: document.documentElement.clientWidth });
+    }
+    return { y, runs };
+  }, selector);
+}
+
+/** The `nth` marker on the line of `selector`'s last words, as a point on the page. */
+async function textMarkerPoint(frame: Frame, selector: string, nth = 0) {
+  const { y, runs } = await markersOnLine(frame, selector);
+  const run = runs[nth];
+  if (run === undefined) {
+    throw new Error(`no marker ${nth} on the line of ${selector}`);
   }
-  return { x: box.x + box.width + 10, y: box.y };
+  const box = await (await frame.frameElement()).boundingBox();
+  return { x: (box?.x ?? 0) + (run.left + run.right) / 2, y: (box?.y ?? 0) + y };
 }
 
 test("markers: a mark with a count gets a numbered bubble; its click is reported and never reaches the content", async ({
@@ -752,11 +794,19 @@ test("markers: a mark with a count gets a numbered bubble; its click is reported
     "probe: no marker's click reached the content",
   ).toBeNull();
 
-  // A mark without a count: its anchor is marked, but no marker takes the click there.
+  // A mark without a count: its anchor is marked, but no marker is on its line, and a click past
+  // its words is the content's.
   expect((await look(page, frame, "#p2")).equals(plainBefore)).toBe(false);
+  expect(
+    (await markersOnLine(frame, "#plain")).runs,
+    "probe: a mark without a count has no marker",
+  ).toEqual([]);
   count = (await reports(display)).length;
-  const plain = await textMarkerPoint(frame, "#plain");
-  await page.mouse.click(plain.x, plain.y);
+  const words = await frame.locator("#plain").boundingBox();
+  if (words === null) {
+    throw new Error("no plain words");
+  }
+  await page.mouse.click(words.x + words.width + 10, words.y + words.height / 2);
   await expect(frame.locator("body")).toHaveAttribute("data-after2", "yes");
   await page.waitForTimeout(400);
   expect(
@@ -764,12 +814,15 @@ test("markers: a mark with a count gets a numbered bubble; its click is reported
     "probe: a mark without a count has no marker to click",
   ).toEqual([]);
 
-  // While the person picks an element, markers step aside: the click picks what lies under one.
+  // While the person picks an element, markers step aside: the click picks what lies under one
+  // (the button, under the left half of the marker on its corner).
   await display.annotate("start", { elements: true, text: false });
   count = (await reports(display)).length;
-  await page.mouse.click(fell.x, fell.y);
+  await page.mouse.click(more.x + more.width - 3, more.y + 3);
   const picked = await next(display, "selected", count);
-  expect(picked.anchor.kind).toBe("element");
+  expect(picked.anchor.label, "probe: the click picked what lies under the marker").toContain(
+    "button#more",
+  );
 });
 
 const SCROLLING = `<!doctype html><html><head><title>Long</title></head><body style="margin: 0">
@@ -805,15 +858,20 @@ test("following: once a scroll settles, one report with only the marks that move
 
   // A run of scrolls, as a wheel gives them: a report once it has settled, with the marks that
   // moved, the pinned one never. One for the run unless the run itself paused (measured: under
-  // load an engine may hold a step back past the shell's 150 ms, and then that pause settled).
+  // load an engine may hold a step back past the shell's 150 ms, and then that pause settled), by
+  // the scroll events as the shell hears them: on a starved machine (one CPU, P105) the steps are
+  // 30 ms apart but their events bunch, a late frame between them.
   const gaps = await frame.evaluate(async () => {
-    const times: number[] = [];
+    const heard: number[] = [];
+    const note = () => heard.push(performance.now());
+    window.addEventListener("scroll", note, true);
     for (let i = 0; i < 8; i += 1) {
       window.scrollBy(0, 50);
-      times.push(performance.now());
       await new Promise((resolve) => setTimeout(resolve, 30));
     }
-    return times.slice(1).map((time, i) => time - (times[i] ?? time));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    window.removeEventListener("scroll", note, true);
+    return heard.slice(1).map((time, i) => time - (heard[i] ?? time));
   });
   const anchoredSince = async (after: number) =>
     (await reports(display))
@@ -838,7 +896,7 @@ test("following: once a scroll settles, one report with only the marks that move
   expect(run.length, "probe: a settled scroll is reported").toBeGreaterThanOrEqual(1);
   expect(
     run.length,
-    `probe: at most one per settle (steps ${gaps.map(Math.round).join(", ")} ms apart)`,
+    `probe: at most one per settle (scroll events ${gaps.map(Math.round).join(", ")} ms apart)`,
   ).toBeLessThanOrEqual(1 + gaps.filter((gap) => gap >= 130).length);
   for (const report of run) {
     expect(
@@ -897,6 +955,33 @@ test("following: once a scroll settles, one report with only the marks that move
     .toBeCloseTo(before.get("top")?.y ?? 0, 0);
 });
 
+test("following: a host that gives no counts hears no follow-up after a scroll, as before markers", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    content: SCROLLING,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#far")).toBeAttached();
+  await display.annotate("show", [elementMark("top", "#top"), textMark("near", "near paragraph")]);
+  await next(display, "anchored");
+  const count = (await reports(display)).length;
+  // Both marks move with the scroll; once it has settled, and past the follow-ups' second, the
+  // host has heard nothing more.
+  const scrolled = await frame.evaluate(() => {
+    window.scrollBy(0, 200);
+    return window.scrollY;
+  });
+  expect(scrolled, "the page scrolled").toBe(200);
+  // Long enough for a settle and a follow-up on a slow machine too.
+  await page.waitForTimeout(2_500);
+  expect(
+    (await reports(display)).slice(count),
+    "probe: marks without counts are told nothing after a scroll",
+  ).toEqual([]);
+});
+
 test("a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker", async ({
   page,
 }) => {
@@ -945,19 +1030,18 @@ test("a hostile page fakes a marker's click: the host takes it only for a mark i
     "probe: the click was rebuilt from known fields only",
   ).toEqual({ type: "activated", id: "fell", rect });
 
-  // Content's own synthetic click on the shell's layer reports nothing.
+  // Content's own synthetic click on the shell's layer, where the marker is, reports nothing.
   const after = (await reports(display)).length;
-  await frame.evaluate(() => {
-    const layer = document.querySelector("[data-porthole-annotations]");
-    const box = document.querySelector("#p1 b")?.getBoundingClientRect();
-    layer?.dispatchEvent(
-      new MouseEvent("click", {
-        bubbles: true,
-        clientX: (box?.right ?? 0) + 10,
-        clientY: (box?.top ?? 0) + 2,
-      }),
-    );
-  });
+  const line = await markersOnLine(frame, "#p1 b");
+  const marker = line.runs[0];
+  expect(marker, "the marker is on its line").toBeDefined();
+  await frame.evaluate(
+    ([x, y]) => {
+      const layer = document.querySelector("[data-porthole-annotations]");
+      layer?.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: x, clientY: y }));
+    },
+    [((marker?.left ?? 0) + (marker?.right ?? 0)) / 2, line.y] as const,
+  );
   await page.waitForTimeout(400);
   expect((await reports(display)).length, "probe: the host took content's own click").toBe(after);
 });
@@ -1017,10 +1101,32 @@ test("a marker's press, of any kind, moves nothing of the content's: no handler,
   const activations = async () =>
     (await reports(display)).filter((each) => each.type === "activated").length;
 
-  // A selection stays as it was.
+  // A selection stays as it was, after a click and after a drag that starts on the marker
+  // (without the press cancelled, WebKit selects from there; measured, P105: the markers'
+  // user-select keeps Chromium's and Firefox's).
   expect(await select(frame, "#p2", "words to select")).toBe(true);
   await page.mouse.click(at.x, at.y);
   await expect.poll(activations).toBe(1);
+  expect(
+    await frame.evaluate(() => String(getSelection())),
+    "probe: the selection stays as it was",
+  ).toBe("words to select");
+  const words = await frame.locator("#p2").boundingBox();
+  if (words === null) {
+    throw new Error("no words");
+  }
+  // Up off the marker's line, round the paragraph's left edge, down to the next line and along
+  // it over its words: never over #after, wherever on its line the marker is.
+  const frameBox = await (await frame.frameElement()).boundingBox();
+  const left = (frameBox?.x ?? 0) + 2;
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.mouse.move(at.x, at.y - 20, { steps: 1 });
+  await page.mouse.move(left, at.y - 20, { steps: 4 });
+  await page.mouse.move(left, words.y + words.height / 2, { steps: 4 });
+  await page.mouse.move(words.x + words.width / 3, words.y + words.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(150);
   expect(
     await frame.evaluate(() => String(getSelection())),
     "probe: the selection stays as it was",
@@ -1054,7 +1160,380 @@ test("a marker's press, of any kind, moves nothing of the content's: no handler,
   ).toBe("field");
 });
 
-test("an honest scroll session, long, leaves room for a marker's click: follow-ups at most one a second", async ({
+test("a page that patches the event's built-ins neither hears a marker's press nor stops its report (P105)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: annotated(),
+    content: `<p id="p1" style="font-size: 18px">Costs <b>fell</b><span id="after"> by three percent this quarter.</span></p>
+<script>
+  // What the review of P104 did (R1, R2): a stop that stops nothing, and a pointer said to be far off.
+  Event.prototype.stopImmediatePropagation = function () {};
+  for (const name of ["clientX", "clientY"]) {
+    Object.defineProperty(MouseEvent.prototype, name, { configurable: true, get() { return -1e6; } });
+  }
+  window.heard = [];
+  const layer = () => document.querySelector("[data-porthole-annotations]");
+  for (const type of ["pointerdown", "pointerup", "mousedown", "mouseup", "click"]) {
+    window.addEventListener(type, (event) => {
+      if (event.target === layer()) {
+        window.heard.push(type);
+      }
+    }, true);
+  }
+</script>`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#after")).toBeVisible();
+  await display.annotate("show", [textMark("fell", "fell", 3)]);
+  await next(display, "anchored");
+  const at = await textMarkerPoint(frame, "#p1 b");
+  const count = (await reports(display)).length;
+  await page.mouse.click(at.x, at.y);
+  await expect
+    .poll(
+      async () =>
+        (await reports(display)).slice(count).find((each) => each.type === "activated")?.id,
+      { message: "probe: the marker's click is reported, the pointer read as it was" },
+    )
+    .toBe("fell");
+  expect(
+    await frame.evaluate(() => (window as unknown as { heard: string[] }).heard),
+    "probe: no handler of the content's heard the marker's press",
+  ).toEqual([]);
+});
+
+test("a hostile page's marker click with no gesture is dropped; one on the person's own press is the host's view to guard (P105)", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const display = await referenceHost.launch(page, {
+    config: annotated(),
+    content: `<p id="p1" style="font-size: 18px">Costs <b>fell</b> by three percent.</p>
+<button id="own" style="margin: 30px">Press me</button>
+<script>
+  const fake = (rect) => parent.postMessage({ jsonrpc: "2.0", method: "porthole/annotate.activated", params: { id: "fell", rect } }, "*");
+  // By itself, some seconds after the marks arrive: no one did anything.
+  addEventListener("message", (event) => {
+    if (event.data && event.data.method === "porthole/annotate.show" && !window.timed) {
+      window.timed = true;
+      setTimeout(() => {
+        fake({ x: 0, y: 0, width: 10, height: 10 });
+        window.faked = true;
+      }, 6500);
+    }
+  });
+  // On the person's own press in the content, under their pointer (the review's R4).
+  document.getElementById("own").addEventListener("pointerdown", (event) => fake({ x: event.clientX - 1, y: event.clientY - 1, width: 2, height: 2 }));
+</script>`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#own")).toBeVisible();
+  await display.annotate("show", [textMark("fell", "fell", 3)]);
+  await next(display, "anchored");
+  // Nothing asks anything of either page meanwhile: a test's own evaluate is a gesture to the
+  // browser (measured), and transient activation lasts 5 s on all three engines.
+  await page.waitForTimeout(7_500);
+  expect(
+    await frame.evaluate(() => (window as unknown as { faked?: boolean }).faked),
+    "the page posted its click by itself",
+  ).toBe(true);
+  expect(
+    (await reports(display)).filter((each) => each.type === "activated"),
+    "probe: the host took a marker's click no gesture came with",
+  ).toEqual([]);
+
+  // Within the person's own press in the content, it passes: the host's view must take no press
+  // for 500 ms after it opens, and ignore one that began before (THREAT_MODEL §6).
+  const own = await frame.locator("#own").boundingBox();
+  if (own === null) {
+    throw new Error("no button");
+  }
+  await page.mouse.move(own.x + own.width / 2, own.y + own.height / 2);
+  await page.mouse.down();
+  await next(display, "activated");
+  await page.mouse.up();
+});
+
+test("a tap on a marker is reported on every engine, and the content hears none of it (P105)", async ({
+  browser,
+  browserName,
+}) => {
+  test.setTimeout(90_000);
+  // A touch screen on each engine, and the phone each mobile engine emulates (Firefox has none).
+  const phones: Record<string, (typeof devices)[string]> = {
+    webkit: devices["iPhone 13"],
+    chromium: devices["Pixel 5"],
+  };
+  const phone = phones[browserName];
+  const kinds: [string, Parameters<typeof browser.newContext>[0]][] = [
+    ["touch", { hasTouch: true }],
+  ];
+  if (phone !== undefined) {
+    const { defaultBrowserType: _engine, ...options } = phone;
+    kinds.push([browserName === "webkit" ? "iPhone 13" : "Pixel 5", options]);
+  }
+  for (const [kind, options] of kinds) {
+    const context = await browser.newContext(options);
+    try {
+      const page = await context.newPage();
+      const display = await referenceHost.launch(page, {
+        config: annotated(),
+        widthPx: 360,
+        content: `<p id="p1" style="font-size: 18px">Costs <b>fell</b><span id="after"> by three percent.</span></p>
+<script>
+  window.heard = [];
+  const layer = () => document.querySelector("[data-porthole-annotations]");
+  for (const type of ["touchstart", "touchend", "pointerdown", "pointerup", "mousedown", "mouseup", "click"]) {
+    window.addEventListener(type, (event) => {
+      if (event.target === layer()) {
+        window.heard.push(type);
+      }
+    }, true);
+  }
+</script>`,
+      });
+      const frame = await display.frame();
+      await expect(frame.locator("#after")).toBeVisible();
+      await display.annotate("show", [textMark("fell", "fell", 3)]);
+      await next(display, "anchored");
+      const at = await textMarkerPoint(frame, "#p1 b");
+      // Nothing asks either page anything for 6 s (an evaluate is a gesture): the tap's own
+      // activation is what the host takes it by.
+      await page.waitForTimeout(6_000);
+      await page.touchscreen.tap(at.x, at.y);
+      await expect
+        .poll(
+          async () => (await reports(display)).filter((each) => each.type === "activated").length,
+          { message: `probe: a tap on the marker is reported (${kind})` },
+        )
+        .toBe(1);
+      expect(
+        await frame.evaluate(() => (window as unknown as { heard: string[] }).heard),
+        `probe: no handler of the content's heard the tap (${kind})`,
+      ).toEqual([]);
+    } finally {
+      await context.close();
+    }
+  }
+});
+
+// The page #36 was judged on (P105): 16 px text, line height 1.6, a 640 px column or a phone's
+// full width with 20 px padding; anchors ending mid-line, at a line's end, at a wrapped line's
+// start, two on one line, in a card, in a table's cell; elements.
+const PLACED = (column: string) => `<!doctype html><html><head><title>Notes</title><style>
+body { margin: 0; font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #1f2328; background: #fff; }
+main { ${column} }
+h2 { font-size: 22px; line-height: 1.3; margin: 0 0 12px; }
+p { margin: 0 0 14px; }
+.cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 14px; }
+.card { border: 1px solid #d0d7de; border-radius: 8px; padding: 10px 12px; }
+table { border-collapse: collapse; width: 100%; margin: 0 0 14px; }
+td, th { border-bottom: 1px solid #d0d7de; padding: 4px 8px; text-align: left; }
+</style></head><body><main>
+<h2 id="title">Quarterly review</h2>
+<p id="p1">Revenue grew 12% over the last quarter, mostly from the two new regions, while costs stayed flat even though we hired two engineers and one designer before the summer began.</p>
+<p id="p2">The roadmap for next year is short: ship the mobile app, finish the billing rewrite, move the reports to the new storage, and hire one more person for support before the busy season.</p>
+<div class="cards"><div class="card" id="c1">Churn fell to 2.1% this quarter, the lowest in two years.</div><div class="card" id="c2">Support tickets rose by a third after the launch.</div></div>
+<table><tr><th>Region</th><th>Revenue</th><th>Growth</th></tr><tr><td>North</td><td id="north">$1.2M</td><td>+14%</td></tr><tr><td>South</td><td>$0.8M</td><td>+9%</td></tr></table>
+<p id="p3">Next steps are listed in the plan, with owners and dates for each of them.</p>
+</main></body></html>`;
+
+/** Phrases by where they end as the page is laid out: at a line's end, at a wrapped line's start, two on one line. */
+const phrasesOf = (frame: Frame) =>
+  frame.evaluate(() => {
+    const words = (id: string) => {
+      const node = document.getElementById(id)?.firstChild as Text;
+      const text = node.nodeValue ?? "";
+      return {
+        text,
+        all: Array.from(text.matchAll(/\S+/gu), (match) => {
+          const range = document.createRange();
+          range.setStart(node, match.index);
+          range.setEnd(node, match.index + match[0].length);
+          return {
+            start: match.index,
+            end: match.index + match[0].length,
+            top: Math.round(range.getBoundingClientRect().top),
+          };
+        }),
+      };
+    };
+    const breakAfter = (list: { top: number }[]) =>
+      list.findIndex((each, i) => list[i + 1] !== undefined && list[i + 1]?.top !== each.top);
+    const p1 = words("p1");
+    const p2 = words("p2");
+    const end1 = breakAfter(p1.all);
+    const end2 = breakAfter(p2.all);
+    const second = p2.all.filter((each) => each.top === p2.all[end2 + 1]?.top);
+    const slice = (of: typeof p1, from: number, to: number) =>
+      of.text.slice(of.all[from]?.start, of.all[to]?.end);
+    return {
+      lineEnd: slice(p1, end1 - 1, end1),
+      wrapped: slice(p2, end2, end2 + 1),
+      firstOfTwo: p2.text.slice(second[2]?.start, second[3]?.end),
+      secondOfTwo: p2.text.slice(second[5]?.start, second[6]?.end),
+    };
+  });
+
+/** The words any marker covers: every word's glyph boxes against the points the layer takes (2 px). */
+const coveredWords = (frame: Frame) =>
+  frame.evaluate(() => {
+    const layer = document.querySelector("[data-porthole-annotations]");
+    const on = new Set<string>();
+    const width = document.documentElement.clientWidth;
+    const height = document.documentElement.clientHeight;
+    for (let y = 0; y < height; y += 2) {
+      for (let x = 0; x < width; x += 2) {
+        if (document.elementFromPoint(x, y) === layer) {
+          on.add(`${x},${y}`);
+        }
+      }
+    }
+    const covered: string[] = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      for (const match of (node.nodeValue ?? "").matchAll(/\S+/gu)) {
+        const range = document.createRange();
+        range.setStart(node, match.index);
+        range.setEnd(node, match.index + match[0].length);
+        for (const box of Array.from(range.getClientRects())) {
+          let hit = false;
+          for (let y = Math.ceil(box.top / 2) * 2; y < box.bottom && !hit; y += 2) {
+            for (let x = Math.ceil(box.left / 2) * 2; x < box.right && !hit; x += 2) {
+              hit = on.has(`${x},${y}`);
+            }
+          }
+          if (hit) {
+            covered.push(match[0]);
+          }
+        }
+      }
+    }
+    return { markerPoints: on.size, covered };
+  });
+
+test("text markers cover no word: on a column page, and on a phone's lines with one marker each (P105, #36)", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  for (const [kind, column, width, height] of [
+    ["column", "max-width: 640px; margin: 0 auto; padding: 24px 20px;", 1000, 640],
+    ["phone", "padding: 20px;", 390, 820],
+  ] as const) {
+    const display = await referenceHost.launch(page, {
+      config: presets.artifact({ capabilities: { annotate: {} } }),
+      content: PLACED(column),
+      widthPx: width,
+      heightPx: height,
+    });
+    const frame = await display.frame();
+    await expect(frame.locator("#p3")).toBeVisible();
+    const at = await phrasesOf(frame);
+    const count = (await reports(display)).length;
+    await display.annotate("show", [
+      textMark("mid", "Revenue grew 12%", 3),
+      textMark("hire", "one designer", 99),
+      textMark("card", "lowest in two years", 4),
+      textMark("cell", "$1.2M", 7),
+      elementMark("title", "#title", 0),
+      elementMark("c2", "#c2", 2),
+      // On a phone two or three anchors ending on one full line can't all fit beside it: the
+      // column only (P105).
+      ...(kind === "column"
+        ? [
+            textMark("end", at.lineEnd, 1),
+            textMark("wrap", at.wrapped, 12),
+            textMark("two-a", at.firstOfTwo, 2),
+            textMark("two-b", at.secondOfTwo, 5),
+          ]
+        : []),
+    ]);
+    await next(display, "anchored", count);
+    await page.waitForTimeout(400);
+    const { markerPoints, covered } = await coveredWords(frame);
+    expect(markerPoints, `the markers are drawn (${kind})`).toBeGreaterThan(0);
+    expect(covered, `probe: no marker covers a word (${kind})`).toEqual([]);
+  }
+});
+
+/** ADOPTING.md's guardPresses, as it is written there: the duty's reference code (P105). */
+const GUARD = (() => {
+  const doc = readFileSync(new URL("../../../docs/ADOPTING.md", import.meta.url), "utf8");
+  const at = doc.indexOf("function guardPresses(");
+  const code = doc.slice(at, doc.indexOf("```", at));
+  return code.replace(/^ {2}/gmu, "");
+})();
+
+test("ADOPTING's guard: a view a report opens takes no press for 500 ms, nor one begun before, then takes them (P105)", async ({
+  page,
+}) => {
+  expect(GUARD, "ADOPTING.md has the guard").toContain("placed");
+  // A view opening on the person's press in the content, under the pointer (as the review's R4,
+  // R9): a plain button, a menu item that clicks itself when a press ends on it (Radix's, Base
+  // UI's), a trigger acting on pointerdown.
+  await page.setContent(`<!doctype html><body style="margin:0">
+<div id="content" style="position:absolute;left:0;top:0;width:400px;height:300px;background:#eee">content</div>
+<div id="view" style="position:absolute;left:150px;top:100px;width:200px;height:120px;background:#fff;display:none">
+  <button id="plain" style="display:block;width:200px;height:40px">Resolve</button>
+  <div id="item" role="menuitem" style="width:200px;height:40px;background:#fcc">Delete</div>
+  <div id="trigger" style="width:200px;height:40px;background:#ccf">More</div>
+</div>
+<script>
+${GUARD}
+  window.fired = [];
+  const view = document.getElementById("view");
+  const guard = guardPresses(view);
+  document.getElementById("plain").addEventListener("click", () => fired.push("plain"));
+  const item = document.getElementById("item");
+  let down = false;
+  item.addEventListener("pointerdown", () => (down = true));
+  item.addEventListener("pointerup", () => { if (!down) item.click(); down = false; });
+  item.addEventListener("click", () => fired.push("item"));
+  document.getElementById("trigger").addEventListener("pointerdown", () => fired.push("trigger"));
+  window.open = () => { view.style.display = "block"; guard.placed(); };
+  document.getElementById("content").addEventListener("pointerdown", () => open());
+</script>`);
+  const fired = () =>
+    page.evaluate(() => (window as unknown as { fired: string[] }).fired.splice(0));
+  const close = () =>
+    page.evaluate(() => {
+      (document.getElementById("view") as HTMLElement).style.display = "none";
+    });
+  // A press in the content that ends where the menu item opened under it.
+  await page.mouse.move(250, 160);
+  await page.mouse.down();
+  await page.waitForTimeout(50);
+  await page.mouse.up();
+  expect(await fired(), "probe: a release on the menu item, within 500 ms").toEqual([]);
+  // A double click whose second press lands on the button, or on the trigger.
+  for (const [y, what] of [
+    [120, "button"],
+    [200, "trigger"],
+  ] as const) {
+    await close();
+    await page.mouse.click(250, y);
+    await page.mouse.click(250, y);
+    expect(await fired(), `probe: a double click's second press, on the ${what}`).toEqual([]);
+  }
+  // A press begun in the content, held past the 500 ms, released on the menu item.
+  await close();
+  await page.mouse.move(250, 160);
+  await page.mouse.down();
+  await page.waitForTimeout(700);
+  await page.mouse.up();
+  expect(await fired(), "probe: a press that began before the view did, ended on it").toEqual([]);
+  // Once armed, the person's own press, or key, is taken.
+  await page.waitForTimeout(100);
+  await page.mouse.click(250, 120);
+  expect(await fired(), "a press begun on the view after 500 ms").toEqual(["plain"]);
+  await page.focus("#plain");
+  await page.keyboard.press("Enter");
+  expect(await fired(), "a key on the view after 500 ms").toEqual(["plain"]);
+});
+
+test("an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second", async ({
   page,
 }) => {
   test.setTimeout(90_000);
@@ -1066,6 +1545,11 @@ test("an honest scroll session, long, leaves room for a marker's click: follow-u
   await expect(frame.locator("#far")).toBeAttached();
   await display.annotate("show", [textMark("near", "The near paragraph.", 2)]);
   await next(display, "anchored");
+  // Comment mode, as a host has it: text selection on, and one selection the person made, whose
+  // box follows the scroll too (P105).
+  await display.annotate("start", { elements: false, text: true });
+  expect(await select(frame, "#far", "far paragraph says")).toBe(true);
+  await next(display, "selected");
   const box = await (await frame.frameElement()).boundingBox();
   if (box === null) {
     throw new Error("no frame");
@@ -1078,21 +1562,75 @@ test("an honest scroll session, long, leaves room for a marker's click: follow-u
   }
   await expect.poll(() => frame.evaluate(() => window.scrollY)).toBe(0);
   await page.waitForTimeout(1_200);
-  const followed = (await reports(display)).filter((each) => each.type === "anchored").length;
-  expect(followed).toBeLessThanOrEqual(45);
-  expect(await refusals(display)).toEqual([]);
+  // Every follow-up, of the marks and of the selection, shares one clock: at most one a second.
+  const told = await reports(display);
+  const followed =
+    told.filter((each) => each.type === "anchored").length +
+    told.filter((each) => each.type === "selected").length;
+  expect(
+    followed,
+    "probe: the follow-ups of 28 s of scrolling, the selection's included, are at most one a second",
+  ).toBeLessThanOrEqual(45);
+  expect(await refusals(display), "probe: nothing the honest page reported was refused").toEqual(
+    [],
+  );
 
   const count = (await reports(display)).length;
-  // Its marker: just past the end of the words, where the host was last told they are.
-  const words = await frame.evaluate(() => {
-    const range = document.createRange();
-    range.selectNodeContents(document.getElementById("near") as Node);
-    const rect = range.getBoundingClientRect();
-    return { right: rect.right, top: rect.top };
+  // Its marker, beside its line.
+  const near = await textMarkerPoint(frame, "#near");
+  await page.mouse.click(near.x, near.y);
+  await expect
+    .poll(
+      async () =>
+        (await reports(display)).slice(count).find((each) => each.type === "activated")?.id ??
+        (await refusals(display)).join(", "),
+      { message: "probe: the marker's click after the session is taken" },
+    )
+    .toBe("near");
+  expect(await refusals(display), "probe: the marker's click was not refused").toEqual([]);
+
+  // However fast the machine (a slower one makes fewer settles of a wheel's turns, and a shell
+  // without the clock then stays under the count above: CI's WebKit, P105): eight scrolls 300 ms
+  // apart, from inside the frame, each a settle of its own, the host page noting when each
+  // follow-up arrives. The selection's re-reports, and the marks', each come a second apart.
+  await page.evaluate(() => {
+    const noted = window as unknown as { followUps: [string, number][] };
+    noted.followUps = [];
+    window.addEventListener("message", (event) => {
+      const method = (event.data as { method?: unknown } | null)?.method;
+      if (method === "porthole/annotate.selected" || method === "porthole/annotate.anchored") {
+        noted.followUps.push([method, performance.now()]);
+      }
+    });
   });
-  await page.mouse.click(box.x + words.right + 10, box.y + words.top);
-  expect((await next(display, "activated", count)).id).toBe("near");
-  expect(await refusals(display)).toEqual([]);
+  await frame.evaluate(async () => {
+    for (let i = 0; i < 8; i += 1) {
+      window.scrollBy(0, i % 2 === 0 ? 60 : -60);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  });
+  await page.waitForTimeout(2_500);
+  const arrivals = await page.evaluate(
+    () => (window as unknown as { followUps: [string, number][] }).followUps,
+  );
+  const gaps = (method: string) => {
+    const times = arrivals.filter(([each]) => each === method).map(([, at]) => at);
+    return times.slice(1).map((at, i) => Math.round(at - (times[i] ?? at)));
+  };
+  expect(
+    arrivals.filter(([each]) => each === "porthole/annotate.selected").length,
+    "the selection was told again as the page scrolled",
+  ).toBeGreaterThan(0);
+  for (const [method, what] of [
+    ["porthole/annotate.selected", "the selection's re-reports"],
+    ["porthole/annotate.anchored", "the marks' follow-ups"],
+  ] as const) {
+    const apart = gaps(method);
+    expect(
+      Math.min(Infinity, ...apart),
+      `probe: ${what} come at least a second apart (${apart.join(", ")} ms)`,
+    ).toBeGreaterThanOrEqual(700);
+  }
 });
 
 test("following: a burst of changes cut short by the anchoring deadline still reports what its last change moved", async ({

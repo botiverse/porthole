@@ -195,11 +195,44 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         }
       };
       /**
+       * The frame's viewport as the platform tells it now; undefined where it can't (no
+       * `viewport`, or one that answers no size or throws, P105): every box is then nothing at the
+       * frame's corner, and nothing throws out of the frame's listener.
+       */
+      const frameViewport = (): { width: number; height: number } | undefined => {
+        try {
+          const viewport: unknown = surface?.viewport?.();
+          if (viewport === null || typeof viewport !== "object") {
+            return undefined;
+          }
+          const size = viewport as { width?: unknown; height?: unknown };
+          const across = size.width;
+          const down = size.height;
+          return typeof across === "number" && typeof down === "number"
+            ? { width: across, height: down }
+            : undefined;
+        } catch {
+          return undefined;
+        }
+      };
+      /**
+       * Whether the person is known to have made no gesture just now (P105): the platform says the
+       * page has no transient activation, or fails to say. Where it can't tell (undefined), as for
+       * the gesture gate, a report passes.
+       */
+      const noGesture = (): boolean => {
+        try {
+          return surface?.userActivation() === false;
+        } catch {
+          return true;
+        }
+      };
+      /**
        * Every box a report carries, clamped to the frame's viewport as it is now (P104): the page
        * places the host's own UI nowhere outside its frame.
        */
       const withinFrame = (report: AnnotationReport): AnnotationReport => {
-        const viewport = surface?.viewport?.();
+        const viewport = frameViewport();
         switch (report.type) {
           case "selected":
           case "activated":
@@ -220,7 +253,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       /**
        * A report from the frame: checked, taken only while the host asked for it (a selection
        * only in select mode, results only for its own marks, a marker's click only for a mark it
-       * shows with one), then through the bridge's gates.
+       * shows with one, within a gesture), then through the bridge's gates.
        */
       const onAnnotation = (raw: unknown, through: HostFunctionBridge) => {
         if (
@@ -278,6 +311,13 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           case "activated": {
             const { id } = report;
             if (!marks.some((mark) => mark.id === id && mark.count !== undefined)) {
+              return;
+            }
+            // A marker's real click gives the host's page transient activation (measured on all
+            // three engines, P105); a click a page posts at load, on a timer or on a scroll has
+            // none and is dropped. One posted on the person's own press in the content passes: the
+            // host's view guards itself against that (THREAT_MODEL §6).
+            if (noGesture()) {
               return;
             }
             break;

@@ -246,6 +246,82 @@ createHost(config, {
   Myanmar (Persian's می‌خواهم). Subdivision flags (tag characters) don't. Your own `show` resolves only once that very update is visible: if a later update of
   the display replaces it before it is drawn, reject, and it doesn't go.
 
+### Annotations: comments on a display
+
+With `annotate` declared (`capabilities: { annotate: {} }`), a host lets people point at a
+display and keeps its comments beside it ([P053](DECISIONS.md), P104). Everything the frame
+reports is the page's word: a hint where to draw, never a permission. A mark's `count` puts a
+numbered marker beside its words; a click on one is `activated`.
+
+```js
+display.annotations.show(comments.map((c) => ({ id: c.markId, anchor: c.anchor, count: c.replies })));
+display.annotations.start({ elements: false, text: true }); // comment mode: the person selects words
+display.on("annotation", (report) => {
+  if (report.type === "selected") composer.openBeside(frame, report.rect, report.anchor);
+  if (report.type === "activated") bubble.openBeside(frame, report.rect, report.id);
+  if (report.type === "anchored") bubble.follow(report.results);
+});
+```
+
+- **Ids say nothing, and a count only where the page may know it**: the content reads every
+  `show`. Who wrote what stays in your view, outside the frame.
+- **The content chooses when your view opens and where** (it can post `activated` for a mark you
+  show on the person's own press in the content, under their pointer, P105), so a view that a
+  report opens or moves takes no press of any kind for 500 ms after it appears or moves (no
+  `pointerdown`, `pointerup`, `click` or key: menu triggers act on a press, and menu items click
+  themselves on a release), ignores a press that began before that, opens beside the frame rather
+  than over `rect` where the layout allows, takes no focus, and has no destructive action (resolve,
+  delete) one click away. Making it `inert` while it arms does all of the first:
+
+  ```js
+  // Call placed() each time the view appears or moves. For 500 ms it takes nothing (inert: no
+  // press, no click, no focus; the pointer reaches what is under it), then only a press or a key
+  // that began on it after that.
+  function guardPresses(...parts) {
+    let timer = 0;
+    let fresh = false;
+    for (const part of parts) {
+      part.addEventListener("pointerdown", () => (fresh = true), true);
+      part.addEventListener("keydown", () => (fresh = true), true);
+      for (const type of ["pointerup", "mouseup", "touchend", "click"]) {
+        part.addEventListener(type, (event) => {
+          if (!fresh) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }, true);
+      }
+    }
+    const arm = (on) => {
+      for (const part of parts) {
+        part.inert = on;
+        part.style.pointerEvents = on ? "none" : "";
+      }
+    };
+    return {
+      placed() {
+        fresh = false;
+        arm(true);
+        clearTimeout(timer);
+        timer = setTimeout(() => arm(false), 500);
+      },
+    };
+  }
+  ```
+
+  Menus and popovers the view opens are part of it, but a portaled one (Base UI's, Radix's) is
+  drawn outside it, where this guard doesn't reach: give it a container inside the view (both take
+  one, `container`), or pass that container to `guardPresses` too, and close it each time the view
+  appears or moves.
+
+- **Boxes are in the frame's CSS px**, clamped to its viewport (P104): add the frame element's
+  position. A frame you scale or transform (a thumbnail, a zoomed preview) needs the box mapped
+  through that transform too (`frame.getBoundingClientRect().width / frame.clientWidth` for a
+  plain scale), or your view lands off by the difference.
+- **Labels and quotes are the page's text**: shown only as text. Porthole takes out of a label what
+  the person can't see; a quote (`exact`) keeps it, to be found again. Hand either to a model only
+  as the page's words.
+
 ## 4. Served pages: the host kit
 
 ### Local development

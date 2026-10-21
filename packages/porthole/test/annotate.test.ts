@@ -10,6 +10,7 @@ import {
 } from "../src/annotate/validate.ts";
 import { ANNOTATION_LIMITS, type AnnotationAnchor } from "../src/annotate/types.ts";
 import { createBridge, type BridgeEvent } from "../src/bridge/bridge.ts";
+import { unseen, withoutUnseen } from "../src/bridge/unseen.ts";
 import {
   compile,
   createHost,
@@ -56,6 +57,103 @@ describe("the host's checks on what a frame reports", () => {
       selectors: [{ type: "TextQuoteSelector", exact: "x" }],
       label: "grew 12%",
     });
+  });
+
+  test("a label is shown text: what the person couldn't see is taken out of it, never out of the words found again (P105)", () => {
+    // A wordless element named by an alt the page never shows: a bidi override, zero-width
+    // characters, a tag character, a soft hyphen and a control.
+    const label = "img#chart ‮htnoM‬ by​ mo⁠nth\u{E0041}­\u0007";
+    const picked = parseAnchor({ ...element, label });
+    expect(picked?.label).toBe("img#chart htnoM by month");
+    expect(picked?.selectors).toEqual(element.selectors);
+    // No exceptions: an emoji's joiners and selectors go too (its faces stay), and so does a
+    // joiner between letters a script shapes, whose surroundings a page can fake.
+    expect(parseAnchor({ ...text, label: "family 👨‍👩‍👧, 1️⃣, می‌خواهم" })?.label).toBe(
+      "family 👨👩👧, 1⃣, میخواهم",
+    );
+    // The review of P105: "rm -rf" in joiners, each beside a Mongolian free variation selector,
+    // which a strip with the emoji and shaping exceptions kept (48 of them).
+    const bits = Array.from(new TextEncoder().encode("rm -rf")).flatMap((byte) =>
+      Array.from(byte.toString(2).padStart(8, "0")),
+    );
+    let payload = "img.chart \u180B";
+    for (const bit of bits) {
+      payload += (bit === "1" ? "\u200D" : "\u200C") + "\u180B";
+    }
+    payload = payload.slice(0, ANNOTATION_LIMITS.label);
+    const cleaned = parseAnchor({ ...element, label: payload })?.label ?? "";
+    expect(cleaned).toBe("img.chart ");
+    expect(unseen(cleaned)).toBe(false);
+    // A text anchor's words keep what they have, so the text is found again where it is.
+    const soft = { type: "TextQuoteSelector" as const, exact: "co­operate" };
+    expect(parseAnchor({ kind: "text", selectors: [soft], label: "co­operate" })).toEqual({
+      kind: "text",
+      selectors: [soft],
+      label: "cooperate",
+    });
+    // The host's own marks go to the frame checked the same way.
+    expect(checkMarks([{ id: "m1", anchor: { ...element, label } }])[0]?.anchor.label).toBe(
+      "img#chart htnoM by month",
+    );
+  });
+
+  test("a label's strip is closed: nothing unseen is left, whatever the label holds (P105)", () => {
+    // The review's pool: letters, spaces, every kind of invisible character, the parts of emoji,
+    // shaped letters and their joiners, Mongolian selectors, lone surrogates, controls.
+    const pool = [
+      "a",
+      "Z",
+      " ",
+      "\u200B",
+      "\u200C",
+      "\u200D",
+      "\u202E",
+      "\u2066",
+      "\u00AD",
+      "\uFEFF",
+      "\uFE0F",
+      "\uFE0E",
+      "\u20E3",
+      "1",
+      "#",
+      "\u{1F600}",
+      "\u{1F469}",
+      "\u{1F3FD}",
+      "\u{E0041}",
+      "\u{E0100}",
+      "\u{F0000}",
+      "\uD800",
+      "\uDC00",
+      "\u0000",
+      "\u0007",
+      "\n",
+      "\t",
+      "م",
+      "ی",
+      "क",
+      "्",
+      "\u034F",
+      "\u115F",
+      "\u17B4",
+      "\u180B",
+      "\u2060",
+      "\u061C",
+      "\u200E",
+    ];
+    let seed = 105;
+    const random = () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    for (let i = 0; i < 20_000; i += 1) {
+      let label = "";
+      for (let n = 1 + Math.floor(random() * 12); n > 0; n -= 1) {
+        label += pool[Math.floor(random() * pool.length)];
+      }
+      const out = withoutUnseen(label);
+      expect(unseen(out), JSON.stringify(label)).toBe(false);
+      expect(out.length).toBeLessThanOrEqual(label.length);
+    }
   });
 
   test("anything malformed or too large is dropped whole", () => {
@@ -213,7 +311,12 @@ describe("a marker's click (P104), on createHost over a stand-in platform", () =
       display.destroy();
     }
   });
-  const mount = () => {
+  const mount = (
+    given: {
+      userActivation?: () => boolean | undefined;
+      viewport?: () => unknown;
+    } = {},
+  ) => {
     const listeners = new Set<(message: unknown) => void>();
     const platform: PlatformHost = {
       name: "stand-in",
@@ -229,8 +332,12 @@ describe("a marker's click (P104), on createHost over a stand-in platform", () =
         element: null,
         setHeight: () => {},
         setColorScheme: () => {},
-        userActivation: () => undefined,
-        viewport: () => ({ width: 600, height: 400 }),
+        userActivation: given.userActivation ?? (() => undefined),
+        // A platform of the host's own may answer anything here (P105).
+        viewport: (given.viewport ?? (() => ({ width: 600, height: 400 }))) as () => {
+          width: number;
+          height: number;
+        },
         onNavigated: () => () => {},
         onLoad: () => () => {},
         destroy: () => {},
@@ -250,13 +357,19 @@ describe("a marker's click (P104), on createHost over a stand-in platform", () =
     const refused: string[] = [];
     display.on("annotation", (report) => reports.push(report));
     display.on("refused", (detail) => refused.push(detail.refusal));
+    // What a listener threw, as the transport's loop would see it: nothing, ever (P105).
+    const thrown: unknown[] = [];
     const activate = async (params: unknown) => {
       for (const listener of listeners) {
-        listener({ jsonrpc: "2.0", method: "porthole/annotate.activated", params });
+        try {
+          listener({ jsonrpc: "2.0", method: "porthole/annotate.activated", params });
+        } catch (error) {
+          thrown.push(error);
+        }
       }
       await new Promise((resolve) => setTimeout(resolve, 0));
     };
-    return { display, reports, refused, activate };
+    return { display, reports, refused, thrown, activate };
   };
   const rect = { x: 10, y: 20, width: 30, height: 18 };
 
@@ -285,6 +398,57 @@ describe("a marker's click (P104), on createHost over a stand-in platform", () =
     t.display.annotations.clear();
     await t.activate({ id: "c1", rect });
     expect(t.reports).toHaveLength(2);
+  });
+
+  test("is taken only within a gesture, where the platform can tell (P105)", async () => {
+    const marks = [{ id: "c1", anchor: text, count: 2 }];
+    // No transient activation on the host's page: a click the page posted by itself.
+    const idle = mount({ userActivation: () => false });
+    idle.display.annotations.show(marks);
+    await idle.activate({ id: "c1", rect });
+    expect(idle.reports).toEqual([]);
+    expect(idle.refused).toEqual([]);
+    // A platform that fails to say is taken as saying no.
+    const failing = mount({
+      userActivation: () => {
+        throw new Error("can't tell");
+      },
+    });
+    failing.display.annotations.show(marks);
+    await failing.activate({ id: "c1", rect });
+    expect(failing.reports).toEqual([]);
+    expect(failing.thrown).toEqual([]);
+    // Within one, and where the platform can't tell (as for the gesture gate): taken.
+    for (const userActivation of [() => true, () => undefined]) {
+      const t = mount({ userActivation });
+      t.display.annotations.show(marks);
+      await t.activate({ id: "c1", rect });
+      expect(t.reports).toEqual([{ type: "activated", id: "c1", rect }]);
+    }
+  });
+
+  test("a platform's viewport() that answers no size or throws: nothing at the corner, nothing thrown (P105)", async () => {
+    const corner = { x: 0, y: 0, width: 0, height: 0 };
+    for (const viewport of [
+      () => null,
+      () => "600x400",
+      () => ({ width: "600", height: "400" }),
+      () => {
+        throw new Error("measure failed");
+      },
+      () => ({
+        get width(): number {
+          throw new Error("measure failed");
+        },
+        height: 400,
+      }),
+    ]) {
+      const t = mount({ viewport });
+      t.display.annotations.show([{ id: "c1", anchor: text, count: 2 }]);
+      await t.activate({ id: "c1", rect });
+      expect(t.thrown).toEqual([]);
+      expect(t.reports).toEqual([{ type: "activated", id: "c1", rect: corner }]);
+    }
   });
 });
 
@@ -334,7 +498,13 @@ describe("a reported box, clamped to the frame's viewport (P104)", () => {
     });
   });
 
-  test("where the viewport isn't known, or isn't a size, nothing at the corner", () => {
+  test("where the viewport isn't known (null too), or isn't a size, nothing at the corner", () => {
+    expect(clampRect({ x: 10, y: 20, width: 30, height: 18 }, null)).toEqual({
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+    });
     const rect = { x: 10, y: 20, width: 30, height: 18 };
     const nothing = { x: 0, y: 0, width: 0, height: 0 };
     expect(clampRect(rect, undefined)).toEqual(nothing);

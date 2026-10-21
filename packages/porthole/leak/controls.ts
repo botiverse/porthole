@@ -114,6 +114,14 @@ const TRUSTED_CODE =
   "a script asset runs as code only if an admin uploaded it where uploads are the admins'";
 const FAKED_MARKER_CLICK =
   "a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker";
+const MARKER_PRESS =
+  "a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection";
+const PATCHED_PRESS =
+  "a page that patches the event's built-ins neither hears a marker's press nor stops its report (P105)";
+const MARKER_TAP =
+  "a tap on a marker is reported on every engine, and the content hears none of it (P105)";
+const HONEST_SCROLL =
+  "an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second";
 const IN_SET_LINKS = [
   "a link to another page of the set opens it in the frame; the display goes on",
   "a link to another page of the set opens it in the frame when the leaving page's notice is dropped (P098)",
@@ -272,7 +280,41 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     specs: [ANNOTATE],
     fails: all(
       "markers: a mark with a count gets a numbered bubble; its click is reported and never reaches the content",
-      "a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection",
+      MARKER_PRESS,
+      PATCHED_PRESS,
+      MARKER_TAP,
+    ),
+  },
+  // After the review of P104 (P105): the press's default cancelled (focus on every engine; a
+  // drag's selection on WebKit), read through the platform's own functions, follow-ups on one
+  // clock and only while a mark has a marker, a marker's click only within a gesture.
+  "marker-prevent": { specs: [ANNOTATE], fails: all(MARKER_PRESS) },
+  "marker-place": {
+    specs: [ANNOTATE],
+    fails: all(
+      "text markers cover no word: on a column page, and on a phone's lines with one marker each (P105, #36)",
+    ),
+  },
+  "marker-tap": {
+    specs: [ANNOTATE],
+    fails: each([], { webkit: [MARKER_TAP] }),
+    holds: {
+      why: "no probe can see it on Chromium and Firefox: they make a tap a click on the marker without a listener of its own (measured, P105)",
+    },
+  },
+  "marker-originals": { specs: [ANNOTATE], fails: all(PATCHED_PRESS) },
+  "follow-throttle": { specs: [ANNOTATE], fails: all(HONEST_SCROLL) },
+  "selection-follow": { specs: [ANNOTATE], fails: all(HONEST_SCROLL) },
+  "follow-count": {
+    specs: [ANNOTATE],
+    fails: all(
+      "following: a host that gives no counts hears no follow-up after a scroll, as before markers",
+    ),
+  },
+  "annotation-activated-gesture": {
+    specs: [ANNOTATE],
+    fails: all(
+      "a hostile page's marker click with no gesture is dropped; one on the person's own press is the host's view to guard (P105)",
     ),
   },
   // The host clamps every reported box to the frame (P104); the two cases that read a mark below
@@ -811,6 +853,15 @@ const MEASURED: Readonly<Record<string, number>> = {
   "marker-trusted": 20,
   "marker-click": 20,
   "annotation-rect-clamp": 20,
+  // P105's (2026-10-20).
+  "marker-prevent": 69,
+  "marker-originals": 73,
+  "follow-throttle": 70,
+  "selection-follow": 70,
+  "follow-count": 70,
+  "annotation-activated-gesture": 69,
+  "marker-tap": 83,
+  "marker-place": 83,
 };
 
 /**
