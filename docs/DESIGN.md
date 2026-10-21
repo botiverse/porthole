@@ -1118,8 +1118,10 @@ selection kept, a drag from a marker too (`marker-prevent` → the press case), 
 without a count, stepping aside while picking, drawn whole at the frame's top; a
 run of scrolls reported with only the marks that moved, a fixed one never; marks
 without counts told nothing after a scroll (`follow-count`); a long honest scroll
-session in comment mode, a selection made, leaving a marker's click its budget
-(`follow-throttle`, `selection-follow`); a content change that moves one mark
+session in comment mode, a selection made, leaving a marker's click its budget,
+and then, by when each arrives, the selection's re-reports and the marks'
+follow-ups a second apart however fast the machine (`follow-throttle`,
+`selection-follow`); a content change that moves one mark
 reports it alone, even when the deadline cut its run short; a hostile page faking a
 marker's click for no mark, an unknown id or a mark without a marker, or clicking
 the layer itself (`annotation-activated`, `annotation-activated-count`,

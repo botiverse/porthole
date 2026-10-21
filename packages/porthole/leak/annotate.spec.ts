@@ -858,15 +858,20 @@ test("following: once a scroll settles, one report with only the marks that move
 
   // A run of scrolls, as a wheel gives them: a report once it has settled, with the marks that
   // moved, the pinned one never. One for the run unless the run itself paused (measured: under
-  // load an engine may hold a step back past the shell's 150 ms, and then that pause settled).
+  // load an engine may hold a step back past the shell's 150 ms, and then that pause settled), by
+  // the scroll events as the shell hears them: on a starved machine (one CPU, P105) the steps are
+  // 30 ms apart but their events bunch, a late frame between them.
   const gaps = await frame.evaluate(async () => {
-    const times: number[] = [];
+    const heard: number[] = [];
+    const note = () => heard.push(performance.now());
+    window.addEventListener("scroll", note, true);
     for (let i = 0; i < 8; i += 1) {
       window.scrollBy(0, 50);
-      times.push(performance.now());
       await new Promise((resolve) => setTimeout(resolve, 30));
     }
-    return times.slice(1).map((time, i) => time - (times[i] ?? time));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    window.removeEventListener("scroll", note, true);
+    return heard.slice(1).map((time, i) => time - (heard[i] ?? time));
   });
   const anchoredSince = async (after: number) =>
     (await reports(display))
@@ -891,7 +896,7 @@ test("following: once a scroll settles, one report with only the marks that move
   expect(run.length, "probe: a settled scroll is reported").toBeGreaterThanOrEqual(1);
   expect(
     run.length,
-    `probe: at most one per settle (steps ${gaps.map(Math.round).join(", ")} ms apart)`,
+    `probe: at most one per settle (scroll events ${gaps.map(Math.round).join(", ")} ms apart)`,
   ).toBeLessThanOrEqual(1 + gaps.filter((gap) => gap >= 130).length);
   for (const report of run) {
     expect(
@@ -969,7 +974,8 @@ test("following: a host that gives no counts hears no follow-up after a scroll, 
     return window.scrollY;
   });
   expect(scrolled, "the page scrolled").toBe(200);
-  await page.waitForTimeout(1_600);
+  // Long enough for a settle and a follow-up on a slow machine too.
+  await page.waitForTimeout(2_500);
   expect(
     (await reports(display)).slice(count),
     "probe: marks without counts are told nothing after a scroll",
@@ -1582,6 +1588,49 @@ test("an honest scroll session, long, in comment mode, leaves room for a marker'
     )
     .toBe("near");
   expect(await refusals(display), "probe: the marker's click was not refused").toEqual([]);
+
+  // However fast the machine (a slower one makes fewer settles of a wheel's turns, and a shell
+  // without the clock then stays under the count above: CI's WebKit, P105): eight scrolls 300 ms
+  // apart, from inside the frame, each a settle of its own, the host page noting when each
+  // follow-up arrives. The selection's re-reports, and the marks', each come a second apart.
+  await page.evaluate(() => {
+    const noted = window as unknown as { followUps: [string, number][] };
+    noted.followUps = [];
+    window.addEventListener("message", (event) => {
+      const method = (event.data as { method?: unknown } | null)?.method;
+      if (method === "porthole/annotate.selected" || method === "porthole/annotate.anchored") {
+        noted.followUps.push([method, performance.now()]);
+      }
+    });
+  });
+  await frame.evaluate(async () => {
+    for (let i = 0; i < 8; i += 1) {
+      window.scrollBy(0, i % 2 === 0 ? 60 : -60);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  });
+  await page.waitForTimeout(2_500);
+  const arrivals = await page.evaluate(
+    () => (window as unknown as { followUps: [string, number][] }).followUps,
+  );
+  const gaps = (method: string) => {
+    const times = arrivals.filter(([each]) => each === method).map(([, at]) => at);
+    return times.slice(1).map((at, i) => Math.round(at - (times[i] ?? at)));
+  };
+  expect(
+    arrivals.filter(([each]) => each === "porthole/annotate.selected").length,
+    "the selection was told again as the page scrolled",
+  ).toBeGreaterThan(0);
+  for (const [method, what] of [
+    ["porthole/annotate.selected", "the selection's re-reports"],
+    ["porthole/annotate.anchored", "the marks' follow-ups"],
+  ] as const) {
+    const apart = gaps(method);
+    expect(
+      Math.min(Infinity, ...apart),
+      `probe: ${what} come at least a second apart (${apart.join(", ")} ms)`,
+    ).toBeGreaterThanOrEqual(700);
+  }
 });
 
 test("following: a burst of changes cut short by the anchoring deadline still reports what its last change moved", async ({

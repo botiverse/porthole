@@ -5034,6 +5034,15 @@ and Firefox 155.
      across) fails it. The press test's drag goes round the paragraph, so it holds wherever the
      marker is.
    - **P3-E:** CHANGELOG.md's Unreleased section says what a host sees change, what to act on first.
+   - **CI's WebKit (PR #38):** `selection-follow` and `follow-throttle` failed nothing there: the
+     honest session's verdict was a count of follow-ups over 140 wheel turns, and a slower runner
+     settles fewer of them, so a shell without the clock stayed under it. The test now also
+     scrolls eight times 300 ms apart from inside the frame, each a settle on any machine, and the
+     host page notes when each follow-up arrives: the selection's re-reports, and the marks'
+     follow-ups, must each come at least 700 ms apart (the clock keeps them 1 s apart; without it
+     they come 300 ms apart). Both controls fail it on WebKit pinned to one CPU. That run also
+     showed P104's settle test counting the script's steps, 30 ms apart, while a starved
+     engine's scroll events bunched across a late frame: it counts the events now.
    - **P3-F:** THREAT_MODEL had P105 in §8 as merged and its status line naming it. As P104's own
      change did, it now describes what P105 does where it does it, without a §8 row; the release
      commit says what the document describes.
