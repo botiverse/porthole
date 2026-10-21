@@ -3,7 +3,7 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
-## Unreleased
+## 0.10.0
 
 After the review of P104 (P105): a host guards the view a marker's click opens, `activated` needs
 a gesture, follow-ups share one clock, and text markers sit beside their line instead of over the
