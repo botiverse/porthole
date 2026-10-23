@@ -8,7 +8,9 @@ import {
 } from "../files/paths.ts";
 import { fileTypeOf, knownType } from "../files/types.ts";
 import { sizeWords } from "../guide/limits.ts";
-import { lintContent, type Finding } from "./lint.ts";
+import { lintPage, type Finding } from "./lint.ts";
+import { attributesOf } from "./markup.ts";
+import { scrollBudget, scrollLock, type LinkedSheet } from "./scroll.ts";
 
 /**
  * What can be told about a page that comes with files (P081), without running it: each page
@@ -81,58 +83,6 @@ const REFERENCE_ATTRIBUTES: Readonly<Record<string, readonly string[]>> = {
 
 /** A tag: its name and its attributes' text. Bounded, and never across another `<`: linear. */
 const TAG = /<([a-z][a-z0-9-]{0,30})\b([^<>]{0,8192})>/giu;
-
-const isSpace = (code: number): boolean =>
-  code === 32 || code === 9 || code === 10 || code === 12 || code === 13;
-
-/** A tag's attributes, read once from left to right (linear): each name, value and its offset. */
-function attributesOf(text: string): { name: string; value: string; at: number }[] {
-  const out: { name: string; value: string; at: number }[] = [];
-  let at = 0;
-  while (at < text.length) {
-    while (at < text.length && (isSpace(text.charCodeAt(at)) || text[at] === "/")) {
-      at += 1;
-    }
-    const nameStart = at;
-    while (
-      at < text.length &&
-      !isSpace(text.charCodeAt(at)) &&
-      text[at] !== "=" &&
-      text[at] !== "/"
-    ) {
-      at += 1;
-    }
-    const name = text.slice(nameStart, at).toLowerCase();
-    if (name === "") {
-      at += 1;
-      continue;
-    }
-    while (at < text.length && isSpace(text.charCodeAt(at))) {
-      at += 1;
-    }
-    if (text[at] !== "=") {
-      continue;
-    }
-    at += 1;
-    while (at < text.length && isSpace(text.charCodeAt(at))) {
-      at += 1;
-    }
-    const quote = text[at];
-    if (quote === '"' || quote === "'") {
-      const close = text.indexOf(quote, at + 1);
-      const end = close < 0 ? text.length : close;
-      out.push({ name, value: text.slice(at + 1, end), at: at + 1 });
-      at = end + 1;
-    } else {
-      const start = at;
-      while (at < text.length && !isSpace(text.charCodeAt(at))) {
-        at += 1;
-      }
-      out.push({ name, value: text.slice(start, at), at: start });
-    }
-  }
-  return out;
-}
 
 /** What a page's markup loads or links: each element's `src`, `href` or `poster`. */
 function markupReferences(text: string): Reference[] {
@@ -224,6 +174,9 @@ function resolve(directory: string, reference: string): string | null {
 }
 
 const directoryOf = (path: string): string => path.slice(0, path.lastIndexOf("/") + 1);
+
+/** The most pages the scroll-lock rule reads in a version: its entry, and 7 more (P106). */
+export const SCROLL_PAGES = 8;
 
 /**
  * Lints a page that comes with files (P081): the set (paths, limits, its entry), each page as
@@ -319,7 +272,30 @@ export function lintFiles(
       }
     }
   };
+  // A stylesheet a page links or a stylesheet imports, found in the set by its path (P106).
+  const decoded = new Map<string, string>();
+  const stylesheet: LinkedSheet = (href, from) => {
+    if (href === "" || elsewhere(href) || href.startsWith("/")) {
+      return null;
+    }
+    const target = resolve(directoryOf(from), href);
+    const sheet = target === null || !has(target) ? undefined : files[target];
+    if (sheet === undefined || target === null) {
+      return null;
+    }
+    // Decoded once for the whole set, however many pages link it.
+    let text = decoded.get(target);
+    if (text === undefined) {
+      text = textOf(sheet).slice(0, SCANNED);
+      decoded.set(target, text);
+    }
+    return { path: target, text };
+  };
+  const it = config.mode === "mcp-app" ? "view" : config.mode === "inline" ? "widget" : "page";
   const maxPage = config.limits.maxBytes;
+  // The version's pages, read, for the scroll-lock rule after the rest (P106). A page over its
+  // limit isn't read at all: its error says so.
+  const pages = new Set<string>();
   for (const [path, body] of Object.entries(files)) {
     const { role } = fileTypeOf(path);
     if (!knownType(path)) {
@@ -344,9 +320,12 @@ export function lintFiles(
         continue;
       }
       const text = textOf(body);
-      for (const finding of lintContent(config, text)) {
+      // The scroll-lock rule apart, with the stylesheets the page links (P106).
+      for (const finding of lintPage(config, text, { scrollLock: false })) {
         findings.push({ ...finding, path });
       }
+      // Its path only: the few the rule reads are decoded again there, one at a time.
+      pages.add(path);
       const lines = linesOf(text);
       check(path, lines, markupReferences(text), directory, "error");
       check(path, lines, patternReferences(text, CSS_REFERENCES), directory, "warning");
@@ -375,6 +354,41 @@ export function lintFiles(
         directory,
       );
     }
+  }
+  // Its own styles holding a page to one screen (P106): the entry first, then the others in path
+  // order, at most SCROLL_PAGES, within one budget for them all. A warning: past either, the pages
+  // left aren't checked, and it says how many.
+  const budget = scrollBudget();
+  const order = [
+    ...(pages.has(entry) ? [entry] : []),
+    ...[...pages].filter((path) => path !== entry).sort(),
+  ];
+  let checked = 0;
+  for (const path of order.slice(0, SCROLL_PAGES)) {
+    const body = files[path];
+    const text = body === undefined ? "" : textOf(body);
+    const held = scrollLock(text, { noun: it, path, sheet: stylesheet, budget });
+    if (budget.spent) {
+      break;
+    }
+    checked += 1;
+    if (held !== null) {
+      findings.push({
+        rule: "scroll-lock",
+        severity: "warning",
+        message: held.message,
+        path: held.path ?? path,
+        line: held.line,
+      });
+    }
+  }
+  const unchecked = pages.size - checked;
+  if (unchecked > 0) {
+    findings.push({
+      rule: "scroll-lock",
+      severity: "warning",
+      message: `${unchecked} page${unchecked === 1 ? "" : "s"} not checked for scroll lock: the check reads the entry and at most ${SCROLL_PAGES - 1} other pages, within one budget. If one of them holds html, body or its root to one screen (overflow: hidden with height: 100% or 100vh, or position: fixed), let it scroll as a document.`,
+    });
   }
   return findings;
 }

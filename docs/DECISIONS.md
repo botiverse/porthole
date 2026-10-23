@@ -5105,14 +5105,257 @@ none`), a host shows right-to-left text (the gutter is on the right), a host nee
 markers itself (then it draws them from `anchored`), an engine changes what gives a page
 activation, or MCP Apps defines annotations.
 
+## P106 · 2026-10-23 · A page held to one screen by its own styles is warned before it is published · Accepted
+
+From Raft's triage of its Artifacts (task #71): agents' first versions of high-fidelity mockups,
+bundled from an app's own code, carry the app shell's global styles, `html, body { height: 100%;
+overflow: hidden }` and `#root { position: fixed; height: 100dvh; overflow: hidden }`, right for
+the app and wrong for a long page in a frame: it doesn't scroll. 2 of 50 artifacts on the server
+had it (the first version broken, the second fixing it by overriding the styles); one also had an
+inner box take the wheel. Nothing told the agent: the manual spoke only of sideways overflow, and
+`admitFiles` didn't look.
+
+**Decision.**
+1. **`scroll-lock`, a warning** in `lintContent` (so `admitContent`) and `lintFiles` (so
+   `admitFiles`), from `src/check/scroll.ts`: a cascade, read from the text, of the few
+   properties that matter (overflow, height, max-height, position, top and bottom, with their
+   shorthands) over the three elements that hold a document: html, body, and the body's one
+   element of content (the root: `#root`, `#app`, a lone `div`; none where body has two). It
+   warns where one of them holds the page and nothing below body scrolls itself:
+   - html with overflow-y hidden or clip;
+   - body with overflow-y hidden or clip, where html's overflow is visible or body is one screen;
+   - the root with overflow-y hidden or clip, one screen tall;
+   - any of them `position: fixed`, one screen tall.
+   Nothing below body scrolls itself: no element in the page's own markup below body has
+   `overflow` or `overflow-y` auto or scroll, by its `style=""`, by a Tailwind class (where
+   Tailwind is loaded), or by a rule the check reads whose selector matches it (with the selectors
+   the check can match; one it can't read, or that matches nothing in the markup, doesn't count).
+   The root itself isn't such an element, by its `style=""`, its classes or a rule: it is in the
+   cascade, so its own values decide. One screen tall with overflow-y auto or scroll, it scrolls
+   the page (no warning); without a height it grows with what it holds and has nothing to scroll,
+   so `html, body { height: 100%; overflow: hidden } #root { overflow-y: auto }`, or the same
+   with `<div id="root" style="overflow: auto">`, is held. A root that scrolls in a height the
+   check can't read is its own box, as an inner one is (no warning): under a flex or grid body
+   (its `display`, or Tailwind's `flex`, `grid`; the root's height is the layout's: `flex-1`), or
+   with a height of another shape (a length, `min()`, `var()`, a `calc()` other than below, an
+   arbitrary `h-[…]`), where body itself is one screen tall. It is held where its height is the
+   content's (unset, `auto`, `fit-content`, or 100% of a body that is) under a block body, and
+   wherever body isn't one screen tall (a body that grows with the page holds a flex column that
+   does too: `html { height: 100%; overflow: hidden } body { display: flex; flex-direction:
+   column; overflow: hidden } #root { overflow: auto }` is held).
+   Where one does, the page may scroll in that box (a dashboard's `main { flex: 1; overflow-y:
+   auto }`), and the text can't tell which box holds the content: no warning; the manual's line on
+   the wheel says the rest. Matched against at most 2,000 elements, 32 deep, 256 selectors and a
+   million steps (each selector's compound and element tried once).
+   **A page its script draws** (body holds at most one element of content, with no text, and the
+   page has a script: `<div id="root"></div>`) has nothing to match: it is warned, but said as a
+   page that looks held: "The page looks held to one screen in its frame: … If it is meant to fit
+   one screen, or a box its script draws scrolls the content, ignore this; otherwise let it scroll
+   as a document: …". A page with its content in the markup is told "The page won't scroll in its
+   frame: … Unless it is meant to fit one screen, let it scroll as a document: …".
+   One screen: height or max-height (or `block-size`, `max-block-size`) `100vh` (`dvh`, `svh`,
+   `lvh`) or `calc(100vh - 4rem)` (the whole less one positive length: px, rem, em, %, vh),
+   `100%` or `calc(100% - 56px)` of a one-screen parent (html's 100% is
+   the frame's; Tailwind's arbitrary `h-[calc(100vh-4rem)]` read as Tailwind writes it, with
+   spaces around `-` and `+`) or of the frame where it is fixed or absolute, or fixed or absolute with both top
+   and bottom set (`inset: 0`). Measured with Playwright's Chromium and Firefox (a 3,000 px
+   page, a 400 px frame, the wheel): each of these stops it; `body { overflow: hidden }` alone
+   does (the viewport takes body's overflow), as does `#root { position: fixed; inset: 0 }`
+   without any overflow; `#root { overflow: hidden }` without a height, `#root { height: 100% }`
+   under a body as tall as its content, `html, body { height: 100% }` alone, and
+   `overflow-x: hidden` alone don't; a one-screen `#root { overflow: auto }` under a held body
+   scrolls in the root. WebKit couldn't run on the box; nothing here is engine-specific CSS.
+   Why the markup: an app's whole stylesheet, bundled into a page, has scroll boxes of its own (a
+   list, a sidebar) that a page may never draw; counting every such rule would leave the app
+   shell's page, the case this is for, unwarned.
+2. **What it reads:** `<style>` and `<link rel=stylesheet>` in document order (not for print, not
+   alternate), the linked sheets found in the version and their `@import`s, `style=""` on the
+   three, rules whose selectors it can match (type, id, class, `*`, `:root`, `:only-child`,
+   `:first-child`, descendant and child), and, where the page loads Tailwind (its CDN, or a
+   Tailwind stylesheet), the utilities that hold a page (`h-screen`, `h-full`, `overflow-hidden`,
+   `fixed`, `inset-0`…). Specificity, order, `!important` and cascade layers pick each value, so
+   a later override, as the triage's second versions wrote, is seen. A layer's place is where it is
+   first declared or its block opens, a sub-layer's rules below its parent's own, unlayered rules
+   above all layers, reversed for `!important`; each value is picked once every sheet is read.
+   **Bounded:** a page's stylesheets are each read once (a sheet linked or imported again is read
+   where it first comes), at most 32 of them and 4 MiB in all, its own `<style>` elements
+   included; past that, the rest isn't read (a later one that fits still is). Each
+   is asked of the caller once per place it is named from. The check is then linear in what it
+   reads: ten sheets each importing the next six times read ten sheets, not 6^10; each element
+   keeps, per longhand, only each layer's winner so far (within a layer, and within `!important`
+   or `style=""`, specificity and order decide; the layers' order picks among those once all is
+   read), and the layers' tree is built in place, so a sheet of 80,000 declarations, or an `@layer`
+   of 80,000 names, costs what sixteen of 5,000 do. A rule's selectors are read one at a time, and
+   a scroll rule's kept only while there is room for them (a 2 MiB rule of 300,000 selectors ran
+   out of memory at 128 MB before). An element's classes are a set, and a compound
+   selector of more than 32 ids and classes matches nothing, so matching a compound against an
+   element is bounded work, for html, body and the root as for the elements below body: the size
+   of the sheets and the size of the page add, not multiply. A layer named more than 16 deep
+   (`a.b.c…`, with the layers it is in) isn't read: its rules are dropped, but its first 16 parts
+   are declared where it comes, as a browser declares them, so the layers' order holds. A page's
+   sheets name at most 1,024 layers (each, parents included): a new one past them isn't declared
+   and its rules aren't read, as a layer too deep (each layer kept every value its rules gave:
+   2 MiB of anonymous layers needed 128 MB of heap, of layers 15 parts deep 256 MB, in 8daa075
+   too). A layer's name with the layers it is in (`a.b.c`) is at most 256 characters: a longer
+   one isn't declared, nor its rules or the layers in it read (each anonymous layer in a 1.9 MB
+   one copied its name: out of memory at 1,024 MB; in a 1 MB one, past 300 s).
+   **A version's pages** (`lintFiles`, so `admitFiles` at publish): the rule reads the pages an
+   agent opens first, the entry and then the others in path order, at most 8 in all, each as a
+   page alone (its sheets read as it streams them: nothing parsed is kept from one page to the
+   next). Only the pages' paths are kept for it, and the eight it checks are decoded again there
+   (keeping every page's text took 96 MB for 500 pages of 192 KB). The 8 share one budget: 8 MiB of stylesheet read, every sheet each page reads (one two
+   pages link is read for each) and each page's own `<style>`, and two million steps of matching
+   scroll rules against markup. A page that would spend more than is left isn't checked, nor are
+   any after it, the cheap ones too. Where pages aren't checked (past 8, or past the budget), one
+   warning says how many: "N pages not checked for scroll lock: the check reads the entry and at
+   most 7 other pages, within one budget. If one of them holds html, body or its root to one
+   screen (…), let it scroll as a document." A page over its size isn't read at all (its error
+   says so) and isn't counted. A warning, so an unchecked page is a warning missed, never a
+   refusal. Bounded: whatever a version holds, the rule reads at most 8 pages and 8 MiB of
+   sheets (the review's 500 pages sharing a 250 KB sheet took 13.8 s; 999 pages sharing a 1 MB one
+   now read 8). Why not read each sheet once for the version and replay it for each page (the
+   fourth review's answer): its parsed rules took about 100 bytes a byte, kept for the version (a
+   page with one 2 MiB sheet ran out of memory at 128 MB; eight with their own took 1.5 GB), for
+   an advisory rule whose pages that matter are the ones an agent opens.
+3. **The warning says what to do:** what holds it, as the page wrote it, and the rule that undoes
+   it under the page's own selectors (so it wins by coming later; `!important` where the hold
+   was). The page's CSS goes into the agent's context, so only values of a known shape are echoed
+   (lengths, percentages, viewport units, 0, auto, hidden, clip, fixed, static…; else the property
+   and `…`), each declaration (its `!important` included) and selector at most 60 characters, and
+   a selector with escapes, other than plain characters or longer is given as the element's own
+   name: `#root` where the root's id is plain and `#id` at most 60 characters (the id is page text
+   too), else `body > div`, or `body > *` for an element HTML doesn't have (a custom element's
+   name is page text too). Where that name has less specificity than the selector it stands for
+   (`body > div` for a 61-character `#id`, `#root` for `body > #\72 oot.x`), the fix is
+   `!important`, or it couldn't win. So: `add html, body, #root { height: auto; overflow: visible; position: static } after
+   those rules`, `take h-screen overflow-hidden off body's class`, or `take … out of html's style
+   attribute`. In `lintFiles` it names the stylesheet and line the hold is in; a page's own
+   `<style>` is reported once.
+4. **The manual** (the Pages section, every kind): "It scrolls as a document: unless it's meant to
+   fit one screen (a game, a canvas), don't hold html, body or the element that holds it all to one
+   screen (height: 100% or 100vh with overflow: hidden, or
+   position: fixed), or what's below the first screen can't be reached. A box that scrolls by
+   itself takes the wheel while the pointer is over it: keep those to parts of the page (a wide
+   table, a long list), never the whole of it."
+
+**Why.** The agent learns it at publish, with the fix in the words of its own CSS, instead of from
+a person who can't scroll. A warning and not a refusal: some pages are one-screen apps on purpose,
+and a text read can't be sure.
+
+**Rejected.**
+- Overflow hidden on html or body only together with a one-screen height (the triage's first
+  rule): body's overflow alone stops the viewport, measured above; requiring the height misses
+  `body { overflow: hidden }`, which is the common way to stop a page's scroll.
+- Measuring it in a browser (`checkPage` comparing the document's scroll height with the frame):
+  publish has no browser; a later check may add it, and then the wheel too.
+- Warning on an inner one-screen scroll box: it does scroll, and an app's sidebar is one; the
+  manual says it instead.
+- Warning where a box below body scrolls, unless it is shown to hold the page: from the text, a
+  box's height in a flex or grid layout can't be told, and the review's three cases (a flex
+  `main`, Tailwind's dashboard, a `style="overflow: auto"`) were false warnings.
+- Any rule that gives something below body a scroll box silencing the warning (the first answer
+  to that review): an app's bundled stylesheet always has one, and its pages went unwarned.
+
+**Limits.** Not read: rules under `@media` (but `all` and `screen`), `@supports`, `@container`;
+`:is()`, `:where()`, `:not()`, attributes and sibling combinators (they match nothing); nested
+rules; values through `var()` or `calc()`; `@import … layer()` beyond a name; a layer named more
+than 16 deep; a sheet's second link or import; what scripts set; stylesheets from another origin;
+sheets past the budget. Each can miss a hold or an override (a warning then wrong, never
+a refusal). A body with stray unclosed tags may be taken as having one child. A root that scrolls
+under a flex or grid body, or with a height the check can't read, is taken as its own scroll box:
+where it is in fact as tall as its content (a flex column's item without `flex: 1`, a `min()`
+that comes to its content), the hold is missed. In a version, pages past the entry and 7 more,
+or past the budget (8 MiB of sheets, two million match steps), aren't checked: a warning says
+how many. A page's layers past 1,024, and a layer's name past 256 characters, aren't read: that
+misses a hold in them, and it can warn wrongly too, where the hold is in a layer read and what
+undoes it is in one that isn't (`html { overflow: hidden }` in layer `p0`, and `html { overflow:
+visible }` in a new layer past the cap). Known, to follow: the app shell's fix names
+only html (`add html { … }`), and body's overflow, which the viewport takes once html's is
+visible, is said by a second warning after it; an `!important` hold inside a layer can't be
+undone by the unlayered `!important` the fix suggests (a layer's `!important` beats it), so the
+same advice comes again; `display: -webkit-box` isn't taken as flex.
+
+**Tested.** `test/check.test.ts` (a page held to one screen): the app shell's exact styles (the
+message and line), body or html hidden alone, the root by height, max-height and `inset: 0`, a
+lone `div` by `:only-child`, `style=""`, `!important`, a more specific hold over a later override,
+Tailwind's CDN utilities on body and a build's class rules; none for overflow hidden on the root
+without a height, a one-screen height without overflow hidden, `overflow-x: hidden`, an inner
+element, two body children, a one-screen scroll box in a held body, 100% of a content-tall body;
+later overrides (same `<style>`, a later one, `style=""`, unlayered over layered, a comment),
+part of an override not enough; the limits (`@media`, `@supports`, `var()`, `:is()`); the
+manual's line in the artifact, fill and inline manuals; after review: none where something below
+body scrolls in the markup (a flex `main`, Tailwind's dashboard, `style="overflow: auto"`), held
+where it only scrolls sideways; an app bundle (the shell's styles and `.message-list { overflow-y:
+auto }`, an empty `#root`) warned in the hedged words, silent with a `.message-list` in its markup
+(also through `#root > section .message-list`), held where the markup has no match, the selector
+can't be read (`:hover`) or doesn't match (`section > .message-list`); the shell's styles over
+content in the markup said flatly; a hostile `top:` value and a long one not echoed, an escaped
+selector given as `#root`; after the second review: a scroll rule on the root without a height
+held (`#root { overflow-y: auto }`, `body > div { overflow: auto }`), one screen tall not, a box in
+the root or one of two in body still a scroll box; a plain id of 1,400 characters given as `body >
+div` (in the rule, the fix and the style attribute's fix; the message 346 characters, 3,128
+before), one of 59 as `#id`; a layer 100,000 deep not read (it overflowed the stack), 16 deep read;
+80,000 declarations of body and an `@layer` of 80,000 names timed against sixteen times 5,000
+(under eight times as long, and each under 2 s: about 0.06 s and 0.14 s here, 36.6 s and 36.3 s
+before); after the third review: html, body, the root and 24 paragraphs with 4,000 classes each
+against two 2 MB `.a.a….b` rules, timed against sixteen sixteenths of both (under eight times,
+under 2 s: 0.1 s here, 178 s before; a sixteenth of both took 0.74 s, a quarter 11 s), a
+compound of 32 classes read and 33 not, a deep layer's parents declared where it comes (`theme`
+before `reset`), `!important` within the 60 characters, a custom element as `body > *`, the root
+by its own `style="overflow: auto"` and Tailwind class held without a height and not with
+`h-full`, by `block-size`, `max-block-size` and `calc(100vh - 56px)`, and a `style="overflow:
+auto"` below the root still a scroll box; after the fourth review: the four app shells (a
+Tailwind flex column with a `flex-1 overflow-y-auto` root, `display: flex` with an inline-styled
+root, Tailwind's grid with an `overflow-auto` main, an `h-[calc(100vh-4rem)]` root) and `min()`,
+a longer `calc()` and a length silent, the content's heights (none, `fit-content`, `auto`, a
+`display: block` body, 100% of a content-tall body) held; `calc()` read only as a whole less one
+positive length (`- 1px + 2000px`, `- -2000px`, `-10px`, `var()` not), `calc(100% - 4rem)` one
+screen under a one-screen body and not under a content-tall one; an `@import` into a layer 17
+deep declaring its first 16 parts; with no root, a body child's `style=""` still a scroll box;
+the fix `!important` where `#root` or `body > div` stands for a more specific selector, not where
+it is the selector; after the fifth review: `:root { overflow: hidden }` and `* { height: 100%;
+overflow: hidden }` held (the fix under their own selectors), `#\72 oot` as specific as `#root`
+so no `!important`, a flex column under a body that grows with the page held, and a root of
+`640px` under such a body too; a layer opened early with nothing for the page losing to a later one, a sub-layer below
+its parent's own rules either way round. `test/files.test.ts`: a linked sheet (its
+path and line), an `@import`ed one, each page by what it links, overrides across sheets in either
+order, print, alternate and missing sheets, and `admitFiles`'s note; ten sheets each importing the
+next six times (11 asks, well under 2 s; without the budget it ran past 60 s), a thousand links to
+one sheet (asked once), and a hold past 32 sheets unread; `lintFiles` on a page linking a 1.8 MB
+sheet of 230,000 declarations for body, under 3 s (0.2 s; 285 s before); 999 pages sharing a 1
+MB sheet (a version's most files) the entry and 7 more checked, in that order, and "991 pages
+not checked" said, under 10 s (41 s before) and under four times what 8 pages cost; eight
+pages or fewer, no note; eight pages, the first five linking a sheet just under 2 MiB, four
+checked and the fifth stopping the rest, the three cheap ones after it too ("4 pages not
+checked"); a page's own `<style>` charged (three of 3.5 MiB, the third not checked, nor a cheap
+one after); four pages each spending a page's million match steps, two checked; in a child
+process under a 48 MB heap, one page linking a 2 MiB sheet of each of six shapes: `.kN{top:0}`,
+`div{top:0}`, one rule's 300,000 selectors, anonymous layers, layers 15 parts deep and named
+layers of six declarations (each runs in 32 MB; the fourth review's code ran out at 128 MB on the
+first three, 8daa075 on the third; 11c422f on the last three at 64 MB, the layers 15 parts
+deep at 128 MB too), and 500
+pages of 192 KB as bytes (8 checked, "492 pages not checked"; 11c422f ran out at 96 MB). After
+the sixth review: 1,023 layers and a new one read, 1,024 and a new one not, `a.b` with one place
+left not, an unlayered rule and a layer already named still read, an `@import … layer(z)` past
+them not read; a layer's name of 256 characters read and of 257 not, nor one of 250 with a
+sub-layer of 6; an `@import … layer()` of 256 characters read and of 257 not; a statement's
+257-character name taking no place among the 1,024; a 1.9 MB layer name with 5,500 anonymous layers in it, under the 48 MB heap and
+5 s (out of memory at 1,024 MB before); a page's own `<style>` past
+4 MiB not read and the next one read; Tailwind's `h-[calc(100vh-4rem)] overflow-hidden` on the
+root held, `h-[calc(100vh--4rem)]` not one screen. The manual's examples and the
+Vite + React fixture still lint clean.
+
+**Revisit when** `checkPage` measures scrolling in a browser (then this can defer to it), a host's
+viewer scrolls the frame itself (a page then can't be held), or the misses above show up in
+published pages.
+
 ## P107 · 2026-10-23 · Draft marks: a person's unposted comments, a dashed line and a hollow marker with no number · Accepted
 
-(P106 is taken by the scroll-lock warning, in review.) A host adding batch comments (Raft
-Artifacts) shows a person's unsubmitted comments, drafts, in the page while they write more: at
-their anchors, in a style apart from posted comments, so that what others can already read and what
-only the author has written so far don't look alike. P104's marks have one look (a solid underline,
-a filled numbered marker, or neither), and P104 rejected a style knob per mark for want of a need.
-This is the need: one state, not a knob.
+A host adding batch comments (Raft Artifacts) shows a person's unsubmitted comments, drafts, in the
+page while they write more: at their anchors, in a style apart from posted comments, so that what
+others can already read and what only the author has written so far don't look alike. P104's marks
+have one look (a solid underline, a filled numbered marker, or neither), and P104 rejected a style
+knob per mark for want of a need. This is the need: one state, not a knob.
 
 **Decision.**
 1. **`AnnotationMark.kind?: "posted" | "draft"`**, absent meaning posted. `checkMarks` checks it

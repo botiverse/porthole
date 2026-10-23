@@ -5,8 +5,37 @@
 
 ## Unreleased
 
-A host can mark a person's unposted comments, drafts, apart from posted ones (P107).
+The agent hears, before publishing, that its page's own styles hold it to one screen (P106), and
+the manual says a page scrolls as a document. A host can mark a person's unposted comments,
+drafts, apart from posted ones (P107).
 
+- **A warning for a page held to one screen** (P106): `lintContent`, `admitContent`, `lintFiles`
+  and `admitFiles` warn (rule `scroll-lock`, never an error: a one-screen app means it) where the
+  page's own CSS stops it at its first screen in the frame: html or body with `overflow: hidden`
+  (or `clip`), or the body's one element of content (`#root`) one screen tall (100vh, dvh, svh,
+  100% of a one-screen parent, fixed at the frame's edges) with `overflow: hidden` or
+  `position: fixed`, and no element in the page's markup below body scrolls itself (by
+  `style=""`, a Tailwind class, or a rule whose selector matches it: the page may scroll there;
+  the root counts only where it is one screen tall, or, in a one-screen body, under a flex or
+  grid body or in a height it can't read). A
+  page its script draws (an empty `#root`) has nothing to match: it is warned as one that "looks
+  held", which it may ignore if a box its script draws scrolls the content. It reads `<style>`,
+  the version's linked stylesheets and their `@import`s, `style=""` on those elements, and
+  Tailwind's utilities where the page loads Tailwind, by the cascade (specificity, order,
+  `!important`, layers), so a later override is seen; each sheet once, at most 32 and 4 MiB a
+  page (its own `<style>` included), 1,024 layers, and layer names of 256 characters. The warning names what holds the page and
+  the rule that undoes it, e.g. `add html, body, #root { height: auto; overflow: visible;
+  position: static } after those rules`; only values of a known shape and plain selectors are
+  echoed (and the root's id, else `body > div`, or `body > *` for a custom element), each at most
+  60 characters with its `!important`. In `lintFiles` it reads the entry and at most 7 other
+  pages (path order), within one budget for them all (8 MiB of stylesheet, two million match
+  steps); past either, the pages left aren't checked, and one warning says how many. In `lintFiles` its `path` is the stylesheet's, where
+  the rule is there. Not read: rules under `@media` (but `all` and `screen`), `@supports`,
+  `@container`, `:is()`/`:where()`/`:not()` and sibling selectors, nested rules, `var()`, scripts.
+- **The manual** (every kind): "It scrolls as a document: unless it's meant to fit one screen (a
+  game, a canvas), don't hold html, body or the element that holds it all to one screen …; a box that scrolls by itself takes the wheel while the
+  pointer is over it: keep those to parts of the page, never the whole of it."
+- `LintRule` and `FileFinding["rule"]` take `"scroll-lock"`.
 - **Drafts** (P107): `AnnotationMark.kind` is `"posted"` (the default, as absent) or `"draft"`. A
   draft is drawn with a dashed underline (a dashed outline on an element) and a hollow marker with
   no number, beside its words as a posted marker is; its click is `activated`, its place

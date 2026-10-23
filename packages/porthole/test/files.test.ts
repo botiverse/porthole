@@ -1,4 +1,7 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { resolve as resolvePath } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   admitFiles,
@@ -896,6 +899,327 @@ describe("the agent's side: a page with files, linted and admitted (P081)", () =
       admitFiles(served, { "index.html": '<script src="/x.js"></script>' }, { refuseOn: "never" })
         .ok,
     ).toBe(true);
+  });
+});
+
+describe("a page with files held to one screen (P106)", () => {
+  const served = presets.artifact({ isolation: "domain", contentOrigins: [CONTENT] });
+  const SHELL =
+    "html, body { height: 100%; overflow: hidden; }\n#root { position: fixed; height: 100dvh; overflow: hidden; }";
+  const UNDO = "html, body, #root { height: auto; overflow: visible; position: static; }";
+  const page = (head: string) =>
+    `<!doctype html><html><head>${head}</head><body><div id="root"></div><script type="module" src="./app.js"></script></body></html>`;
+  const held = (files: Record<string, string>) =>
+    lintFiles(served, { "app.js": "", ...files }).filter((each) => each.rule === "scroll-lock");
+
+  it("reads the stylesheets a page links and what they import, and names the file and line", () => {
+    const linked = held({
+      "index.html": page('<link rel="stylesheet" href="./assets/index.css">'),
+      "assets/index.css": `.x { color: red }\n${SHELL}`,
+    });
+    expect(linked.map((each) => [each.severity, each.path, each.line])).toEqual([
+      ["warning", "assets/index.css", 2],
+    ]);
+    expect(linked[0]?.message).toContain(
+      "add html, body, #root { height: auto; overflow: visible; position: static } after those rules",
+    );
+    const imported = held({
+      "index.html": page('<link rel="stylesheet" href="css/site.css">'),
+      "css/site.css": "@import 'base/shell.css';\nbody { color: black }",
+      "css/base/shell.css": SHELL,
+    });
+    expect(imported.map((each) => [each.path, each.line])).toEqual([["css/base/shell.css", 1]]);
+    // Each page of the set, by what it links; a page's own <style> once, not twice.
+    const pages = held({
+      "index.html": page(`<style>${SHELL}</style>`),
+      "about.html": page('<link rel="stylesheet" href="shell.css">'),
+      "plain.html": page(""),
+      "shell.css": SHELL,
+    });
+    expect(pages.map((each) => each.path)).toEqual(["index.html", "shell.css"]);
+  });
+
+  it("an override in a later stylesheet or <style>, in either order, is seen", () => {
+    expect(
+      held({
+        "index.html": page(
+          '<link rel="stylesheet" href="shell.css"><link rel="stylesheet" href="undo.css">',
+        ),
+        "shell.css": SHELL,
+        "undo.css": UNDO,
+      }),
+    ).toEqual([]);
+    expect(
+      held({
+        "index.html": page(`<link rel="stylesheet" href="shell.css"><style>${UNDO}</style>`),
+        "shell.css": SHELL,
+      }),
+    ).toEqual([]);
+    // The override before the shell's rules loses to them.
+    expect(
+      held({
+        "index.html": page(`<style>${UNDO}</style><link rel="stylesheet" href="shell.css">`),
+        "shell.css": SHELL,
+      }).length,
+    ).toBe(1);
+    // A sheet for print, one that isn't in the set, or an alternate one: not read.
+    expect(
+      held({
+        "index.html": page(
+          '<link rel="stylesheet" href="shell.css" media="print"><link rel="alternate stylesheet" href="shell.css"><link rel="stylesheet" href="gone.css">',
+        ),
+        "shell.css": SHELL,
+      }),
+    ).toEqual([]);
+  });
+
+  it("reads each stylesheet once, within one budget a page: fan-out and repeated links stay cheap", async () => {
+    const { scrollLock, SHEETS } = await import("../src/check/scroll.ts");
+    // Ten sheets, each importing the next six times: 6^10 imports if each were followed.
+    const sheets: Record<string, string> = {};
+    for (let index = 0; index < 10; index += 1) {
+      sheets[`s${index}.css`] = `${`@import "s${index + 1}.css";\n`.repeat(6)}p { color: red }`;
+    }
+    sheets["s10.css"] = SHELL;
+    let asked = 0;
+    const sheet = (href: string) => {
+      asked += 1;
+      const text = sheets[href];
+      return text === undefined ? null : { path: href, text };
+    };
+    const started = performance.now();
+    const fanned = scrollLock(page('<link rel="stylesheet" href="s0.css">'), {
+      noun: "page",
+      path: "index.html",
+      sheet,
+    });
+    expect(fanned?.path).toBe("s10.css");
+    expect(asked).toBeLessThanOrEqual(11);
+    // A thousand links to one sheet: asked for and read once.
+    asked = 0;
+    scrollLock(page('<link rel="stylesheet" href="s10.css">'.repeat(1_000)), {
+      noun: "page",
+      path: "index.html",
+      sheet,
+    });
+    expect(asked).toBe(1);
+    // Past SHEETS distinct sheets, the rest isn't read: the hold in the last one goes unseen.
+    const many: Record<string, string> = {};
+    for (let index = 0; index < SHEETS; index += 1) {
+      many[`m${index}.css`] = "p { color: red }";
+    }
+    many["last.css"] = SHELL;
+    const links = Object.keys(many)
+      .map((path) => `<link rel="stylesheet" href="${path}">`)
+      .join("");
+    expect(
+      scrollLock(page(links), {
+        noun: "page",
+        path: "index.html",
+        sheet: (href) => (many[href] === undefined ? null : { path: href, text: many[href] }),
+      }),
+    ).toBeNull();
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+
+  /** An app's stylesheet of `bytes`: many class rules, some scroll boxes, nothing that holds. */
+  const appSheet = (bytes: number) => {
+    let css = "";
+    for (let index = 0; css.length < bytes; index += 1) {
+      css +=
+        index % 20 === 0
+          ? `.list-${index} { overflow-y: auto; max-height: 20rem }\n`
+          : `.c-${index} > .d-${index} { color: #123; padding: ${index}px; margin: 0 auto }\n`;
+    }
+    return css;
+  };
+  const note = (count: number) =>
+    `${count} page${count === 1 ? "" : "s"} not checked for scroll lock: the check reads the entry and at most 7 other pages, within one budget. If one of them holds html, body or its root to one screen (overflow: hidden with height: 100% or 100vh, or position: fixed), let it scroll as a document.`;
+  const scrollFindings = (files: Record<string, string>) =>
+    lintFiles(served, files)
+      .filter((each) => each.rule === "scroll-lock")
+      .map((each) => each.path ?? each.message);
+
+  it("checks the entry and at most 7 other pages: 999 pages sharing a sheet cost what 8 do, and the rest are said", () => {
+    // P106's fifth review: the version's sheets, read once and kept, took about 100 bytes a byte
+    // (a page with one 2 MiB sheet ran out of memory at 128 MB). The rule now reads the pages an
+    // agent opens first: the entry, then the others in path order, eight in all; each streams its
+    // sheets as 8daa075 did. Each page here holds itself (its own <style>), so a finding names it.
+    // 999 pages and the sheet: a version's most files (1,000).
+    const version = (pages: number) => {
+      // A sheet of 1 MB: eight pages of it fit the version's 8 MiB.
+      const files: Record<string, string> = { "app.css": appSheet(1_000_000) };
+      const each = page(`<link rel="stylesheet" href="app.css"><style>${SHELL}</style>`);
+      files["index.html"] = each;
+      for (let index = 0; index < pages - 1; index += 1) {
+        files[`p${String(index).padStart(3, "0")}.html`] = each;
+      }
+      return files;
+    };
+    const many = version(999);
+    const eight = version(8);
+    const timed = (files: Record<string, string>): number => {
+      const started = performance.now();
+      lintFiles(served, files);
+      return performance.now() - started;
+    };
+    let whole = Infinity;
+    let few = Infinity;
+    for (let round = 0; round < 3; round += 1) {
+      whole = Math.min(whole, timed(many));
+      // Eight pages' work, at most a second idle; 8daa075 read all 999 (41 s).
+      expect(whole, `999 pages: ${whole.toFixed(0)} ms`).toBeLessThan(10_000);
+      few = Math.min(few, timed(eight));
+    }
+    // Every page is linted, eight checked for this rule: about what eight pages cost.
+    expect(
+      whole / few,
+      `999 pages ${whole.toFixed(0)} ms, 8 pages ${few.toFixed(0)} ms`,
+    ).toBeLessThan(4);
+    expect(scrollFindings(many)).toEqual([
+      "index.html",
+      ...Array.from({ length: 7 }, (_, index) => `p00${index}.html`),
+      note(991),
+    ]);
+    // Eight pages or fewer: no note.
+    expect(scrollFindings(eight)).toHaveLength(8);
+    // Heavy by design: a minute, not the default 5 s, on a busy machine.
+  }, 60_000);
+
+  it("checks pages within one budget for the version: a page past what's left stops the rest", async () => {
+    const { scrollBudget, scrollLock, VERSION_READ } = await import("../src/check/scroll.ts");
+    // VERSION_READ (8 MiB) for all the pages checked: every sheet each reads (one two pages link
+    // is read for each). Four pages each linking a sheet just under 2 MiB fit; the fifth doesn't,
+    // and it stops the rest, the cheap ones after it too.
+    const big = appSheet(2 * 1024 * 1024 - 4_096);
+    const linking = page(`<link rel="stylesheet" href="big.css"><style>${SHELL}</style>`);
+    const files: Record<string, string> = { "app.js": "", "big.css": big, "index.html": linking };
+    for (let index = 0; index < 7; index += 1) {
+      files[`p${index}.html`] = index < 4 ? linking : page(`<style>${SHELL}</style>`);
+    }
+    expect(scrollFindings(files)).toEqual(["index.html", "p0.html", "p1.html", "p2.html", note(4)]);
+    // A page's own <style> is charged too (each within a page's 4 MiB): three pages of 3.5 MiB
+    // each, the third past the budget.
+    const budget = scrollBudget();
+    const styled = page(`<style>${SHELL}\n${appSheet(3.5 * 1024 * 1024)}</style>`);
+    expect(scrollLock(styled, { noun: "page", budget })).not.toBeNull();
+    expect(budget.bytes).toBeLessThan(VERSION_READ - 3.5 * 1024 * 1024);
+    expect(scrollLock(styled, { noun: "page", budget })).not.toBeNull();
+    expect(scrollLock(styled, { noun: "page", budget })).toBeNull();
+    expect(budget.spent).toBe(true);
+    // Spent: a page that would cost nothing isn't checked either.
+    expect(scrollLock(page(`<style>${SHELL}</style>`), { noun: "page", budget })).toBeNull();
+  });
+
+  it("matches scroll rules against a version's markup within one budget of steps", () => {
+    // VERSION_STEPS (2,000,000) for the pages checked: each of these spends a page's million
+    // (2,000 elements 32 deep, 256 scroll rules whose first compound matches none of them), so two
+    // are checked and the third stops the rest.
+    const nest = `${"<div>".repeat(31)}<div></div>${"</div>".repeat(31)}`;
+    const rules = Array.from(
+      { length: 256 },
+      (_, index) => `.n${index} ${"div ".repeat(30)}div { overflow: auto }`,
+    );
+    const deep = `<!doctype html><html><head><style>html, body { height: 100%; overflow: hidden }\n${rules.join("\n")}</style></head><body><div id="root">${nest.repeat(63)}</div></body></html>`;
+    const files: Record<string, string> = { "index.html": deep };
+    for (let index = 0; index < 3; index += 1) {
+      files[`p${index}.html`] = deep;
+    }
+    expect(scrollFindings(files)).toEqual(["index.html", "p0.html", note(2)]);
+    // Heavy by design: a minute, not the default 5 s, on a busy machine.
+  }, 60_000);
+
+  /** Runs `script` (an ES module, with `lintFiles`, `served`, `fill`, `MiB`) under a 48 MB heap. */
+  const underHeap = (script: string): string => {
+    const index = pathToFileURL(resolvePath(import.meta.dirname, "../src/index.ts")).href;
+    const prelude = `
+      const { lintFiles, presets } = await import(${JSON.stringify(index)});
+      const served = presets.artifact({ isolation: "domain", contentOrigins: [${JSON.stringify(CONTENT)}] });
+      const fill = (unit, bytes) => { const parts = []; let n = 0; for (let i = 0; n < bytes; i += 1) { const u = unit(i); parts.push(u); n += u.length; } return parts.join(""); };
+      const MiB = 1024 * 1024;
+    `;
+    return execFileSync(
+      process.execPath,
+      ["--max-old-space-size=48", "--input-type=module", "--eval", prelude + script],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    ).trim();
+  };
+
+  it("reads a page's 2 MiB stylesheet in little memory: under a 48 MB heap", () => {
+    // P106's fifth review: one page linking one 2 MiB sheet of `.kN{top:0}` took 222-266 MB of
+    // heap and ran out at 128 MB (the parsed sheet kept for the version). Streamed, each of these
+    // runs in a heap of 32 MB: rules on what the check reads, ones that match, and one rule's
+    // 300,000 selectors (it ran out at 128 MB in 8daa075 too: all split, and kept for the scroll
+    // rules). The sixth review's layers: a page's 1,024 at most (each kept the values of every
+    // rule in it: 2 MiB of anonymous layers needed 128 MB, of layers 15 parts deep 256 MB). The
+    // seventh's: a layer's name of 1.9 MB, its anonymous layers each copying it (out of memory at
+    // 1,024 MB; with a 1 MB name, past 300 s), isn't read past 256 characters.
+    const shapes = `{
+      rules: fill((i) => \`.k\${i}{top:0}\`, 2 * MiB),
+      matching: fill(() => "div{top:0}", 2 * MiB),
+      selectors: fill((i) => \`.a\${i},\`, 2 * MiB - 20) + ".z{top:0}",
+      anonymous: fill(() => "@layer{html,body,#root{overflow:hidden;inset:0}}", 2 * MiB),
+      dotted: fill((i) => \`@layer a\${i}.b.c.d.e.f.g.h.i.j.k.l.m.n.o{html{top:0}}\`, 2 * MiB),
+      named: fill((i) => \`@layer a\${i}{html,body,#root{overflow:hidden;height:100%;position:fixed;top:0;bottom:0;max-height:100vh}}\`, 2 * MiB),
+      long: "@layer " + "A".repeat(Math.floor(1.9 * MiB)) + "{" + "@layer{html{top:0}}".repeat(5_500) + "}",
+    }`;
+    expect(
+      underHeap(`
+        for (const [name, sheet] of Object.entries(${shapes})) {
+          const started = performance.now();
+          lintFiles(served, { "index.html": '<link rel="stylesheet" href="s.css"><div id="root"><p>x</p></div>', "s.css": sheet });
+          // Each in a second or so on a busy machine: 5 s says it isn't the work it was.
+          const took = performance.now() - started;
+          process.stdout.write(name + (took < 5_000 ? " " : \` (\${Math.round(took)} ms) \`));
+        }
+      `),
+    ).toBe("rules matching selectors anonymous dotted named long");
+    // Heavy by design: a minute, not the default 5 s, on a busy machine.
+  }, 60_000);
+
+  it("keeps no page's text past its own lint: 500 pages of 192 KB under a 48 MB heap", () => {
+    // P106's sixth review: lintFiles kept every page's decoded text for the rule, which reads 8
+    // (500 pages of 192 KB, as bytes, ran out at 96 MB). Only their paths are kept now, and the
+    // eight it checks decoded again there.
+    expect(
+      underHeap(`
+        const encoder = new TextEncoder();
+        const files = {};
+        for (let i = 0; i < 500; i += 1) {
+          files[\`p\${String(i).padStart(3, "0")}.html\`] = encoder.encode(\`<!doctype html><html><head><style>html, body { height: 100%; overflow: hidden }</style></head><body><div id="root"><p>\${"word ".repeat(38_000)}</p>\${i}</div></body></html>\`);
+        }
+        const findings = lintFiles(served, files).filter((each) => each.rule === "scroll-lock");
+        process.stdout.write(String(findings.length) + " " + findings.at(-1).message.split(":")[0]);
+      `),
+    ).toBe("9 492 pages not checked for scroll lock");
+  }, 60_000);
+
+  it("lints a page linking a 1.8 MB stylesheet of declarations for body in linear time", () => {
+    // P106's second review: each declaration copied the list of those before it, so this one sheet
+    // (230,000 declarations) took 285 s on an arm64 box (over 400 s in the review). Kept as each
+    // layer's winner so far: about 0.2 s there, so the bound is many times that; quadratic, minutes.
+    const sheet = `html, body { height: 100%; }\nbody { ${"top: 0; ".repeat(230_000)}overflow: hidden }`;
+    expect(sheet.length).toBeGreaterThan(1_800_000);
+    const started = performance.now();
+    const findings = held({
+      "index.html": page('<link rel="stylesheet" href="shell.css">'),
+      "shell.css": sheet,
+    });
+    const took = performance.now() - started;
+    expect(findings.map((each) => [each.path, each.line])).toEqual([["shell.css", 2]]);
+    expect(took, `${took.toFixed(0)} ms`).toBeLessThan(3_000);
+  });
+
+  it("admitFiles publishes it, with the warning in its note", () => {
+    const admitted = admitFiles(served, {
+      "index.html": page('<link rel="stylesheet" href="shell.css">'),
+      "shell.css": SHELL,
+      "app.js": "",
+    });
+    expect(admitted.ok).toBe(true);
+    expect(admitted.ok ? admitted.note : "").toContain(
+      "- shell.css line 1: The page looks held to one screen in its frame",
+    );
   });
 });
 

@@ -253,6 +253,7 @@ function widget(c: Context): string {
     ),
     `- An SVG scales with the frame: its text shows at font-size × frame width ÷ viewBox width, so a 680-wide viewBox turns 12 into 5 px on a phone. Draw it for the phone: viewBox="0 0 ${viewBox} H", no text under 13, width="100%" style="max-width: 400px"; its text then shows at ${smallest} to ${largest} px on every screen. Or draw it 1 unit = 1 px with a script (topic chart).`,
     `- The frame never scrolls sideways: nothing fixed wider than ${layout.minWidthPx} px; images max-width: 100%; a grid or flex child with long text min-width: 0; a wide table or code block in its own box with overflow-x: auto.`,
+    `- It scrolls as a document: unless it's meant to fit one screen (a game, a canvas), don't hold html, body or the element that holds it all to one screen (height: 100% or 100vh with overflow: hidden, or position: fixed), or what's below the first screen can't be reached. A box that scrolls by itself takes the wheel while the pointer is over it: keep those to parts of the ${noun} (a wide table, a long list), never the whole of it.`,
     "- Cards in a row wrap (flex-wrap: wrap; flex: 1 1 100px), or a grid of repeat(auto-fit, minmax(160px, 1fr)): at most 2 columns under 500 px, never a fixed repeat(3, …).",
     "- Touch: anything clickable is at least 44 px tall. Phones don't hover: what a hover shows, a tap (click) shows too.",
     fills

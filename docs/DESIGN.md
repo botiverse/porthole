@@ -628,7 +628,9 @@ What both adopters still wrote after 0.2 moves into Porthole (ADOPTING.md is the
   over the size, a document where a fragment goes that has no body, nested frames and plugins,
   `document.write`. Warnings for the rest: a document sent as a widget (taken as its body,
   `fragmentOf`), the clipboard, dialogs, forms, hosts outside egress, unpinned CDN libraries,
-  `position: fixed` in a flow layout, new windows without `openLink`.
+  `position: fixed` in a flow layout, new windows without `openLink`, the page's own styles
+  holding it to one screen (P106: `src/check/scroll.ts`, a cascade of html, body and the root's
+  overflow, height and position; `lintFiles` reads the version's linked stylesheets too).
 - **`admitContent(config, content, { refuseOn })`**: the show tool's gate. It refuses errors by
   default with a text that says what to change; otherwise it shows the content (a widget's
   document taken as its body) and returns the warnings as a note.
