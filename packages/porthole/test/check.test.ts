@@ -205,6 +205,14 @@ describe("a page held to one screen (P106)", () => {
     expect(
       held(page("html { overflow: hidden !important }\nhtml { overflow: visible }"))[0]?.message,
     ).toContain("add html { overflow: visible !important }");
+    // :root is html alone; * is every element: the fix says them as they are.
+    const content = '<div id="root"><p>x</p></div>';
+    expect(held(page(":root { height: 100%; overflow: hidden }", content))[0]?.message).toContain(
+      "html (height: 100%; overflow: hidden) holds it to one screen, and what's below can't be reached. Unless it is meant to fit one screen, let it scroll as a document: add :root { height: auto; overflow: visible } after those rules.",
+    );
+    expect(held(page("* { height: 100%; overflow: hidden }", content))[0]?.message).toContain(
+      "html, body and #root (height: 100%; overflow: hidden) hold it to one screen, and what's below can't be reached. Unless it is meant to fit one screen, let it scroll as a document: add * { height: auto; overflow: visible } after those rules.",
+    );
     // A more specific rule wins over a later, less specific override: the fix names its selector.
     expect(
       held(page("html body { overflow: hidden }\nbody { overflow: visible }"))[0]?.message,
@@ -370,6 +378,22 @@ describe("a page held to one screen (P106)", () => {
         height,
       ).toEqual([]);
     }
+    // Not under a body that grows with the page (no height of its own): a flex column of the
+    // content's height, so the root is too, and html holds it.
+    expect(
+      held(
+        page(
+          "html { height: 100%; overflow: hidden } body { display: flex; flex-direction: column; overflow: hidden } #root { overflow: auto }",
+        ),
+      )[0]?.message,
+    ).toContain("html (height: 100%; overflow: hidden) holds it there");
+    expect(
+      held(
+        page(
+          "html { height: 100%; overflow: hidden } body { overflow: hidden } #root { height: 640px; overflow: auto }",
+        ),
+      ).length,
+    ).toBe(1);
     // Held where the root's height is the content's, under a block body: it grows with the page.
     for (const root of [
       "#root { overflow: auto }",
@@ -547,6 +571,13 @@ describe("a page held to one screen (P106)", () => {
       ),
     )[0]?.message;
     expect(escaped).toContain("#root (height: 100vh; overflow: hidden) holds it");
+    // Escaped but as specific as `#root` (1,0,0): `#root` wins by coming later, no !important.
+    expect(
+      held(page("#\\72 oot { height: 100vh; overflow: hidden }", '<div id="root"></div>'))[0]
+        ?.message,
+    ).toContain(
+      "#root (height: 100vh; overflow: hidden) holds it to one screen, and what's below can't be reached. Unless it is meant to fit one screen, let it scroll as a document: add #root { height: auto; overflow: visible } after those rules.",
+    );
     // Its selector (1,1,1) outranks `#root` (1,0,0): the fix is !important, or it couldn't win.
     expect(escaped).toContain(
       "add #root { height: auto !important; overflow: visible !important } after those rules",

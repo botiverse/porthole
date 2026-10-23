@@ -5138,8 +5138,11 @@ inner box take the wheel. Nothing told the agent: the manual spoke only of sidew
    check can't read is its own box, as an inner one is (no warning): under a flex or grid body
    (its `display`, or Tailwind's `flex`, `grid`; the root's height is the layout's: `flex-1`), or
    with a height of another shape (a length, `min()`, `var()`, a `calc()` other than below, an
-   arbitrary `h-[…]`). It is held only where its height is the content's (unset, `auto`,
-   `fit-content`, or 100% of a body that is) under a block body.
+   arbitrary `h-[…]`), where body itself is one screen tall. It is held where its height is the
+   content's (unset, `auto`, `fit-content`, or 100% of a body that is) under a block body, and
+   wherever body isn't one screen tall (a body that grows with the page holds a flex column that
+   does too: `html { height: 100%; overflow: hidden } body { display: flex; flex-direction:
+   column; overflow: hidden } #root { overflow: auto }` is held).
    Where one does, the page may scroll in that box (a dashboard's `main { flex: 1; overflow-y:
    auto }`), and the text can't tell which box holds the content: no warning; the manual's line on
    the wheel says the rest. Matched against at most 2,000 elements, 32 deep, 256 selectors and a
@@ -5180,23 +5183,31 @@ inner box take the wheel. Nothing told the agent: the manual spoke only of sidew
    keeps, per longhand, only each layer's winner so far (within a layer, and within `!important`
    or `style=""`, specificity and order decide; the layers' order picks among those once all is
    read), and the layers' tree is built in place, so a sheet of 80,000 declarations, or an `@layer`
-   of 80,000 names, costs what sixteen of 5,000 do. An element's classes are a set, and a compound
+   of 80,000 names, costs what sixteen of 5,000 do. A rule's selectors are read one at a time, and
+   a scroll rule's kept only while there is room for them (a 2 MiB rule of 300,000 selectors ran
+   out of memory at 128 MB before). An element's classes are a set, and a compound
    selector of more than 32 ids and classes matches nothing, so matching a compound against an
    element is bounded work, for html, body and the root as for the elements below body: the size
    of the sheets and the size of the page add, not multiply. A layer named more than 16 deep
    (`a.b.c…`, with the layers it is in) isn't read: its rules are dropped, but its first 16 parts
    are declared where it comes, as a browser declares them, so the layers' order holds.
-   **A version's pages** (`lintFiles`, so `admitFiles` at publish): each stylesheet is read once
-   for the version (its rules, the steps between them, and its rules by each selector's last
-   compound: an id, a class, a tag, `*`), and each page replays only the rules that may match its
-   html, body or root, with its scroll rules until it has 256; a repeated selector in a rule is
-   read once. The version has one budget for all its pages: 16 MiB of sheets read and replayed,
-   and two million steps of matching scroll rules against markup. Past either, the pages left
-   aren't checked for this rule: it is a warning, so an unchecked page is a warning missed, never
-   a refusal. So the check is linear in the version's pages and sheets: 500 pages sharing a 250
-   KB sheet (13.8 s in the review), or ten linking two 2 MiB ones (15.9 s), read each sheet once
-   (512 pages and a 256 KB sheet: 6.4 s before, 0.25 s; 16 pages and two 2 MiB sheets: 25 s,
-   0.3 s).
+   **A version's pages** (`lintFiles`, so `admitFiles` at publish): the rule reads the pages an
+   agent opens first, the entry and then the others in path order, at most 8 in all, each as a
+   page alone (its sheets read as it streams them: nothing parsed is kept from one page to the
+   next). The 8 share one budget: 8 MiB of stylesheet read, every sheet each page reads (one two
+   pages link is read for each) and each page's own `<style>`, and two million steps of matching
+   scroll rules against markup. A page that would spend more than is left isn't checked, nor are
+   any after it, the cheap ones too. Where pages aren't checked (past 8, or past the budget), one
+   warning says how many: "N pages not checked for scroll lock: the check reads the entry and at
+   most 7 other pages, within one budget. If one of them holds html, body or its root to one
+   screen (…), let it scroll as a document." A page over its size isn't read at all (its error
+   says so) and isn't counted. A warning, so an unchecked page is a warning missed, never a
+   refusal. Bounded: whatever a version holds, the rule reads at most 8 pages and 8 MiB of
+   sheets (the review's 500 pages sharing a 250 KB sheet took 13.8 s; 999 pages sharing a 1 MB one
+   now read 8). Why not read each sheet once for the version and replay it for each page (the
+   fourth review's answer): its parsed rules took about 100 bytes a byte, kept for the version (a
+   page with one 2 MiB sheet ran out of memory at 128 MB; eight with their own took 1.5 GB), for
+   an advisory rule whose pages that matter are the ones an agent opens.
 3. **The warning says what to do:** what holds it, as the page wrote it, and the rule that undoes
    it under the page's own selectors (so it wins by coming later; `!important` where the hold
    was). The page's CSS goes into the agent's context, so only values of a known shape are echoed
@@ -5239,12 +5250,14 @@ and a text read can't be sure.
 **Limits.** Not read: rules under `@media` (but `all` and `screen`), `@supports`, `@container`;
 `:is()`, `:where()`, `:not()`, attributes and sibling combinators (they match nothing); nested
 rules; values through `var()` or `calc()`; `@import … layer()` beyond a name; a layer named more
-than 16 deep; a sheet's second link or import; what scripts set; stylesheets from another origin; sheets past the budget. Each can miss a hold or an override (a warning then wrong, never
+than 16 deep; a sheet's second link or import; what scripts set; stylesheets from another origin;
+sheets past the budget. Each can miss a hold or an override (a warning then wrong, never
 a refusal). A body with stray unclosed tags may be taken as having one child. A root that scrolls
 under a flex or grid body, or with a height the check can't read, is taken as its own scroll box:
 where it is in fact as tall as its content (a flex column's item without `flex: 1`, a `min()`
-that comes to its content), the hold is missed. A version's pages past its budget (16 MiB of
-sheets, two million match steps) aren't checked.
+that comes to its content), the hold is missed. In a version, pages past the entry and 7 more,
+or past the budget (8 MiB of sheets, two million match steps), aren't checked: a warning says
+how many.
 
 **Tested.** `test/check.test.ts` (a page held to one screen): the app shell's exact styles (the
 message and line), body or html hidden alone, the root by height, max-height and `inset: 0`, a
@@ -5284,17 +5297,25 @@ positive length (`- 1px + 2000px`, `- -2000px`, `-10px`, `var()` not), `calc(100
 screen under a one-screen body and not under a content-tall one; an `@import` into a layer 17
 deep declaring its first 16 parts; with no root, a body child's `style=""` still a scroll box;
 the fix `!important` where `#root` or `body > div` stands for a more specific selector, not where
-it is the selector; a layer opened early with nothing for the page losing to a later one, a sub-layer below
+it is the selector; after the fifth review: `:root { overflow: hidden }` and `* { height: 100%;
+overflow: hidden }` held (the fix under their own selectors), `#\72 oot` as specific as `#root`
+so no `!important`, a flex column under a body that grows with the page held, and a root of
+`640px` under such a body too; a layer opened early with nothing for the page losing to a later one, a sub-layer below
 its parent's own rules either way round. `test/files.test.ts`: a linked sheet (its
 path and line), an `@import`ed one, each page by what it links, overrides across sheets in either
 order, print, alternate and missing sheets, and `admitFiles`'s note; ten sheets each importing the
 next six times (11 asks, well under 2 s; without the budget it ran past 60 s), a thousand links to
 one sheet (asked once), and a hold past 32 sheets unread; `lintFiles` on a page linking a 1.8 MB
-sheet of 230,000 declarations for body, under 3 s (0.2 s; 285 s before); a version of 512 pages
-sharing a 256 KB sheet and one of 16 pages linking two 2 MiB `div,` sheets, each timed against
-sixteen sixteenths of both its pages and its sheets (under eight times, and under 3 s), all 512
-pages warned; twelve pages each with its own sheet just under 2 MiB, eight checked; four pages
-each spending a page's million match steps, two checked. The manual's examples and the
+sheet of 230,000 declarations for body, under 3 s (0.2 s; 285 s before); 999 pages sharing a 1
+MB sheet (a version's most files) the entry and 7 more checked, in that order, and "991 pages
+not checked" said, under 10 s (41 s before) and under four times what 8 pages cost; eight
+pages or fewer, no note; eight pages, the first five linking a sheet just under 2 MiB, four
+checked and the fifth stopping the rest, the three cheap ones after it too ("4 pages not
+checked"); a page's own `<style>` charged (two of 5
+MiB, the second not checked, nor a cheap one after); four pages each spending a page's million
+match steps, two checked; one page linking a 2 MiB sheet of `.kN{top:0}`, of `div{top:0}` and
+of one rule's 300,000 selectors, each in a child process under a 48 MB heap (32 MB is enough;
+the fourth review's code ran out at 128 MB on each, 8daa075 on the last). The manual's examples and the
 Vite + React fixture still lint clean.
 
 **Revisit when** `checkPage` measures scrolling in a browser (then this can defer to it), a host's

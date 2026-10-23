@@ -1,4 +1,7 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { resolve as resolvePath } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   admitFiles,
@@ -1019,114 +1022,140 @@ describe("a page with files held to one screen (P106)", () => {
     expect(performance.now() - started).toBeLessThan(2_000);
   });
 
-  it("reads each stylesheet once for the version: many pages cost what their pages and sheets do, added", () => {
-    // P106's fourth review: each page read every sheet it links again (only decoding was shared),
-    // so the work was the pages times the sheets: 500 pages sharing one 250 KB sheet took 13.8 s,
-    // 10 pages linking two 2 MiB `div,` sheets 15.9 s. Each sheet is now read once a version and
-    // replayed for each page, only its rules that may match the page's top. Timed as P098 has it,
-    // pages and sheets both cut to a sixteenth for the parts: linear, the whole costs what the
-    // sixteen parts do; a product of the two, sixteen times as much (and past the bound beside it).
-    const appSheet = (bytes: number) => {
-      let css = `${SHELL}\n`;
-      for (let index = 0; css.length < bytes; index += 1) {
-        css +=
-          index % 20 === 0
-            ? `.list-${index} { overflow-y: auto; max-height: 20rem }\n`
-            : `.c-${index} > .d-${index} { color: #123; padding: ${index}px; margin: 0 auto }\n`;
-      }
-      return css;
-    };
-    const divs = (bytes: number) => `${"div,".repeat(bytes / 4 - 4)}div{top:0}`;
-    const version = (pages: number, sheets: Record<string, string>) => {
-      const files: Record<string, string> = { "app.js": "", ...sheets };
-      const links = Object.keys(sheets)
-        .map((path) => `<link rel="stylesheet" href="${path}">`)
-        .join("");
-      for (let index = 0; index < pages; index += 1) {
-        files[`p${index}.html`] = page(links);
+  /** An app's stylesheet of `bytes`: many class rules, some scroll boxes, nothing that holds. */
+  const appSheet = (bytes: number) => {
+    let css = "";
+    for (let index = 0; css.length < bytes; index += 1) {
+      css +=
+        index % 20 === 0
+          ? `.list-${index} { overflow-y: auto; max-height: 20rem }\n`
+          : `.c-${index} > .d-${index} { color: #123; padding: ${index}px; margin: 0 auto }\n`;
+    }
+    return css;
+  };
+  const note = (count: number) =>
+    `${count} page${count === 1 ? "" : "s"} not checked for scroll lock: the check reads the entry and at most 7 other pages, within one budget. If one of them holds html, body or its root to one screen (overflow: hidden with height: 100% or 100vh, or position: fixed), let it scroll as a document.`;
+  const scrollFindings = (files: Record<string, string>) =>
+    lintFiles(served, files)
+      .filter((each) => each.rule === "scroll-lock")
+      .map((each) => each.path ?? each.message);
+
+  it("checks the entry and at most 7 other pages: 999 pages sharing a sheet cost what 8 do, and the rest are said", () => {
+    // P106's fifth review: the version's sheets, read once and kept, took about 100 bytes a byte
+    // (a page with one 2 MiB sheet ran out of memory at 128 MB). The rule now reads the pages an
+    // agent opens first: the entry, then the others in path order, eight in all; each streams its
+    // sheets as 8daa075 did. Each page here holds itself (its own <style>), so a finding names it.
+    // 999 pages and the sheet: a version's most files (1,000).
+    const version = (pages: number) => {
+      // A sheet of 1 MB: eight pages of it fit the version's 8 MiB.
+      const files: Record<string, string> = { "app.css": appSheet(1_000_000) };
+      const each = page(`<link rel="stylesheet" href="app.css"><style>${SHELL}</style>`);
+      files["index.html"] = each;
+      for (let index = 0; index < pages - 1; index += 1) {
+        files[`p${String(index).padStart(3, "0")}.html`] = each;
       }
       return files;
     };
-    const timed = (files: Record<string, string>, times: number): number => {
+    const many = version(999);
+    const eight = version(8);
+    const timed = (files: Record<string, string>): number => {
       const started = performance.now();
-      for (let each = 0; each < times; each += 1) {
-        lintFiles(served, files);
-      }
+      lintFiles(served, files);
       return performance.now() - started;
     };
-    const mib = 1024 * 1024;
-    const inputs = [
-      {
-        name: "512 pages, one 256 KB sheet",
-        whole: version(512, { "app.css": appSheet(256 * 1024) }),
-        part: version(32, { "app.css": appSheet(16 * 1024) }),
-      },
-      {
-        name: "16 pages, two 2 MiB div, sheets",
-        whole: version(16, { "a.css": divs(2 * mib), "b.css": divs(2 * mib) }),
-        part: version(1, { "a.css": divs(128 * 1024), "b.css": divs(128 * 1024) }),
-      },
-    ];
-    for (const { name, whole, part } of inputs) {
-      let once = Infinity;
-      let parts = Infinity;
-      for (let round = 0; round < 3; round += 1) {
-        once = Math.min(once, timed(whole, 1));
-        expect(once, `${name}: ${once.toFixed(1)} ms`).toBeLessThan(3_000);
-        parts = Math.min(parts, timed(part, 16));
-      }
-      const said = `${name}: ${once.toFixed(1)} ms, 16 sixteenths ${parts.toFixed(1)} ms`;
-      expect(once / parts, said).toBeLessThan(8);
+    let whole = Infinity;
+    let few = Infinity;
+    for (let round = 0; round < 3; round += 1) {
+      whole = Math.min(whole, timed(many));
+      // Eight pages' work, at most a second idle; 8daa075 read all 999 (41 s).
+      expect(whole, `999 pages: ${whole.toFixed(0)} ms`).toBeLessThan(10_000);
+      few = Math.min(few, timed(eight));
     }
-    // Every page is still checked.
+    // Every page is linted, eight checked for this rule: about what eight pages cost.
     expect(
-      lintFiles(served, inputs[0]?.whole ?? {}).filter((each) => each.rule === "scroll-lock"),
-    ).toHaveLength(512);
-  });
+      whole / few,
+      `999 pages ${whole.toFixed(0)} ms, 8 pages ${few.toFixed(0)} ms`,
+    ).toBeLessThan(4);
+    expect(scrollFindings(many)).toEqual([
+      "index.html",
+      ...Array.from({ length: 7 }, (_, index) => `p00${index}.html`),
+      note(991),
+    ]);
+    // Eight pages or fewer: no note.
+    expect(scrollFindings(eight)).toHaveLength(8);
+    // Heavy by design: a minute, not the default 5 s, on a busy machine.
+  }, 60_000);
 
-  it("checks a version's pages within one budget: past it, the pages left aren't checked", () => {
-    // VERSION_READ (16 MiB) of sheets read and replayed for all its pages: twelve pages, each with
-    // a sheet of its own just under 2 MiB, are eight checked and four not.
-    const files: Record<string, string> = { "app.js": "" };
-    for (let index = 0; index < 12; index += 1) {
-      let css = `${SHELL}\n`;
-      for (let rule = 0; css.length < 2 * 1024 * 1024 - 4_096; rule += 1) {
-        css += `.s${index}-${rule} > .d${rule} { color: #123; padding: ${rule}px }\n`;
-      }
-      files[`p${index}.html`] = page(`<link rel="stylesheet" href="s${index}.css">`);
-      files[`s${index}.css`] = css;
+  it("checks pages within one budget for the version: a page past what's left stops the rest", async () => {
+    const { scrollBudget, scrollLock, VERSION_READ } = await import("../src/check/scroll.ts");
+    // VERSION_READ (8 MiB) for all the pages checked: every sheet each reads (one two pages link
+    // is read for each). Four pages each linking a sheet just under 2 MiB fit; the fifth doesn't,
+    // and it stops the rest, the cheap ones after it too.
+    const big = appSheet(2 * 1024 * 1024 - 4_096);
+    const linking = page(`<link rel="stylesheet" href="big.css"><style>${SHELL}</style>`);
+    const files: Record<string, string> = { "app.js": "", "big.css": big, "index.html": linking };
+    for (let index = 0; index < 7; index += 1) {
+      files[`p${index}.html`] = index < 4 ? linking : page(`<style>${SHELL}</style>`);
     }
-    const started = performance.now();
-    const findings = held(files);
-    const took = performance.now() - started;
-    expect(findings.map((each) => each.path)).toEqual(
-      Array.from({ length: 8 }, (_, index) => `s${index}.css`),
-    );
-    expect(took, `${took.toFixed(0)} ms`).toBeLessThan(5_000);
+    expect(scrollFindings(files)).toEqual(["index.html", "p0.html", "p1.html", "p2.html", note(4)]);
+    // A page's own <style> is charged too: two pages of 5 MiB each, the second past the budget.
+    const budget = scrollBudget();
+    const styled = page(`<style>${SHELL}\n${appSheet(5 * 1024 * 1024)}</style>`);
+    expect(scrollLock(styled, { noun: "page", budget })).not.toBeNull();
+    expect(budget.bytes).toBeLessThan(VERSION_READ - 5 * 1024 * 1024);
+    expect(scrollLock(styled, { noun: "page", budget })).toBeNull();
+    expect(budget.spent).toBe(true);
+    // Spent: a page that would cost nothing isn't checked either.
+    expect(scrollLock(page(`<style>${SHELL}</style>`), { noun: "page", budget })).toBeNull();
   });
 
   it("matches scroll rules against a version's markup within one budget of steps", () => {
-    // VERSION_STEPS (2,000,000) for all its pages: each of these spends a page's million (2,000
-    // elements 32 deep, 256 scroll rules whose first compound matches none of them), so two are
-    // checked and two not.
+    // VERSION_STEPS (2,000,000) for the pages checked: each of these spends a page's million
+    // (2,000 elements 32 deep, 256 scroll rules whose first compound matches none of them), so two
+    // are checked and the third stops the rest.
     const nest = `${"<div>".repeat(31)}<div></div>${"</div>".repeat(31)}`;
-    const deep = `<!doctype html><html><head><link rel="stylesheet" href="app.css"></head><body><div id="root">${nest.repeat(63)}</div></body></html>`;
     const rules = Array.from(
       { length: 256 },
       (_, index) => `.n${index} ${"div ".repeat(30)}div { overflow: auto }`,
     );
-    const files: Record<string, string> = {
-      "app.css": `html, body { height: 100%; overflow: hidden }\n${rules.join("\n")}`,
-    };
-    for (let index = 0; index < 4; index += 1) {
+    const deep = `<!doctype html><html><head><style>html, body { height: 100%; overflow: hidden }\n${rules.join("\n")}</style></head><body><div id="root">${nest.repeat(63)}</div></body></html>`;
+    const files: Record<string, string> = { "index.html": deep };
+    for (let index = 0; index < 3; index += 1) {
       files[`p${index}.html`] = deep;
     }
-    // Two warnings (each named by the sheet's line): the first two pages'.
-    expect(held(files).map((each) => [each.path, each.line])).toEqual([
-      ["app.css", 1],
-      ["app.css", 1],
-    ]);
-  });
+    expect(scrollFindings(files)).toEqual(["index.html", "p0.html", note(2)]);
+    // Heavy by design: a minute, not the default 5 s, on a busy machine.
+  }, 60_000);
+
+  it("reads a page's 2 MiB stylesheet in little memory: under a 48 MB heap", () => {
+    // P106's fifth review: one page linking one 2 MiB sheet of `.kN{top:0}` took 222-266 MB of
+    // heap and ran out at 128 MB (the parsed sheet kept for the version). Streamed, each of these
+    // shapes runs in a heap of 32 MB; a 2 MiB rule of distinct selectors ran out at 128 MB in
+    // 8daa075 too (all its selectors split, and kept for the scroll rules).
+    const index = pathToFileURL(resolvePath(import.meta.dirname, "../src/index.ts")).href;
+    const script = `
+      const { lintFiles, presets } = await import(${JSON.stringify(index)});
+      const served = presets.artifact({ isolation: "domain", contentOrigins: [${JSON.stringify(CONTENT)}] });
+      const fill = (unit, bytes) => { const parts = []; let n = 0; for (let i = 0; n < bytes; i += 1) { const u = unit(i); parts.push(u); n += u.length; } return parts.join(""); };
+      const MiB = 1024 * 1024;
+      const sheets = {
+        rules: fill((i) => \`.k\${i}{top:0}\`, 2 * MiB),
+        matching: fill(() => "div{top:0}", 2 * MiB),
+        selectors: fill((i) => \`.a\${i},\`, 2 * MiB - 20) + ".z{top:0}",
+      };
+      for (const [name, sheet] of Object.entries(sheets)) {
+        lintFiles(served, { "index.html": '<link rel="stylesheet" href="s.css"><div id="root"><p>x</p></div>', "s.css": sheet });
+        process.stdout.write(name + " ");
+      }
+    `;
+    const out = execFileSync(
+      process.execPath,
+      ["--max-old-space-size=48", "--input-type=module", "--eval", script],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    expect(out.trim()).toBe("rules matching selectors");
+    // Heavy by design: a minute, not the default 5 s, on a busy machine.
+  }, 60_000);
 
   it("lints a page linking a 1.8 MB stylesheet of declarations for body in linear time", () => {
     // P106's second review: each declaration copied the list of those before it, so this one sheet

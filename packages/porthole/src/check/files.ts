@@ -10,7 +10,7 @@ import { fileTypeOf, knownType } from "../files/types.ts";
 import { sizeWords } from "../guide/limits.ts";
 import { lintPage, type Finding } from "./lint.ts";
 import { attributesOf } from "./markup.ts";
-import { scrollLock, type LinkedSheet, scrollBudget } from "./scroll.ts";
+import { scrollBudget, scrollLock, type LinkedSheet } from "./scroll.ts";
 
 /**
  * What can be told about a page that comes with files (P081), without running it: each page
@@ -175,6 +175,9 @@ function resolve(directory: string, reference: string): string | null {
 
 const directoryOf = (path: string): string => path.slice(0, path.lastIndexOf("/") + 1);
 
+/** The most pages the scroll-lock rule reads in a version: its entry, and 7 more (P106). */
+export const SCROLL_PAGES = 8;
+
 /**
  * Lints a page that comes with files (P081): the set (paths, limits, its entry), each page as
  * `lintContent` lints a page, each relative reference looked up in the set (a leading `/`, which
@@ -288,11 +291,11 @@ export function lintFiles(
     }
     return { path: target, text };
   };
-  // One budget for the rule over all the version's pages: each sheet read once, its rules replayed
-  // for each page within it (P106).
-  const budget = scrollBudget();
   const it = config.mode === "mcp-app" ? "view" : config.mode === "inline" ? "widget" : "page";
   const maxPage = config.limits.maxBytes;
+  // The version's pages, read, for the scroll-lock rule after the rest (P106). A page over its
+  // limit isn't read at all: its error says so.
+  const pages = new Map<string, string>();
   for (const [path, body] of Object.entries(files)) {
     const { role } = fileTypeOf(path);
     if (!knownType(path)) {
@@ -317,20 +320,11 @@ export function lintFiles(
         continue;
       }
       const text = textOf(body);
-      // The scroll-lock rule once, with the stylesheets the page links (P106).
+      // The scroll-lock rule apart, with the stylesheets the page links (P106).
       for (const finding of lintPage(config, text, { scrollLock: false })) {
         findings.push({ ...finding, path });
       }
-      const held = scrollLock(text, { noun: it, path, sheet: stylesheet, budget });
-      if (held !== null) {
-        findings.push({
-          rule: "scroll-lock",
-          severity: "warning",
-          message: held.message,
-          path: held.path ?? path,
-          line: held.line,
-        });
-      }
+      pages.set(path, text);
       const lines = linesOf(text);
       check(path, lines, markupReferences(text), directory, "error");
       check(path, lines, patternReferences(text, CSS_REFERENCES), directory, "warning");
@@ -359,6 +353,39 @@ export function lintFiles(
         directory,
       );
     }
+  }
+  // Its own styles holding a page to one screen (P106): the entry first, then the others in path
+  // order, at most SCROLL_PAGES, within one budget for them all. A warning: past either, the pages
+  // left aren't checked, and it says how many.
+  const budget = scrollBudget();
+  const order = [
+    ...(pages.has(entry) ? [entry] : []),
+    ...[...pages.keys()].filter((path) => path !== entry).sort(),
+  ];
+  let checked = 0;
+  for (const path of order.slice(0, SCROLL_PAGES)) {
+    const held = scrollLock(pages.get(path) ?? "", { noun: it, path, sheet: stylesheet, budget });
+    if (budget.spent) {
+      break;
+    }
+    checked += 1;
+    if (held !== null) {
+      findings.push({
+        rule: "scroll-lock",
+        severity: "warning",
+        message: held.message,
+        path: held.path ?? path,
+        line: held.line,
+      });
+    }
+  }
+  const unchecked = pages.size - checked;
+  if (unchecked > 0) {
+    findings.push({
+      rule: "scroll-lock",
+      severity: "warning",
+      message: `${unchecked} page${unchecked === 1 ? "" : "s"} not checked for scroll lock: the check reads the entry and at most ${SCROLL_PAGES - 1} other pages, within one budget. If one of them holds html, body or its root to one screen (overflow: hidden with height: 100% or 100vh, or position: fixed), let it scroll as a document.`,
+    });
   }
   return findings;
 }
