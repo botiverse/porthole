@@ -81,10 +81,22 @@ export interface AnnotationMark {
    * A marker (P104): with a count, the shell also draws a small bubble with this number (0 to
    * `ANNOTATION_LIMITS.count`; above 99 it reads "99+", 0 draws the bubble alone) at the end of a
    * text anchor and the top right of an element. The person can click it: the frame reports
-   * `activated`. The content can read the number; give one only where the page may know it.
+   * `activated`. The content can read the number; give one only where the page may know it. A
+   * draft's is dropped (P107): its marker has no number.
    */
   readonly count?: number;
+  /**
+   * What the mark is (P107): `"posted"` (the default, as absent) or `"draft"`, a comment its
+   * author hasn't submitted yet. A draft is drawn apart (a dashed line and a hollow marker with no
+   * number) and has a marker whether or not it has a count; its count is dropped before the mark
+   * goes to the frame. The content can read that a mark is a draft: send drafts only to their
+   * author's own frame.
+   */
+  readonly kind?: AnnotationMarkKind;
 }
+
+/** A posted comment's mark, or an unsubmitted draft's (P107). */
+export type AnnotationMarkKind = "posted" | "draft";
 
 /** Whether a mark's anchor was found in the content as it is now. */
 export type AnchorState = "attached" | "orphaned";
@@ -110,16 +122,17 @@ export type AnnotationReport =
   | { readonly type: "cancelled" }
   /**
    * Where the marked anchors are now: every mark after `show`, the focused one after `focus`,
-   * every mark when the content changed one's state, and, while any mark has a `count`, once a
+   * every mark when the content changed one's state, and, while any mark has a marker (a `count`,
+   * or a draft, P107), once a
    * scroll, a resize or a change of the content has settled, only the marks that moved since the
    * host was last told, at most once a second (P104).
    */
   | { readonly type: "anchored"; readonly results: readonly AnchorResult[] }
   /**
-   * The person clicked the marker of a mark the host shows with a `count` (P104); `rect` is the
-   * marker's box, to open the host's own UI beside it. The content can fake it for any mark the
-   * host shows with a count, and can tell a real one happened: open the host's own view of that
-   * mark, never act on it.
+   * The person clicked the marker of a mark the host shows with a `count` (P104), or of a draft
+   * (P107); `rect` is the marker's box, to open the host's own UI beside it. The content can fake
+   * it for any mark the host shows with a marker, and can tell a real one happened: open the
+   * host's own view of that mark, never act on it.
    */
   | { readonly type: "activated"; readonly id: string; readonly rect: AnnotationRect };
 

@@ -539,7 +539,7 @@ wall on three engines, and `defineHostConformance` runs it against a host's own 
 **The host must** do what [every host](#what-every-host-must-do) does, write the handlers (their
 effects are its own), and group displays by page (S7).
 
-**Annotations** (`annotate`, P053, P104). The shell that draws marks and reports anchors shares
+**Annotations** (`annotate`, P053, P104, P107). The shell that draws marks and reports anchors shares
 its realm with the content, so:
 
 - *What content learns.* Everything the host sends in a `show` is posted into the frame's window,
@@ -547,9 +547,29 @@ its realm with the content, so:
   its marker). A host gives ids that say nothing (never a person's name or a comment's words), and
   a count only where the page may know how many there are. Who commented and what they wrote stay
   in the host's own UI, outside the frame.
+- *Drafts* (P107). A mark with `kind: "draft"` (a comment its author hasn't posted) is drawn apart,
+  a dashed line and a hollow marker with no number, so the page also learns which of its marks are
+  drafts: that the person viewing it is writing a comment there, before they post it. That is new
+  information for the page, accepted where the page has no way out: drafts are the host's to send
+  only to their author's own frame (Porthole can't tell whose frame it is), the page is the one
+  being commented on and already sees where the person selects (`selected`), and closed egress
+  ([§4](#4-two-lines-of-defense)) keeps it off the network. Closed egress doesn't cover the
+  channels the host itself opens, and through them a draft's existence, place and timing can
+  leave: a page with the runtime's `db` (writes) and `user` can call `user.get()`, read the marks
+  shown to it, and write "viewer A is drafting at section 3" where its author and other viewers
+  read it before A posts; once A posts, the page can tie that posted comment to A (the anchor and
+  the time match). Origins a config declares for egress (an MCP App's `connectDomains`, S5; an
+  `egress` a host opened in its own config; the `liveWidget` preset itself has none, P103), and a
+  host function that sends the page's words somewhere, are channels of the same kind (S4, and the
+  app runtime below). A host that sends drafts to such a page accepts that its author and other viewers can
+  learn of them. A draft carries nothing else: the host drops its count before the frame (control
+  `draft-count`), so a page can't read how many drafts are at an anchor unless the host sends a
+  mark per draft, and its id is the host's, as any mark's (random, never the draft's words). A host
+  that sends drafts into a frame others see (a shared screen, a frame several viewers share) tells
+  that page, and anything it draws for them, what its author hasn't posted.
 - *What content can fake.* Any report: a selection while the host asks for one, where marks are,
-  and a marker's click (`activated`) for any mark the host shows with a count, without a click on
-  it and with any box. It can draw look-alike markers, or lay its own elements over Porthole's.
+  and a marker's click (`activated`) for any mark the host shows with a marker (a count, or a draft:
+  P107), without a click on it and with any box. It can draw look-alike markers, or lay its own elements over Porthole's.
   The host takes each report only for what it asked for and its own shown ids, rebuilt within
   `ANNOTATION_LIMITS`, at 120 a minute; `activated` for a mark without a marker, or an id it
   doesn't show, is dropped (negative control `annotation-activated`). `activated` is also taken

@@ -333,6 +333,7 @@ export {
   type AnnotateMode,
   type AnnotationAnchor,
   type AnnotationMark,
+  type AnnotationMarkKind,
   type AnnotationRect,
   type AnnotationReport,
   type AnnotationSelector,

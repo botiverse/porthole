@@ -4,7 +4,13 @@ import {
   type AnnotationMark,
   type AnnotationReport,
 } from "../annotate/types.ts";
-import { annotateMode, checkMarks, clampRect, parseReport } from "../annotate/validate.ts";
+import {
+  annotateMode,
+  checkMarks,
+  clampRect,
+  hasMarker,
+  parseReport,
+} from "../annotate/validate.ts";
 import {
   createBridge,
   onceConsent,
@@ -253,7 +259,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       /**
        * A report from the frame: checked, taken only while the host asked for it (a selection
        * only in select mode, results only for its own marks, a marker's click only for a mark it
-       * shows with one, within a gesture), then through the bridge's gates.
+       * shows with one, a count's or a draft's, within a gesture), then through the bridge's gates.
        */
       const onAnnotation = (raw: unknown, through: HostFunctionBridge) => {
         if (
@@ -310,7 +316,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           }
           case "activated": {
             const { id } = report;
-            if (!marks.some((mark) => mark.id === id && mark.count !== undefined)) {
+            if (!marks.some((mark) => mark.id === id && hasMarker(mark))) {
               return;
             }
             // A marker's real click gives the host's page transient activation (measured on all
