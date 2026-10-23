@@ -9,6 +9,8 @@ import {
 import { fileTypeOf, knownType } from "../files/types.ts";
 import { sizeWords } from "../guide/limits.ts";
 import { lintContent, type Finding } from "./lint.ts";
+import { attributesOf } from "./markup.ts";
+import { scrollLock, type LinkedSheet } from "./scroll.ts";
 
 /**
  * What can be told about a page that comes with files (P081), without running it: each page
@@ -81,58 +83,6 @@ const REFERENCE_ATTRIBUTES: Readonly<Record<string, readonly string[]>> = {
 
 /** A tag: its name and its attributes' text. Bounded, and never across another `<`: linear. */
 const TAG = /<([a-z][a-z0-9-]{0,30})\b([^<>]{0,8192})>/giu;
-
-const isSpace = (code: number): boolean =>
-  code === 32 || code === 9 || code === 10 || code === 12 || code === 13;
-
-/** A tag's attributes, read once from left to right (linear): each name, value and its offset. */
-function attributesOf(text: string): { name: string; value: string; at: number }[] {
-  const out: { name: string; value: string; at: number }[] = [];
-  let at = 0;
-  while (at < text.length) {
-    while (at < text.length && (isSpace(text.charCodeAt(at)) || text[at] === "/")) {
-      at += 1;
-    }
-    const nameStart = at;
-    while (
-      at < text.length &&
-      !isSpace(text.charCodeAt(at)) &&
-      text[at] !== "=" &&
-      text[at] !== "/"
-    ) {
-      at += 1;
-    }
-    const name = text.slice(nameStart, at).toLowerCase();
-    if (name === "") {
-      at += 1;
-      continue;
-    }
-    while (at < text.length && isSpace(text.charCodeAt(at))) {
-      at += 1;
-    }
-    if (text[at] !== "=") {
-      continue;
-    }
-    at += 1;
-    while (at < text.length && isSpace(text.charCodeAt(at))) {
-      at += 1;
-    }
-    const quote = text[at];
-    if (quote === '"' || quote === "'") {
-      const close = text.indexOf(quote, at + 1);
-      const end = close < 0 ? text.length : close;
-      out.push({ name, value: text.slice(at + 1, end), at: at + 1 });
-      at = end + 1;
-    } else {
-      const start = at;
-      while (at < text.length && !isSpace(text.charCodeAt(at))) {
-        at += 1;
-      }
-      out.push({ name, value: text.slice(start, at), at: start });
-    }
-  }
-  return out;
-}
 
 /** What a page's markup loads or links: each element's `src`, `href` or `poster`. */
 function markupReferences(text: string): Reference[] {
@@ -319,6 +269,16 @@ export function lintFiles(
       }
     }
   };
+  // A stylesheet a page links or a stylesheet imports, found in the set by its path (P106).
+  const stylesheet: LinkedSheet = (href, from) => {
+    if (href === "" || elsewhere(href) || href.startsWith("/")) {
+      return null;
+    }
+    const target = resolve(directoryOf(from), href);
+    const sheet = target === null || !has(target) ? undefined : files[target];
+    return sheet === undefined || target === null ? null : { path: target, text: textOf(sheet) };
+  };
+  const it = config.mode === "mcp-app" ? "view" : config.mode === "inline" ? "widget" : "page";
   const maxPage = config.limits.maxBytes;
   for (const [path, body] of Object.entries(files)) {
     const { role } = fileTypeOf(path);
@@ -344,8 +304,21 @@ export function lintFiles(
         continue;
       }
       const text = textOf(body);
+      // The page's scroll is read again below with the stylesheets it links (P106).
       for (const finding of lintContent(config, text)) {
-        findings.push({ ...finding, path });
+        if (finding.rule !== "scroll-lock") {
+          findings.push({ ...finding, path });
+        }
+      }
+      const held = scrollLock(text, { noun: it, path, sheet: stylesheet });
+      if (held !== null) {
+        findings.push({
+          rule: "scroll-lock",
+          severity: "warning",
+          message: held.message,
+          path: held.path ?? path,
+          line: held.line,
+        });
       }
       const lines = linesOf(text);
       check(path, lines, markupReferences(text), directory, "error");

@@ -8,6 +8,7 @@ import {
 import type { PortholeConfig } from "../config/schema.ts";
 import { sizeWords } from "../guide/limits.ts";
 import { originMatchesSource } from "../isolation/served.ts";
+import { scrollLock } from "./scroll.ts";
 
 /**
  * What can be told about content without running it (P073), worded as the manual words it, so
@@ -26,6 +27,7 @@ export type LintRule =
   | "egress"
   | "unpinned"
   | "position-fixed"
+  | "scroll-lock"
   | "new-window";
 
 export interface Finding {
@@ -273,6 +275,16 @@ export function lintContent(config: PortholeConfig, content: string): Finding[] 
         fixed.index,
       );
     }
+  }
+  // Its own styles holding it to one screen (P106): a warning, as a one-screen app means it.
+  const held = scrollLock(content, { noun: it });
+  if (held !== null) {
+    findings.push({
+      rule: "scroll-lock",
+      severity: "warning",
+      message: held.message,
+      line: held.line,
+    });
   }
   const opens = /target\s*=\s*["']?_blank|\bwindow\s*\.\s*open\s*\(/u.exec(content);
   if (opens !== null && !declared.has("openLink")) {

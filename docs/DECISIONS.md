@@ -5104,3 +5104,90 @@ default, gate or policy loosens.
 none`), a host shows right-to-left text (the gutter is on the right), a host needs to place
 markers itself (then it draws them from `anchored`), an engine changes what gives a page
 activation, or MCP Apps defines annotations.
+
+## P106 · 2026-10-23 · A page held to one screen by its own styles is warned before it is published · Accepted
+
+From Raft's triage of its Artifacts (task #71): agents' first versions of high-fidelity mockups,
+bundled from an app's own code, carry the app shell's global styles, `html, body { height: 100%;
+overflow: hidden }` and `#root { position: fixed; height: 100dvh; overflow: hidden }`, right for
+the app and wrong for a long page in a frame: it doesn't scroll. 2 of 50 artifacts on the server
+had it (the first version broken, the second fixing it by overriding the styles); one also had an
+inner box take the wheel. Nothing told the agent: the manual spoke only of sideways overflow, and
+`admitFiles` didn't look.
+
+**Decision.**
+1. **`scroll-lock`, a warning** in `lintContent` (so `admitContent`) and `lintFiles` (so
+   `admitFiles`), from `src/check/scroll.ts`: a cascade, read from the text, of the few
+   properties that matter (overflow, height, max-height, position, top and bottom, with their
+   shorthands) over the three elements that hold a document: html, body, and the body's one
+   element of content (the root: `#root`, `#app`, a lone `div`; none where body has two). It
+   warns where one of them holds the page and no one-screen box inside it scrolls itself:
+   - html with overflow-y hidden or clip;
+   - body with overflow-y hidden or clip, where html's overflow is visible or body is one screen;
+   - the root with overflow-y hidden or clip, one screen tall;
+   - any of them `position: fixed`, one screen tall.
+   One screen: height or max-height `100vh` (`dvh`, `svh`, `lvh`), `100%` of a one-screen parent
+   (html's 100% is the frame's) or of the frame where it is fixed or absolute, or fixed or absolute
+   with both top and bottom set (`inset: 0`). Measured with Playwright's Chromium and Firefox (a 3,000 px
+   page, a 400 px frame, the wheel): each of these stops it; `body { overflow: hidden }` alone
+   does (the viewport takes body's overflow), as does `#root { position: fixed; inset: 0 }`
+   without any overflow; `#root { overflow: hidden }` without a height, `#root { height: 100% }`
+   under a body as tall as its content, `html, body { height: 100% }` alone, and
+   `overflow-x: hidden` alone don't; a one-screen `#root { overflow: auto }` under a held body
+   scrolls in the root. WebKit couldn't run on the box; nothing here is engine-specific CSS.
+2. **What it reads:** `<style>` and `<link rel=stylesheet>` in document order (not for print, not
+   alternate), the linked sheets found in the version and their `@import`s, `style=""` on the
+   three, rules whose selectors it can match (type, id, class, `*`, `:root`, `:only-child`,
+   `:first-child`, descendant and child), and, where the page loads Tailwind (its CDN, or a
+   Tailwind stylesheet), the utilities that hold a page (`h-screen`, `h-full`, `overflow-hidden`,
+   `fixed`, `inset-0`…). Specificity, order, `!important` and cascade layers (unlayered over
+   layered, reversed for `!important`) pick each value, so a later override, as the triage's
+   second versions wrote, is seen.
+3. **The warning says what to do:** what holds it, as the page wrote it, and the rule that undoes
+   it under the page's own selectors (so it wins by coming later; `!important` where the hold
+   was): `add html, body, #root { height: auto; overflow: visible; position: static } after those
+   rules`, `take h-screen overflow-hidden off body's class`, or `take … out of html's style
+   attribute`. In `lintFiles` it names the stylesheet and line the hold is in; a page's own
+   `<style>` is reported once.
+4. **The manual** (the Pages section, every kind): "It scrolls as a document: never hold html, body
+   or the element that holds it all to one screen (height: 100% or 100vh with overflow: hidden, or
+   position: fixed), or what's below the first screen can't be reached. A box that scrolls by
+   itself takes the wheel while the pointer is over it: keep those to parts of the page (a wide
+   table, a long list), never the whole of it."
+
+**Why.** The agent learns it at publish, with the fix in the words of its own CSS, instead of from
+a person who can't scroll. A warning and not a refusal: some pages are one-screen apps on purpose,
+and a text read can't be sure.
+
+**Rejected.**
+- Overflow hidden on html or body only together with a one-screen height (the triage's first
+  rule): body's overflow alone stops the viewport, measured above; requiring the height misses
+  `body { overflow: hidden }`, which is the common way to stop a page's scroll.
+- Measuring it in a browser (`checkPage` comparing the document's scroll height with the frame):
+  publish has no browser; a later check may add it, and then the wheel too.
+- Warning on an inner one-screen scroll box: it does scroll, and an app's sidebar is one; the
+  manual says it instead.
+
+**Limits.** Not read: rules under `@media` (but `all` and `screen`), `@supports`, `@container`;
+`:is()`, `:where()`, `:not()`, attributes and sibling combinators (they match nothing); nested
+rules; values through `var()` or `calc()`; `@import … layer()` beyond a name; what scripts set;
+stylesheets from another origin. Each can miss a hold or an override (a warning then wrong, never
+a refusal). A body with stray unclosed tags may be taken as having one child.
+
+**Tested.** `test/check.test.ts` (a page held to one screen): the app shell's exact styles (the
+message and line), body or html hidden alone, the root by height, max-height and `inset: 0`, a
+lone `div` by `:only-child`, `style=""`, `!important`, a more specific hold over a later override,
+Tailwind's CDN utilities on body and a build's class rules; none for overflow hidden on the root
+without a height, a one-screen height without overflow hidden, `overflow-x: hidden`, an inner
+element, two body children, a one-screen scroll box in a held body, 100% of a content-tall body;
+later overrides (same `<style>`, a later one, `style=""`, unlayered over layered, a comment),
+part of an override not enough; the limits (`@media`, `@supports`, `var()`, `:is()`); the
+manual's line in the artifact, fill and inline manuals. `test/files.test.ts`: a linked sheet (its
+path and line), an `@import`ed one, each page by what it links, overrides across sheets in either
+order, print, alternate and missing sheets, and `admitFiles`'s note. The manual's examples and the
+Vite + React fixture still lint clean.
+
+**Revisit when** `checkPage` measures scrolling in a browser (then this can defer to it), a host's
+viewer scrolls the frame itself (a page then can't be held), or the misses above show up in
+published pages.
+

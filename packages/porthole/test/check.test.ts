@@ -137,6 +137,181 @@ describe("lintContent", () => {
   });
 });
 
+describe("a page held to one screen (P106)", () => {
+  const config = presets.artifact();
+  const page = (
+    css: string,
+    body = '<div id="root"></div><script type="module" src="./app.js"></script>',
+  ) => `<!doctype html><html><head>\n<style>\n${css}\n</style>\n</head><body>${body}</body></html>`;
+  const held = (content: string) =>
+    lintContent(config, content).filter((each) => each.rule === "scroll-lock");
+  /** The Raft web app's own shell styles, carried into a page built from its code. */
+  const APP_SHELL = [
+    "html, body { height: 100%; overflow: hidden; }",
+    "#root { position: fixed; height: 100dvh; overflow: hidden; }",
+  ].join("\n");
+
+  it("warns on an app shell's styles, saying what holds it and the rule that undoes it", () => {
+    const findings = held(page(APP_SHELL));
+    expect(rules(findings)).toEqual(["warning scroll-lock"]);
+    expect(findings[0]?.line).toBe(3);
+    expect(findings[0]?.message).toBe(
+      "The page won't scroll in its frame: html and body (height: 100%; overflow: hidden) and #root (position: fixed; height: 100dvh; overflow: hidden) hold it to one screen, and what's below can't be reached. Unless it is meant to fit one screen, let it scroll as a document: add html, body, #root { height: auto; overflow: visible; position: static } after those rules.",
+    );
+    // A warning: the page is still shown.
+    const admitted = admitContent(config, page(APP_SHELL));
+    expect(admitted.ok).toBe(true);
+    expect(admitted.ok && admitted.note).toContain("line 3: The page won't scroll in its frame");
+  });
+
+  it("warns on each way a page's top is held", () => {
+    // html or body hidden alone: the viewport takes their overflow, and nothing scrolls.
+    expect(rules(held(page("body { overflow: hidden }")))).toEqual(["warning scroll-lock"]);
+    expect(rules(held(page("html { overflow-y: clip }")))).toEqual(["warning scroll-lock"]);
+    // The root, one screen tall: by its height, its max-height, or fixed at the frame's edges.
+    expect(held(page("#root { height: 100vh; overflow: hidden }"))[0]?.message).toContain(
+      "#root (height: 100vh; overflow: hidden) holds it",
+    );
+    expect(
+      held(page("#app { max-height: 100svh; overflow-y: hidden }", '<div id="app"></div>'))[0]
+        ?.message,
+    ).toContain("add #app { max-height: none; overflow: visible }");
+    expect(held(page("#root { position: fixed; inset: 0 }"))[0]?.message).toContain(
+      "#root (position: fixed; inset: 0) holds it",
+    );
+    expect(
+      held(page("html, body { height: 100% } #root { height: 100%; overflow: hidden }"))[0]
+        ?.message,
+    ).toContain("#root (height: 100%; overflow: hidden)");
+    // A root without an id, the body's only element.
+    expect(
+      held(page("body > div:only-child { height: 100dvh; overflow: hidden }", "<div></div>"))[0]
+        ?.message,
+    ).toContain("add body > div:only-child { height: auto; overflow: visible }");
+    // style="" on html: taken out where it is, as a rule can't undo it.
+    expect(
+      held(
+        '<!doctype html><html style="height: 100%; overflow: hidden"><body><p>x</p></body></html>',
+      )[0]?.message,
+    ).toContain("take height: 100%; overflow: hidden out of html's style attribute");
+    // !important: the rule that undoes it is !important too.
+    expect(
+      held(page("html { overflow: hidden !important }\nhtml { overflow: visible }"))[0]?.message,
+    ).toContain("add html { overflow: visible !important }");
+    // A more specific rule wins over a later, less specific override: the fix names its selector.
+    expect(
+      held(page("html body { overflow: hidden }\nbody { overflow: visible }"))[0]?.message,
+    ).toContain("add html body { overflow: visible }");
+  });
+
+  it("reads Tailwind: its CDN's utilities on body, or a build's class rules", () => {
+    const cdn =
+      '<!doctype html><html><head><script src="https://cdn.tailwindcss.com/3.4.17"></script></head><body class="h-screen overflow-hidden bg-white"><main>x</main></body></html>';
+    expect(held(cdn)[0]?.message).toContain(
+      "body (class h-screen overflow-hidden) holds it to one screen",
+    );
+    expect(held(cdn)[0]?.message).toContain("take h-screen overflow-hidden off body's class");
+    // Without Tailwind on the page, the names are only names.
+    expect(held(cdn.replace(/<script[^>]*><\/script>/u, ""))).toEqual([]);
+    const built = page(
+      ".h-screen { height: 100vh } .overflow-hidden { overflow: hidden }",
+      '<div id="root" class="h-screen overflow-hidden"></div>',
+    );
+    expect(held(built)[0]?.message).toContain("#root (height: 100vh; overflow: hidden) holds it");
+  });
+
+  it("says nothing where the page still scrolls", () => {
+    // Overflow hidden on the root, without a height: the root grows with what it holds.
+    expect(held(page("#root { overflow: hidden }"))).toEqual([]);
+    // One screen tall, nothing hidden: the page scrolls past it.
+    expect(held(page("html, body, #root { height: 100% }"))).toEqual([]);
+    expect(held(page("#root { height: 100vh }"))).toEqual([]);
+    // Hidden on one axis only (a common guard against sideways scroll).
+    expect(held(page("html, body { overflow-x: hidden }"))).toEqual([]);
+    // An element inside the page, held: that is a box, not the page.
+    expect(
+      held(
+        page(
+          ".panel { height: 100vh; overflow: hidden } main { position: fixed; inset: 0; overflow: hidden }",
+          '<div id="root"><main><div class="panel">x</div></main></div>',
+        ),
+      ),
+    ).toEqual([]);
+    // Two elements in body: neither is the page's root.
+    expect(held(page("div { height: 100vh; overflow: hidden }", "<div></div><div></div>"))).toEqual(
+      [],
+    );
+    // The root scrolls itself, one screen tall: the page scrolls (in it).
+    expect(
+      held(
+        page(
+          "html, body { height: 100%; overflow: hidden } #root { height: 100%; overflow: auto }",
+        ),
+      ),
+    ).toEqual([]);
+    // 100% of a body that is only as tall as its content.
+    expect(held(page("#root { height: 100%; overflow: hidden }"))).toEqual([]);
+  });
+
+  it("sees a later override, as the cascade does", () => {
+    expect(
+      held(
+        page(
+          `${APP_SHELL}\nhtml, body, #root { height: auto; overflow: visible; position: static }`,
+        ),
+      ),
+    ).toEqual([]);
+    // In a later <style>, or on the element itself.
+    expect(
+      held(
+        page(APP_SHELL).replace(
+          "</head>",
+          "<style>html, body, #root { height: auto; overflow: visible; position: static }</style></head>",
+        ),
+      ),
+    ).toEqual([]);
+    expect(
+      held(page("body { overflow: hidden }").replace("<body>", '<body style="overflow: visible">')),
+    ).toEqual([]);
+    // Undoing part of it is not enough: #root still holds it.
+    expect(
+      held(page(`${APP_SHELL}\nhtml, body { height: auto; overflow: visible }`))[0]?.message,
+    ).toContain("#root (position: fixed; height: 100dvh; overflow: hidden) holds it");
+    // Unlayered rules win over layered ones, wherever they are; a comment says nothing.
+    expect(
+      held(
+        page("html, body { overflow: visible }\n@layer base { html, body { overflow: hidden } }"),
+      ),
+    ).toEqual([]);
+    expect(held(page("/* body { overflow: hidden } */"))).toEqual([]);
+  });
+
+  it("doesn't read what depends on the screen (its limits)", () => {
+    // Under @media (other than all or screen), @supports, or through var(): not read.
+    expect(held(page("@media (max-width: 600px) { body { overflow: hidden } }"))).toEqual([]);
+    expect(held(page("@media screen { body { overflow: hidden } }")).length).toBe(1);
+    expect(held(page("@supports (display: grid) { body { overflow: hidden } }"))).toEqual([]);
+    expect(held(page(":root { --o: hidden } body { overflow: var(--o) }"))).toEqual([]);
+    // Selectors it can't match match nothing.
+    expect(held(page(":is(html, body) { overflow: hidden }"))).toEqual([]);
+  });
+
+  it("the manual says a page scrolls as a document", () => {
+    for (const each of [
+      presets.artifact(),
+      presets.artifact({ layout: { kind: "fill" } }),
+      presets.inlineWidget(),
+    ]) {
+      expect(generateGuide(each)).toContain(
+        "- It scrolls as a document: never hold html, body or the element that holds it all to one screen",
+      );
+    }
+    expect(generateGuide(config)).toContain(
+      "A box that scrolls by itself takes the wheel while the pointer is over it: keep those to parts of the page",
+    );
+  });
+});
+
 describe("the show tool's gate (admitContent)", () => {
   it("refuses errors by default, saying what to change", () => {
     const refused = admitContent(presets.inlineWidget(), "<iframe src=x></iframe>");

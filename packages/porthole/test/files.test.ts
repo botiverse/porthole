@@ -899,6 +899,90 @@ describe("the agent's side: a page with files, linted and admitted (P081)", () =
   });
 });
 
+describe("a page with files held to one screen (P106)", () => {
+  const served = presets.artifact({ isolation: "domain", contentOrigins: [CONTENT] });
+  const SHELL =
+    "html, body { height: 100%; overflow: hidden; }\n#root { position: fixed; height: 100dvh; overflow: hidden; }";
+  const UNDO = "html, body, #root { height: auto; overflow: visible; position: static; }";
+  const page = (head: string) =>
+    `<!doctype html><html><head>${head}</head><body><div id="root"></div><script type="module" src="./app.js"></script></body></html>`;
+  const held = (files: Record<string, string>) =>
+    lintFiles(served, { "app.js": "", ...files }).filter((each) => each.rule === "scroll-lock");
+
+  it("reads the stylesheets a page links and what they import, and names the file and line", () => {
+    const linked = held({
+      "index.html": page('<link rel="stylesheet" href="./assets/index.css">'),
+      "assets/index.css": `.x { color: red }\n${SHELL}`,
+    });
+    expect(linked.map((each) => [each.severity, each.path, each.line])).toEqual([
+      ["warning", "assets/index.css", 2],
+    ]);
+    expect(linked[0]?.message).toContain(
+      "add html, body, #root { height: auto; overflow: visible; position: static } after those rules",
+    );
+    const imported = held({
+      "index.html": page('<link rel="stylesheet" href="css/site.css">'),
+      "css/site.css": "@import 'base/shell.css';\nbody { color: black }",
+      "css/base/shell.css": SHELL,
+    });
+    expect(imported.map((each) => [each.path, each.line])).toEqual([["css/base/shell.css", 1]]);
+    // Each page of the set, by what it links; a page's own <style> once, not twice.
+    const pages = held({
+      "index.html": page(`<style>${SHELL}</style>`),
+      "about.html": page('<link rel="stylesheet" href="shell.css">'),
+      "plain.html": page(""),
+      "shell.css": SHELL,
+    });
+    expect(pages.map((each) => each.path)).toEqual(["index.html", "shell.css"]);
+  });
+
+  it("an override in a later stylesheet or <style>, in either order, is seen", () => {
+    expect(
+      held({
+        "index.html": page(
+          '<link rel="stylesheet" href="shell.css"><link rel="stylesheet" href="undo.css">',
+        ),
+        "shell.css": SHELL,
+        "undo.css": UNDO,
+      }),
+    ).toEqual([]);
+    expect(
+      held({
+        "index.html": page(`<link rel="stylesheet" href="shell.css"><style>${UNDO}</style>`),
+        "shell.css": SHELL,
+      }),
+    ).toEqual([]);
+    // The override before the shell's rules loses to them.
+    expect(
+      held({
+        "index.html": page(`<style>${UNDO}</style><link rel="stylesheet" href="shell.css">`),
+        "shell.css": SHELL,
+      }).length,
+    ).toBe(1);
+    // A sheet for print, one that isn't in the set, or an alternate one: not read.
+    expect(
+      held({
+        "index.html": page(
+          '<link rel="stylesheet" href="shell.css" media="print"><link rel="alternate stylesheet" href="shell.css"><link rel="stylesheet" href="gone.css">',
+        ),
+        "shell.css": SHELL,
+      }),
+    ).toEqual([]);
+  });
+
+  it("admitFiles publishes it, with the warning in its note", () => {
+    const admitted = admitFiles(served, {
+      "index.html": page('<link rel="stylesheet" href="shell.css">'),
+      "shell.css": SHELL,
+      "app.js": "",
+    });
+    expect(admitted.ok).toBe(true);
+    expect(admitted.ok ? admitted.note : "").toContain(
+      "- shell.css line 1: The page won't scroll in its frame",
+    );
+  });
+});
+
 describe("after the security review of 0.6.0's first cut", () => {
   it("publish refuses Unicode format characters: an override, a zero-width space, a BOM (Cf)", () => {
     for (const path of ["a‮gnp.js", "a​b.html", "﻿index.html", "soft­hyphen.css"]) {

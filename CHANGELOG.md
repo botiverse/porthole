@@ -3,6 +3,29 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## Unreleased
+
+The agent hears, before publishing, that its page's own styles hold it to one screen (P106), and
+the manual says a page scrolls as a document.
+
+- **A warning for a page held to one screen** (P106): `lintContent`, `admitContent`, `lintFiles`
+  and `admitFiles` warn (rule `scroll-lock`, never an error: a one-screen app means it) where the
+  page's own CSS stops it at its first screen in the frame: html or body with `overflow: hidden`
+  (or `clip`), or the body's one element of content (`#root`) one screen tall (100vh, dvh, svh,
+  100% of a one-screen parent, fixed at the frame's edges) with `overflow: hidden` or
+  `position: fixed`, with no one-screen box inside it that scrolls itself. It reads `<style>`,
+  the version's linked stylesheets and their `@import`s, `style=""` on those elements, and
+  Tailwind's utilities where the page loads Tailwind, by the cascade (specificity, order,
+  `!important`, layers), so a later override is seen. The warning names what holds the page and
+  the rule that undoes it, e.g. `add html, body, #root { height: auto; overflow: visible;
+  position: static } after those rules`. In `lintFiles` its `path` is the stylesheet's, where
+  the rule is there. Not read: rules under `@media` (but `all` and `screen`), `@supports`,
+  `@container`, `:is()`/`:where()`/`:not()` and sibling selectors, nested rules, `var()`, scripts.
+- **The manual** (every kind): "It scrolls as a document: never hold html, body or the element
+  that holds it all to one screen …; a box that scrolls by itself takes the wheel while the
+  pointer is over it: keep those to parts of the page, never the whole of it."
+- `LintRule` and `FileFinding["rule"]` take `"scroll-lock"`.
+
 ## 0.10.0
 
 After the review of P104 (P105): a host guards the view a marker's click opens, `activated` needs
