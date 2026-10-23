@@ -16,12 +16,13 @@ import { attributesOf } from "./markup.ts";
  * and nothing in the page's markup below body that scrolls itself: no element there with style=""
  * or a Tailwind utility giving it overflow-y auto or scroll, or matched by a rule the check reads
  * that does (a rule whose selector it can't read, or that matches nothing in the markup, doesn't
- * count, nor a rule on the root: its own values say whether it scrolls the page, one screen tall,
- * or grows with it). Then the page may scroll in that box, and the check can't tell which box
- * holds what. A page its script draws (body holds an empty root at most) can't be matched: it is
- * warned, worded as a page that looks held, as a box its script draws may scroll it. One screen
- * tall: height or max-height 100vh (dvh, svh, lvh), or 100% of an element that is (html's 100% is
- * the frame's), or position fixed or absolute with both top and bottom set (`inset: 0`).
+ * count; nor does the root, by its style="", classes or rules: its own values say whether it
+ * scrolls the page, one screen tall, or grows with it). Then the page may scroll in that box, and
+ * the check can't tell which box holds what. A page its script draws (body holds an empty root at
+ * most) can't be matched: it is warned, worded as a page that looks held, as a box its script
+ * draws may scroll it. One screen tall: height or max-height (block-size, max-block-size) 100vh
+ * (dvh, svh, lvh) or calc(100vh - …), or 100% or calc(100% - …) of an element that is (html's
+ * 100% is the frame's), or position fixed or absolute with both top and bottom set (`inset: 0`).
  *
  * What it reads: the page's `<style>` elements, the stylesheets it links that the caller finds
  * (a version's own files) and what they `@import`, in document order; style="" on the three; the
@@ -30,16 +31,20 @@ import { attributesOf } from "./markup.ts";
  * order, !important and cascade layers decide between rules, so a later override is seen.
  * What it doesn't: rules under @media (but `all` and `screen`), @supports or @container, selectors
  * beyond type, id, class, `*`, `:root`, `:only-child`, `:first-child` and the descendant and child
- * combinators (`:is()`, `:where()`, `:not()`, attributes and siblings match nothing), nested
- * rules, values through var() or calc(), a stylesheet linked or imported a second time (read
- * where it first comes), a layer named more than `LAYER_PARTS` deep, and what scripts do. Each
- * of those misses a lock, or an override (then the warning is wrong); it never refuses anything.
+ * combinators (`:is()`, `:where()`, `:not()`, attributes, siblings and a compound of more than
+ * `MOST_IN_COMPOUND` ids and classes match nothing), nested rules, values through var() or calc()
+ * (but the two above), a stylesheet linked or imported a second time (read where it first comes),
+ * the rules of a layer named more than `LAYER_PARTS` deep (its first parts are still declared),
+ * and what scripts do. Each of those misses a lock, or an override (then the warning is wrong); it
+ * never refuses anything.
  *
  * Bounded: each stylesheet is read once per page, at most `SHEETS` of them and `READ` bytes in all;
  * past that, the rest isn't read. Each element keeps, per property, only each layer's winner so
- * far, so time and memory are linear in what it reads. What it echoes to the agent is only values of a
- * known shape, and selectors of plain characters and the root's plain id, each at most `ECHOED`
- * characters (a selector or id that isn't: the element's own name, `#root` or `body > div`).
+ * far, and a compound is matched against an element's classes (a set) in bounded work, so time and
+ * memory are linear in what it reads, the page and its sheets added, not multiplied. What it echoes
+ * to the agent is only values of a known shape, and selectors of plain characters and the root's
+ * plain id, each at most `ECHOED` characters with its !important (a selector or id that isn't: the
+ * element's own name, `#root`, `body > div`, or `body > *` for a tag HTML doesn't have).
  */
 
 /** A stylesheet the page links, as the caller finds it from `from` (a path), or null. */
@@ -70,6 +75,8 @@ export const READ = 4 * 1024 * 1024;
 /** The most elements below body, and how deep, that scroll rules are matched against. */
 const MOST_ELEMENTS = 2_000;
 const DEEPEST_ELEMENT = 32;
+/** The most ids and classes in one compound selector: one with more matches nothing here. */
+const MOST_IN_COMPOUND = 32;
 /** The most scroll rules' selectors kept, and steps spent matching them. */
 const MOST_SCROLL_SELECTORS = 256;
 const MATCH_STEPS = 1_000_000;
@@ -102,7 +109,7 @@ interface Value {
 interface Element {
   readonly tag: string;
   readonly id: string;
-  readonly classes: readonly string[];
+  readonly classes: ReadonlySet<string>;
   readonly onlyChild: boolean;
   readonly firstChild: boolean;
 }
@@ -156,6 +163,16 @@ const RAW = new Set([
   "noembed",
   "noframes",
 ]);
+/** HTML's own elements: a tag's name the agent may be told (another is page text). */
+const HTML_TAGS = new Set(
+  (
+    "a abbr address area article aside audio b bdi bdo blockquote br button canvas center cite " +
+    "code data datalist del details dfn dialog div dl em embed fieldset figure font footer form " +
+    "h1 h2 h3 h4 h5 h6 header hgroup hr i iframe img input ins kbd label main map mark math menu " +
+    "meter nav object ol output p picture pre progress q s samp search section select slot small " +
+    "span strong sub sup svg table textarea time u ul var video"
+  ).split(" "),
+);
 /** A body's children that hold no content. */
 const NOT_CONTENT = new Set(["script", "style", "link", "meta", "noscript", "template", "base"]);
 
@@ -205,8 +222,9 @@ function scanPage(page: string): {
   let contentCount = 0;
   const sheets: SheetRef[] = [];
   let tailwind = false;
-  let styleScrolls = false;
-  let classScrolls = false;
+  /** Whether body's children, and the elements below them, scroll themselves by style or class. */
+  const top = { style: false, classes: false };
+  const inner = { style: false, classes: false };
   const below: Element[][] = [];
   let contentBelow = 0;
   let scripted = false;
@@ -256,14 +274,16 @@ function scanPage(page: string): {
       inBody = true;
       depth = 0;
     } else if (inBody) {
-      // An element below body that scrolls itself, as its markup says.
-      styleScrolls ||= declaresScroll(attribute(tag, "style")?.value ?? "");
-      classScrolls ||= SCROLL_UTILITY.test(attribute(tag, "class")?.value ?? "");
+      // An element below body that scrolls itself, as its markup says. Body's own children apart:
+      // where one is the root, its values are in the cascade, and they decide.
+      const own = depth === 0 ? top : inner;
+      own.style ||= declaresScroll(attribute(tag, "style")?.value ?? "");
+      own.classes ||= SCROLL_UTILITY.test(attribute(tag, "class")?.value ?? "");
       const parent = open.at(-1) ?? bodyFrame;
       const element: Element = {
         tag: name,
         id: attribute(tag, "id")?.value ?? "",
-        classes: (attribute(tag, "class")?.value ?? "").split(/\s+/u).filter((each) => each !== ""),
+        classes: classesOf(attribute(tag, "class")?.value ?? ""),
         onlyChild: false,
         firstChild: parent.children === 0,
       };
@@ -332,14 +352,19 @@ function scanPage(page: string): {
     contentCount,
     sheets,
     tailwind,
-    styleScrolls,
-    classScrolls,
+    // Body's children count where there is no root (it has two of content, or none).
+    styleScrolls: inner.style || (contentCount !== 1 && top.style),
+    classScrolls: inner.classes || (contentCount !== 1 && top.classes),
     below,
     contentBelow,
     scripted,
     texted,
   };
 }
+
+/** A class attribute's names. */
+const classesOf = (value: string): ReadonlySet<string> =>
+  new Set(value.split(/\s+/u).filter((each) => each !== ""));
 
 /** Whether `page` has text other than spaces from `from` to `to` (the end where `to` is -1). */
 const hasText = (page: string, from: number, to: number): boolean =>
@@ -583,6 +608,9 @@ function parseSelector(text: string): Selector | null {
         if (name === null) {
           return null;
         }
+        if (compoundIds.length + compoundClasses.length >= MOST_IN_COMPOUND) {
+          return null;
+        }
         if (mark === "#") {
           compoundIds.push(name.value);
           ids += 1;
@@ -637,7 +665,7 @@ function parseSelector(text: string): Selector | null {
 const compoundMatches = (compound: Compound, node: Element, index: number): boolean =>
   (compound.tag === null || compound.tag === node.tag) &&
   compound.ids.every((id) => id === node.id) &&
-  compound.classes.every((name) => node.classes.includes(name)) &&
+  compound.classes.every((name) => node.classes.has(name)) &&
   (!compound.root || index === 0) &&
   (!compound.onlyChild || node.onlyChild) &&
   (!compound.firstChild || node.firstChild);
@@ -706,6 +734,10 @@ function longhands(property: string, value: string): [string, string][] {
         ["top", parts[0] ?? ""],
         ["bottom", parts[1] ?? parts[0] ?? ""],
       ];
+    case "block-size":
+      return [["height", value]];
+    case "max-block-size":
+      return [["max-height", value]];
     case "overflow-x":
     case "overflow-y":
     case "height":
@@ -769,16 +801,19 @@ interface Target {
   readonly selector: string;
 }
 
-/** Whether a layer's name has more than `LAYER_PARTS` parts (such a layer isn't read). */
-const tooDeep = (name: string): boolean => {
+/**
+ * A layer's name cut to its first `LAYER_PARTS` parts where it has more (its rules then aren't
+ * read, but its parents are declared where it comes, as a browser does); null where it doesn't.
+ */
+const tooDeep = (name: string): string | null => {
   let parts = 1;
-  for (let dot = name.indexOf("."); dot >= 0; dot = name.indexOf(".", dot + 1)) {
+  for (let dot = name.indexOf(".", 1); dot > 0; dot = name.indexOf(".", dot + 1)) {
     parts += 1;
     if (parts > LAYER_PARTS) {
-      return true;
+      return name.slice(0, dot);
     }
   }
-  return false;
+  return null;
 };
 
 /** A stylesheet found for the page, once: its path and text. */
@@ -890,8 +925,7 @@ class Cascade {
     for (const [longhand, longValue] of longhands(property, value)) {
       const each: Value = {
         value: longValue,
-        written:
-          where.written ?? `${echoed(property, value)}${rank.important ? " !important" : ""}`,
+        written: where.written ?? echoed(property, value, rank.important),
         kind: where.kind ?? (rank.inline ? "inline" : "rule"),
         selector: where.selector,
         important: rank.important,
@@ -1064,14 +1098,14 @@ class Cascade {
           if (block === null) {
             for (const each of names) {
               const layer = within(each);
-              if (!tooDeep(layer)) {
-                this.declare(layer);
-              }
+              this.declare(tooDeep(layer) ?? layer);
             }
           } else {
             this.anonymous += 1;
             const layer = within(names[0] ?? `\u0000${this.anonymous}`);
-            if (tooDeep(layer)) {
+            const cut = tooDeep(layer);
+            if (cut !== null) {
+              this.declare(cut);
               continue;
             }
             // Its place is where its block opens, whatever it holds.
@@ -1162,14 +1196,15 @@ class Cascade {
       layer = within(`\u0000${this.anonymous}`);
       tail = tail.replace(/^layer\b\s*/iu, "");
     }
-    if (
-      (tail !== "" && !/^(?:only\s+)?(?:all|screen)$/iu.test(tail)) ||
-      (layer !== null && tooDeep(layer))
-    ) {
+    if (tail !== "" && !/^(?:only\s+)?(?:all|screen)$/iu.test(tail)) {
       return;
     }
     if (layer !== null) {
-      this.declare(layer);
+      const cut = tooDeep(layer);
+      this.declare(cut ?? layer);
+      if (cut !== null) {
+        return;
+      }
     }
     this.file(this.find(href, context.from), layer);
   }
@@ -1178,14 +1213,18 @@ class Cascade {
 /** A value of a shape the check knows, as the agent may be told it; else its property alone. */
 const KNOWN =
   /^(?:(?:-?(?:\d{1,6}(?:\.\d{1,4})?|\.\d{1,4})(?:px|%|d?vh|svh|lvh|vw|em|rem)?|auto|hidden|clip|visible|scroll|overlay|fixed|absolute|static|relative|sticky|none)(?: |$)){1,4}$/u;
-const echoed = (property: string, value: string): string => {
+const echoed = (property: string, value: string, important: boolean): string => {
   const said = `${property}: ${KNOWN.test(value) ? value : "…"}`;
-  return said.length > ECHOED ? `${said.slice(0, ECHOED - 1)}…` : said;
+  const flag = important ? " !important" : "";
+  const room = ECHOED - flag.length;
+  return `${said.length > room ? `${said.slice(0, room - 1)}…` : said}${flag}`;
 };
 /** A selector the agent may be told: plain characters, short. */
 const PLAIN_SELECTOR = new RegExp(`^[\\w#.:>* ()-]{1,${ECHOED}}$`, "u");
 
-const SCREEN = /^100(?:d|s|l)?vh$/u;
+const SCREEN = /^(?:100(?:d|s|l)?vh|calc\(\s?100(?:d|s|l)?vh\s?-[^()]*\))$/u;
+/** 100% of the parent, less something: one screen where the parent is. */
+const PARENT = /^(?:100%|calc\(\s?100%\s?-[^()]*\))$/u;
 const CLIPS = new Set(["hidden", "clip"]);
 const SCROLLS = new Set(["auto", "scroll", "overlay"]);
 const RESET = new Set(["initial", "unset", "revert", "revert-layer"]);
@@ -1222,7 +1261,7 @@ export function scrollLock(
       label,
       tag: name,
       id: attribute(tag, "id")?.value ?? "",
-      classes: (classes?.value ?? "").split(/\s+/u).filter((each) => each !== ""),
+      classes: classesOf(classes?.value ?? ""),
       onlyChild: child && scanned.childCount === 1,
       firstChild: child && scanned.children[0] === tag,
       style:
@@ -1240,9 +1279,11 @@ export function scrollLock(
     scanned.body !== null && scanned.contentCount === 1 ? scanned.content[0] : undefined;
   if (rootTag !== undefined) {
     const id = attribute(rootTag, "id")?.value ?? "";
-    // Page text told to the agent: `#id` for a plain id, at most ECHOED characters; else its tag.
+    // Page text told to the agent: `#id` for a plain id, at most ECHOED characters; else its tag
+    // where HTML has it (a custom element's name is the page's own).
     const named = /^[a-z_][\w-]*$/iu.test(id) && id.length < ECHOED;
-    chain.push(nodeOf(rootTag, rootTag.name, named ? `#${id}` : `body > ${rootTag.name}`, true));
+    const tag = HTML_TAGS.has(rootTag.name) ? rootTag.name : "*";
+    chain.push(nodeOf(rootTag, rootTag.name, named ? `#${id}` : `body > ${tag}`, true));
   }
 
   // Each stylesheet is asked for once per place it is named from, and read once (`take`).
@@ -1382,7 +1423,7 @@ export function scrollLock(
       const found = value(node, property);
       const is =
         found !== undefined &&
-        (SCREEN.test(found.value) || (found.value === "100%" && (parent || positioned)));
+        (SCREEN.test(found.value) || (PARENT.test(found.value) && (parent || positioned)));
       if (is && found !== undefined) {
         shown.push(found);
       }
@@ -1492,8 +1533,8 @@ export function scrollLock(
     rules.some((each) => prefixes.some((prefix) => each.written.startsWith(prefix)));
   const important = rules.some((each) => each.important) ? " !important" : "";
   const reset = [
-    says(["height", "inset", "top", "bottom"]) ? "height: auto" : null,
-    says(["max-height"]) ? "max-height: none" : null,
+    says(["height", "inset", "top", "bottom", "block-size"]) ? "height: auto" : null,
+    says(["max-height", "max-block-size"]) ? "max-height: none" : null,
     says(["overflow"]) ? "overflow: visible" : null,
     says(["position"]) ? "position: static" : null,
   ]

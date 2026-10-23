@@ -5130,10 +5130,11 @@ inner box take the wheel. Nothing told the agent: the manual spoke only of sidew
    `overflow` or `overflow-y` auto or scroll, by its `style=""`, by a Tailwind class (where
    Tailwind is loaded), or by a rule the check reads whose selector matches it (with the selectors
    the check can match; one it can't read, or that matches nothing in the markup, doesn't count).
-   A rule on the root itself doesn't count either: the root is in the cascade, so its own values
-   decide. One screen tall with overflow-y auto or scroll, it scrolls the page (no warning); without
-   a height it grows with what it holds and has nothing to scroll, so `html, body { height: 100%;
-   overflow: hidden } #root { overflow-y: auto }` is held.
+   The root itself isn't such an element, by its `style=""`, its classes or a rule: it is in the
+   cascade, so its own values decide. One screen tall with overflow-y auto or scroll, it scrolls
+   the page (no warning); without a height it grows with what it holds and has nothing to scroll,
+   so `html, body { height: 100%; overflow: hidden } #root { overflow-y: auto }`, or the same
+   with `<div id="root" style="overflow: auto">`, is held.
    Where one does, the page may scroll in that box (a dashboard's `main { flex: 1; overflow-y:
    auto }`), and the text can't tell which box holds the content: no warning; the manual's line on
    the wheel says the rest. Matched against at most 2,000 elements, 32 deep, 256 selectors and a
@@ -5144,9 +5145,10 @@ inner box take the wheel. Nothing told the agent: the manual spoke only of sidew
    one screen, or a box its script draws scrolls the content, ignore this; otherwise let it scroll
    as a document: …". A page with its content in the markup is told "The page won't scroll in its
    frame: … Unless it is meant to fit one screen, let it scroll as a document: …".
-   One screen: height or max-height `100vh` (`dvh`, `svh`, `lvh`), `100%` of a one-screen parent
-   (html's 100% is the frame's) or of the frame where it is fixed or absolute, or fixed or absolute
-   with both top and bottom set (`inset: 0`). Measured with Playwright's Chromium and Firefox (a 3,000 px
+   One screen: height or max-height (or `block-size`, `max-block-size`) `100vh` (`dvh`, `svh`,
+   `lvh`) or `calc(100vh - …)`, `100%` or `calc(100% - …)` of a one-screen parent (html's 100% is
+   the frame's) or of the frame where it is fixed or absolute, or fixed or absolute with both top
+   and bottom set (`inset: 0`). Measured with Playwright's Chromium and Firefox (a 3,000 px
    page, a 400 px frame, the wheel): each of these stops it; `body { overflow: hidden }` alone
    does (the viewport takes body's overflow), as does `#root { position: fixed; inset: 0 }`
    without any overflow; `#root { overflow: hidden }` without a height, `#root { height: 100% }`
@@ -5172,16 +5174,21 @@ inner box take the wheel. Nothing told the agent: the manual spoke only of sidew
    keeps, per longhand, only each layer's winner so far (within a layer, and within `!important`
    or `style=""`, specificity and order decide; the layers' order picks among those once all is
    read), and the layers' tree is built in place, so a sheet of 80,000 declarations, or an `@layer`
-   of 80,000 names, costs what sixteen of 5,000 do. A layer named more than 16 deep (`a.b.c…`,
-   with the layers it is in) isn't read.
+   of 80,000 names, costs what sixteen of 5,000 do. An element's classes are a set, and a compound
+   selector of more than 32 ids and classes matches nothing, so matching a compound against an
+   element is bounded work, for html, body and the root as for the elements below body: the size
+   of the sheets and the size of the page add, not multiply. A layer named more than 16 deep
+   (`a.b.c…`, with the layers it is in) isn't read: its rules are dropped, but its first 16 parts
+   are declared where it comes, as a browser declares them, so the layers' order holds.
 3. **The warning says what to do:** what holds it, as the page wrote it, and the rule that undoes
    it under the page's own selectors (so it wins by coming later; `!important` where the hold
    was). The page's CSS goes into the agent's context, so only values of a known shape are echoed
    (lengths, percentages, viewport units, 0, auto, hidden, clip, fixed, static…; else the property
-   and `…`), each declaration and selector at most 60 characters, and a selector with escapes,
-   other than plain characters or longer is given as the element's own name: `#root` where the
-   root's id is plain and `#id` at most 60 characters (the id is page text too), else `body >
-   div`. So: `add html, body, #root { height: auto; overflow: visible; position: static } after
+   and `…`), each declaration (its `!important` included) and selector at most 60 characters, and
+   a selector with escapes, other than plain characters or longer is given as the element's own
+   name: `#root` where the root's id is plain and `#id` at most 60 characters (the id is page text
+   too), else `body > div`, or `body > *` for an element HTML doesn't have (a custom element's
+   name is page text too). So: `add html, body, #root { height: auto; overflow: visible; position: static } after
    those rules`, `take h-screen overflow-hidden off body's class`, or `take … out of html's style
    attribute`. In `lintFiles` it names the stylesheet and line the hold is in; a page's own
    `<style>` is reported once.
@@ -5214,11 +5221,11 @@ and a text read can't be sure.
 `:is()`, `:where()`, `:not()`, attributes and sibling combinators (they match nothing); nested
 rules; values through `var()` or `calc()`; `@import … layer()` beyond a name; a layer named more
 than 16 deep; a sheet's second link or import; what scripts set; stylesheets from another origin; sheets past the budget. Each can miss a hold or an override (a warning then wrong, never
-a refusal). A body with stray unclosed tags may be taken as having one child. The root's own
-`style=""` or Tailwind class giving it overflow auto counts as a box below body that scrolls, as
-any element's does, so a root with those and no height (it grows with the page) is missed; a
-root bounded only by a flex or grid parent, with a scroll rule, is warned (its height can't be
-told from the text).
+a refusal). A body with stray unclosed tags may be taken as having one child. A root that scrolls
+the page in a height the check can't read is warned though the page scrolls: one bounded only by
+a flex or grid parent, or whose height is `calc()` other than `100vh` or `100%` less something,
+`min()`, `clamp()` or `var()` (`html, body { height: 100%; overflow: hidden } #root { height:
+min(100vh, 900px); overflow: auto }`).
 
 **Tested.** `test/check.test.ts` (a page held to one screen): the app shell's exact styles (the
 message and line), body or html hidden alone, the root by height, max-height and `inset: 0`, a
@@ -5242,7 +5249,14 @@ div` (in the rule, the fix and the style attribute's fix; the message 346 charac
 before), one of 59 as `#id`; a layer 100,000 deep not read (it overflowed the stack), 16 deep read;
 80,000 declarations of body and an `@layer` of 80,000 names timed against sixteen times 5,000
 (under eight times as long, and each under 2 s: about 0.06 s and 0.14 s here, 36.6 s and 36.3 s
-before); a layer opened early with nothing for the page losing to a later one, a sub-layer below
+before); after the third review: html, body, the root and 24 paragraphs with 4,000 classes each
+against two 2 MB `.a.a….b` rules, timed against sixteen sixteenths of both (under eight times,
+under 2 s: 0.1 s here, 178 s before; a sixteenth of both took 0.74 s, a quarter 11 s), a
+compound of 32 classes read and 33 not, a deep layer's parents declared where it comes (`theme`
+before `reset`), `!important` within the 60 characters, a custom element as `body > *`, the root
+by its own `style="overflow: auto"` and Tailwind class held without a height and not with
+`h-full`, by `block-size`, `max-block-size` and `calc(100vh - 56px)`, and a `style="overflow:
+auto"` below the root still a scroll box; a layer opened early with nothing for the page losing to a later one, a sub-layer below
 its parent's own rules either way round. `test/files.test.ts`: a linked sheet (its
 path and line), an `@import`ed one, each page by what it links, overrides across sheets in either
 order, print, alternate and missing sheets, and `admitFiles`'s note; ten sheets each importing the

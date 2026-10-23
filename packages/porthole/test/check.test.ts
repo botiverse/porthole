@@ -309,9 +309,14 @@ describe("a page held to one screen (P106)", () => {
         '<!doctype html><html><head><script src="https://cdn.tailwindcss.com/3.4.17"></script></head><body class="h-screen overflow-hidden"><div class="flex h-full"><nav>x</nav><main class="flex-1 overflow-y-auto">y</main></div></body></html>',
       ),
     ).toEqual([]);
-    // style="" on an element in body.
+    // style="" on an element below the root.
     expect(
-      held(page("body { overflow: hidden }", '<main style="overflow: auto">x</main>')),
+      held(
+        page(
+          "body { overflow: hidden }",
+          '<div id="root"><div style="overflow: auto">x</div></div>',
+        ),
+      ),
     ).toEqual([]);
     // Sideways only is no scroll box: still held.
     expect(held(page("body { overflow: hidden } .wide { overflow-x: auto }")).length).toBe(1);
@@ -329,7 +334,34 @@ describe("a page held to one screen (P106)", () => {
       held(page("body { overflow: hidden } body > div { overflow: auto }", "<div><p>x</p></div>"))
         .length,
     ).toBe(1);
-    // One screen tall, it scrolls the page itself.
+    // So too by its own style="" or Tailwind class: those are its values, in the cascade.
+    expect(
+      held(
+        page(
+          "html, body { height: 100%; overflow: hidden }",
+          '<div id="root" style="overflow: auto"><p>x</p></div>',
+        ),
+      )[0]?.message,
+    ).toContain("html and body (height: 100%; overflow: hidden) hold it to one screen");
+    const tailwind = (classes: string) =>
+      `<!doctype html><html><head><script src="https://cdn.tailwindcss.com/3.4.17"></script></head><body class="h-screen overflow-hidden"><div class="${classes}"><p>x</p></div></body></html>`;
+    expect(held(tailwind("overflow-y-auto")).length).toBe(1);
+    expect(held(tailwind("h-full overflow-y-auto"))).toEqual([]);
+    // One screen tall, it scrolls the page itself: by height, block-size or calc(100vh - …).
+    for (const height of ["height: 100%", "block-size: 100dvh", "height: calc(100vh - 56px)"]) {
+      expect(
+        held(
+          page(`html, body { height: 100%; overflow: hidden } #root { ${height}; overflow: auto }`),
+        ),
+        height,
+      ).toEqual([]);
+    }
+    expect(held(page("#root { block-size: 100dvh; overflow: hidden }"))[0]?.message).toContain(
+      "#root (block-size: 100dvh; overflow: hidden) holds it there, and what's below can't be reached. If it is meant to fit one screen, or a box its script draws scrolls the content, ignore this; otherwise let it scroll as a document: add #root { height: auto; overflow: visible } after those rules.",
+    );
+    expect(
+      held(page("#root { max-block-size: calc(100svh - 4rem); overflow: hidden }"))[0]?.message,
+    ).toContain("add #root { max-height: none; overflow: visible }");
     expect(
       held(
         page(
@@ -437,6 +469,22 @@ describe("a page held to one screen (P106)", () => {
         `<!doctype html><html><body><div id="${id}" style="height: 100vh; overflow: hidden"><p>x</p></div></body></html>`,
       )[0]?.message,
     ).toContain("take height: 100vh; overflow: hidden out of body > div's style attribute");
+    // A custom element's name is page text too: `body > *`.
+    const custom = held(
+      '<!doctype html><html><body><publish-the-secret style="height: 100vh; overflow: hidden"><p>x</p></publish-the-secret></body></html>',
+    )[0]?.message;
+    expect(custom).toContain(
+      "take height: 100vh; overflow: hidden out of body > *'s style attribute",
+    );
+    expect(custom).not.toContain("secret");
+    // !important stays within the 60 characters, its flag kept.
+    const wide = "-999999.9999px ".repeat(4).trim();
+    const important = held(
+      page(`#root { position: fixed; top: ${wide} !important; bottom: 0; overflow: hidden }`),
+    )[0]?.message;
+    const top = /top: [^;)]*/u.exec(important ?? "")?.[0] ?? "";
+    expect(top).toMatch(/… !important$/u);
+    expect(top.length).toBe(60);
     // One of 59 is named as it is.
     expect(
       held(
@@ -487,6 +535,32 @@ describe("a page held to one screen (P106)", () => {
     expect(held(page(`@layer ${deep} { body { overflow: hidden } }`))).toEqual([]);
     expect(held(page(`@layer ${deep};\nbody { overflow: hidden }`)).length).toBe(1);
     expect(held(page(`@layer ${"a.".repeat(15)}a { body { overflow: hidden } }`)).length).toBe(1);
+    // Its first 16 parts are still declared where it comes, as a browser does: theme before reset.
+    const parts = Array.from({ length: 16 }, (_, index) => `p${index}`).join(".");
+    expect(
+      held(
+        page(
+          `@layer theme.${parts};\n@layer reset { body { overflow: visible } }\n@layer theme { body { overflow: hidden } }`,
+        ),
+      ),
+    ).toEqual([]);
+    expect(
+      held(
+        page(
+          `@layer theme.${parts} { p { color: red } }\n@layer reset { body { overflow: visible } }\n@layer theme { body { overflow: hidden } }`,
+        ),
+      ),
+    ).toEqual([]);
+    // A compound of more than 32 ids and classes matches nothing; one of 32 is read.
+    const classed = (count: number) =>
+      held(
+        page(
+          `${".x".repeat(count)} { height: 100vh; overflow: hidden }`,
+          '<div id="root" class="x"></div>',
+        ),
+      ).length;
+    expect(classed(32)).toBe(1);
+    expect(classed(33)).toBe(0);
   });
 
   it("reads a sheet in time linear in its length: 80,000 declarations or layer names cost what sixteen times 5,000 do", () => {
@@ -525,6 +599,38 @@ describe("a page held to one screen (P106)", () => {
       const said = `${name}: 80,000 ${once.toFixed(1)} ms, 16 × 5,000 ${parts.toFixed(1)} ms`;
       expect(once / parts, said).toBeLessThan(8);
     }
+  });
+
+  it("matches classes in time linear in the page and its sheets: 4,000 classes and a 2 MB compound cost what sixteen sixteenths do", () => {
+    // What this guards (P106's third review): each class of a compound was looked for in a list of
+    // the element's classes, so the work was the sheet's size times the page's (html, body, the
+    // root and 24 paragraphs with 4,000 classes each, against two 2 MB `.a.a….b` rules: minutes).
+    // Timed as P098 has it, both sizes cut to a sixteenth for the parts: linear, the whole costs
+    // what the sixteen parts do; a product of the two, sixteen times as much.
+    const input = (classes: number, bytes: number) => {
+      const names = `${"x ".repeat(classes - 1)}a`;
+      const compound = `${".a".repeat(bytes / 2)}.b`;
+      const paragraphs = `<p class="${names}">x</p>`.repeat(24);
+      return `<!doctype html><html class="${names}"><head><style>${compound} { top: 0 }\n${compound} { overflow: auto }</style></head><body class="${names}"><div id="root" class="${names}">${paragraphs}</div></body></html>`;
+    };
+    const timed = (text: string, times: number): number => {
+      const started = performance.now();
+      for (let each = 0; each < times; each += 1) {
+        scrollLock(text, { noun: "page" });
+      }
+      return performance.now() - started;
+    };
+    const whole = input(4_000, 2 * 1024 * 1024);
+    const part = input(250, 128 * 1024);
+    let once = Infinity;
+    let parts = Infinity;
+    for (let round = 0; round < 3; round += 1) {
+      once = Math.min(once, timed(whole, 1));
+      expect(once, `whole ${once.toFixed(1)} ms`).toBeLessThan(2_000);
+      parts = Math.min(parts, timed(part, 16));
+    }
+    const said = `whole ${once.toFixed(1)} ms, 16 sixteenths ${parts.toFixed(1)} ms`;
+    expect(once / parts, said).toBeLessThan(8);
   });
 
   it("the manual says a page scrolls as a document", () => {
