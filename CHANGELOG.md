@@ -13,8 +13,10 @@ the manual says a page scrolls as a document.
   page's own CSS stops it at its first screen in the frame: html or body with `overflow: hidden`
   (or `clip`), or the body's one element of content (`#root`) one screen tall (100vh, dvh, svh,
   100% of a one-screen parent, fixed at the frame's edges) with `overflow: hidden` or
-  `position: fixed`, and nothing below body scrolls itself (no rule, `style=""` or Tailwind
-  utility gives it `overflow-y: auto` or `scroll`: the page may scroll there). It reads `<style>`,
+  `position: fixed`, and no element in the page's markup below body scrolls itself (by
+  `style=""`, a Tailwind class, or a rule whose selector matches it: the page may scroll there). A
+  page its script draws (an empty `#root`) has nothing to match: it is warned as one that "looks
+  held", which it may ignore if a box its script draws scrolls the content. It reads `<style>`,
   the version's linked stylesheets and their `@import`s, `style=""` on those elements, and
   Tailwind's utilities where the page loads Tailwind, by the cascade (specificity, order,
   `!important`, layers), so a later override is seen; each sheet once, at most 32 and 4 MiB a

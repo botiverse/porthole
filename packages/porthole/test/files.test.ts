@@ -1027,7 +1027,7 @@ describe("a page with files held to one screen (P106)", () => {
     });
     expect(admitted.ok).toBe(true);
     expect(admitted.ok ? admitted.note : "").toContain(
-      "- shell.css line 1: The page won't scroll in its frame",
+      "- shell.css line 1: The page looks held to one screen in its frame",
     );
   });
 });

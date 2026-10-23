@@ -13,9 +13,12 @@ import { attributesOf } from "./markup.ts";
  *   viewport's) or body is one screen tall;
  * - the root with overflow-y hidden or clip and one screen tall;
  * - any of them position: fixed and one screen tall (a fixed box's content scrolls nothing);
- * and nothing inside body that scrolls itself: no rule, style="" or Tailwind utility the check
- * reads gives an element below body (the root, or anything in it) overflow-y auto or scroll. Then
- * the page may scroll in that box, and the check can't tell which box holds what. One screen tall:
+ * and nothing in the page's markup below body that scrolls itself: no element there with style=""
+ * or a Tailwind utility giving it overflow-y auto or scroll, or matched by a rule the check reads
+ * that does (a rule whose selector it can't read, or that matches nothing in the markup, doesn't
+ * count). Then the page may scroll in that box, and the check can't tell which box holds what. A
+ * page its script draws (body holds an empty root at most) can't be matched: it is warned, worded
+ * as a page that looks held, as a box its script draws may scroll it. One screen tall:
  * height or max-height 100vh (dvh, svh, lvh), or 100% of an element that is (html's 100% is the
  * frame's), or position fixed or absolute with both top and bottom set (`inset: 0`).
  *
@@ -59,6 +62,12 @@ const DEEPEST = 8;
 export const SHEETS = 32;
 /** The most bytes of stylesheets read for one page, in all. */
 export const READ = 4 * 1024 * 1024;
+/** The most elements below body, and how deep, that scroll rules are matched against. */
+const MOST_ELEMENTS = 2_000;
+const DEEPEST_ELEMENT = 32;
+/** The most scroll rules' selectors kept, and steps spent matching them. */
+const MOST_SCROLL_SELECTORS = 256;
+const MATCH_STEPS = 1_000_000;
 /** The longest declaration or selector told back to the agent. */
 const ECHOED = 60;
 
@@ -84,14 +93,18 @@ interface Value {
   readonly at: number;
 }
 
-/** An element of the document's top, as its tag says. */
-interface Node {
-  readonly label: string;
+/** An element as its tag says: what a selector is matched against. */
+interface Element {
   readonly tag: string;
   readonly id: string;
   readonly classes: readonly string[];
   readonly onlyChild: boolean;
   readonly firstChild: boolean;
+}
+
+/** An element of the document's top (html, body, the root), with its cascade. */
+interface Node extends Element {
+  readonly label: string;
   readonly style: { readonly text: string; readonly at: number } | null;
   readonly classAt: number;
   /** Every declaration for each longhand: the cascade picks once all are read (layers' order). */
@@ -169,6 +182,12 @@ function scanPage(page: string): {
   tailwind: boolean;
   styleScrolls: boolean;
   classScrolls: boolean;
+  /** Each element of content below body, as its ancestors below body and itself (bounded). */
+  below: Element[][];
+  /** How many elements of content are below body, at any depth. */
+  contentBelow: number;
+  scripted: boolean;
+  texted: boolean;
 } {
   let html: Tag | null = null;
   let body: Tag | null = null;
@@ -180,6 +199,15 @@ function scanPage(page: string): {
   let tailwind = false;
   let styleScrolls = false;
   let classScrolls = false;
+  const below: Element[][] = [];
+  let contentBelow = 0;
+  let scripted = false;
+  /** Body has text of its own (outside scripts and styles). */
+  let texted = false;
+  /** The open elements below body, each with how many children it has had. */
+  const open: { element: Element; children: number }[] = [];
+  const bodyFrame = { children: 0 };
+  let opened: Element | null = null;
   let inBody = false;
   let depth = 0;
   let at = page.indexOf("<");
@@ -205,9 +233,11 @@ function scanPage(page: string): {
           inBody = false;
         } else if (depth > 0) {
           depth -= 1;
+          open.pop();
         }
       }
       at = page.indexOf("<", next);
+      texted ||= inBody && hasText(page, next, at);
       continue;
     }
     const tag: Tag = { name, attributes: attributesOf(match[3] ?? ""), at: attributesAt };
@@ -221,6 +251,25 @@ function scanPage(page: string): {
       // An element below body that scrolls itself, as its markup says.
       styleScrolls ||= declaresScroll(attribute(tag, "style")?.value ?? "");
       classScrolls ||= SCROLL_UTILITY.test(attribute(tag, "class")?.value ?? "");
+      const parent = open.at(-1) ?? bodyFrame;
+      const element: Element = {
+        tag: name,
+        id: attribute(tag, "id")?.value ?? "",
+        classes: (attribute(tag, "class")?.value ?? "").split(/\s+/u).filter((each) => each !== ""),
+        onlyChild: false,
+        firstChild: parent.children === 0,
+      };
+      parent.children += 1;
+      opened = element;
+      if (!NOT_CONTENT.has(name)) {
+        contentBelow += 1;
+        if (below.length < MOST_ELEMENTS && open.length < DEEPEST_ELEMENT) {
+          below.push([...open.map((each) => each.element), element]);
+        }
+      }
+    }
+    if (name === "script") {
+      scripted = true;
     }
     if (inBody && depth === 0 && name !== "body") {
       childCount += 1;
@@ -258,8 +307,13 @@ function scanPage(page: string): {
       next = found === null ? page.length : found.index + found[0].length;
     } else if (inBody && name !== "body" && !VOID.has(name)) {
       depth += 1;
+      if (opened !== null) {
+        open.push({ element: opened, children: 0 });
+      }
     }
+    opened = null;
     at = page.indexOf("<", next);
+    texted ||= inBody && hasText(page, next, at);
   }
   return {
     html,
@@ -272,8 +326,16 @@ function scanPage(page: string): {
     tailwind,
     styleScrolls,
     classScrolls,
+    below,
+    contentBelow,
+    scripted,
+    texted,
   };
 }
+
+/** Whether `page` has text other than spaces from `from` to `to` (the end where `to` is -1). */
+const hasText = (page: string, from: number, to: number): boolean =>
+  /\S/u.test(page.slice(from, to < 0 ? page.length : to));
 
 /** Tailwind's utilities that make a box scroll itself. */
 const SCROLL_UTILITY = /(?:^|\s)overflow-(?:y-)?(?:auto|scroll)(?:\s|$)/u;
@@ -564,7 +626,7 @@ function parseSelector(text: string): Selector | null {
   return { compounds, combinators, specificity: [ids, classLike, tags] };
 }
 
-const compoundMatches = (compound: Compound, node: Node, index: number): boolean =>
+const compoundMatches = (compound: Compound, node: Element, index: number): boolean =>
   (compound.tag === null || compound.tag === node.tag) &&
   compound.ids.every((id) => id === node.id) &&
   compound.classes.every((name) => node.classes.includes(name)) &&
@@ -572,9 +634,30 @@ const compoundMatches = (compound: Compound, node: Node, index: number): boolean
   (!compound.onlyChild || node.onlyChild) &&
   (!compound.firstChild || node.firstChild);
 
-/** Whether `selector` matches `chain[index]` (each element's parent is the one before it). */
-function matches(selector: Selector, chain: readonly Node[], index: number): boolean {
+/**
+ * Whether `selector` matches `chain[index]` (each element's parent is the one before it). Each
+ * (compound, element) pair is tried once; `budget.steps` bounds the work across calls (none left:
+ * no match).
+ */
+function matches(
+  selector: Selector,
+  chain: readonly Element[],
+  index: number,
+  budget: { steps: number } = { steps: Infinity },
+): boolean {
+  const tried = new Map<number, boolean>();
   const at = (k: number, i: number): boolean => {
+    const key = k * (chain.length + 1) + i;
+    const known = tried.get(key);
+    if (known !== undefined) {
+      return known;
+    }
+    budget.steps -= 1;
+    const result = budget.steps > 0 && pair(k, i);
+    tried.set(key, result);
+    return result;
+  };
+  const pair = (k: number, i: number): boolean => {
     const compound = selector.compounds[k];
     const node = chain[i];
     if (compound === undefined || node === undefined || !compoundMatches(compound, node, i)) {
@@ -687,8 +770,8 @@ class Cascade {
   /** Layer names, in the order they were first declared or opened (`a`, `a.b`). */
   readonly layers: string[] = [];
   readonly known = new Set<string>();
-  /** Some rule the check reads gives an element below body overflow-y auto or scroll. */
-  scrollsInside = false;
+  /** The selectors of rules that give something below body overflow-y auto or scroll. */
+  readonly scrollSelectors: Selector[] = [];
   order = 0;
   anonymous = 0;
   /** The stylesheets read for this page, by path: each once, within the budget. */
@@ -961,7 +1044,7 @@ class Cascade {
         continue;
       }
       const targets: Target[] = [];
-      let below = false;
+      const below: Selector[] = [];
       for (const each of splitList(prelude)) {
         const selector = parseSelector(each);
         let top = false;
@@ -983,11 +1066,20 @@ class Cascade {
             }
           });
         }
-        // A selector for anything but html or body may name an element below body.
-        below ||= !top;
+        // A selector for anything but html or body may name an element below body; one the
+        // check can't read names nothing it can see.
+        if (selector !== null && !top) {
+          below.push(selector);
+        }
       }
-      if (below && !this.scrollsInside && declaresScroll(text.slice(block[0], block[1]))) {
-        this.scrollsInside = true;
+      if (
+        below.length > 0 &&
+        this.scrollSelectors.length < MOST_SCROLL_SELECTORS &&
+        declaresScroll(text.slice(block[0], block[1]))
+      ) {
+        this.scrollSelectors.push(
+          ...below.slice(0, MOST_SCROLL_SELECTORS - this.scrollSelectors.length),
+        );
       }
       if (targets.length > 0) {
         this.declarations(
@@ -1181,11 +1273,26 @@ export function scrollLock(
   }
 
   cascade.resolve();
-  // Something below body scrolls itself: the page may scroll in it (the manual's line on the
-  // wheel says the rest). Not a hold the check can be sure of.
-  if (cascade.scrollsInside || scanned.styleScrolls || (scanned.tailwind && scanned.classScrolls)) {
+  // Something in the page's own markup below body scrolls itself: the page may scroll in it (the
+  // manual's line on the wheel says the rest). Not a hold the check can be sure of. A scroll rule
+  // counts only where it matches an element the markup has: an app's stylesheet has many for
+  // boxes a page never draws.
+  const outer = chain.slice(0, 2);
+  const budget = { steps: MATCH_STEPS };
+  const scrollsInside =
+    scanned.styleScrolls ||
+    (scanned.tailwind && scanned.classScrolls) ||
+    cascade.scrollSelectors.some((selector) =>
+      scanned.below.some((path) => {
+        const elements = [...outer, ...path];
+        return matches(selector, elements, elements.length - 1, budget);
+      }),
+    );
+  if (scrollsInside) {
     return null;
   }
+  // Drawn by its script (body holds an empty root at most): a box it draws may scroll the content.
+  const drawn = scanned.scripted && scanned.contentBelow <= 1 && !scanned.texted;
 
   // Each element's computed values, from the outside in.
   const value = (node: Node, property: string): Value | undefined => {
@@ -1356,7 +1463,9 @@ export function scrollLock(
     }
   }
   return {
-    message: `The ${options.noun} won't scroll in its frame: ${what} hold${holds.length === 1 ? "s" : ""} it to one screen, and what's below can't be reached. Unless it is meant to fit one screen, let it scroll as a document: ${and(fixes)}.`,
+    message: drawn
+      ? `The ${options.noun} looks held to one screen in its frame: ${what} hold${holds.length === 1 ? "s" : ""} it there, and what's below can't be reached. If it is meant to fit one screen, or a box its script draws scrolls the content, ignore this; otherwise let it scroll as a document: ${and(fixes)}.`
+      : `The ${options.noun} won't scroll in its frame: ${what} hold${holds.length === 1 ? "s" : ""} it to one screen, and what's below can't be reached. Unless it is meant to fit one screen, let it scroll as a document: ${and(fixes)}.`,
     ...(first.at.source.path === undefined ? {} : { path: first.at.source.path }),
     line: lineOf(first.at.source.text, first.at.at),
   };

@@ -156,12 +156,18 @@ describe("a page held to one screen (P106)", () => {
     expect(rules(findings)).toEqual(["warning scroll-lock"]);
     expect(findings[0]?.line).toBe(3);
     expect(findings[0]?.message).toBe(
+      "The page looks held to one screen in its frame: html and body (height: 100%; overflow: hidden) and #root (position: fixed; height: 100dvh; overflow: hidden) hold it there, and what's below can't be reached. If it is meant to fit one screen, or a box its script draws scrolls the content, ignore this; otherwise let it scroll as a document: add html, body, #root { height: auto; overflow: visible; position: static } after those rules.",
+    );
+    // Its content in the markup: no script draws it, so it is said flatly.
+    expect(
+      held(page(APP_SHELL, '<div id="root"><h1>Plan</h1><p>A long page.</p></div>'))[0]?.message,
+    ).toBe(
       "The page won't scroll in its frame: html and body (height: 100%; overflow: hidden) and #root (position: fixed; height: 100dvh; overflow: hidden) hold it to one screen, and what's below can't be reached. Unless it is meant to fit one screen, let it scroll as a document: add html, body, #root { height: auto; overflow: visible; position: static } after those rules.",
     );
     // A warning: the page is still shown.
     const admitted = admitContent(config, page(APP_SHELL));
     expect(admitted.ok).toBe(true);
-    expect(admitted.ok && admitted.note).toContain("line 3: The page won't scroll in its frame");
+    expect(admitted.ok && admitted.note).toContain("line 3: The page looks held to one screen");
   });
 
   it("warns on each way a page's top is held", () => {
@@ -292,6 +298,7 @@ describe("a page held to one screen (P106)", () => {
       held(
         page(
           "html, body { height: 100%; overflow: hidden } #root { height: 100%; display: flex } main { flex: 1; overflow-y: auto }",
+          '<div id="root"><nav>x</nav><main>y</main></div>',
         ),
       ),
     ).toEqual([]);
@@ -307,6 +314,47 @@ describe("a page held to one screen (P106)", () => {
     ).toEqual([]);
     // Sideways only is no scroll box: still held.
     expect(held(page("body { overflow: hidden } .wide { overflow-x: auto }")).length).toBe(1);
+  });
+
+  it("counts a scroll rule only where it matches an element of the page's markup", () => {
+    // An app's bundle: its shell's styles and a list's scroll box, the page drawn by its script.
+    const bundle = `${APP_SHELL}\n.message-list { overflow-y: auto }`;
+    const drawn = held(page(bundle));
+    expect(drawn[0]?.message).toMatch(
+      /^The page looks held to one screen in its frame: .* If it is meant to fit one screen, or a box its script draws scrolls the content, ignore this; otherwise let it scroll as a document: add html, body, #root \{ height: auto; overflow: visible; position: static \} after those rules\.$/u,
+    );
+    // The same bundle with the list in its markup, below body: it may scroll there.
+    expect(
+      held(page(bundle, '<div id="root"><div class="message-list"><p>a</p></div></div>')),
+    ).toEqual([]);
+    expect(
+      held(
+        page(
+          `${APP_SHELL}\n#root > section .message-list { overflow: auto }`,
+          '<div id="root"><section><div><ul class="message-list"></ul></div></section></div>',
+        ),
+      ),
+    ).toEqual([]);
+    // Markup that the rule doesn't match, or a selector the check can't read: still held.
+    expect(
+      held(page(bundle, '<div id="root"><div class="composer"><p>a</p></div></div>'))[0]?.message,
+    ).toMatch(/^The page won't scroll in its frame/u);
+    expect(
+      held(
+        page(
+          `${APP_SHELL}\n.message-list:hover { overflow-y: auto }`,
+          '<div id="root"><div class="message-list">a</div></div>',
+        ),
+      ).length,
+    ).toBe(1);
+    expect(
+      held(
+        page(
+          `${APP_SHELL}\nsection > .message-list { overflow-y: auto }`,
+          '<div id="root"><div class="message-list">a</div></div>',
+        ),
+      ).length,
+    ).toBe(1);
   });
 
   it("tells the agent only values of a known shape and plain selectors, cut short", () => {

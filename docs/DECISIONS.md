@@ -5126,11 +5126,20 @@ inner box take the wheel. Nothing told the agent: the manual spoke only of sidew
    - body with overflow-y hidden or clip, where html's overflow is visible or body is one screen;
    - the root with overflow-y hidden or clip, one screen tall;
    - any of them `position: fixed`, one screen tall.
-   Nothing below body scrolls itself: no rule the check reads whose selectors name anything but
-   html or body, no `style=""` on an element in body, and (where Tailwind is loaded) no class in
-   body, gives `overflow` or `overflow-y` auto or scroll. Where one does, the page may scroll in
-   that box (a dashboard's `main { flex: 1; overflow-y: auto }`), and the text can't tell which box
-   holds the content: no warning; the manual's line on the wheel says the rest.
+   Nothing below body scrolls itself: no element in the page's own markup below body has
+   `overflow` or `overflow-y` auto or scroll, by its `style=""`, by a Tailwind class (where
+   Tailwind is loaded), or by a rule the check reads whose selector matches it (with the selectors
+   the check can match; one it can't read, or that matches nothing in the markup, doesn't count).
+   Where one does, the page may scroll in that box (a dashboard's `main { flex: 1; overflow-y:
+   auto }`), and the text can't tell which box holds the content: no warning; the manual's line on
+   the wheel says the rest. Matched against at most 2,000 elements, 32 deep, 256 selectors and a
+   million steps (each selector's compound and element tried once).
+   **A page its script draws** (body holds at most one element of content, with no text, and the
+   page has a script: `<div id="root"></div>`) has nothing to match: it is warned, but said as a
+   page that looks held: "The page looks held to one screen in its frame: … If it is meant to fit
+   one screen, or a box its script draws scrolls the content, ignore this; otherwise let it scroll
+   as a document: …". A page with its content in the markup is told "The page won't scroll in its
+   frame: … Unless it is meant to fit one screen, let it scroll as a document: …".
    One screen: height or max-height `100vh` (`dvh`, `svh`, `lvh`), `100%` of a one-screen parent
    (html's 100% is the frame's) or of the frame where it is fixed or absolute, or fixed or absolute
    with both top and bottom set (`inset: 0`). Measured with Playwright's Chromium and Firefox (a 3,000 px
@@ -5140,9 +5149,9 @@ inner box take the wheel. Nothing told the agent: the manual spoke only of sidew
    under a body as tall as its content, `html, body { height: 100% }` alone, and
    `overflow-x: hidden` alone don't; a one-screen `#root { overflow: auto }` under a held body
    scrolls in the root. WebKit couldn't run on the box; nothing here is engine-specific CSS.
-   A cost of the rule above: an app's whole stylesheet, bundled into a page, often has some
-   scroll box of its own (a list, a sidebar), and then its page isn't warned even where that box
-   isn't on it.
+   Why the markup: an app's whole stylesheet, bundled into a page, has scroll boxes of its own (a
+   list, a sidebar) that a page may never draw; counting every such rule would leave the app
+   shell's page, the case this is for, unwarned.
 2. **What it reads:** `<style>` and `<link rel=stylesheet>` in document order (not for print, not
    alternate), the linked sheets found in the version and their `@import`s, `style=""` on the
    three, rules whose selectors it can match (type, id, class, `*`, `:root`, `:only-child`,
@@ -5187,6 +5196,8 @@ and a text read can't be sure.
 - Warning where a box below body scrolls, unless it is shown to hold the page: from the text, a
   box's height in a flex or grid layout can't be told, and the review's three cases (a flex
   `main`, Tailwind's dashboard, a `style="overflow: auto"`) were false warnings.
+- Any rule that gives something below body a scroll box silencing the warning (the first answer
+  to that review): an app's bundled stylesheet always has one, and its pages went unwarned.
 
 **Limits.** Not read: rules under `@media` (but `all` and `screen`), `@supports`, `@container`;
 `:is()`, `:where()`, `:not()`, attributes and sibling combinators (they match nothing); nested
@@ -5203,8 +5214,12 @@ element, two body children, a one-screen scroll box in a held body, 100% of a co
 later overrides (same `<style>`, a later one, `style=""`, unlayered over layered, a comment),
 part of an override not enough; the limits (`@media`, `@supports`, `var()`, `:is()`); the
 manual's line in the artifact, fill and inline manuals; after review: none where something below
-body scrolls (a flex `main`, Tailwind's dashboard, `style="overflow: auto"`), held where it only
-scrolls sideways; a hostile `top:` value and a long one not echoed, an escaped selector given as
+body scrolls in the markup (a flex `main`, Tailwind's dashboard, `style="overflow: auto"`), held
+where it only scrolls sideways; an app bundle (the shell's styles and `.message-list { overflow-y:
+auto }`, an empty `#root`) warned in the hedged words, silent with a `.message-list` in its markup
+(also through `#root > section .message-list`), held where the markup has no match, the selector
+can't be read (`:hover`) or doesn't match (`section > .message-list`); the shell's styles over
+content in the markup said flatly; a hostile `top:` value and a long one not echoed, an escaped selector given as
 `#root`; a layer opened early with nothing for the page losing to a later one, a sub-layer below
 its parent's own rules either way round. `test/files.test.ts`: a linked sheet (its
 path and line), an `@import`ed one, each page by what it links, overrides across sheets in either
