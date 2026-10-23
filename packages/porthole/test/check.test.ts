@@ -742,6 +742,28 @@ describe("a page held to one screen (P106)", () => {
       );
     expect(imported(1_023)).not.toBeNull();
     expect(imported(1_024)).toBeNull();
+    // Nor one into a layer named in more than 256 characters (it would be read in full for
+    // nothing: a sheet of 20,000 rules took past 120 s), nor such a name in a statement.
+    const into = (name: string) =>
+      scrollLock(
+        `<!doctype html><html><head><style>@import url(s.css) layer(${name});</style></head><body><p>x</p></body></html>`,
+        {
+          noun: "page",
+          path: "index.html",
+          sheet: () => ({ path: "s.css", text: "body { overflow: hidden }" }),
+        },
+      );
+    expect(into("z".repeat(256))).not.toBeNull();
+    expect(into("z".repeat(257))).toBeNull();
+    // A statement's long name takes no place among the 1,024: after 1,022 names and it (with its
+    // parent, two places were it read), a new layer still has one.
+    expect(
+      held(
+        page(
+          `@layer ${names(1_022)}, ${"t".repeat(257)}.b;\n@layer x { body { overflow: hidden } }`,
+        ),
+      ),
+    ).toHaveLength(1);
     // A layer's name (with the layers it is in) of more than 256 characters isn't read, nor the
     // layers in it: each would copy its name.
     expect(held(page(`@layer ${"a".repeat(256)} { body { overflow: hidden } }`))).toHaveLength(1);

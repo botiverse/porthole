@@ -45,15 +45,16 @@ import { attributesOf } from "./markup.ts";
  * rule it is in, a rule's selectors one at a time), at most `SHEETS` of them and `READ` bytes in
  * all, its own `<style>` included; past that, the rest isn't read. At most `MOST_LAYERS` layers a
  * page, each named in at most `LONGEST_LAYER` characters: a new one past either isn't read. Each
- * element keeps, per property, only each layer's winner so far, and a compound is matched against an element's classes (a set) in bounded work, so time
- * and memory are linear in what it reads. A version's pages (`lintFiles`: the entry and at most 7
- * more) share one `scrollBudget()`: `VERSION_READ` bytes of every sheet read for any of them, its
- * own `<style>` included, and `VERSION_STEPS` match steps; a page that would spend more than is
- * left isn't checked, nor are the pages after it. What it echoes to the agent is only values of a
- * known shape, and selectors of plain characters and the root's plain id, each at most `ECHOED`
- * characters with its !important (a selector or id that isn't: the element's own name, `#root`,
- * `body > div`, or `body > *` for a tag HTML doesn't have; the fix is then !important where the
- * name has less specificity than the selector).
+ * element keeps, per property, only each layer's winner so far, and a compound is matched against
+ * an element's classes (a set) in bounded work, so time and memory are linear in what it reads. A
+ * version's pages (`lintFiles`: the entry and at most 7 more) share one `scrollBudget()`:
+ * `VERSION_READ` bytes of every sheet read for any of them, its own `<style>` included, and
+ * `VERSION_STEPS` match steps; a page that would spend more than is left isn't checked, nor are the
+ * pages after it. What it echoes to the agent is only values of a known shape, and selectors of
+ * plain characters and the root's plain id, each at most `ECHOED` characters with its !important (a
+ * selector or id that isn't: the element's own name, `#root`, `body > div`, or `body > *` for a tag
+ * HTML doesn't have; the fix is then !important where the name has less specificity than the
+ * selector).
  */
 
 /** A stylesheet the page links, as the caller finds it from `from` (a path), or null. */

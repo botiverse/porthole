@@ -5338,7 +5338,8 @@ pages of 192 KB as bytes (8 checked, "492 pages not checked"; 11c422f ran out at
 the sixth review: 1,023 layers and a new one read, 1,024 and a new one not, `a.b` with one place
 left not, an unlayered rule and a layer already named still read, an `@import … layer(z)` past
 them not read; a layer's name of 256 characters read and of 257 not, nor one of 250 with a
-sub-layer of 6; a 1.9 MB layer name with 5,500 anonymous layers in it, under the 48 MB heap and
+sub-layer of 6; an `@import … layer()` of 256 characters read and of 257 not; a statement's
+257-character name taking no place among the 1,024; a 1.9 MB layer name with 5,500 anonymous layers in it, under the 48 MB heap and
 5 s (out of memory at 1,024 MB before); a page's own `<style>` past
 4 MiB not read and the next one read; Tailwind's `h-[calc(100vh-4rem)] overflow-hidden` on the
 root held, `h-[calc(100vh--4rem)]` not one screen. The manual's examples and the
