@@ -5130,6 +5130,10 @@ inner box take the wheel. Nothing told the agent: the manual spoke only of sidew
    `overflow` or `overflow-y` auto or scroll, by its `style=""`, by a Tailwind class (where
    Tailwind is loaded), or by a rule the check reads whose selector matches it (with the selectors
    the check can match; one it can't read, or that matches nothing in the markup, doesn't count).
+   A rule on the root itself doesn't count either: the root is in the cascade, so its own values
+   decide. One screen tall with overflow-y auto or scroll, it scrolls the page (no warning); without
+   a height it grows with what it holds and has nothing to scroll, so `html, body { height: 100%;
+   overflow: hidden } #root { overflow-y: auto }` is held.
    Where one does, the page may scroll in that box (a dashboard's `main { flex: 1; overflow-y:
    auto }`), and the text can't tell which box holds the content: no warning; the manual's line on
    the wheel says the rest. Matched against at most 2,000 elements, 32 deep, 256 selectors and a
@@ -5164,14 +5168,21 @@ inner box take the wheel. Nothing told the agent: the manual spoke only of sidew
    **Bounded:** a page's stylesheets are each read once (a sheet linked or imported again is read
    where it first comes), at most 32 of them and 4 MiB in all; past that, the rest isn't read. Each
    is asked of the caller once per place it is named from. The check is then linear in what it
-   reads: ten sheets each importing the next six times read ten sheets, not 6^10.
+   reads: ten sheets each importing the next six times read ten sheets, not 6^10; each element
+   keeps, per longhand, only each layer's winner so far (within a layer, and within `!important`
+   or `style=""`, specificity and order decide; the layers' order picks among those once all is
+   read), and the layers' tree is built in place, so a sheet of 80,000 declarations, or an `@layer`
+   of 80,000 names, costs what sixteen of 5,000 do. A layer named more than 16 deep (`a.b.c…`,
+   with the layers it is in) isn't read.
 3. **The warning says what to do:** what holds it, as the page wrote it, and the rule that undoes
    it under the page's own selectors (so it wins by coming later; `!important` where the hold
    was). The page's CSS goes into the agent's context, so only values of a known shape are echoed
    (lengths, percentages, viewport units, 0, auto, hidden, clip, fixed, static…; else the property
-   and `…`), each declaration and selector at most 60 characters, and a selector with escapes or
-   other than plain characters is given as the element's own name (`#root`, `body > div`): `add html, body, #root { height: auto; overflow: visible; position: static } after those
-   rules`, `take h-screen overflow-hidden off body's class`, or `take … out of html's style
+   and `…`), each declaration and selector at most 60 characters, and a selector with escapes,
+   other than plain characters or longer is given as the element's own name: `#root` where the
+   root's id is plain and `#id` at most 60 characters (the id is page text too), else `body >
+   div`. So: `add html, body, #root { height: auto; overflow: visible; position: static } after
+   those rules`, `take h-screen overflow-hidden off body's class`, or `take … out of html's style
    attribute`. In `lintFiles` it names the stylesheet and line the hold is in; a page's own
    `<style>` is reported once.
 4. **The manual** (the Pages section, every kind): "It scrolls as a document: unless it's meant to
@@ -5201,9 +5212,13 @@ and a text read can't be sure.
 
 **Limits.** Not read: rules under `@media` (but `all` and `screen`), `@supports`, `@container`;
 `:is()`, `:where()`, `:not()`, attributes and sibling combinators (they match nothing); nested
-rules; values through `var()` or `calc()`; `@import … layer()` beyond a name; a sheet's second
-link or import; what scripts set; stylesheets from another origin; sheets past the budget. Each can miss a hold or an override (a warning then wrong, never
-a refusal). A body with stray unclosed tags may be taken as having one child.
+rules; values through `var()` or `calc()`; `@import … layer()` beyond a name; a layer named more
+than 16 deep; a sheet's second link or import; what scripts set; stylesheets from another origin; sheets past the budget. Each can miss a hold or an override (a warning then wrong, never
+a refusal). A body with stray unclosed tags may be taken as having one child. The root's own
+`style=""` or Tailwind class giving it overflow auto counts as a box below body that scrolls, as
+any element's does, so a root with those and no height (it grows with the page) is missed; a
+root bounded only by a flex or grid parent, with a scroll rule, is warned (its height can't be
+told from the text).
 
 **Tested.** `test/check.test.ts` (a page held to one screen): the app shell's exact styles (the
 message and line), body or html hidden alone, the root by height, max-height and `inset: 0`, a
@@ -5219,13 +5234,21 @@ where it only scrolls sideways; an app bundle (the shell's styles and `.message-
 auto }`, an empty `#root`) warned in the hedged words, silent with a `.message-list` in its markup
 (also through `#root > section .message-list`), held where the markup has no match, the selector
 can't be read (`:hover`) or doesn't match (`section > .message-list`); the shell's styles over
-content in the markup said flatly; a hostile `top:` value and a long one not echoed, an escaped selector given as
-`#root`; a layer opened early with nothing for the page losing to a later one, a sub-layer below
+content in the markup said flatly; a hostile `top:` value and a long one not echoed, an escaped
+selector given as `#root`; after the second review: a scroll rule on the root without a height
+held (`#root { overflow-y: auto }`, `body > div { overflow: auto }`), one screen tall not, a box in
+the root or one of two in body still a scroll box; a plain id of 1,400 characters given as `body >
+div` (in the rule, the fix and the style attribute's fix; the message 346 characters, 3,128
+before), one of 59 as `#id`; a layer 100,000 deep not read (it overflowed the stack), 16 deep read;
+80,000 declarations of body and an `@layer` of 80,000 names timed against sixteen times 5,000
+(under eight times as long, and each under 2 s: about 0.06 s and 0.14 s here, 36.6 s and 36.3 s
+before); a layer opened early with nothing for the page losing to a later one, a sub-layer below
 its parent's own rules either way round. `test/files.test.ts`: a linked sheet (its
 path and line), an `@import`ed one, each page by what it links, overrides across sheets in either
 order, print, alternate and missing sheets, and `admitFiles`'s note; ten sheets each importing the
 next six times (11 asks, well under 2 s; without the budget it ran past 60 s), a thousand links to
-one sheet (asked once), and a hold past 32 sheets unread. The manual's examples and the
+one sheet (asked once), and a hold past 32 sheets unread; `lintFiles` on a page linking a 1.8 MB
+sheet of 230,000 declarations for body, under 3 s (0.2 s; 285 s before). The manual's examples and the
 Vite + React fixture still lint clean.
 
 **Revisit when** `checkPage` measures scrolling in a browser (then this can defer to it), a host's

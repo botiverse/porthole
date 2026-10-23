@@ -1019,6 +1019,22 @@ describe("a page with files held to one screen (P106)", () => {
     expect(performance.now() - started).toBeLessThan(2_000);
   });
 
+  it("lints a page linking a 1.8 MB stylesheet of declarations for body in linear time", () => {
+    // P106's second review: each declaration copied the list of those before it, so this one sheet
+    // (230,000 declarations) took 285 s on an arm64 box (over 400 s in the review). Kept as each
+    // layer's winner so far: about 0.2 s there, so the bound is many times that; quadratic, minutes.
+    const sheet = `html, body { height: 100%; }\nbody { ${"top: 0; ".repeat(230_000)}overflow: hidden }`;
+    expect(sheet.length).toBeGreaterThan(1_800_000);
+    const started = performance.now();
+    const findings = held({
+      "index.html": page('<link rel="stylesheet" href="shell.css">'),
+      "shell.css": sheet,
+    });
+    const took = performance.now() - started;
+    expect(findings.map((each) => [each.path, each.line])).toEqual([["shell.css", 2]]);
+    expect(took, `${took.toFixed(0)} ms`).toBeLessThan(3_000);
+  });
+
   it("admitFiles publishes it, with the warning in its note", () => {
     const admitted = admitFiles(served, {
       "index.html": page('<link rel="stylesheet" href="shell.css">'),

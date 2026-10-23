@@ -14,7 +14,8 @@ the manual says a page scrolls as a document.
   (or `clip`), or the body's one element of content (`#root`) one screen tall (100vh, dvh, svh,
   100% of a one-screen parent, fixed at the frame's edges) with `overflow: hidden` or
   `position: fixed`, and no element in the page's markup below body scrolls itself (by
-  `style=""`, a Tailwind class, or a rule whose selector matches it: the page may scroll there). A
+  `style=""`, a Tailwind class, or a rule whose selector matches it: the page may scroll there; a
+  rule on the root counts only where the root is one screen tall). A
   page its script draws (an empty `#root`) has nothing to match: it is warned as one that "looks
   held", which it may ignore if a box its script draws scrolls the content. It reads `<style>`,
   the version's linked stylesheets and their `@import`s, `style=""` on those elements, and
@@ -23,7 +24,8 @@ the manual says a page scrolls as a document.
   page. The warning names what holds the page and
   the rule that undoes it, e.g. `add html, body, #root { height: auto; overflow: visible;
   position: static } after those rules`; only values of a known shape and plain selectors are
-  echoed, each at most 60 characters. In `lintFiles` its `path` is the stylesheet's, where
+  echoed (and the root's id, else `body > div`), each at most 60 characters; time and memory are
+  linear in what it reads. In `lintFiles` its `path` is the stylesheet's, where
   the rule is there. Not read: rules under `@media` (but `all` and `screen`), `@supports`,
   `@container`, `:is()`/`:where()`/`:not()` and sibling selectors, nested rules, `var()`, scripts.
 - **The manual** (every kind): "It scrolls as a document: unless it's meant to fit one screen (a

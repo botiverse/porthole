@@ -16,11 +16,12 @@ import { attributesOf } from "./markup.ts";
  * and nothing in the page's markup below body that scrolls itself: no element there with style=""
  * or a Tailwind utility giving it overflow-y auto or scroll, or matched by a rule the check reads
  * that does (a rule whose selector it can't read, or that matches nothing in the markup, doesn't
- * count). Then the page may scroll in that box, and the check can't tell which box holds what. A
- * page its script draws (body holds an empty root at most) can't be matched: it is warned, worded
- * as a page that looks held, as a box its script draws may scroll it. One screen tall:
- * height or max-height 100vh (dvh, svh, lvh), or 100% of an element that is (html's 100% is the
- * frame's), or position fixed or absolute with both top and bottom set (`inset: 0`).
+ * count, nor a rule on the root: its own values say whether it scrolls the page, one screen tall,
+ * or grows with it). Then the page may scroll in that box, and the check can't tell which box
+ * holds what. A page its script draws (body holds an empty root at most) can't be matched: it is
+ * warned, worded as a page that looks held, as a box its script draws may scroll it. One screen
+ * tall: height or max-height 100vh (dvh, svh, lvh), or 100% of an element that is (html's 100% is
+ * the frame's), or position fixed or absolute with both top and bottom set (`inset: 0`).
  *
  * What it reads: the page's `<style>` elements, the stylesheets it links that the caller finds
  * (a version's own files) and what they `@import`, in document order; style="" on the three; the
@@ -31,12 +32,14 @@ import { attributesOf } from "./markup.ts";
  * beyond type, id, class, `*`, `:root`, `:only-child`, `:first-child` and the descendant and child
  * combinators (`:is()`, `:where()`, `:not()`, attributes and siblings match nothing), nested
  * rules, values through var() or calc(), a stylesheet linked or imported a second time (read
- * where it first comes), and what scripts do. Each of those misses a lock, or an override (then the
- * warning is wrong); it never refuses anything.
+ * where it first comes), a layer named more than `LAYER_PARTS` deep, and what scripts do. Each
+ * of those misses a lock, or an override (then the warning is wrong); it never refuses anything.
  *
  * Bounded: each stylesheet is read once per page, at most `SHEETS` of them and `READ` bytes in all;
- * past that, the rest isn't read. What it echoes to the agent is only values of a known shape, and
- * selectors of plain characters, each cut to `ECHOED` characters.
+ * past that, the rest isn't read. Each element keeps, per property, only each layer's winner so
+ * far, so time and memory are linear in what it reads. What it echoes to the agent is only values of a
+ * known shape, and selectors of plain characters and the root's plain id, each at most `ECHOED`
+ * characters (a selector or id that isn't: the element's own name, `#root` or `body > div`).
  */
 
 /** A stylesheet the page links, as the caller finds it from `from` (a path), or null. */
@@ -58,6 +61,8 @@ export interface ScrollLock {
 const SCANNED = 2 * 1024 * 1024;
 /** How deep `@import` and `@layer` are followed. */
 const DEEPEST = 8;
+/** The most parts of a layer's name (`a.b.c`, with the layers it is in): deeper isn't read. */
+const LAYER_PARTS = 16;
 /** The most stylesheets read for one page, each once. */
 export const SHEETS = 32;
 /** The most bytes of stylesheets read for one page, in all. */
@@ -107,8 +112,11 @@ interface Node extends Element {
   readonly label: string;
   readonly style: { readonly text: string; readonly at: number } | null;
   readonly classAt: number;
-  /** Every declaration for each longhand: the cascade picks once all are read (layers' order). */
-  readonly candidates: Map<string, Value[]>;
+  /**
+   * Each longhand's winner so far within each layer (and !important, style=""), by specificity and
+   * order: the layers' order is known once all is read, and the cascade picks among these then.
+   */
+  readonly candidates: Map<string, Map<string, Value>>;
   readonly values: Map<string, Value>;
 }
 
@@ -761,6 +769,18 @@ interface Target {
   readonly selector: string;
 }
 
+/** Whether a layer's name has more than `LAYER_PARTS` parts (such a layer isn't read). */
+const tooDeep = (name: string): boolean => {
+  let parts = 1;
+  for (let dot = name.indexOf("."); dot >= 0; dot = name.indexOf(".", dot + 1)) {
+    parts += 1;
+    if (parts > LAYER_PARTS) {
+      return true;
+    }
+  }
+  return false;
+};
+
 /** A stylesheet found for the page, once: its path and text. */
 type Found = { readonly path: string; readonly text: string } | null;
 
@@ -789,9 +809,12 @@ class Cascade {
     if (this.known.has(name)) {
       return;
     }
-    const dot = name.lastIndexOf(".");
-    if (dot > 0) {
-      this.declare(name.slice(0, dot));
+    for (let dot = name.indexOf(".", 1); dot > 0; dot = name.indexOf(".", dot + 1)) {
+      const parent = name.slice(0, dot);
+      if (!this.known.has(parent)) {
+        this.known.add(parent);
+        this.layers.push(parent);
+      }
     }
     this.known.add(name);
     this.layers.push(name);
@@ -806,7 +829,12 @@ class Cascade {
     for (const name of this.layers) {
       const dot = name.lastIndexOf(".");
       const parent = dot > 0 ? name.slice(0, dot) : null;
-      children.set(parent, [...(children.get(parent) ?? []), name]);
+      const siblings = children.get(parent);
+      if (siblings === undefined) {
+        children.set(parent, [name]);
+      } else {
+        siblings.push(name);
+      }
     }
     const out = new Map<string | null, number>();
     const visit = (name: string | null) => {
@@ -833,7 +861,10 @@ class Cascade {
     return true;
   }
 
-  /** A declaration for `node`, kept until the cascade picks. */
+  /**
+   * A declaration for `node`, kept where it wins so far within its layer (and !important,
+   * style=""): there, specificity and then order decide, as the layer's rank is the same for all.
+   */
   set(
     node: Node,
     property: string,
@@ -871,7 +902,18 @@ class Cascade {
         source: where.source,
         at: where.at,
       };
-      node.candidates.set(longhand, [...(node.candidates.get(longhand) ?? []), each]);
+      let kept = node.candidates.get(longhand);
+      if (kept === undefined) {
+        kept = new Map();
+        node.candidates.set(longhand, kept);
+      }
+      const layer = each.layer === null ? "" : `@${each.layer}`;
+      const key = `${each.important ? "!" : ""}${each.inline ? "=" : ""}${layer}`;
+      const best = kept.get(key);
+      // Later, as specific or more: it wins within its layer.
+      if (best === undefined || compare(each.specificity, best.specificity) >= 0) {
+        kept.set(key, each);
+      }
     }
   }
 
@@ -889,7 +931,7 @@ class Cascade {
       for (const [property, candidates] of node.candidates) {
         let best: Value | undefined;
         let bestPriority: number[] = [];
-        for (const each of candidates) {
+        for (const each of candidates.values()) {
           const mine = priority(each);
           if (best === undefined || compare(mine, bestPriority) > 0) {
             best = each;
@@ -1021,11 +1063,17 @@ class Cascade {
           const names = splitList(rest);
           if (block === null) {
             for (const each of names) {
-              this.declare(within(each));
+              const layer = within(each);
+              if (!tooDeep(layer)) {
+                this.declare(layer);
+              }
             }
           } else {
             this.anonymous += 1;
             const layer = within(names[0] ?? `\u0000${this.anonymous}`);
+            if (tooDeep(layer)) {
+              continue;
+            }
             // Its place is where its block opens, whatever it holds.
             this.declare(layer);
             this.sheet(text, block[0], block[1], { ...context, layer, depth: context.depth + 1 });
@@ -1114,7 +1162,10 @@ class Cascade {
       layer = within(`\u0000${this.anonymous}`);
       tail = tail.replace(/^layer\b\s*/iu, "");
     }
-    if (tail !== "" && !/^(?:only\s+)?(?:all|screen)$/iu.test(tail)) {
+    if (
+      (tail !== "" && !/^(?:only\s+)?(?:all|screen)$/iu.test(tail)) ||
+      (layer !== null && tooDeep(layer))
+    ) {
       return;
     }
     if (layer !== null) {
@@ -1189,14 +1240,9 @@ export function scrollLock(
     scanned.body !== null && scanned.contentCount === 1 ? scanned.content[0] : undefined;
   if (rootTag !== undefined) {
     const id = attribute(rootTag, "id")?.value ?? "";
-    chain.push(
-      nodeOf(
-        rootTag,
-        rootTag.name,
-        /^[a-z_][\w-]*$/iu.test(id) ? `#${id}` : `body > ${rootTag.name}`,
-        true,
-      ),
-    );
+    // Page text told to the agent: `#id` for a plain id, at most ECHOED characters; else its tag.
+    const named = /^[a-z_][\w-]*$/iu.test(id) && id.length < ECHOED;
+    chain.push(nodeOf(rootTag, rootTag.name, named ? `#${id}` : `body > ${rootTag.name}`, true));
   }
 
   // Each stylesheet is asked for once per place it is named from, and read once (`take`).
@@ -1276,14 +1322,19 @@ export function scrollLock(
   // Something in the page's own markup below body scrolls itself: the page may scroll in it (the
   // manual's line on the wheel says the rest). Not a hold the check can be sure of. A scroll rule
   // counts only where it matches an element the markup has: an app's stylesheet has many for
-  // boxes a page never draws.
+  // boxes a page never draws. Not the root's own rules: it is in the cascade, and its computed
+  // values say whether it scrolls the page (one screen tall) or grows with it (`scrollBox`).
   const outer = chain.slice(0, 2);
+  const rooted = chain.length > 2;
   const budget = { steps: MATCH_STEPS };
   const scrollsInside =
     scanned.styleScrolls ||
     (scanned.tailwind && scanned.classScrolls) ||
     cascade.scrollSelectors.some((selector) =>
       scanned.below.some((path) => {
+        if (rooted && path.length === 1) {
+          return false;
+        }
         const elements = [...outer, ...path];
         return matches(selector, elements, elements.length - 1, budget);
       }),
