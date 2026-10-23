@@ -730,6 +730,28 @@ describe("a page held to one screen (P106)", () => {
     expect(
       held(page(`@layer ${names(1_024)};\n@layer l3 { body { overflow: hidden } }`)),
     ).toHaveLength(1);
+    // An @import into a layer past them isn't read either.
+    const imported = (count: number) =>
+      scrollLock(
+        `<!doctype html><html><head><style>@layer ${names(count)};\n@import url(s.css) layer(z);</style></head><body><p>x</p></body></html>`,
+        {
+          noun: "page",
+          path: "index.html",
+          sheet: () => ({ path: "s.css", text: "body { overflow: hidden }" }),
+        },
+      );
+    expect(imported(1_023)).not.toBeNull();
+    expect(imported(1_024)).toBeNull();
+    // A layer's name (with the layers it is in) of more than 256 characters isn't read, nor the
+    // layers in it: each would copy its name.
+    expect(held(page(`@layer ${"a".repeat(256)} { body { overflow: hidden } }`))).toHaveLength(1);
+    expect(held(page(`@layer ${"a".repeat(257)} { body { overflow: hidden } }`))).toEqual([]);
+    expect(
+      held(page(`@layer ${"a".repeat(250)} { @layer bbbbbb { body { overflow: hidden } } }`)),
+    ).toEqual([]);
+    expect(
+      held(page(`@layer ${"a".repeat(250)} { @layer bbbbb { body { overflow: hidden } } }`)),
+    ).toHaveLength(1);
     // A page's own <style> past 4 MiB isn't read (as a linked sheet past it isn't); the next is.
     const filler = ".x { color: red }".repeat(300_000);
     expect(

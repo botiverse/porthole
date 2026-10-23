@@ -44,8 +44,8 @@ import { attributesOf } from "./markup.ts";
  * Bounded: each stylesheet is read once per page, as it streams (nothing parsed is kept past the
  * rule it is in, a rule's selectors one at a time), at most `SHEETS` of them and `READ` bytes in
  * all, its own `<style>` included; past that, the rest isn't read. At most `MOST_LAYERS` layers a
- * page: a new one past them isn't read. Each element keeps, per property, only each layer's winner
- * so far, and a compound is matched against an element's classes (a set) in bounded work, so time
+ * page, each named in at most `LONGEST_LAYER` characters: a new one past either isn't read. Each
+ * element keeps, per property, only each layer's winner so far, and a compound is matched against an element's classes (a set) in bounded work, so time
  * and memory are linear in what it reads. A version's pages (`lintFiles`: the entry and at most 7
  * more) share one `scrollBudget()`: `VERSION_READ` bytes of every sheet read for any of them, its
  * own `<style>` included, and `VERSION_STEPS` match steps; a page that would spend more than is
@@ -77,6 +77,11 @@ const SCANNED = 2 * 1024 * 1024;
 const DEEPEST = 8;
 /** The most layers a page's sheets name: past that, a new layer's rules aren't read. */
 const MOST_LAYERS = 1_024;
+/**
+ * The longest layer name, with the layers it is in (`a.b.c`): a longer one isn't declared, nor
+ * its rules or the layers in it read (each would copy its name).
+ */
+const LONGEST_LAYER = 256;
 /** The most parts of a layer's name (`a.b.c`, with the layers it is in): deeper isn't read. */
 const LAYER_PARTS = 16;
 /** The most stylesheets read for one page, each once. */
@@ -1188,12 +1193,17 @@ class Cascade {
           if (block === null) {
             for (const each of listOf(rest)) {
               const layer = within(each);
-              this.declare(tooDeep(layer) ?? layer);
+              if (layer.length <= LONGEST_LAYER) {
+                this.declare(tooDeep(layer) ?? layer);
+              }
             }
           } else {
             this.anonymous += 1;
             const first = listOf(rest).next();
             const layer = within(first.done === true ? `\u0000${this.anonymous}` : first.value);
+            if (layer.length > LONGEST_LAYER) {
+              continue;
+            }
             const cut = tooDeep(layer);
             if (cut !== null) {
               this.declare(cut);
@@ -1292,6 +1302,9 @@ class Cascade {
       return;
     }
     if (layer !== null) {
+      if (layer.length > LONGEST_LAYER) {
+        return;
+      }
       const cut = tooDeep(layer);
       if (!this.declare(cut ?? layer) || cut !== null) {
         return;

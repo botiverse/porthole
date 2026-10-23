@@ -1151,7 +1151,9 @@ describe("a page with files held to one screen (P106)", () => {
     // runs in a heap of 32 MB: rules on what the check reads, ones that match, and one rule's
     // 300,000 selectors (it ran out at 128 MB in 8daa075 too: all split, and kept for the scroll
     // rules). The sixth review's layers: a page's 1,024 at most (each kept the values of every
-    // rule in it: 2 MiB of anonymous layers needed 128 MB, of layers 15 parts deep 256 MB).
+    // rule in it: 2 MiB of anonymous layers needed 128 MB, of layers 15 parts deep 256 MB). The
+    // seventh's: a layer's name of 1.9 MB, its anonymous layers each copying it (out of memory at
+    // 1,024 MB; with a 1 MB name, past 300 s), isn't read past 256 characters.
     const shapes = `{
       rules: fill((i) => \`.k\${i}{top:0}\`, 2 * MiB),
       matching: fill(() => "div{top:0}", 2 * MiB),
@@ -1159,15 +1161,19 @@ describe("a page with files held to one screen (P106)", () => {
       anonymous: fill(() => "@layer{html,body,#root{overflow:hidden;inset:0}}", 2 * MiB),
       dotted: fill((i) => \`@layer a\${i}.b.c.d.e.f.g.h.i.j.k.l.m.n.o{html{top:0}}\`, 2 * MiB),
       named: fill((i) => \`@layer a\${i}{html,body,#root{overflow:hidden;height:100%;position:fixed;top:0;bottom:0;max-height:100vh}}\`, 2 * MiB),
+      long: "@layer " + "A".repeat(Math.floor(1.9 * MiB)) + "{" + "@layer{html{top:0}}".repeat(5_500) + "}",
     }`;
     expect(
       underHeap(`
         for (const [name, sheet] of Object.entries(${shapes})) {
+          const started = performance.now();
           lintFiles(served, { "index.html": '<link rel="stylesheet" href="s.css"><div id="root"><p>x</p></div>', "s.css": sheet });
-          process.stdout.write(name + " ");
+          // Each in a second or so on a busy machine: 5 s says it isn't the work it was.
+          const took = performance.now() - started;
+          process.stdout.write(name + (took < 5_000 ? " " : \` (\${Math.round(took)} ms) \`));
         }
       `),
-    ).toBe("rules matching selectors anonymous dotted named");
+    ).toBe("rules matching selectors anonymous dotted named long");
     // Heavy by design: a minute, not the default 5 s, on a busy machine.
   }, 60_000);
 

@@ -5196,7 +5196,9 @@ inner box take the wheel. Nothing told the agent: the manual spoke only of sidew
    sheets name at most 1,024 layers (each, parents included): a new one past them isn't declared
    and its rules aren't read, as a layer too deep (each layer kept every value its rules gave:
    2 MiB of anonymous layers needed 128 MB of heap, of layers 15 parts deep 256 MB, in 8daa075
-   too).
+   too). A layer's name with the layers it is in (`a.b.c`) is at most 256 characters: a longer
+   one isn't declared, nor its rules or the layers in it read (each anonymous layer in a 1.9 MB
+   one copied its name: out of memory at 1,024 MB; in a 1 MB one, past 300 s).
    **A version's pages** (`lintFiles`, so `admitFiles` at publish): the rule reads the pages an
    agent opens first, the entry and then the others in path order, at most 8 in all, each as a
    page alone (its sheets read as it streams them: nothing parsed is kept from one page to the
@@ -5264,7 +5266,10 @@ under a flex or grid body, or with a height the check can't read, is taken as it
 where it is in fact as tall as its content (a flex column's item without `flex: 1`, a `min()`
 that comes to its content), the hold is missed. In a version, pages past the entry and 7 more,
 or past the budget (8 MiB of sheets, two million match steps), aren't checked: a warning says
-how many. A page's layers past 1,024 aren't read. Known, to follow: the app shell's fix names
+how many. A page's layers past 1,024, and a layer's name past 256 characters, aren't read: that
+misses a hold in them, and it can warn wrongly too, where the hold is in a layer read and what
+undoes it is in one that isn't (`html { overflow: hidden }` in layer `p0`, and `html { overflow:
+visible }` in a new layer past the cap). Known, to follow: the app shell's fix names
 only html (`add html { … }`), and body's overflow, which the viewport takes once html's is
 visible, is said by a second warning after it; an `!important` hold inside a layer can't be
 undone by the unlayered `!important` the fix suggests (a layer's `!important` beats it), so the
@@ -5331,7 +5336,10 @@ first three, 8daa075 on the third; 11c422f on the last three at 64 MB, the layer
 deep at 128 MB too), and 500
 pages of 192 KB as bytes (8 checked, "492 pages not checked"; 11c422f ran out at 96 MB). After
 the sixth review: 1,023 layers and a new one read, 1,024 and a new one not, `a.b` with one place
-left not, an unlayered rule and a layer already named still read; a page's own `<style>` past
+left not, an unlayered rule and a layer already named still read, an `@import … layer(z)` past
+them not read; a layer's name of 256 characters read and of 257 not, nor one of 250 with a
+sub-layer of 6; a 1.9 MB layer name with 5,500 anonymous layers in it, under the 48 MB heap and
+5 s (out of memory at 1,024 MB before); a page's own `<style>` past
 4 MiB not read and the next one read; Tailwind's `h-[calc(100vh-4rem)] overflow-hidden` on the
 root held, `h-[calc(100vh--4rem)]` not one screen. The manual's examples and the
 Vite + React fixture still lint clean.
