@@ -5156,7 +5156,8 @@ inner box take the wheel. Nothing told the agent: the manual spoke only of sidew
    One screen: height or max-height (or `block-size`, `max-block-size`) `100vh` (`dvh`, `svh`,
    `lvh`) or `calc(100vh - 4rem)` (the whole less one positive length: px, rem, em, %, vh),
    `100%` or `calc(100% - 56px)` of a one-screen parent (html's 100% is
-   the frame's) or of the frame where it is fixed or absolute, or fixed or absolute with both top
+   the frame's; Tailwind's arbitrary `h-[calc(100vh-4rem)]` read as Tailwind writes it, with
+   spaces around `-` and `+`) or of the frame where it is fixed or absolute, or fixed or absolute with both top
    and bottom set (`inset: 0`). Measured with Playwright's Chromium and Firefox (a 3,000 px
    page, a 400 px frame, the wheel): each of these stops it; `body { overflow: hidden }` alone
    does (the viewport takes body's overflow), as does `#root { position: fixed; inset: 0 }`
@@ -5177,7 +5178,8 @@ inner box take the wheel. Nothing told the agent: the manual spoke only of sidew
    first declared or its block opens, a sub-layer's rules below its parent's own, unlayered rules
    above all layers, reversed for `!important`; each value is picked once every sheet is read.
    **Bounded:** a page's stylesheets are each read once (a sheet linked or imported again is read
-   where it first comes), at most 32 of them and 4 MiB in all; past that, the rest isn't read. Each
+   where it first comes), at most 32 of them and 4 MiB in all, its own `<style>` elements
+   included; past that, the rest isn't read (a later one that fits still is). Each
    is asked of the caller once per place it is named from. The check is then linear in what it
    reads: ten sheets each importing the next six times read ten sheets, not 6^10; each element
    keeps, per longhand, only each layer's winner so far (within a layer, and within `!important`
@@ -5190,11 +5192,16 @@ inner box take the wheel. Nothing told the agent: the manual spoke only of sidew
    element is bounded work, for html, body and the root as for the elements below body: the size
    of the sheets and the size of the page add, not multiply. A layer named more than 16 deep
    (`a.b.c…`, with the layers it is in) isn't read: its rules are dropped, but its first 16 parts
-   are declared where it comes, as a browser declares them, so the layers' order holds.
+   are declared where it comes, as a browser declares them, so the layers' order holds. A page's
+   sheets name at most 1,024 layers (each, parents included): a new one past them isn't declared
+   and its rules aren't read, as a layer too deep (each layer kept every value its rules gave:
+   2 MiB of anonymous layers needed 128 MB of heap, of layers 15 parts deep 256 MB, in 8daa075
+   too).
    **A version's pages** (`lintFiles`, so `admitFiles` at publish): the rule reads the pages an
    agent opens first, the entry and then the others in path order, at most 8 in all, each as a
    page alone (its sheets read as it streams them: nothing parsed is kept from one page to the
-   next). The 8 share one budget: 8 MiB of stylesheet read, every sheet each page reads (one two
+   next). Only the pages' paths are kept for it, and the eight it checks are decoded again there
+   (keeping every page's text took 96 MB for 500 pages of 192 KB). The 8 share one budget: 8 MiB of stylesheet read, every sheet each page reads (one two
    pages link is read for each) and each page's own `<style>`, and two million steps of matching
    scroll rules against markup. A page that would spend more than is left isn't checked, nor are
    any after it, the cheap ones too. Where pages aren't checked (past 8, or past the budget), one
@@ -5257,7 +5264,11 @@ under a flex or grid body, or with a height the check can't read, is taken as it
 where it is in fact as tall as its content (a flex column's item without `flex: 1`, a `min()`
 that comes to its content), the hold is missed. In a version, pages past the entry and 7 more,
 or past the budget (8 MiB of sheets, two million match steps), aren't checked: a warning says
-how many.
+how many. A page's layers past 1,024 aren't read. Known, to follow: the app shell's fix names
+only html (`add html { … }`), and body's overflow, which the viewport takes once html's is
+visible, is said by a second warning after it; an `!important` hold inside a layer can't be
+undone by the unlayered `!important` the fix suggests (a layer's `!important` beats it), so the
+same advice comes again; `display: -webkit-box` isn't taken as flex.
 
 **Tested.** `test/check.test.ts` (a page held to one screen): the app shell's exact styles (the
 message and line), body or html hidden alone, the root by height, max-height and `inset: 0`, a
@@ -5311,11 +5322,18 @@ MB sheet (a version's most files) the entry and 7 more checked, in that order, a
 not checked" said, under 10 s (41 s before) and under four times what 8 pages cost; eight
 pages or fewer, no note; eight pages, the first five linking a sheet just under 2 MiB, four
 checked and the fifth stopping the rest, the three cheap ones after it too ("4 pages not
-checked"); a page's own `<style>` charged (two of 5
-MiB, the second not checked, nor a cheap one after); four pages each spending a page's million
-match steps, two checked; one page linking a 2 MiB sheet of `.kN{top:0}`, of `div{top:0}` and
-of one rule's 300,000 selectors, each in a child process under a 48 MB heap (32 MB is enough;
-the fourth review's code ran out at 128 MB on each, 8daa075 on the last). The manual's examples and the
+checked"); a page's own `<style>` charged (three of 3.5 MiB, the third not checked, nor a cheap
+one after); four pages each spending a page's million match steps, two checked; in a child
+process under a 48 MB heap, one page linking a 2 MiB sheet of each of six shapes: `.kN{top:0}`,
+`div{top:0}`, one rule's 300,000 selectors, anonymous layers, layers 15 parts deep and named
+layers of six declarations (each runs in 32 MB; the fourth review's code ran out at 128 MB on the
+first three, 8daa075 on the third; 11c422f on the last three at 64 MB, the layers 15 parts
+deep at 128 MB too), and 500
+pages of 192 KB as bytes (8 checked, "492 pages not checked"; 11c422f ran out at 96 MB). After
+the sixth review: 1,023 layers and a new one read, 1,024 and a new one not, `a.b` with one place
+left not, an unlayered rule and a layer already named still read; a page's own `<style>` past
+4 MiB not read and the next one read; Tailwind's `h-[calc(100vh-4rem)] overflow-hidden` on the
+root held, `h-[calc(100vh--4rem)]` not one screen. The manual's examples and the
 Vite + React fixture still lint clean.
 
 **Revisit when** `checkPage` measures scrolling in a browser (then this can defer to it), a host's

@@ -43,7 +43,8 @@ import { attributesOf } from "./markup.ts";
  *
  * Bounded: each stylesheet is read once per page, as it streams (nothing parsed is kept past the
  * rule it is in, a rule's selectors one at a time), at most `SHEETS` of them and `READ` bytes in
- * all; past that, the rest isn't read. Each element keeps, per property, only each layer's winner
+ * all, its own `<style>` included; past that, the rest isn't read. At most `MOST_LAYERS` layers a
+ * page: a new one past them isn't read. Each element keeps, per property, only each layer's winner
  * so far, and a compound is matched against an element's classes (a set) in bounded work, so time
  * and memory are linear in what it reads. A version's pages (`lintFiles`: the entry and at most 7
  * more) share one `scrollBudget()`: `VERSION_READ` bytes of every sheet read for any of them, its
@@ -74,6 +75,8 @@ export interface ScrollLock {
 const SCANNED = 2 * 1024 * 1024;
 /** How deep `@import` and `@layer` are followed. */
 const DEEPEST = 8;
+/** The most layers a page's sheets name: past that, a new layer's rules aren't read. */
+const MOST_LAYERS = 1_024;
 /** The most parts of a layer's name (`a.b.c`, with the layers it is in): deeper isn't read. */
 const LAYER_PARTS = 16;
 /** The most stylesheets read for one page, each once. */
@@ -541,9 +544,6 @@ function* listOf(text: string): Generator<string> {
   }
 }
 
-/** A list split at its top-level commas. */
-const splitList = (text: string): string[] => [...listOf(text)];
-
 interface Compound {
   readonly tag: string | null;
   readonly ids: readonly string[];
@@ -834,7 +834,7 @@ const UTILITIES: Readonly<Record<string, readonly [string, string]>> = {
   "inline-grid": ["display", "inline-grid"],
   block: ["display", "block"],
 };
-/** Tailwind's arbitrary heights: `h-[calc(100vh-4rem)]`, `max-h-[80vh]`. */
+/** Tailwind's arbitrary heights: `h-[calc(100vh-4rem)]` (`calc(100vh - 4rem)`), `max-h-[80vh]`. */
 const ARBITRARY_HEIGHT = /^(max-)?h-\[([^\]]{1,64})\]$/u;
 
 const compare = (a: readonly number[], b: readonly number[]): number => {
@@ -909,19 +909,28 @@ class Cascade {
   }
 
   /** A layer, declared (its parents first): its place is where it first comes. */
-  declare(name: string) {
+  declare(name: string): boolean {
     if (this.known.has(name)) {
-      return;
+      return true;
     }
+    const add = (layer: string): boolean => {
+      if (this.known.has(layer)) {
+        return true;
+      }
+      // Past MOST_LAYERS a page's layers aren't kept: the new one's rules aren't read.
+      if (this.known.size >= MOST_LAYERS) {
+        return false;
+      }
+      this.known.add(layer);
+      this.layers.push(layer);
+      return true;
+    };
     for (let dot = name.indexOf(".", 1); dot > 0; dot = name.indexOf(".", dot + 1)) {
-      const parent = name.slice(0, dot);
-      if (!this.known.has(parent)) {
-        this.known.add(parent);
-        this.layers.push(parent);
+      if (!add(name.slice(0, dot))) {
+        return false;
       }
     }
-    this.known.add(name);
-    this.layers.push(name);
+    return add(name);
   }
 
   /**
@@ -949,6 +958,19 @@ class Cascade {
     };
     visit(null);
     return out;
+  }
+
+  /**
+   * Whether the page's own `<style>` of `size` may be read: within `READ` for the page (else it
+   * isn't, as a linked sheet past it isn't), and within the version's budget (else nothing more
+   * is, and `spent` says so).
+   */
+  inline(size: number): boolean {
+    if (this.bytes + size > READ || !this.spend(size)) {
+      return false;
+    }
+    this.bytes += size;
+    return true;
   }
 
   /** Whether a stylesheet may still be read for this page (once, within the budget). */
@@ -1163,22 +1185,24 @@ class Cascade {
         if (name === "import" && block === null && !ruled) {
           this.import(rest, context, within);
         } else if (name === "layer") {
-          const names = splitList(rest);
           if (block === null) {
-            for (const each of names) {
+            for (const each of listOf(rest)) {
               const layer = within(each);
               this.declare(tooDeep(layer) ?? layer);
             }
           } else {
             this.anonymous += 1;
-            const layer = within(names[0] ?? `\u0000${this.anonymous}`);
+            const first = listOf(rest).next();
+            const layer = within(first.done === true ? `\u0000${this.anonymous}` : first.value);
             const cut = tooDeep(layer);
             if (cut !== null) {
               this.declare(cut);
               continue;
             }
-            // Its place is where its block opens, whatever it holds.
-            this.declare(layer);
+            // Its place is where its block opens, whatever it holds; past MOST_LAYERS, not read.
+            if (!this.declare(layer)) {
+              continue;
+            }
             this.sheet(text, block[0], block[1], { ...context, layer, depth: context.depth + 1 });
           }
         } else if (
@@ -1269,8 +1293,7 @@ class Cascade {
     }
     if (layer !== null) {
       const cut = tooDeep(layer);
-      this.declare(cut ?? layer);
-      if (cut !== null) {
+      if (!this.declare(cut ?? layer) || cut !== null) {
         return;
       }
     }
@@ -1398,8 +1421,11 @@ export function scrollLock(
       continue;
     }
     if (sheet.kind === "style") {
-      if (!cascade.spend(sheet.end - sheet.start)) {
-        return null;
+      if (!cascade.inline(sheet.end - sheet.start)) {
+        if (shared.spent) {
+          return null;
+        }
+        continue;
       }
       const text = withoutComments(page.slice(sheet.start, sheet.end));
       cascade.sheet(text, 0, text.length, {
@@ -1440,7 +1466,12 @@ export function scrollLock(
     for (const node of chain) {
       for (const name of node.classes) {
         const arbitrary = ARBITRARY_HEIGHT.exec(name);
-        const height = (arbitrary?.[2] ?? "").replaceAll("_", " ").toLowerCase();
+        // As Tailwind writes it: `_` is a space, and calc() has spaces around - and + (its CSS
+        // needs them): `h-[calc(100vh-4rem)]` is `calc(100vh - 4rem)`.
+        const raw = (arbitrary?.[2] ?? "").replaceAll("_", " ").toLowerCase();
+        const height = raw.startsWith("calc(")
+          ? raw.replace(/\s*([+-])\s*/gu, " $1 ").replace(/\(\s+/gu, "(")
+          : raw;
         const utility = Object.hasOwn(UTILITIES, name)
           ? UTILITIES[name]
           : arbitrary === null

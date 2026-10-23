@@ -430,6 +430,15 @@ describe("a page held to one screen (P106)", () => {
         page("html, body { height: 100% } #root { height: calc(100% - 4rem); overflow: hidden }"),
       )[0]?.message,
     ).toContain("#root (height: …; overflow: hidden) holds it");
+    // Tailwind's arbitrary calc(), written without spaces, as Tailwind reads it: one screen.
+    const tailwind = (root: string) =>
+      `<!doctype html><html><head><script src="https://cdn.tailwindcss.com/3.4.17"></script></head><body class="h-screen overflow-hidden"><div id="root" class="${root}"><p>x</p></div></body></html>`;
+    expect(held(tailwind("h-[calc(100vh-4rem)] overflow-hidden"))[0]?.message).toContain(
+      "body (class h-screen overflow-hidden) and #root (class h-[calc(100vh-4rem)] overflow-hidden) hold it to one screen",
+    );
+    expect(held(tailwind("h-[calc(100vh--4rem)] overflow-hidden"))[0]?.message).toContain(
+      "body (class h-screen overflow-hidden) holds it to one screen",
+    );
     // Of a body as tall as its content, it is the content's.
     expect(held(page("#root { height: calc(100% - 4rem); overflow: hidden }"))).toEqual([]);
     // More than that, a negative length, or no space after the minus (not valid CSS): not read.
@@ -704,6 +713,37 @@ describe("a page held to one screen (P106)", () => {
         ),
       ).length,
     ).toBe(1);
+    // A page's sheets name at most 1,024 layers: a new one past them isn't read.
+    const names = (count: number) =>
+      Array.from({ length: count }, (_, index) => `l${index}`).join(", ");
+    expect(
+      held(page(`@layer ${names(1_023)};\n@layer extra { body { overflow: hidden } }`)),
+    ).toHaveLength(1);
+    expect(
+      held(page(`@layer ${names(1_024)};\n@layer extra { body { overflow: hidden } }`)),
+    ).toEqual([]);
+    // With one place left, `a.b` takes it for `a`, and `a.b` itself isn't read.
+    expect(held(page(`@layer ${names(1_023)};\n@layer a.b { body { overflow: hidden } }`))).toEqual(
+      [],
+    );
+    // Unlayered rules, and layers already named, are read as before.
+    expect(
+      held(page(`@layer ${names(1_024)};\n@layer l3 { body { overflow: hidden } }`)),
+    ).toHaveLength(1);
+    // A page's own <style> past 4 MiB isn't read (as a linked sheet past it isn't); the next is.
+    const filler = ".x { color: red }".repeat(300_000);
+    expect(
+      scrollLock(
+        `<!doctype html><html><head><style>${filler}\nbody { overflow: hidden }</style></head><body><p>x</p></body></html>`,
+        { noun: "page" },
+      ),
+    ).toBeNull();
+    expect(
+      scrollLock(
+        `<!doctype html><html><head><style>${filler}</style><style>body { overflow: hidden }</style></head><body><p>x</p></body></html>`,
+        { noun: "page" },
+      ),
+    ).not.toBeNull();
     // A compound of more than 32 ids and classes matches nothing; one of 32 is read.
     const classed = (count: number) =>
       held(

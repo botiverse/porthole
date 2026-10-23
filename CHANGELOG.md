@@ -22,7 +22,7 @@ the manual says a page scrolls as a document.
   the version's linked stylesheets and their `@import`s, `style=""` on those elements, and
   Tailwind's utilities where the page loads Tailwind, by the cascade (specificity, order,
   `!important`, layers), so a later override is seen; each sheet once, at most 32 and 4 MiB a
-  page. The warning names what holds the page and
+  page (its own `<style>` included) and 1,024 layers. The warning names what holds the page and
   the rule that undoes it, e.g. `add html, body, #root { height: auto; overflow: visible;
   position: static } after those rules`; only values of a known shape and plain selectors are
   echoed (and the root's id, else `body > div`, or `body > *` for a custom element), each at most

@@ -295,7 +295,7 @@ export function lintFiles(
   const maxPage = config.limits.maxBytes;
   // The version's pages, read, for the scroll-lock rule after the rest (P106). A page over its
   // limit isn't read at all: its error says so.
-  const pages = new Map<string, string>();
+  const pages = new Set<string>();
   for (const [path, body] of Object.entries(files)) {
     const { role } = fileTypeOf(path);
     if (!knownType(path)) {
@@ -324,7 +324,8 @@ export function lintFiles(
       for (const finding of lintPage(config, text, { scrollLock: false })) {
         findings.push({ ...finding, path });
       }
-      pages.set(path, text);
+      // Its path only: the few the rule reads are decoded again there, one at a time.
+      pages.add(path);
       const lines = linesOf(text);
       check(path, lines, markupReferences(text), directory, "error");
       check(path, lines, patternReferences(text, CSS_REFERENCES), directory, "warning");
@@ -360,11 +361,13 @@ export function lintFiles(
   const budget = scrollBudget();
   const order = [
     ...(pages.has(entry) ? [entry] : []),
-    ...[...pages.keys()].filter((path) => path !== entry).sort(),
+    ...[...pages].filter((path) => path !== entry).sort(),
   ];
   let checked = 0;
   for (const path of order.slice(0, SCROLL_PAGES)) {
-    const held = scrollLock(pages.get(path) ?? "", { noun: it, path, sheet: stylesheet, budget });
+    const body = files[path];
+    const text = body === undefined ? "" : textOf(body);
+    const held = scrollLock(text, { noun: it, path, sheet: stylesheet, budget });
     if (budget.spent) {
       break;
     }
