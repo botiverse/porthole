@@ -1239,6 +1239,69 @@ test("what the page reads of a draft (P107): that it is one, never its count; a 
     ]);
 });
 
+test("the shell's own checks on a raw show (P107): a draft draws no number, a kind it doesn't know is no mark", async ({
+  page,
+  browserName,
+}) => {
+  const display = await referenceHost.launch(page, { config: annotated(), content: DRAFTED });
+  const frame = await display.frame();
+  await expect(frame.locator("#more")).toBeVisible();
+  // The host knows the ids (it takes reports for its own marks only).
+  await showAndDraw(display, frame, [
+    asDraft(textMark("d1", "fell")),
+    textMark("u1", "rose", 4),
+    elementMark("p1", "#more", 2),
+  ]);
+  // Past `checkMarks`, as a host's own transport or an older host could send it: a draft with a
+  // count, a mark of a kind the shell doesn't know. Posted from the host's page, as the host is.
+  const before = (await reports(display)).length;
+  await (
+    await frame.frameElement()
+  ).evaluate(
+    (element, marks) =>
+      (element as HTMLIFrameElement).contentWindow?.postMessage(
+        { jsonrpc: "2.0", method: "porthole/annotate.show", params: { marks } },
+        "*",
+      ),
+    [
+      { ...asDraft(textMark("d1", "fell")), count: 7 },
+      { ...textMark("u1", "rose", 4), kind: "note" },
+      elementMark("p1", "#more", 2),
+    ],
+  );
+  const shown = await next(display, "anchored", before);
+  expect(
+    shown.results.map((each) => each.id).sort(),
+    "probe: the shell drops a mark of a kind it doesn't know",
+  ).toEqual(["d1", "p1"]);
+  await frame.evaluate(
+    () =>
+      new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve(0))),
+      ),
+  );
+  expect(
+    (await markersOnLine(frame, "#p2 i")).runs,
+    "probe: a mark of a kind the shell doesn't know has no marker",
+  ).toEqual([]);
+  if (browserName === "chromium") {
+    expect(
+      (await layerNodes(page, frame, "marker")).map((each) => each.text).sort(),
+      "probe: the shell draws no number for a draft given a count",
+    ).toEqual(["", "2"]);
+  }
+  // On every engine, by its size: a draft's marker is as wide as a bubble without a number.
+  const count = (await reports(display)).length;
+  const fell = await textMarkerPoint(frame, "#p1 b");
+  await page.mouse.click(fell.x, fell.y);
+  const activated = await next(display, "activated", count);
+  expect(activated.id, "the draft's marker click is reported").toBe("d1");
+  expect(
+    activated.rect.width,
+    "probe: the shell draws no number for a draft given a count",
+  ).toBeLessThan(28);
+});
+
 test("following: drafts alone have markers, so a settled scroll is followed (P107)", async ({
   page,
 }) => {

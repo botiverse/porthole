@@ -318,6 +318,12 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "what the page reads of a draft (P107): that it is one, never its count; a posted mark as before",
     ),
   },
+  "draft-shell-checks": {
+    specs: [ANNOTATE],
+    fails: all(
+      "the shell's own checks on a raw show (P107): a draft draws no number, a kind it doesn't know is no mark",
+    ),
+  },
   "annotation-activated-gesture": {
     specs: [ANNOTATE],
     fails: all(

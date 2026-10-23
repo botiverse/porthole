@@ -207,7 +207,7 @@ export const hasMarker = (mark: AnnotationMark): boolean =>
 
 /**
  * The host's marks, checked before they go to the frame; throws on the first bad one. Each is
- * rebuilt as the frame gets it: a posted mark as 0.9 sent it (no `kind`), a draft with
+ * rebuilt as the frame gets it: a posted mark as 0.10.0 sent it (no `kind`), a draft with
  * `kind: "draft"` and without its count (P107: a draft's marker shows no number, so the page isn't
  * told one).
  */

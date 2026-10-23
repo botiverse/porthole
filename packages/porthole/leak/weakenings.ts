@@ -288,6 +288,24 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
         "      return { id: mark.id, anchor, kind, ...(mark.count === undefined ? {} : { count: mark.count }) };",
     },
   ],
+  // The shell's own checks on a show (P107): a draft draws no number, an unknown kind is no mark.
+  "draft-shell-checks": [
+    {
+      file: "src/shell/annotate.ts",
+      find: ' && (mark.kind === undefined || mark.kind === "posted" || mark.kind === "draft"))',
+      replace: ")",
+    },
+    {
+      file: "src/shell/annotate.ts",
+      find: '                const count = !draft && typeof mark.count === "number"',
+      replace: '                const count = typeof mark.count === "number"',
+    },
+    {
+      file: "src/shell/annotate.ts",
+      find: '              const label = mark.draft ? "" : labelOf(mark.count);',
+      replace: '              const label = mark.count === null ? "" : labelOf(mark.count);',
+    },
+  ],
   // A marker's click (P104): the shell reports a trusted one only, never the content's own.
   "marker-trusted": [
     {

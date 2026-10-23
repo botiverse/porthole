@@ -14,7 +14,11 @@ A host can mark a person's unposted comments, drafts, apart from posted ones (P1
   sent and reported as before.
   - **The page reads which marks are drafts**: send a person's drafts only to the frame that person
     views (THREAT_MODEL §7). A draft's `count` is dropped before the frame.
-  - `annotations.show` (and React's `annotations`) throws on any other `kind`, as on a bad anchor.
+  - **Upgrade the content server's Porthole before sending drafts**: the shell is the content
+    server's. A shell before this one, given a draft by a newer host, draws it as a posted mark
+    without a marker (a solid underline, nothing to click), not apart.
+  - Any other `kind` is refused, as a bad anchor is: `annotations.show` throws; React's
+    `annotations` is refused (`onHostError`, kind `"annotations"`).
   - New: `AnnotationMarkKind`.
 
 ## 0.10.0

@@ -5117,7 +5117,7 @@ This is the need: one state, not a knob.
 **Decision.**
 1. **`AnnotationMark.kind?: "posted" | "draft"`**, absent meaning posted. `checkMarks` checks it
    as it checks the other fields: any other value (a typo, another case, a number, null) throws,
-   naming the mark. A posted mark is sent to the frame as 0.10 sent it (no `kind`, whether the host
+   naming the mark. A posted mark is sent to the frame as 0.10.0 sent it (no `kind`, whether the host
    said `"posted"` or nothing), so nothing changes for a host that has no drafts, nor for the page.
 2. **A draft has a marker, never a number.** Its `count` is still checked (a bad one throws: it is
    the host's bug) and then dropped: the frame gets `{ id, anchor, kind: "draft" }`. The shell, too,
@@ -5141,9 +5141,17 @@ This is the need: one state, not a knob.
   writing a comment there before they post it. Accepted, and said in THREAT_MODEL §7: the host sends
   drafts only to their author's own frame (Porthole can't tell whose a frame is: it is the host's
   duty, said in ADOPTING.md); the page is the thing being commented on and already sees where that
-  person selects (`selected`) and points; and what it learns it can't send anywhere its CSP doesn't
-  open (closed egress). Nothing else of a draft reaches it: not its count (dropped, control
-  `draft-count`), and its id is the host's, which ADOPTING.md already asks to say nothing.
+  person selects (`selected`) and points; and closed egress keeps what it learns off the network.
+  Not off the channels the host opens: with the runtime's `db` writes and `user`, a page can read
+  who is viewing (`user.get()`) and which shown marks are drafts, and store "viewer A is drafting
+  at section 3" where its author and other viewers read it before A posts, then tie A's posted
+  comment to A by its anchor and time; origins a config declares for egress (an MCP App's
+  `connectDomains`, an `egress` the host opened; the `liveWidget` preset has none, P103) carry it
+  out the same way (THREAT_MODEL S4, S5, §7). So a draft's existence, place and timing are the page's to
+  pass on wherever the host gave it a way, and ADOPTING.md says: don't send drafts to such a page,
+  or accept that its author and other viewers can learn of them. Nothing else of a draft reaches
+  it: not its count (dropped, control `draft-count`; a host that sends a mark per draft tells how
+  many there are), and its id is the host's, which ADOPTING.md already asks to say nothing.
 - *What content can fake:* `activated` for a draft's id, as for any mark with a marker (P104,
   P105): the host's view of a draft opens on it, guarded as THREAT_MODEL §6 says, and never acts
   (no submit, no discard one click away).
@@ -5151,8 +5159,11 @@ This is the need: one state, not a knob.
   whatever it draws for them, what one of them hasn't posted. That is the host's choice to not make.
 
 **API.** `AnnotationMark.kind`, `AnnotationMarkKind` (exported), `hasMarker` (internal to the host
-and its checks). `annotations.show` throws on a bad `kind`. No other change: posted marks, every
-report, the bridge's rate are as they were.
+and its checks). `annotations.show` throws on a bad `kind` (React's `annotations` reports it
+through `onHostError`, kind `"annotations"`). No other change: posted marks, every report, the
+bridge's rate are as they were. The shell is the content server's: one from before P107, given a
+draft by a newer host, draws it as a posted mark without a marker (it ignores `kind` and has no
+count), so a host upgrades its content server's Porthole before sending drafts.
 
 **Tested.** `test/annotate.test.ts`: `checkMarks` keeps a draft's kind and drops its count, sends
 `"posted"` as nothing, still refuses a draft's bad count, and throws on `"Draft"`, `"note"`, `""`,
@@ -5164,7 +5175,11 @@ and line carry the draft's style and the markers have no number though one draft
 draft and a posted mark together, each drawn its way, the draft's text and element markers' clicks
 and the posted one's reported for their ids, none reaching the content's listeners; the page,
 listening to its own window, reads a draft as `{ id, anchor, kind }` and posted marks as before
-(control `draft-count`, the count left on drafts, fails exactly that test); drafts alone followed
+(control `draft-count`, the count left on drafts, fails exactly that test); a raw `show` posted to
+the frame from the host's page, past `checkMarks`, with a draft given a count and a mark of kind
+`"note"`: the draft's marker is a bubble without a number (by its clicked box on every engine, by
+its words on Chromium) and the unknown kind is neither anchored nor drawn (control
+`draft-shell-checks`, the shell's two checks out, fails exactly that test); drafts alone followed
 once a scroll settles. P104's and P105's marker tests and controls pass as before.
 
 **Threat it re-opens.** None of Porthole's: no default, gate or policy loosens. The page learns one

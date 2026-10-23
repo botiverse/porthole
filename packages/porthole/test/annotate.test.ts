@@ -300,6 +300,8 @@ describe("the host's checks on what a frame reports", () => {
       ).toThrow(/count/u);
     }
     expect(annotateMode(undefined)).toEqual({ elements: true, text: true });
+    expect(annotateMode({ text: false })).toEqual({ elements: true, text: false });
+    expect(() => annotateMode({ elements: false, text: false })).toThrow(/elements, text/u);
   });
 
   test("a mark's kind (P107): a draft is sent without its count, a posted mark as before, any other kind refused", () => {
@@ -311,7 +313,7 @@ describe("the host's checks on what a frame reports", () => {
     expect(checkMarks([{ id: "d1", anchor: element, kind: "draft" }])).toEqual([
       { id: "d1", anchor: element, kind: "draft" },
     ]);
-    // Posted, said or not, goes as 0.10 sent it: no kind key.
+    // Posted, said or not, goes as 0.10.0 sent it: no kind key.
     expect(checkMarks([{ id: "c1", anchor: text, kind: "posted", count: 2 }])).toEqual([
       { id: "c1", anchor: text, count: 2 },
     ]);
@@ -332,8 +334,6 @@ describe("the host's checks on what a frame reports", () => {
     expect(hasMarker({ id: "d1", anchor: text, kind: "draft" })).toBe(true);
     expect(hasMarker({ id: "c1", anchor: text, count: 0 })).toBe(true);
     expect(hasMarker({ id: "c1", anchor: text, kind: "posted" })).toBe(false);
-    expect(annotateMode({ text: false })).toEqual({ elements: true, text: false });
-    expect(() => annotateMode({ elements: false, text: false })).toThrow(/elements, text/u);
   });
 });
 

@@ -275,7 +275,16 @@ display.on("annotation", (report) => {
   is writing a comment there), so send a person's drafts only to the frame that person is viewing,
   never one shared with others. A draft's `count` is dropped before the frame (no number is
   drawn), so give a draft's id at random like any other; a `kind` other than `"posted"` or
-  `"draft"` throws, as a bad anchor does.
+  `"draft"` throws, as a bad anchor does (React: `onHostError`, kind `"annotations"`). The shell
+  is your content server's: upgrade its Porthole first, or an older shell draws a draft as a
+  posted mark without a marker.
+- **No drafts to a page that can pass them on**, or accept that it does: a page with the runtime's
+  `db` writes and `user` can store who is drafting where (`user.get()` and the marks it is shown)
+  for its author and other viewers to read before the draft is posted, and tie the posted comment
+  to its author after; origins its config declares for egress (an MCP App's `connectDomains`, an
+  `egress` you opened) can carry the same out. Send
+  drafts only to pages without such a channel (annotations, `copyText`, `openLink` and the like),
+  or accept that the page's author and other viewers can learn of them (THREAT_MODEL §7).
 - **The content chooses when your view opens and where** (it can post `activated` for a mark you
   show on the person's own press in the content, under their pointer, P105), so a view that a
   report opens or moves takes no press of any kind for 500 ms after it appears or moves (no
