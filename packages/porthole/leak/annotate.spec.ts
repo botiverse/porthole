@@ -617,6 +617,18 @@ const textMark = (id: string, exact: string, count?: number) => ({
 
 /** The markers' labels in the shell's closed layer, as Chromium's inspector sees them. */
 async function markerLabels(page: Page, frame: Frame): Promise<string[]> {
+  return (await layerNodes(page, frame, "marker")).map((each) => each.text);
+}
+
+/**
+ * The nodes of the shell's closed layer whose class has `name` (`marker`, `mark`), with their
+ * class and words, as Chromium's inspector sees them.
+ */
+async function layerNodes(
+  page: Page,
+  frame: Frame,
+  name: string,
+): Promise<{ className: string; text: string }[]> {
   interface Node {
     nodeName: string;
     nodeValue?: string;
@@ -634,7 +646,8 @@ async function markerLabels(page: Page, frame: Frame): Promise<string[]> {
   const { root } = (await session.send("DOM.getDocument", { depth: -1, pierce: true })) as {
     root: Node;
   };
-  const labels: string[] = [];
+  const labels: { className: string; text: string }[] = [];
+  const named = new RegExp(`(^|\\s)${name}(\\s|$)`, "u");
   const text = (node: Node): string =>
     node.nodeName === "#text"
       ? (node.nodeValue ?? "")
@@ -642,8 +655,9 @@ async function markerLabels(page: Page, frame: Frame): Promise<string[]> {
   const walk = (node: Node) => {
     const attributes = node.attributes ?? [];
     const classAt = attributes.indexOf("class");
-    if (classAt !== -1 && /\bmarker\b/u.test(attributes[classAt + 1] ?? "")) {
-      labels.push(text(node));
+    const className = classAt === -1 ? "" : (attributes[classAt + 1] ?? "");
+    if (named.test(className)) {
+      labels.push({ className, text: text(node) });
     }
     for (const child of [
       ...(node.children ?? []),
@@ -1044,6 +1058,220 @@ test("a hostile page fakes a marker's click: the host takes it only for a mark i
   );
   await page.waitForTimeout(400);
   expect((await reports(display)).length, "probe: the host took content's own click").toBe(after);
+});
+
+// Drafts (P107): a person's unsubmitted comments, drawn apart from posted ones: a dashed line and a
+// hollow marker with no number. Activation, anchoring and following work as for posted marks.
+
+const asDraft = <T extends object>(mark: T): T & { kind: "draft" } => ({ ...mark, kind: "draft" });
+
+const DRAFTED = `<h2 id="title" style="margin: 40px 0 24px">Quarterly notes</h2>
+<p id="p1" style="font-size: 18px">Costs <b>fell</b><span id="after"> by three percent this quarter, again and again.</span></p>
+<p id="p2" style="font-size: 18px">Sales <i>rose</i><span id="after2"> by two percent this quarter, again and again.</span></p>
+<button id="more" style="margin: 24px 60px">Read more</button>
+<script>
+  for (const type of ["pointerdown", "pointerup", "mousedown", "mouseup", "click"]) {
+    window.addEventListener(type, () => (document.body.dataset[type] = "yes"), true);
+  }
+  // What the page reads of each show: every mark's fields, as they arrive in its window.
+  window.addEventListener("message", (event) => {
+    const data = event.data;
+    if (data && data.method === "porthole/annotate.show") {
+      document.body.dataset.shown = JSON.stringify(data.params.marks.map((mark) => ({ id: mark.id, keys: Object.keys(mark).sort(), kind: mark.kind, count: mark.count })));
+    }
+  });
+</script>`;
+
+/** The pixels of the whole frame, as the person sees them, the pointer away from it. */
+async function lookAtFrame(page: Page, frame: Frame): Promise<Buffer> {
+  const box = await (await frame.frameElement()).boundingBox();
+  if (box === null) {
+    throw new Error("no frame");
+  }
+  await page.mouse.move(0, 0);
+  return page.screenshot({ clip: box, animations: "disabled" });
+}
+
+/** Shows `marks`, then waits for the frame to draw them: their report, and two frames after it. */
+async function showAndDraw(display: ReferenceDisplay, frame: Frame, marks: unknown[]) {
+  const before = (await reports(display)).length;
+  await display.annotate("show", marks);
+  await next(display, "anchored", before);
+  await frame.evaluate(
+    () =>
+      new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve(0))),
+      ),
+  );
+}
+
+test("drafts (P107): a dashed line and a hollow marker with no number, apart from posted marks; their clicks are reported the same", async ({
+  page,
+  browserName,
+}) => {
+  const display = await referenceHost.launch(page, { config: annotated(), content: DRAFTED });
+  const frame = await display.frame();
+  await expect(frame.locator("#more")).toBeVisible();
+  const bare = await lookAtFrame(page, frame);
+
+  // The same anchors, posted (a bubble alone, count 0, so neither has a number) and then drafts:
+  // the frame looks different each way, and the words' own line differs too.
+  await showAndDraw(display, frame, [textMark("fell", "fell", 0), elementMark("more", "#more", 0)]);
+  const posted = await lookAtFrame(page, frame);
+  const postedWords = await look(page, frame, "#p1 b");
+  // A draft given a count shows no number (the host drops it; the shell would draw none anyway).
+  await showAndDraw(display, frame, [
+    asDraft(textMark("fell", "fell", 7)),
+    asDraft(elementMark("more", "#more")),
+  ]);
+  const drafted = await lookAtFrame(page, frame);
+  const draftedWords = await look(page, frame, "#p1 b");
+  expect(drafted.equals(bare), "probe: drafts are drawn").toBe(false);
+  expect(drafted.equals(posted), "probe: drafts are drawn apart from posted marks").toBe(false);
+  expect(draftedWords.equals(postedWords), "probe: a draft's line is not a posted one's").toBe(
+    false,
+  );
+  if (browserName === "chromium") {
+    await expect
+      .poll(async () => (await layerNodes(page, frame, "marker")).map((each) => each.text), {
+        message: "probe: a draft's marker has no number, even given a count",
+      })
+      .toEqual(["", ""]);
+    for (const each of await layerNodes(page, frame, "marker")) {
+      expect(each.className, "probe: each draft's marker is drawn as a draft's").toMatch(
+        /(^|\s)draft(\s|$)/u,
+      );
+    }
+    const lines = await layerNodes(page, frame, "mark");
+    expect(lines.length, "both drafts are marked").toBeGreaterThanOrEqual(2);
+    for (const each of lines) {
+      expect(each.className, "probe: each draft's line is drawn as a draft's").toMatch(
+        /(^|\s)draft(\s|$)/u,
+      );
+    }
+  }
+
+  // A draft and a posted mark together: each drawn its own way, each click reported for its id.
+  await showAndDraw(display, frame, [
+    asDraft(textMark("fell", "fell")),
+    textMark("rose", "rose", 3),
+    asDraft(elementMark("more", "#more")),
+  ]);
+  if (browserName === "chromium") {
+    const markers = await layerNodes(page, frame, "marker");
+    // In the layer's order (a kept marker stays where it was): as kinds and numbers.
+    expect(
+      markers
+        .map(
+          (each) =>
+            `${/(^|\s)draft(\s|$)/u.test(each.className) ? "draft" : "posted"}:${each.text}`,
+        )
+        .sort(),
+      "probe: posted marks are drawn as before, beside drafts",
+    ).toEqual(["draft:", "draft:", "posted:3"]);
+  }
+  let count = (await reports(display)).length;
+  const fell = await textMarkerPoint(frame, "#p1 b");
+  await page.mouse.click(fell.x, fell.y);
+  const activated = await next(display, "activated", count);
+  expect(activated.id, "probe: a draft's marker click is reported for its id").toBe("fell");
+  const frameBox = await (await frame.frameElement()).boundingBox();
+  const left = activated.rect.x + (frameBox?.x ?? 0);
+  expect(left, "probe: the reported box is the draft's marker").toBeLessThanOrEqual(fell.x);
+  expect(
+    left + activated.rect.width,
+    "probe: the reported box is the draft's marker",
+  ).toBeGreaterThanOrEqual(fell.x);
+  count = (await reports(display)).length;
+  const rose = await textMarkerPoint(frame, "#p2 i");
+  await page.mouse.click(rose.x, rose.y);
+  expect(
+    (await next(display, "activated", count)).id,
+    "probe: a posted marker's click beside drafts is reported for its id",
+  ).toBe("rose");
+  const more = await frame.locator("#more").boundingBox();
+  if (more === null) {
+    throw new Error("no button");
+  }
+  count = (await reports(display)).length;
+  await page.mouse.click(more.x + more.width, more.y);
+  expect(
+    (await next(display, "activated", count)).id,
+    "probe: a draft element's marker click is reported for its id",
+  ).toBe("more");
+  for (const attribute of [
+    "data-pointerdown",
+    "data-pointerup",
+    "data-mousedown",
+    "data-mouseup",
+    "data-click",
+  ]) {
+    expect(
+      await frame.locator("body").getAttribute(attribute),
+      `probe: no draft's or posted marker's press reached the content (${attribute})`,
+    ).toBeNull();
+  }
+});
+
+test("what the page reads of a draft (P107): that it is one, never its count; a posted mark as before", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, { config: annotated(), content: DRAFTED });
+  const frame = await display.frame();
+  await expect(frame.locator("#more")).toBeVisible();
+  await display.annotate("show", [
+    asDraft(textMark("d1", "fell", 5)),
+    textMark("p1", "rose", 2),
+    { ...textMark("p2", "again", 1), kind: "posted" },
+    elementMark("p3", "#more"),
+  ]);
+  await next(display, "anchored");
+  await expect
+    .poll(
+      async () => JSON.parse((await frame.locator("body").getAttribute("data-shown")) ?? "null"),
+      { message: "probe: a draft carries its kind and no count; posted marks no kind" },
+    )
+    .toEqual([
+      { id: "d1", keys: ["anchor", "id", "kind"], kind: "draft" },
+      { id: "p1", keys: ["anchor", "count", "id"], count: 2 },
+      { id: "p2", keys: ["anchor", "count", "id"], count: 1 },
+      { id: "p3", keys: ["anchor", "id"] },
+    ]);
+});
+
+test("following: drafts alone have markers, so a settled scroll is followed (P107)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    content: SCROLLING,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#far")).toBeAttached();
+  await display.annotate("show", [
+    asDraft(elementMark("top", "#top")),
+    asDraft(textMark("near", "near paragraph")),
+  ]);
+  const shown = await next(display, "anchored");
+  const before = new Map(shown.results.map((each) => [each.id, each.rect]));
+  const count = (await reports(display)).length;
+  await frame.evaluate(() => window.scrollBy(0, 200));
+  await expect
+    .poll(
+      async () => {
+        const last = (await reports(display))
+          .slice(count)
+          .filter(
+            (each): each is Extract<AnnotationReport, { type: "anchored" }> =>
+              each.type === "anchored",
+          )
+          .at(-1);
+        const top = last?.results.find((each) => each.id === "top")?.rect?.y;
+        return top === undefined ? null : Math.round((before.get("top")?.y ?? 0) - top);
+      },
+      { message: "probe: a draft is followed once the scroll settles", timeout: 5_000 },
+    )
+    .toBe(200);
 });
 
 test("following: a change of the content that moves a mark, but loses none, reports the moved marks once quiet", async ({

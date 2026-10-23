@@ -4,6 +4,7 @@ import {
   annotateMode,
   checkMarks,
   clampRect,
+  hasMarker,
   parseAnchor,
   parseRect,
   parseReport,
@@ -299,6 +300,38 @@ describe("the host's checks on what a frame reports", () => {
       ).toThrow(/count/u);
     }
     expect(annotateMode(undefined)).toEqual({ elements: true, text: true });
+  });
+
+  test("a mark's kind (P107): a draft is sent without its count, a posted mark as before, any other kind refused", () => {
+    // A draft keeps its kind and loses its count: its marker shows no number, so the page isn't
+    // told one.
+    expect(checkMarks([{ id: "d1", anchor: text, kind: "draft", count: 4 }])).toEqual([
+      { id: "d1", anchor: text, kind: "draft" },
+    ]);
+    expect(checkMarks([{ id: "d1", anchor: element, kind: "draft" }])).toEqual([
+      { id: "d1", anchor: element, kind: "draft" },
+    ]);
+    // Posted, said or not, goes as 0.10 sent it: no kind key.
+    expect(checkMarks([{ id: "c1", anchor: text, kind: "posted", count: 2 }])).toEqual([
+      { id: "c1", anchor: text, count: 2 },
+    ]);
+    expect(Object.keys(checkMarks([{ id: "c1", anchor: text, kind: "posted" }])[0] ?? {})).toEqual([
+      "id",
+      "anchor",
+    ]);
+    // A draft's count is still checked: a bad one is the host's bug, thrown as for a posted mark.
+    expect(() => checkMarks([{ id: "d1", anchor: text, kind: "draft", count: -1 }])).toThrow(
+      /count/u,
+    );
+    for (const kind of ["Draft", "note", "", "draft ", 1, null, true, {}]) {
+      expect(
+        () => checkMarks([{ id: "d1", anchor: text, kind: kind as "draft" }]),
+        JSON.stringify(kind),
+      ).toThrow(/kind/u);
+    }
+    expect(hasMarker({ id: "d1", anchor: text, kind: "draft" })).toBe(true);
+    expect(hasMarker({ id: "c1", anchor: text, count: 0 })).toBe(true);
+    expect(hasMarker({ id: "c1", anchor: text, kind: "posted" })).toBe(false);
     expect(annotateMode({ text: false })).toEqual({ elements: true, text: false });
     expect(() => annotateMode({ elements: false, text: false })).toThrow(/elements, text/u);
   });
@@ -398,6 +431,23 @@ describe("a marker's click (P104), on createHost over a stand-in platform", () =
     t.display.annotations.clear();
     await t.activate({ id: "c1", rect });
     expect(t.reports).toHaveLength(2);
+  });
+
+  test("is taken for a draft's marker, with or without a count (P107)", async () => {
+    const t = mount();
+    t.display.annotations.show([
+      { id: "d1", anchor: text, kind: "draft" },
+      { id: "d2", anchor: element, kind: "draft", count: 3 },
+      { id: "c1", anchor: text, kind: "posted" },
+    ]);
+    await t.activate({ id: "d1", rect });
+    await t.activate({ id: "d2", rect });
+    // Posted without a count: no marker, as before.
+    await t.activate({ id: "c1", rect });
+    expect(t.reports).toEqual([
+      { type: "activated", id: "d1", rect },
+      { type: "activated", id: "d2", rect },
+    ]);
   });
 
   test("is taken only within a gesture, where the platform can tell (P105)", async () => {

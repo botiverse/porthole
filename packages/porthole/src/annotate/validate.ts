@@ -198,7 +198,19 @@ export function annotateMode(mode: AnnotateMode | undefined): Required<AnnotateM
   return { elements, text: words };
 }
 
-/** The host's marks, checked before they go to the frame; throws on the first bad one. */
+/**
+ * Whether a mark gets a marker, the one thing a person can click (P104): one with a `count`, and
+ * every draft (P107).
+ */
+export const hasMarker = (mark: AnnotationMark): boolean =>
+  mark.count !== undefined || mark.kind === "draft";
+
+/**
+ * The host's marks, checked before they go to the frame; throws on the first bad one. Each is
+ * rebuilt as the frame gets it: a posted mark as 0.9 sent it (no `kind`), a draft with
+ * `kind: "draft"` and without its count (P107: a draft's marker shows no number, so the page isn't
+ * told one).
+ */
 export function checkMarks(marks: readonly AnnotationMark[]): AnnotationMark[] {
   if (!Array.isArray(marks) || marks.length > LIMITS.marks) {
     throw new TypeError(`annotations.show: at most ${LIMITS.marks} marks`);
@@ -216,7 +228,14 @@ export function checkMarks(marks: readonly AnnotationMark[]): AnnotationMark[] {
         `annotations.show: mark ${index}'s count is a whole number from 0 to ${LIMITS.count}`,
       );
     }
+    const kind: unknown = mark.kind;
+    if (kind !== undefined && kind !== "posted" && kind !== "draft") {
+      throw new TypeError(`annotations.show: mark ${index}'s kind is "posted" or "draft"`);
+    }
     seen.add(mark.id);
+    if (kind === "draft") {
+      return { id: mark.id, anchor, kind };
+    }
     return { id: mark.id, anchor, ...(mark.count === undefined ? {} : { count: mark.count }) };
   });
 }

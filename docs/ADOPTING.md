@@ -251,10 +251,16 @@ createHost(config, {
 With `annotate` declared (`capabilities: { annotate: {} }`), a host lets people point at a
 display and keeps its comments beside it ([P053](DECISIONS.md), P104). Everything the frame
 reports is the page's word: a hint where to draw, never a permission. A mark's `count` puts a
-numbered marker beside its words; a click on one is `activated`.
+numbered marker beside its words; a click on one is `activated`. A draft, a comment its author
+hasn't posted yet (`kind: "draft"`, P107), is drawn apart: a dashed line and a hollow marker with no
+number, which is clicked and followed as a posted one is.
 
 ```js
-display.annotations.show(comments.map((c) => ({ id: c.markId, anchor: c.anchor, count: c.replies })));
+display.annotations.show([
+  ...comments.map((c) => ({ id: c.markId, anchor: c.anchor, count: c.replies })),
+  // Only in the author's own frame: the page can read that these are drafts.
+  ...myDrafts.map((d) => ({ id: d.markId, anchor: d.anchor, kind: "draft" })),
+]);
 display.annotations.start({ elements: false, text: true }); // comment mode: the person selects words
 display.on("annotation", (report) => {
   if (report.type === "selected") composer.openBeside(frame, report.rect, report.anchor);
@@ -265,6 +271,11 @@ display.on("annotation", (report) => {
 
 - **Ids say nothing, and a count only where the page may know it**: the content reads every
   `show`. Who wrote what stays in your view, outside the frame.
+- **Drafts only to their author's frame**: the page reads which marks are drafts (that its viewer
+  is writing a comment there), so send a person's drafts only to the frame that person is viewing,
+  never one shared with others. A draft's `count` is dropped before the frame (no number is
+  drawn), so give a draft's id at random like any other; a `kind` other than `"posted"` or
+  `"draft"` throws, as a bad anchor does.
 - **The content chooses when your view opens and where** (it can post `activated` for a mark you
   show on the person's own press in the content, under their pointer, P105), so a view that a
   report opens or moves takes no press of any kind for 500 ms after it appears or moves (no

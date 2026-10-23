@@ -587,7 +587,8 @@ export interface PortholeFrameProps {
   readonly annotating?: AnnotateMode | null;
   /**
    * The anchors to mark in the frame (the host's comments). A mark with a `count` gets a
-   * clickable marker (P104). Compared by value.
+   * clickable marker (P104); a draft (`kind: "draft"`, the author's own frame only) a hollow one
+   * with no number (P107). Compared by value.
    */
   readonly annotations?: readonly AnnotationMark[];
   /**

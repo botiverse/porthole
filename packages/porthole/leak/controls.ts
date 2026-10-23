@@ -311,6 +311,13 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "following: a host that gives no counts hears no follow-up after a scroll, as before markers",
     ),
   },
+  // P107: the host drops a draft's count before the frame.
+  "draft-count": {
+    specs: [ANNOTATE],
+    fails: all(
+      "what the page reads of a draft (P107): that it is one, never its count; a posted mark as before",
+    ),
+  },
   "annotation-activated-gesture": {
     specs: [ANNOTATE],
     fails: all(

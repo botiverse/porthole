@@ -3,6 +3,20 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## Unreleased
+
+A host can mark a person's unposted comments, drafts, apart from posted ones (P107).
+
+- **Drafts** (P107): `AnnotationMark.kind` is `"posted"` (the default, as absent) or `"draft"`. A
+  draft is drawn with a dashed underline (a dashed outline on an element) and a hollow marker with
+  no number, beside its words as a posted marker is; its click is `activated`, its place
+  `anchored`, and it is followed after a scroll, with or without a count. Posted marks are drawn,
+  sent and reported as before.
+  - **The page reads which marks are drafts**: send a person's drafts only to the frame that person
+    views (THREAT_MODEL §7). A draft's `count` is dropped before the frame.
+  - `annotations.show` (and React's `annotations`) throws on any other `kind`, as on a bad anchor.
+  - New: `AnnotationMarkKind`.
+
 ## 0.10.0
 
 After the review of P104 (P105): a host guards the view a marker's click opens, `activated` needs
