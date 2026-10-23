@@ -4849,6 +4849,9 @@ P097's CI triggers. From the audit of 2026-10-19 (V01, V02).
    registry), each uploading its reports and `verdicts.json`; the `controls` job puts them
    together (`--summary`) and fails if any control failed or never ran on an engine. A job's
    name changed, so release.yml's REQUIRED_CI_JOBS lists the twelve shards and `controls`.
+   Later (0.11.0, #46): a shard runs about 42 minutes, but a browser install that usually takes
+   20 seconds took 21 (apt mirrors) and the 60-minute shard was cancelled with every control it
+   reached passing. A shard now allows 90 minutes, and its install fails on its own past 25.
 
 **Why.** PRINCIPLE 6: a wall never seen to fail proves nothing, and a check that says a wall was
 seen to fail when its run never happened is worse than no check. CI's "every control" was 7 of
