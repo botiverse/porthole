@@ -78,11 +78,13 @@ jobs:
   # each engine, and nothing else; a run that didn't happen, or a probe skipped, never run or timed
   # out, fails. A whole engine's controls outlast a job, so each job runs one of four shards
   # (split by measured weight, `--shard k/4`), and `controls` checks every shard's verdicts: every
-  # control ran and held on every engine.
+  # control ran and held on every engine. A shard runs about 42 minutes; the browser install
+  # usually takes 20 seconds but has taken 21 minutes (apt mirrors), so the job allows 90 and
+  # the install fails on its own past 25, naming the slow step instead of a cancelled run.
   controls-shard:
     name: controls (${{ matrix.engine }}, ${{ matrix.shard }}/4)
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -99,6 +101,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @botiverse/porthole exec playwright install --with-deps ${{ matrix.engine }}
+        timeout-minutes: 25
       - run: pnpm --filter @botiverse/porthole exec node scripts/controls.ts --shard ${{ matrix.shard }}/4
         env:
           PORTHOLE_LEAK_ENGINES: ${{ matrix.engine }}
