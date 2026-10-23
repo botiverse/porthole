@@ -4595,7 +4595,7 @@ second wall on a tab); a host needs a served page to open windows from a tab (th
 `'self'` default (it joins `FRAME_DENIED_FEATURES`); or WebKit and Firefox apply
 `Permissions-Policy` to these features (the shell's device locks become the second wall there too).
 
-## P104 · 2026-10-20 · Annotation markers: a number at an anchor, a click the host hears, marks that follow a scroll · Accepted; amended by P105
+## P104 · 2026-10-20 · Annotation markers: a number at an anchor, a click the host hears, marks that follow a scroll · Accepted; amended by P105, P107
 
 A host that shows its comments beside an artifact page wants, at each comment's anchor in the page,
 a small marker (a bubble and how many comments are there) that scrolls with the content; a click on
@@ -5349,3 +5349,97 @@ Vite + React fixture still lint clean.
 viewer scrolls the frame itself (a page then can't be held), or the misses above show up in
 published pages.
 
+## P107 · 2026-10-23 · Draft marks: a person's unposted comments, a dashed line and a hollow marker with no number · Accepted
+
+A host adding batch comments (Raft Artifacts) shows a person's unsubmitted comments, drafts, in the
+page while they write more: at their anchors, in a style apart from posted comments, so that what
+others can already read and what only the author has written so far don't look alike. P104's marks
+have one look (a solid underline, a filled numbered marker, or neither), and P104 rejected a style
+knob per mark for want of a need. This is the need: one state, not a knob.
+
+**Decision.**
+1. **`AnnotationMark.kind?: "posted" | "draft"`**, absent meaning posted. `checkMarks` checks it
+   as it checks the other fields: any other value (a typo, another case, a number, null) throws,
+   naming the mark. A posted mark is sent to the frame as 0.10.0 sent it (no `kind`, whether the host
+   said `"posted"` or nothing), so nothing changes for a host that has no drafts, nor for the page.
+2. **A draft has a marker, never a number.** Its `count` is still checked (a bad one throws: it is
+   the host's bug) and then dropped: the frame gets `{ id, anchor, kind: "draft" }`. The shell, too,
+   draws no number for a draft and drops a mark of a kind it doesn't know. A draft gets a marker
+   with or without a count (`hasMarker`), so everything P104 and P105 give a mark with a marker it
+   gets the same way: `activated` taken for its id (within a gesture), `anchored` with the rest,
+   following after a scroll or a change of the content (a host whose only markers are drafts is
+   followed), placement in the gutter, compact where it must, stepping aside while picking.
+3. **Drawn apart.** A draft's text mark is a dashed 2 px underline (3 px when active) over a
+   lighter fill than a posted mark's; an element's is P104's quiet outline, dashed. Its marker is
+   hollow: a near-white bubble with a 1 px dashed amber edge and the bubble glyph's outline
+   (stroked, not filled), no number, the same size as a posted marker without one (so placement is
+   unchanged). Hover and active lighten it, as they do a posted one. The colors are the layer's own,
+   as P104's are (the page's styles don't reach the layer), and read on light and dark pages. No
+   new motion (the focus flash is the posted mark's). The shell has no forced-colors or
+   high-contrast styles of its own; in forced colors a draft's dashed borders survive where the
+   posted marks' box-shadow underline doesn't, which is the shell's gap, not this change's.
+
+**Trust.** Unchanged in kind from P104; one thing more the page learns.
+- *What content can now learn:* which of its marks are drafts, that the person viewing it is
+  writing a comment there before they post it. Accepted, and said in THREAT_MODEL §7: the host sends
+  drafts only to their author's own frame (Porthole can't tell whose a frame is: it is the host's
+  duty, said in ADOPTING.md); the page is the thing being commented on and already sees where that
+  person selects (`selected`) and points; and closed egress keeps what it learns off the network.
+  Not off the channels the host opens: with the runtime's `db` writes and `user`, a page can read
+  who is viewing (`user.get()`) and which shown marks are drafts, and store "viewer A is drafting
+  at section 3" where its author and other viewers read it before A posts, then tie A's posted
+  comment to A by its anchor and time; origins a config declares for egress (an MCP App's
+  `connectDomains`, an `egress` the host opened; the `liveWidget` preset has none, P103) carry it
+  out the same way (THREAT_MODEL S4, S5, §7). So a draft's existence, place and timing are the page's to
+  pass on wherever the host gave it a way, and ADOPTING.md says: don't send drafts to such a page,
+  or accept that its author and other viewers can learn of them. Nothing else of a draft reaches
+  it: not its count (dropped, control `draft-count`; a host that sends a mark per draft tells how
+  many there are), and its id is the host's, which ADOPTING.md already asks to say nothing.
+- *What content can fake:* `activated` for a draft's id, as for any mark with a marker (P104,
+  P105): the host's view of a draft opens on it, guarded as THREAT_MODEL §6 says, and never acts
+  (no submit, no discard one click away).
+- *A shared frame:* a host that sends drafts into a frame several people see tells that page, and
+  whatever it draws for them, what one of them hasn't posted. That is the host's choice to not make.
+
+**API.** `AnnotationMark.kind`, `AnnotationMarkKind` (exported), `hasMarker` (internal to the host
+and its checks). `annotations.show` throws on a bad `kind` (React's `annotations` reports it
+through `onHostError`, kind `"annotations"`). No other change: posted marks, every report, the
+bridge's rate are as they were. The shell is the content server's: one from before P107, given a
+draft by a newer host, draws it as a posted mark without a marker (it ignores `kind` and has no
+count), so a host upgrades its content server's Porthole before sending drafts.
+
+**Tested.** `test/annotate.test.ts`: `checkMarks` keeps a draft's kind and drops its count, sends
+`"posted"` as nothing, still refuses a draft's bad count, and throws on `"Draft"`, `"note"`, `""`,
+`"draft "`, 1, null, true and `{}`; on `createHost` over a stand-in platform, `activated` taken for a
+draft with and without a count, and dropped for a posted mark without one. `leak/annotate.spec.ts`,
+on Chromium, WebKit and Firefox: the same anchors as posted marks (count 0, so neither has a number)
+and then as drafts look different in the frame and on the words; on Chromium, every draft's marker
+and line carry the draft's style and the markers have no number though one draft was given 7; a
+draft and a posted mark together, each drawn its way, the draft's text and element markers' clicks
+and the posted one's reported for their ids, none reaching the content's listeners (control
+`marker-click`, the shell's stop out, fails it too); the page,
+listening to its own window, reads a draft as `{ id, anchor, kind }` and posted marks as before
+(control `draft-count`, the count left on drafts, fails exactly that test); a raw `show` posted to
+the frame from the host's page, past `checkMarks`, with a draft given a count and a mark of kind
+`"note"`: the draft's marker is a bubble without a number (by its clicked box on every engine, by
+its words on Chromium) and the unknown kind is neither anchored nor drawn (control
+`draft-shell-checks`, the shell's two checks out, fails exactly that test); drafts alone followed
+once a scroll settles. P104's and P105's marker tests and controls pass as before.
+
+**Threat it re-opens.** None of Porthole's: no default, gate or policy loosens. The page learns one
+fact more (a mark is a draft), bounded by the host's duty above.
+
+**Rejected.**
+- A style per mark (colors, dashes) for the host to choose: P104's reason; two states cover the
+  need, and a style the host picks is one more thing the page reads.
+- Hiding that a mark is a draft from the page (drawing drafts the host's own way, over the frame):
+  the host can't place over the frame what moves with the frame's scroll without the frame's
+  reports, which is what markers are; and the author's own frame is the one place a draft goes.
+- A draft's count drawn as a number: a hollow marker with a number reads as posted; a host with
+  several drafts at an anchor gives them one mark or several, as it likes.
+- A dot without the glyph: the bubble's outline reads as "a comment, not yet", and keeps the size,
+  so a draft's marker sits where a posted one would.
+
+**Revisit when** a host needs drafts in a frame others see (then the host draws them itself), a
+third state is asked for (resolved, private: then a state list, still not a style knob), the
+shell gets forced-colors styles, or MCP Apps defines annotations.

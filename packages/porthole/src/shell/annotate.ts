@@ -16,7 +16,8 @@
  *   is reported `orphaned`;
  * - markers (P104): a mark with a count gets a small bubble with the number beside its anchor's
  *   last line (P105: in the line's gutter); a click on it is reported (`activated`), and the
- *   content's own handlers never see it;
+ *   content's own handlers never see it; a draft (P107) is drawn apart, a dashed line and a hollow
+ *   bubble with no number, and has a marker with or without a count;
  * - following: while a mark has a marker, once a scroll, a resize or a change of the content
  *   settles, the marks that moved since the host was last told are reported, at most once a
  *   second, so the host's own UI beside a mark can follow.
@@ -364,8 +365,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       // they are; the active one and a flash add a ring around it, not more fill over its words.
       // An element's mark with a marker is quieter (a thin line): the marker says what it is.
       // A marker is a small bubble with a number, drawn in its own colors and font (only what the
-      // layer inherits from the page could reach it, so each of those is set here).
-      const STYLE = ".mark{position:absolute;border-radius:2px;background:rgba(250,204,21,.18);box-shadow:inset 0 -2px 0 rgba(234,179,8,.95)}.mark.element{background:rgba(250,204,21,.07);box-shadow:none;outline:2px solid rgba(234,179,8,.9);outline-offset:1px}.mark.active{background:rgba(250,204,21,.26);box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 2px rgba(234,179,8,.45)}.mark.element.active{background:rgba(250,204,21,.12);box-shadow:none;outline-width:3px}.mark.element.quiet{background:rgba(250,204,21,.05);outline:1px solid rgba(234,179,8,.6);outline-offset:2px}.mark.element.quiet.active{background:rgba(250,204,21,.1);outline:2px solid rgba(234,179,8,.9)}.marker{position:absolute;box-sizing:border-box;height:18px;min-width:18px;display:flex;align-items:center;justify-content:center;gap:3px;margin:0;padding:0 5px;border:1px solid rgba(161,98,7,.6);border-radius:9px 9px 9px 2px;background:#fde68a;color:#422006;box-shadow:0 1px 2px rgba(0,0,0,.3);font:600 11px/16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-style:normal;letter-spacing:0;word-spacing:0;text-transform:none;text-indent:0;text-shadow:none;direction:ltr;writing-mode:horizontal-tb;white-space:nowrap;user-select:none;-webkit-user-select:none;cursor:pointer;pointer-events:auto}.marker:hover{background:#fcd34d}.marker.active{background:#facc15;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.3)}.marker.compact{padding:0 4px}.marker.inert{pointer-events:none}.marker svg{display:block;width:11px;height:11px;flex:none}.mark.flash{animation:flash 1.8s ease-out}@keyframes flash{from{box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 6px rgba(250,204,21,.6)}}.hover{position:absolute;outline:2px solid #2563eb;outline-offset:1px;background:rgba(37,99,235,.12)}.tag{position:absolute;max-width:70vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace;padding:0 6px;border-radius:4px;background:#1e293b;color:#fff}";
+      // layer inherits from the page could reach it, so each of those is set here). A draft
+      // (P107) is a comment not yet posted: its line is dashed (an element's outline too) and its
+      // marker hollow, a light bubble with a dashed edge and the glyph's outline, no number.
+      const STYLE = ".mark{position:absolute;border-radius:2px;background:rgba(250,204,21,.18);box-shadow:inset 0 -2px 0 rgba(234,179,8,.95)}.mark.element{background:rgba(250,204,21,.07);box-shadow:none;outline:2px solid rgba(234,179,8,.9);outline-offset:1px}.mark.active{background:rgba(250,204,21,.26);box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 2px rgba(234,179,8,.45)}.mark.element.active{background:rgba(250,204,21,.12);box-shadow:none;outline-width:3px}.mark.element.quiet{background:rgba(250,204,21,.05);outline:1px solid rgba(234,179,8,.6);outline-offset:2px}.mark.element.quiet.active{background:rgba(250,204,21,.1);outline:2px solid rgba(234,179,8,.9)}.mark.draft{box-sizing:border-box;background:rgba(250,204,21,.08);box-shadow:none;border-bottom:2px dashed rgba(202,138,4,.95)}.mark.draft.active{background:rgba(250,204,21,.16);box-shadow:0 0 0 2px rgba(234,179,8,.45);border-bottom-width:3px}.mark.element.draft{background:rgba(250,204,21,.04);border-bottom:0;outline-style:dashed}.mark.element.draft.active{background:rgba(250,204,21,.08);box-shadow:none;outline-style:dashed}.marker{position:absolute;box-sizing:border-box;height:18px;min-width:18px;display:flex;align-items:center;justify-content:center;gap:3px;margin:0;padding:0 5px;border:1px solid rgba(161,98,7,.6);border-radius:9px 9px 9px 2px;background:#fde68a;color:#422006;box-shadow:0 1px 2px rgba(0,0,0,.3);font:600 11px/16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-style:normal;letter-spacing:0;word-spacing:0;text-transform:none;text-indent:0;text-shadow:none;direction:ltr;writing-mode:horizontal-tb;white-space:nowrap;user-select:none;-webkit-user-select:none;cursor:pointer;pointer-events:auto}.marker:hover{background:#fcd34d}.marker.active{background:#facc15;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.3)}.marker.compact{padding:0 4px}.marker.draft{border:1px dashed rgb(202,138,4);background:#fffdf5;color:#a16207;box-shadow:0 1px 2px rgba(0,0,0,.2)}.marker.draft:hover{background:#fef9e7}.marker.draft.active{background:#fef3c7;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.2)}.marker.inert{pointer-events:none}.marker svg{display:block;width:11px;height:11px;flex:none}.mark.flash{animation:flash 1.8s ease-out}@keyframes flash{from{box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 6px rgba(250,204,21,.6)}}.hover{position:absolute;outline:2px solid #2563eb;outline-offset:1px;background:rgba(37,99,235,.12)}.tag{position:absolute;max-width:70vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace;padding:0 6px;border-radius:4px;background:#1e293b;color:#fff}";
       // Inline and important: the content's own style sheets can't hide, shrink or move it by
       // accident. Set again at each draw, since its scripts can rewrite it (narrowing only: the
       // content can still cover the layer, or move it with its ancestors, P104).
@@ -645,10 +648,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           // window's first listener stops every click on the layer); the click is told there.
           callOf(listenOn, marker, ["click", tapTarget]);
         }
-        marker.className = "marker" + (each.compact ? " compact" : "") + (mark.id === active ? " active" : "") + (mode.elements ? " inert" : "");
+        marker.className = "marker" + (mark.draft ? " draft" : "") + (each.compact ? " compact" : "") + (mark.id === active ? " active" : "") + (mode.elements ? " inert" : "");
         marker.style.cssText = "left:" + each.left + "px;top:" + each.top + "px";
         markers.push({ id: mark.id, element: marker });
-        const form = (each.compact ? "compact:" : "full:") + label;
+        const form = (mark.draft ? "draft:" : "") + (each.compact ? "compact:" : "full:") + label;
         if (kept && kept.form === form) {
           return marker;
         }
@@ -659,7 +662,15 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           glyph.setAttribute("viewBox", "0 0 16 16");
           glyph.setAttribute("aria-hidden", "true");
           const path = createElementNS.call(document, SVG, "path");
-          path.setAttribute("fill", "currentColor");
+          // A draft's glyph is its outline (P107), a posted one's filled.
+          if (mark.draft) {
+            path.setAttribute("fill", "none");
+            path.setAttribute("stroke", "currentColor");
+            path.setAttribute("stroke-width", "1.5");
+            path.setAttribute("stroke-linejoin", "round");
+          } else {
+            path.setAttribute("fill", "currentColor");
+          }
           path.setAttribute("d", "M3 2h10a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H8l-4 3v-3H3a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z");
           glyph.appendChild(path);
           marker.appendChild(glyph);
@@ -719,14 +730,15 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
               continue;
             }
             const each = createElement.call(document, "div");
-            each.className = "mark " + (mark.found.range ? "text" : "element") + (mark.count === null ? "" : " quiet") + (mark.id === active || mark.id === hot ? " active" : "") + (flashOn && mark.id === flashing ? " flash" : "");
+            each.className = "mark " + (mark.found.range ? "text" : "element") + (mark.marker ? " quiet" : "") + (mark.draft ? " draft" : "") + (mark.id === active || mark.id === hot ? " active" : "") + (flashOn && mark.id === flashing ? " flash" : "");
             each.style.cssText = "left:" + rect.left + "px;top:" + rect.top + "px;width:" + rect.width + "px;height:" + rect.height + "px";
             parts.push(each);
           }
-          if (mark.count !== null) {
+          if (mark.marker) {
             const at = lastBox(rects);
             if (at !== null) {
-              const label = labelOf(mark.count);
+              // A draft's marker has no number (P107).
+              const label = mark.draft ? "" : labelOf(mark.count);
               const each = { mark, order: corners.length + wanted.length, label, width: markerWidth(label), small: compactWidth(label), compact: false, at, left: 0, top: 0 };
               if (mark.found.range) {
                 // Kept while it still holds the words (P105): a change elsewhere doesn't move them.
@@ -926,7 +938,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       let followed = 0;
       // A scroll moved the page since the selection was last told: it is followed only then.
       let selectionScrolled = false;
-      const counted = () => marks.some((mark) => mark.count !== null);
+      const counted = () => marks.some((mark) => mark.marker);
       const sendFollow = () => {
         let sent = 0;
         if (marks.length > 0 && !settling() && counted()) {
@@ -1244,10 +1256,15 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             stop();
             break;
           case M.show:
+            // A draft (P107) has a marker and never a number; a kind the shell doesn't know is no mark.
             marks = (Array.isArray(params.marks) ? params.marks : [])
               .slice(0, LIMIT.marks)
-              .filter((mark) => mark && typeof mark.id === "string" && mark.anchor && Array.isArray(mark.anchor.selectors))
-              .map((mark) => ({ id: mark.id, anchor: mark.anchor, count: typeof mark.count === "number" && mark.count >= 0 && mark.count <= LIMIT.count && Math.floor(mark.count) === mark.count ? mark.count : null, found: null, state: null, told: null }));
+              .filter((mark) => mark && typeof mark.id === "string" && mark.anchor && Array.isArray(mark.anchor.selectors) && (mark.kind === undefined || mark.kind === "posted" || mark.kind === "draft"))
+              .map((mark) => {
+                const draft = mark.kind === "draft";
+                const count = !draft && typeof mark.count === "number" && mark.count >= 0 && mark.count <= LIMIT.count && Math.floor(mark.count) === mark.count ? mark.count : null;
+                return { id: mark.id, anchor: mark.anchor, count, draft, marker: draft || count !== null, found: null, state: null, told: null };
+              });
             if (typeof params.active === "string") {
               active = params.active;
             }

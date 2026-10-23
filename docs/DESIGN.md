@@ -1029,13 +1029,13 @@ chooses), and the annotation runtime is in the shell only then.
 |-----------|---------|--------|
 | host → frame | `porthole/annotate.start` | `{ elements, text }`: picking elements (the one under the pointer or finger outlined with its name; a click or tap picks it, never reaching the content; Escape cancels; one pick), selecting text (each settled selection), or both (a click picks, a drag selects) |
 | host → frame | `porthole/annotate.stop` | — |
-| host → frame | `porthole/annotate.show` | `{ marks: [{ id, anchor, count? }], active? }`: drawn over the content in the shell's own layer (a closed shadow root), found again whenever the content changes; a mark with a `count` (0 to 999) also gets a marker (P104) |
+| host → frame | `porthole/annotate.show` | `{ marks: [{ id, anchor, count?, kind? }], active? }`: drawn over the content in the shell's own layer (a closed shadow root), found again whenever the content changes; a mark with a `count` (0 to 999) also gets a marker (P104); `kind: "draft"` (absent: posted) is drawn apart, with a marker and never a count (P107) |
 | host → frame | `porthole/annotate.focus` | `{ id }`: scrolled into view inside the frame, made the active mark, flashed |
 | host → frame | `porthole/annotate.clear` | — |
 | frame → host | `porthole/annotate.selected` | `{ anchor, rect }`; after a scroll, the same selection again only if its box moved more than 0.5 px, on the follow-ups' clock (P105) |
 | frame → host | `porthole/annotate.unselected` | — (the text selection went away) |
 | frame → host | `porthole/annotate.cancelled` | — (Escape) |
-| frame → host | `porthole/annotate.anchored` | `{ results: [{ id, state: "attached" \| "orphaned", rect? }] }`: every mark after `show`, the one after `focus`, every mark when the content changed a state, and, while any mark has a `count`, once a scroll, a resize or a run of content changes has settled (150 ms quiet), only the marks that moved more than 0.5 px since the host was last told, at most one a second together with the selection's (P104, P105) |
+| frame → host | `porthole/annotate.anchored` | `{ results: [{ id, state: "attached" \| "orphaned", rect? }] }`: every mark after `show`, the one after `focus`, every mark when the content changed a state, and, while any mark has a marker (a `count` or a draft, P107), once a scroll, a resize or a run of content changes has settled (150 ms quiet), only the marks that moved more than 0.5 px since the host was last told, at most one a second together with the selection's (P104, P105) |
 | frame → host | `porthole/annotate.activated` | `{ id, rect }`: the person clicked a mark's marker; `rect` is the marker's (P104); taken only while the host's page has transient activation (P105) |
 
 - **Anchors** are W3C Web Annotation selectors, at most one of each:
@@ -1080,8 +1080,17 @@ chooses), and the annotation runtime is in the shell only then.
   happened, by `:active`, `relatedTarget` and user activation. Markers step aside
   while elements are picked. No tab stop, and the layer stays `aria-hidden`: the
   host's own list of marks is the keyboard path.
-- **Following** (P104), only while a mark has a `count`. Each mark keeps what the
-  host was last told (state and box); a settled scroll or resize (any scroller), or
+- **Drafts** (P107). A mark with `kind: "draft"` (a comment not yet posted) has a
+  marker whether or not it has a count, placed as a posted one's, and drawn apart: a
+  dashed underline (a dashed outline on an element), a lighter fill, and a hollow
+  marker (a light bubble with a dashed edge and the glyph's outline) with no number.
+  `checkMarks` sends a posted mark as before (no `kind`), a draft without its count,
+  and throws on any other kind; the shell draws no number for a draft and drops a
+  mark of a kind it doesn't know. Its click is `activated`, its place `anchored`,
+  and it is followed after a scroll, as a posted marker's.
+- **Following** (P104), only while a mark has a marker (a `count`, or a draft:
+  P107). Each mark keeps what the host was last told (state and box); a settled
+  scroll or resize (any scroller), or
   a quiet run of content changes (one the deadline cut short is checked once quiet),
   reports only what moved. A selection the host was told is told again after a
   settled scroll only if its box moved (P105, with or without counts). Both share one
@@ -1095,8 +1104,8 @@ chooses), and the annotation runtime is in the shell only then.
   all of it, read what `show` sends (ids, anchors, counts), or fake any report. The
   host takes a selection only while it asked for that kind, a cancel only while
   picking, results only for its own marks, a marker's click only for a mark it shows
-  with a count and only within a gesture (P105); it rebuilds each from known fields
-  within `ANNOTATION_LIMITS` (a label without what the person can't see, P105) and
+  with a marker (a count or a draft) and only within a gesture (P105); it rebuilds
+  each from known fields within `ANNOTATION_LIMITS` (a label without what the person can't see, P105) and
   drops the rest, through the bridge's rate limit. UI hints only, never
   permissions: what a report says decides where a comment is drawn, never who may
   see or do anything. A view a report opens or moves guards its presses
@@ -1134,7 +1143,14 @@ the layer itself (`annotation-activated`, `annotation-activated-count`,
 engine, a touch screen and a phone's emulation (iPhone 13, Pixel 5), content hearing
 none of it (`marker-tap` → WebKit; `marker-click` too); on a 640 px column and a phone page's lines
 with one marker each, no marker covering a word (`marker-place`, the marker just
-past its words as 0.9.0 had it); and ADOPTING.md's `guardPresses`, as written
+past its words as 0.9.0 had it); drafts (P107) drawn apart from posted marks on the
+same anchors (the frame's pixels and the words' own differ; on Chromium every draft's
+marker and line drawn as a draft's, no number though given a count), a draft's and a
+posted marker's clicks reported beside each other, none reaching the content
+(`marker-click` too), the
+page reading a draft's kind and never its count (`draft-count`), a raw `show` past
+`checkMarks` drawing a draft given a count without a number and dropping a mark of
+an unknown kind (`draft-shell-checks`), and drafts alone followed after a scroll; and ADOPTING.md's `guardPresses`, as written
 there, taking no press within 500 ms of its view opening (a release on a menu item,
 a double click's second press on a button or a trigger, a press held past the
 arming) and the person's own press or key after.
@@ -1408,7 +1424,7 @@ control the tables above name to the registry):
 | `annotation-activated` | `annotate.spec.ts` | `a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker` | — | — |
 | `annotation-activated-count` | `annotate.spec.ts` | `a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker` | — | — |
 | `marker-trusted` | `annotate.spec.ts` | `a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker` | — | — |
-| `marker-click` | `annotate.spec.ts` | `markers: a mark with a count gets a numbered bubble; its click is reported and never reaches the content`, `a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection`, `a page that patches the event's built-ins neither hears a marker's press nor stops its report (P105)`, `a tap on a marker is reported on every engine, and the content hears none of it (P105)` | — | — |
+| `marker-click` | `annotate.spec.ts` | `markers: a mark with a count gets a numbered bubble; its click is reported and never reaches the content`, `a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection`, `a page that patches the event's built-ins neither hears a marker's press nor stops its report (P105)`, `a tap on a marker is reported on every engine, and the content hears none of it (P105)`, `drafts (P107): a dashed line and a hollow marker with no number, apart from posted marks; their clicks are reported the same` | — | — |
 | `marker-prevent` | `annotate.spec.ts` | `a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection` | — | — |
 | `marker-place` | `annotate.spec.ts` | `text markers cover no word: on a column page, and on a phone's lines with one marker each (P105, #36)` | — | — |
 | `marker-tap` | `annotate.spec.ts` | nothing | WebKit: `a tap on a marker is reported on every engine, and the content hears none of it (P105)` | no probe can see it on Chromium and Firefox: they make a tap a click on the marker without a listener of its own (measured, P105) |
@@ -1416,6 +1432,8 @@ control the tables above name to the registry):
 | `follow-throttle` | `annotate.spec.ts` | `an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second` | — | — |
 | `selection-follow` | `annotate.spec.ts` | `an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second` | — | — |
 | `follow-count` | `annotate.spec.ts` | `following: a host that gives no counts hears no follow-up after a scroll, as before markers` | — | — |
+| `draft-count` | `annotate.spec.ts` | `what the page reads of a draft (P107): that it is one, never its count; a posted mark as before` | — | — |
+| `draft-shell-checks` | `annotate.spec.ts` | `the shell's own checks on a raw show (P107): a draft draws no number, a kind it doesn't know is no mark` | — | — |
 | `annotation-activated-gesture` | `annotate.spec.ts` | `a hostile page's marker click with no gesture is dropped; one on the person's own press is the host's view to guard (P105)` | — | — |
 | `annotation-rect-clamp` | `annotate.spec.ts` | `a hostile page reports a box outside its frame: the host gets it clamped to the frame's viewport`, `marks: drawn over their anchors, one brought into view, an unfound one orphaned, all cleared`, `following: once a scroll settles, one report with only the marks that moved` | — | — |
 | `authorize` | `served/authorize.spec.ts` | `a revoked subject's ticket opens nothing: a page and an app are denied, and the host is told`, `in a tab of its own, a revoked app and page are denied from the next request on` | Chromium, Firefox: `a framed app mid-session: its next request after revocation is denied, and its next load tells the host`, `a framed page mid-session: its next load after revocation is denied where the engine keeps its cookie` | — |

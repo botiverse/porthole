@@ -283,6 +283,8 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       MARKER_PRESS,
       PATCHED_PRESS,
       MARKER_TAP,
+      // P107: a draft's and a posted marker's presses beside each other reach none of the content.
+      "drafts (P107): a dashed line and a hollow marker with no number, apart from posted marks; their clicks are reported the same",
     ),
   },
   // After the review of P104 (P105): the press's default cancelled (focus on every engine; a
@@ -309,6 +311,19 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     specs: [ANNOTATE],
     fails: all(
       "following: a host that gives no counts hears no follow-up after a scroll, as before markers",
+    ),
+  },
+  // P107: the host drops a draft's count before the frame.
+  "draft-count": {
+    specs: [ANNOTATE],
+    fails: all(
+      "what the page reads of a draft (P107): that it is one, never its count; a posted mark as before",
+    ),
+  },
+  "draft-shell-checks": {
+    specs: [ANNOTATE],
+    fails: all(
+      "the shell's own checks on a raw show (P107): a draft draws no number, a kind it doesn't know is no mark",
     ),
   },
   "annotation-activated-gesture": {

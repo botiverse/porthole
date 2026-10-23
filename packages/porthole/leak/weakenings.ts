@@ -257,7 +257,7 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "annotation-activated": [
     {
       file: "src/host/create-host.ts",
-      find: "            if (!marks.some((mark) => mark.id === id && mark.count !== undefined)) {",
+      find: "            if (!marks.some((mark) => mark.id === id && hasMarker(mark))) {",
       replace: "            if (id === null) {",
     },
   ],
@@ -274,8 +274,36 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "annotation-activated-count": [
     {
       file: "src/host/create-host.ts",
-      find: "            if (!marks.some((mark) => mark.id === id && mark.count !== undefined)) {",
+      find: "            if (!marks.some((mark) => mark.id === id && hasMarker(mark))) {",
       replace: "            if (!marks.some((mark) => mark.id === id)) {",
+    },
+  ],
+  // A draft's count never goes to the frame (P107): the page learns a mark is a draft, not how
+  // many comments it holds.
+  "draft-count": [
+    {
+      file: "src/annotate/validate.ts",
+      find: "      return { id: mark.id, anchor, kind };",
+      replace:
+        "      return { id: mark.id, anchor, kind, ...(mark.count === undefined ? {} : { count: mark.count }) };",
+    },
+  ],
+  // The shell's own checks on a show (P107): a draft draws no number, an unknown kind is no mark.
+  "draft-shell-checks": [
+    {
+      file: "src/shell/annotate.ts",
+      find: ' && (mark.kind === undefined || mark.kind === "posted" || mark.kind === "draft"))',
+      replace: ")",
+    },
+    {
+      file: "src/shell/annotate.ts",
+      find: '                const count = !draft && typeof mark.count === "number"',
+      replace: '                const count = typeof mark.count === "number"',
+    },
+    {
+      file: "src/shell/annotate.ts",
+      find: '              const label = mark.draft ? "" : labelOf(mark.count);',
+      replace: '              const label = mark.count === null ? "" : labelOf(mark.count);',
     },
   ],
   // A marker's click (P104): the shell reports a trusted one only, never the content's own.
@@ -347,7 +375,7 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "follow-count": [
     {
       file: "src/shell/annotate.ts",
-      find: "      const counted = () => marks.some((mark) => mark.count !== null);",
+      find: "      const counted = () => marks.some((mark) => mark.marker);",
       replace: "      const counted = () => marks.length > 0;",
     },
   ],

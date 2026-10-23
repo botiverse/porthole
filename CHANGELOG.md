@@ -6,7 +6,8 @@
 ## Unreleased
 
 The agent hears, before publishing, that its page's own styles hold it to one screen (P106), and
-the manual says a page scrolls as a document.
+the manual says a page scrolls as a document. A host can mark a person's unposted comments,
+drafts, apart from posted ones (P107).
 
 - **A warning for a page held to one screen** (P106): `lintContent`, `admitContent`, `lintFiles`
   and `admitFiles` warn (rule `scroll-lock`, never an error: a one-screen app means it) where the
@@ -35,6 +36,19 @@ the manual says a page scrolls as a document.
   game, a canvas), don't hold html, body or the element that holds it all to one screen …; a box that scrolls by itself takes the wheel while the
   pointer is over it: keep those to parts of the page, never the whole of it."
 - `LintRule` and `FileFinding["rule"]` take `"scroll-lock"`.
+- **Drafts** (P107): `AnnotationMark.kind` is `"posted"` (the default, as absent) or `"draft"`. A
+  draft is drawn with a dashed underline (a dashed outline on an element) and a hollow marker with
+  no number, beside its words as a posted marker is; its click is `activated`, its place
+  `anchored`, and it is followed after a scroll, with or without a count. Posted marks are drawn,
+  sent and reported as before.
+  - **The page reads which marks are drafts**: send a person's drafts only to the frame that person
+    views (THREAT_MODEL §7). A draft's `count` is dropped before the frame.
+  - **Upgrade the content server's Porthole before sending drafts**: the shell is the content
+    server's. A shell before this one, given a draft by a newer host, draws it as a posted mark
+    without a marker (a solid underline, nothing to click), not apart.
+  - Any other `kind` is refused, as a bad anchor is: `annotations.show` throws; React's
+    `annotations` is refused (`onHostError`, kind `"annotations"`).
+  - New: `AnnotationMarkKind`.
 
 ## 0.10.0
 
