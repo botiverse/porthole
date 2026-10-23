@@ -3,7 +3,7 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
-## Unreleased
+## 0.11.0
 
 The agent hears, before publishing, that its page's own styles hold it to one screen (P106), and
 the manual says a page scrolls as a document. A host can mark a person's unposted comments,

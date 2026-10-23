@@ -5,11 +5,12 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes Porthole 0.10.0 (2026-10-21). A review on 2026-10-19 found gaps, and every
+**Status.** This describes Porthole 0.11.0 (2026-10-23). A review on 2026-10-19 found gaps, and every
 decision it led to has merged. P096 changed the negative-control runner and CI, and the shipped
 conformance probes' messages and timing, not what they check. P104 (0.9.0's annotation markers) had
-a review of its own, and P105, in 0.10.0, is what it led to. [§8](#8-fixes-in-flight) lists the
-decisions.
+a review of its own, and P105, in 0.10.0, is what it led to. 0.11.0 adds draft marks (P107, §7
+"Drafts": what a page learns from them and who may receive them) and an advisory lint (P106, no
+change to isolation). [§8](#8-fixes-in-flight) lists the decisions.
 
 ## 1. Two layers
 
