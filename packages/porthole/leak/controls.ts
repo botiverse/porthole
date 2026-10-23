@@ -283,6 +283,8 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       MARKER_PRESS,
       PATCHED_PRESS,
       MARKER_TAP,
+      // P107: a draft's and a posted marker's presses beside each other reach none of the content.
+      "drafts (P107): a dashed line and a hollow marker with no number, apart from posted marks; their clicks are reported the same",
     ),
   },
   // After the review of P104 (P105): the press's default cancelled (focus on every engine; a

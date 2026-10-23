@@ -5173,7 +5173,8 @@ on Chromium, WebKit and Firefox: the same anchors as posted marks (count 0, so n
 and then as drafts look different in the frame and on the words; on Chromium, every draft's marker
 and line carry the draft's style and the markers have no number though one draft was given 7; a
 draft and a posted mark together, each drawn its way, the draft's text and element markers' clicks
-and the posted one's reported for their ids, none reaching the content's listeners; the page,
+and the posted one's reported for their ids, none reaching the content's listeners (control
+`marker-click`, the shell's stop out, fails it too); the page,
 listening to its own window, reads a draft as `{ id, anchor, kind }` and posted marks as before
 (control `draft-count`, the count left on drafts, fails exactly that test); a raw `show` posted to
 the frame from the host's page, past `checkMarks`, with a draft given a count and a mark of kind

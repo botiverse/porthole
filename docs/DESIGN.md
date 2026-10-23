@@ -1144,7 +1144,8 @@ with one marker each, no marker covering a word (`marker-place`, the marker just
 past its words as 0.9.0 had it); drafts (P107) drawn apart from posted marks on the
 same anchors (the frame's pixels and the words' own differ; on Chromium every draft's
 marker and line drawn as a draft's, no number though given a count), a draft's and a
-posted marker's clicks reported beside each other, none reaching the content, the
+posted marker's clicks reported beside each other, none reaching the content
+(`marker-click` too), the
 page reading a draft's kind and never its count (`draft-count`), a raw `show` past
 `checkMarks` drawing a draft given a count without a number and dropping a mark of
 an unknown kind (`draft-shell-checks`), and drafts alone followed after a scroll; and ADOPTING.md's `guardPresses`, as written
@@ -1421,7 +1422,7 @@ control the tables above name to the registry):
 | `annotation-activated` | `annotate.spec.ts` | `a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker` | — | — |
 | `annotation-activated-count` | `annotate.spec.ts` | `a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker` | — | — |
 | `marker-trusted` | `annotate.spec.ts` | `a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker` | — | — |
-| `marker-click` | `annotate.spec.ts` | `markers: a mark with a count gets a numbered bubble; its click is reported and never reaches the content`, `a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection`, `a page that patches the event's built-ins neither hears a marker's press nor stops its report (P105)`, `a tap on a marker is reported on every engine, and the content hears none of it (P105)` | — | — |
+| `marker-click` | `annotate.spec.ts` | `markers: a mark with a count gets a numbered bubble; its click is reported and never reaches the content`, `a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection`, `a page that patches the event's built-ins neither hears a marker's press nor stops its report (P105)`, `a tap on a marker is reported on every engine, and the content hears none of it (P105)`, `drafts (P107): a dashed line and a hollow marker with no number, apart from posted marks; their clicks are reported the same` | — | — |
 | `marker-prevent` | `annotate.spec.ts` | `a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection` | — | — |
 | `marker-place` | `annotate.spec.ts` | `text markers cover no word: on a column page, and on a phone's lines with one marker each (P105, #36)` | — | — |
 | `marker-tap` | `annotate.spec.ts` | nothing | WebKit: `a tap on a marker is reported on every engine, and the content hears none of it (P105)` | no probe can see it on Chromium and Firefox: they make a tap a click on the marker without a listener of its own (measured, P105) |
