@@ -125,6 +125,18 @@ const OWN_CDN: readonly {
 ];
 
 export function lintContent(config: PortholeConfig, content: string): Finding[] {
+  return lintPage(config, content, { scrollLock: true });
+}
+
+/**
+ * `lintContent`, with or without the scroll-lock rule: `lintFiles` reads that one itself, once,
+ * with the stylesheets the page links.
+ */
+export function lintPage(
+  config: PortholeConfig,
+  content: string,
+  options: { readonly scrollLock: boolean },
+): Finding[] {
   if (config.mode === "url") {
     return [];
   }
@@ -277,7 +289,7 @@ export function lintContent(config: PortholeConfig, content: string): Finding[] 
     }
   }
   // Its own styles holding it to one screen (P106): a warning, as a one-screen app means it.
-  const held = scrollLock(content, { noun: it });
+  const held = options.scrollLock ? scrollLock(content, { noun: it }) : null;
   if (held !== null) {
     findings.push({
       rule: "scroll-lock",

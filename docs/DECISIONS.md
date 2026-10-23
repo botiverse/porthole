@@ -5121,11 +5121,16 @@ inner box take the wheel. Nothing told the agent: the manual spoke only of sidew
    properties that matter (overflow, height, max-height, position, top and bottom, with their
    shorthands) over the three elements that hold a document: html, body, and the body's one
    element of content (the root: `#root`, `#app`, a lone `div`; none where body has two). It
-   warns where one of them holds the page and no one-screen box inside it scrolls itself:
+   warns where one of them holds the page and nothing below body scrolls itself:
    - html with overflow-y hidden or clip;
    - body with overflow-y hidden or clip, where html's overflow is visible or body is one screen;
    - the root with overflow-y hidden or clip, one screen tall;
    - any of them `position: fixed`, one screen tall.
+   Nothing below body scrolls itself: no rule the check reads whose selectors name anything but
+   html or body, no `style=""` on an element in body, and (where Tailwind is loaded) no class in
+   body, gives `overflow` or `overflow-y` auto or scroll. Where one does, the page may scroll in
+   that box (a dashboard's `main { flex: 1; overflow-y: auto }`), and the text can't tell which box
+   holds the content: no warning; the manual's line on the wheel says the rest.
    One screen: height or max-height `100vh` (`dvh`, `svh`, `lvh`), `100%` of a one-screen parent
    (html's 100% is the frame's) or of the frame where it is fixed or absolute, or fixed or absolute
    with both top and bottom set (`inset: 0`). Measured with Playwright's Chromium and Firefox (a 3,000 px
@@ -5135,22 +5140,34 @@ inner box take the wheel. Nothing told the agent: the manual spoke only of sidew
    under a body as tall as its content, `html, body { height: 100% }` alone, and
    `overflow-x: hidden` alone don't; a one-screen `#root { overflow: auto }` under a held body
    scrolls in the root. WebKit couldn't run on the box; nothing here is engine-specific CSS.
+   A cost of the rule above: an app's whole stylesheet, bundled into a page, often has some
+   scroll box of its own (a list, a sidebar), and then its page isn't warned even where that box
+   isn't on it.
 2. **What it reads:** `<style>` and `<link rel=stylesheet>` in document order (not for print, not
    alternate), the linked sheets found in the version and their `@import`s, `style=""` on the
    three, rules whose selectors it can match (type, id, class, `*`, `:root`, `:only-child`,
    `:first-child`, descendant and child), and, where the page loads Tailwind (its CDN, or a
    Tailwind stylesheet), the utilities that hold a page (`h-screen`, `h-full`, `overflow-hidden`,
-   `fixed`, `inset-0`…). Specificity, order, `!important` and cascade layers (unlayered over
-   layered, reversed for `!important`) pick each value, so a later override, as the triage's
-   second versions wrote, is seen.
+   `fixed`, `inset-0`…). Specificity, order, `!important` and cascade layers pick each value, so
+   a later override, as the triage's second versions wrote, is seen. A layer's place is where it is
+   first declared or its block opens, a sub-layer's rules below its parent's own, unlayered rules
+   above all layers, reversed for `!important`; each value is picked once every sheet is read.
+   **Bounded:** a page's stylesheets are each read once (a sheet linked or imported again is read
+   where it first comes), at most 32 of them and 4 MiB in all; past that, the rest isn't read. Each
+   is asked of the caller once per place it is named from. The check is then linear in what it
+   reads: ten sheets each importing the next six times read ten sheets, not 6^10.
 3. **The warning says what to do:** what holds it, as the page wrote it, and the rule that undoes
    it under the page's own selectors (so it wins by coming later; `!important` where the hold
-   was): `add html, body, #root { height: auto; overflow: visible; position: static } after those
+   was). The page's CSS goes into the agent's context, so only values of a known shape are echoed
+   (lengths, percentages, viewport units, 0, auto, hidden, clip, fixed, static…; else the property
+   and `…`), each declaration and selector at most 60 characters, and a selector with escapes or
+   other than plain characters is given as the element's own name (`#root`, `body > div`): `add html, body, #root { height: auto; overflow: visible; position: static } after those
    rules`, `take h-screen overflow-hidden off body's class`, or `take … out of html's style
    attribute`. In `lintFiles` it names the stylesheet and line the hold is in; a page's own
    `<style>` is reported once.
-4. **The manual** (the Pages section, every kind): "It scrolls as a document: never hold html, body
-   or the element that holds it all to one screen (height: 100% or 100vh with overflow: hidden, or
+4. **The manual** (the Pages section, every kind): "It scrolls as a document: unless it's meant to
+   fit one screen (a game, a canvas), don't hold html, body or the element that holds it all to one
+   screen (height: 100% or 100vh with overflow: hidden, or
    position: fixed), or what's below the first screen can't be reached. A box that scrolls by
    itself takes the wheel while the pointer is over it: keep those to parts of the page (a wide
    table, a long list), never the whole of it."
@@ -5167,11 +5184,14 @@ and a text read can't be sure.
   publish has no browser; a later check may add it, and then the wheel too.
 - Warning on an inner one-screen scroll box: it does scroll, and an app's sidebar is one; the
   manual says it instead.
+- Warning where a box below body scrolls, unless it is shown to hold the page: from the text, a
+  box's height in a flex or grid layout can't be told, and the review's three cases (a flex
+  `main`, Tailwind's dashboard, a `style="overflow: auto"`) were false warnings.
 
 **Limits.** Not read: rules under `@media` (but `all` and `screen`), `@supports`, `@container`;
 `:is()`, `:where()`, `:not()`, attributes and sibling combinators (they match nothing); nested
-rules; values through `var()` or `calc()`; `@import … layer()` beyond a name; what scripts set;
-stylesheets from another origin. Each can miss a hold or an override (a warning then wrong, never
+rules; values through `var()` or `calc()`; `@import … layer()` beyond a name; a sheet's second
+link or import; what scripts set; stylesheets from another origin; sheets past the budget. Each can miss a hold or an override (a warning then wrong, never
 a refusal). A body with stray unclosed tags may be taken as having one child.
 
 **Tested.** `test/check.test.ts` (a page held to one screen): the app shell's exact styles (the
@@ -5182,9 +5202,15 @@ without a height, a one-screen height without overflow hidden, `overflow-x: hidd
 element, two body children, a one-screen scroll box in a held body, 100% of a content-tall body;
 later overrides (same `<style>`, a later one, `style=""`, unlayered over layered, a comment),
 part of an override not enough; the limits (`@media`, `@supports`, `var()`, `:is()`); the
-manual's line in the artifact, fill and inline manuals. `test/files.test.ts`: a linked sheet (its
+manual's line in the artifact, fill and inline manuals; after review: none where something below
+body scrolls (a flex `main`, Tailwind's dashboard, `style="overflow: auto"`), held where it only
+scrolls sideways; a hostile `top:` value and a long one not echoed, an escaped selector given as
+`#root`; a layer opened early with nothing for the page losing to a later one, a sub-layer below
+its parent's own rules either way round. `test/files.test.ts`: a linked sheet (its
 path and line), an `@import`ed one, each page by what it links, overrides across sheets in either
-order, print, alternate and missing sheets, and `admitFiles`'s note. The manual's examples and the
+order, print, alternate and missing sheets, and `admitFiles`'s note; ten sheets each importing the
+next six times (11 asks, well under 2 s; without the budget it ran past 60 s), a thousand links to
+one sheet (asked once), and a hold past 32 sheets unread. The manual's examples and the
 Vite + React fixture still lint clean.
 
 **Revisit when** `checkPage` measures scrolling in a browser (then this can defer to it), a host's

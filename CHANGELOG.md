@@ -13,16 +13,19 @@ the manual says a page scrolls as a document.
   page's own CSS stops it at its first screen in the frame: html or body with `overflow: hidden`
   (or `clip`), or the body's one element of content (`#root`) one screen tall (100vh, dvh, svh,
   100% of a one-screen parent, fixed at the frame's edges) with `overflow: hidden` or
-  `position: fixed`, with no one-screen box inside it that scrolls itself. It reads `<style>`,
+  `position: fixed`, and nothing below body scrolls itself (no rule, `style=""` or Tailwind
+  utility gives it `overflow-y: auto` or `scroll`: the page may scroll there). It reads `<style>`,
   the version's linked stylesheets and their `@import`s, `style=""` on those elements, and
   Tailwind's utilities where the page loads Tailwind, by the cascade (specificity, order,
-  `!important`, layers), so a later override is seen. The warning names what holds the page and
+  `!important`, layers), so a later override is seen; each sheet once, at most 32 and 4 MiB a
+  page. The warning names what holds the page and
   the rule that undoes it, e.g. `add html, body, #root { height: auto; overflow: visible;
-  position: static } after those rules`. In `lintFiles` its `path` is the stylesheet's, where
+  position: static } after those rules`; only values of a known shape and plain selectors are
+  echoed, each at most 60 characters. In `lintFiles` its `path` is the stylesheet's, where
   the rule is there. Not read: rules under `@media` (but `all` and `screen`), `@supports`,
   `@container`, `:is()`/`:where()`/`:not()` and sibling selectors, nested rules, `var()`, scripts.
-- **The manual** (every kind): "It scrolls as a document: never hold html, body or the element
-  that holds it all to one screen …; a box that scrolls by itself takes the wheel while the
+- **The manual** (every kind): "It scrolls as a document: unless it's meant to fit one screen (a
+  game, a canvas), don't hold html, body or the element that holds it all to one screen …; a box that scrolls by itself takes the wheel while the
   pointer is over it: keep those to parts of the page, never the whole of it."
 - `LintRule` and `FileFinding["rule"]` take `"scroll-lock"`.
 

@@ -970,6 +970,55 @@ describe("a page with files held to one screen (P106)", () => {
     ).toEqual([]);
   });
 
+  it("reads each stylesheet once, within one budget a page: fan-out and repeated links stay cheap", async () => {
+    const { scrollLock, SHEETS } = await import("../src/check/scroll.ts");
+    // Ten sheets, each importing the next six times: 6^10 imports if each were followed.
+    const sheets: Record<string, string> = {};
+    for (let index = 0; index < 10; index += 1) {
+      sheets[`s${index}.css`] = `${`@import "s${index + 1}.css";\n`.repeat(6)}p { color: red }`;
+    }
+    sheets["s10.css"] = SHELL;
+    let asked = 0;
+    const sheet = (href: string) => {
+      asked += 1;
+      const text = sheets[href];
+      return text === undefined ? null : { path: href, text };
+    };
+    const started = performance.now();
+    const fanned = scrollLock(page('<link rel="stylesheet" href="s0.css">'), {
+      noun: "page",
+      path: "index.html",
+      sheet,
+    });
+    expect(fanned?.path).toBe("s10.css");
+    expect(asked).toBeLessThanOrEqual(11);
+    // A thousand links to one sheet: asked for and read once.
+    asked = 0;
+    scrollLock(page('<link rel="stylesheet" href="s10.css">'.repeat(1_000)), {
+      noun: "page",
+      path: "index.html",
+      sheet,
+    });
+    expect(asked).toBe(1);
+    // Past SHEETS distinct sheets, the rest isn't read: the hold in the last one goes unseen.
+    const many: Record<string, string> = {};
+    for (let index = 0; index < SHEETS; index += 1) {
+      many[`m${index}.css`] = "p { color: red }";
+    }
+    many["last.css"] = SHELL;
+    const links = Object.keys(many)
+      .map((path) => `<link rel="stylesheet" href="${path}">`)
+      .join("");
+    expect(
+      scrollLock(page(links), {
+        noun: "page",
+        path: "index.html",
+        sheet: (href) => (many[href] === undefined ? null : { path: href, text: many[href] }),
+      }),
+    ).toBeNull();
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+
   it("admitFiles publishes it, with the warning in its note", () => {
     const admitted = admitFiles(served, {
       "index.html": page('<link rel="stylesheet" href="shell.css">'),

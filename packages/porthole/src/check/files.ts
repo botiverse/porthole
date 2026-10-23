@@ -8,7 +8,7 @@ import {
 } from "../files/paths.ts";
 import { fileTypeOf, knownType } from "../files/types.ts";
 import { sizeWords } from "../guide/limits.ts";
-import { lintContent, type Finding } from "./lint.ts";
+import { lintPage, type Finding } from "./lint.ts";
 import { attributesOf } from "./markup.ts";
 import { scrollLock, type LinkedSheet } from "./scroll.ts";
 
@@ -270,13 +270,23 @@ export function lintFiles(
     }
   };
   // A stylesheet a page links or a stylesheet imports, found in the set by its path (P106).
+  const decoded = new Map<string, string>();
   const stylesheet: LinkedSheet = (href, from) => {
     if (href === "" || elsewhere(href) || href.startsWith("/")) {
       return null;
     }
     const target = resolve(directoryOf(from), href);
     const sheet = target === null || !has(target) ? undefined : files[target];
-    return sheet === undefined || target === null ? null : { path: target, text: textOf(sheet) };
+    if (sheet === undefined || target === null) {
+      return null;
+    }
+    // Decoded once for the whole set, however many pages link it.
+    let text = decoded.get(target);
+    if (text === undefined) {
+      text = textOf(sheet).slice(0, SCANNED);
+      decoded.set(target, text);
+    }
+    return { path: target, text };
   };
   const it = config.mode === "mcp-app" ? "view" : config.mode === "inline" ? "widget" : "page";
   const maxPage = config.limits.maxBytes;
@@ -304,11 +314,9 @@ export function lintFiles(
         continue;
       }
       const text = textOf(body);
-      // The page's scroll is read again below with the stylesheets it links (P106).
-      for (const finding of lintContent(config, text)) {
-        if (finding.rule !== "scroll-lock") {
-          findings.push({ ...finding, path });
-        }
+      // The scroll-lock rule once, with the stylesheets the page links (P106).
+      for (const finding of lintPage(config, text, { scrollLock: false })) {
+        findings.push({ ...finding, path });
       }
       const held = scrollLock(text, { noun: it, path, sheet: stylesheet });
       if (held !== null) {
