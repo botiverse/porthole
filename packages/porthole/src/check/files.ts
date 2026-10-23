@@ -10,7 +10,7 @@ import { fileTypeOf, knownType } from "../files/types.ts";
 import { sizeWords } from "../guide/limits.ts";
 import { lintPage, type Finding } from "./lint.ts";
 import { attributesOf } from "./markup.ts";
-import { scrollLock, type LinkedSheet } from "./scroll.ts";
+import { scrollLock, type LinkedSheet, scrollBudget } from "./scroll.ts";
 
 /**
  * What can be told about a page that comes with files (P081), without running it: each page
@@ -288,6 +288,9 @@ export function lintFiles(
     }
     return { path: target, text };
   };
+  // One budget for the rule over all the version's pages: each sheet read once, its rules replayed
+  // for each page within it (P106).
+  const budget = scrollBudget();
   const it = config.mode === "mcp-app" ? "view" : config.mode === "inline" ? "widget" : "page";
   const maxPage = config.limits.maxBytes;
   for (const [path, body] of Object.entries(files)) {
@@ -318,7 +321,7 @@ export function lintFiles(
       for (const finding of lintPage(config, text, { scrollLock: false })) {
         findings.push({ ...finding, path });
       }
-      const held = scrollLock(text, { noun: it, path, sheet: stylesheet });
+      const held = scrollLock(text, { noun: it, path, sheet: stylesheet, budget });
       if (held !== null) {
         findings.push({
           rule: "scroll-lock",

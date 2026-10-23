@@ -5134,7 +5134,12 @@ inner box take the wheel. Nothing told the agent: the manual spoke only of sidew
    cascade, so its own values decide. One screen tall with overflow-y auto or scroll, it scrolls
    the page (no warning); without a height it grows with what it holds and has nothing to scroll,
    so `html, body { height: 100%; overflow: hidden } #root { overflow-y: auto }`, or the same
-   with `<div id="root" style="overflow: auto">`, is held.
+   with `<div id="root" style="overflow: auto">`, is held. A root that scrolls in a height the
+   check can't read is its own box, as an inner one is (no warning): under a flex or grid body
+   (its `display`, or Tailwind's `flex`, `grid`; the root's height is the layout's: `flex-1`), or
+   with a height of another shape (a length, `min()`, `var()`, a `calc()` other than below, an
+   arbitrary `h-[…]`). It is held only where its height is the content's (unset, `auto`,
+   `fit-content`, or 100% of a body that is) under a block body.
    Where one does, the page may scroll in that box (a dashboard's `main { flex: 1; overflow-y:
    auto }`), and the text can't tell which box holds the content: no warning; the manual's line on
    the wheel says the rest. Matched against at most 2,000 elements, 32 deep, 256 selectors and a
@@ -5146,7 +5151,8 @@ inner box take the wheel. Nothing told the agent: the manual spoke only of sidew
    as a document: …". A page with its content in the markup is told "The page won't scroll in its
    frame: … Unless it is meant to fit one screen, let it scroll as a document: …".
    One screen: height or max-height (or `block-size`, `max-block-size`) `100vh` (`dvh`, `svh`,
-   `lvh`) or `calc(100vh - …)`, `100%` or `calc(100% - …)` of a one-screen parent (html's 100% is
+   `lvh`) or `calc(100vh - 4rem)` (the whole less one positive length: px, rem, em, %, vh),
+   `100%` or `calc(100% - 56px)` of a one-screen parent (html's 100% is
    the frame's) or of the frame where it is fixed or absolute, or fixed or absolute with both top
    and bottom set (`inset: 0`). Measured with Playwright's Chromium and Firefox (a 3,000 px
    page, a 400 px frame, the wheel): each of these stops it; `body { overflow: hidden }` alone
@@ -5180,6 +5186,17 @@ inner box take the wheel. Nothing told the agent: the manual spoke only of sidew
    of the sheets and the size of the page add, not multiply. A layer named more than 16 deep
    (`a.b.c…`, with the layers it is in) isn't read: its rules are dropped, but its first 16 parts
    are declared where it comes, as a browser declares them, so the layers' order holds.
+   **A version's pages** (`lintFiles`, so `admitFiles` at publish): each stylesheet is read once
+   for the version (its rules, the steps between them, and its rules by each selector's last
+   compound: an id, a class, a tag, `*`), and each page replays only the rules that may match its
+   html, body or root, with its scroll rules until it has 256; a repeated selector in a rule is
+   read once. The version has one budget for all its pages: 16 MiB of sheets read and replayed,
+   and two million steps of matching scroll rules against markup. Past either, the pages left
+   aren't checked for this rule: it is a warning, so an unchecked page is a warning missed, never
+   a refusal. So the check is linear in the version's pages and sheets: 500 pages sharing a 250
+   KB sheet (13.8 s in the review), or ten linking two 2 MiB ones (15.9 s), read each sheet once
+   (512 pages and a 256 KB sheet: 6.4 s before, 0.25 s; 16 pages and two 2 MiB sheets: 25 s,
+   0.3 s).
 3. **The warning says what to do:** what holds it, as the page wrote it, and the rule that undoes
    it under the page's own selectors (so it wins by coming later; `!important` where the hold
    was). The page's CSS goes into the agent's context, so only values of a known shape are echoed
@@ -5188,7 +5205,9 @@ inner box take the wheel. Nothing told the agent: the manual spoke only of sidew
    a selector with escapes, other than plain characters or longer is given as the element's own
    name: `#root` where the root's id is plain and `#id` at most 60 characters (the id is page text
    too), else `body > div`, or `body > *` for an element HTML doesn't have (a custom element's
-   name is page text too). So: `add html, body, #root { height: auto; overflow: visible; position: static } after
+   name is page text too). Where that name has less specificity than the selector it stands for
+   (`body > div` for a 61-character `#id`, `#root` for `body > #\72 oot.x`), the fix is
+   `!important`, or it couldn't win. So: `add html, body, #root { height: auto; overflow: visible; position: static } after
    those rules`, `take h-screen overflow-hidden off body's class`, or `take … out of html's style
    attribute`. In `lintFiles` it names the stylesheet and line the hold is in; a page's own
    `<style>` is reported once.
@@ -5222,10 +5241,10 @@ and a text read can't be sure.
 rules; values through `var()` or `calc()`; `@import … layer()` beyond a name; a layer named more
 than 16 deep; a sheet's second link or import; what scripts set; stylesheets from another origin; sheets past the budget. Each can miss a hold or an override (a warning then wrong, never
 a refusal). A body with stray unclosed tags may be taken as having one child. A root that scrolls
-the page in a height the check can't read is warned though the page scrolls: one bounded only by
-a flex or grid parent, or whose height is `calc()` other than `100vh` or `100%` less something,
-`min()`, `clamp()` or `var()` (`html, body { height: 100%; overflow: hidden } #root { height:
-min(100vh, 900px); overflow: auto }`).
+under a flex or grid body, or with a height the check can't read, is taken as its own scroll box:
+where it is in fact as tall as its content (a flex column's item without `flex: 1`, a `min()`
+that comes to its content), the hold is missed. A version's pages past its budget (16 MiB of
+sheets, two million match steps) aren't checked.
 
 **Tested.** `test/check.test.ts` (a page held to one screen): the app shell's exact styles (the
 message and line), body or html hidden alone, the root by height, max-height and `inset: 0`, a
@@ -5256,13 +5275,26 @@ compound of 32 classes read and 33 not, a deep layer's parents declared where it
 before `reset`), `!important` within the 60 characters, a custom element as `body > *`, the root
 by its own `style="overflow: auto"` and Tailwind class held without a height and not with
 `h-full`, by `block-size`, `max-block-size` and `calc(100vh - 56px)`, and a `style="overflow:
-auto"` below the root still a scroll box; a layer opened early with nothing for the page losing to a later one, a sub-layer below
+auto"` below the root still a scroll box; after the fourth review: the four app shells (a
+Tailwind flex column with a `flex-1 overflow-y-auto` root, `display: flex` with an inline-styled
+root, Tailwind's grid with an `overflow-auto` main, an `h-[calc(100vh-4rem)]` root) and `min()`,
+a longer `calc()` and a length silent, the content's heights (none, `fit-content`, `auto`, a
+`display: block` body, 100% of a content-tall body) held; `calc()` read only as a whole less one
+positive length (`- 1px + 2000px`, `- -2000px`, `-10px`, `var()` not), `calc(100% - 4rem)` one
+screen under a one-screen body and not under a content-tall one; an `@import` into a layer 17
+deep declaring its first 16 parts; with no root, a body child's `style=""` still a scroll box;
+the fix `!important` where `#root` or `body > div` stands for a more specific selector, not where
+it is the selector; a layer opened early with nothing for the page losing to a later one, a sub-layer below
 its parent's own rules either way round. `test/files.test.ts`: a linked sheet (its
 path and line), an `@import`ed one, each page by what it links, overrides across sheets in either
 order, print, alternate and missing sheets, and `admitFiles`'s note; ten sheets each importing the
 next six times (11 asks, well under 2 s; without the budget it ran past 60 s), a thousand links to
 one sheet (asked once), and a hold past 32 sheets unread; `lintFiles` on a page linking a 1.8 MB
-sheet of 230,000 declarations for body, under 3 s (0.2 s; 285 s before). The manual's examples and the
+sheet of 230,000 declarations for body, under 3 s (0.2 s; 285 s before); a version of 512 pages
+sharing a 256 KB sheet and one of 16 pages linking two 2 MiB `div,` sheets, each timed against
+sixteen sixteenths of both its pages and its sheets (under eight times, and under 3 s), all 512
+pages warned; twelve pages each with its own sheet just under 2 MiB, eight checked; four pages
+each spending a page's million match steps, two checked. The manual's examples and the
 Vite + React fixture still lint clean.
 
 **Revisit when** `checkPage` measures scrolling in a browser (then this can defer to it), a host's

@@ -15,7 +15,8 @@ the manual says a page scrolls as a document.
   100% of a one-screen parent, fixed at the frame's edges) with `overflow: hidden` or
   `position: fixed`, and no element in the page's markup below body scrolls itself (by
   `style=""`, a Tailwind class, or a rule whose selector matches it: the page may scroll there;
-  the root counts only where it is one screen tall). A
+  the root counts only where it is one screen tall, under a flex or grid body, or in a height it
+  can't read). A
   page its script draws (an empty `#root`) has nothing to match: it is warned as one that "looks
   held", which it may ignore if a box its script draws scrolls the content. It reads `<style>`,
   the version's linked stylesheets and their `@import`s, `style=""` on those elements, and
@@ -25,7 +26,9 @@ the manual says a page scrolls as a document.
   the rule that undoes it, e.g. `add html, body, #root { height: auto; overflow: visible;
   position: static } after those rules`; only values of a known shape and plain selectors are
   echoed (and the root's id, else `body > div`, or `body > *` for a custom element), each at most
-  60 characters with its `!important`; time and memory are linear in the page and its sheets. In `lintFiles` its `path` is the stylesheet's, where
+  60 characters with its `!important`. In `lintFiles` each sheet is read once for the version,
+  within one budget for all its pages (16 MiB of sheets, two million match steps; past it, the
+  pages left aren't checked for this rule): linear in the version's pages and sheets. In `lintFiles` its `path` is the stylesheet's, where
   the rule is there. Not read: rules under `@media` (but `all` and `screen`), `@supports`,
   `@container`, `:is()`/`:where()`/`:not()` and sibling selectors, nested rules, `var()`, scripts.
 - **The manual** (every kind): "It scrolls as a document: unless it's meant to fit one screen (a

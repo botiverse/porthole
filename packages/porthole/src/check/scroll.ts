@@ -17,12 +17,14 @@ import { attributesOf } from "./markup.ts";
  * or a Tailwind utility giving it overflow-y auto or scroll, or matched by a rule the check reads
  * that does (a rule whose selector it can't read, or that matches nothing in the markup, doesn't
  * count; nor does the root, by its style="", classes or rules: its own values say whether it
- * scrolls the page, one screen tall, or grows with it). Then the page may scroll in that box, and
+ * scrolls the page, one screen tall or in a height the check can't read (under a flex or grid
+ * body, a height of another shape), or grows with it). Then the page may scroll in that box, and
  * the check can't tell which box holds what. A page its script draws (body holds an empty root at
  * most) can't be matched: it is warned, worded as a page that looks held, as a box its script
  * draws may scroll it. One screen tall: height or max-height (block-size, max-block-size) 100vh
- * (dvh, svh, lvh) or calc(100vh - …), or 100% or calc(100% - …) of an element that is (html's
- * 100% is the frame's), or position fixed or absolute with both top and bottom set (`inset: 0`).
+ * (dvh, svh, lvh) or calc(100vh - 4rem) (less one positive length), or 100% or calc(100% - 4rem)
+ * of an element that is (html's 100% is the frame's), or position fixed or absolute with both top
+ * and bottom set (`inset: 0`).
  *
  * What it reads: the page's `<style>` elements, the stylesheets it links that the caller finds
  * (a version's own files) and what they `@import`, in document order; style="" on the three; the
@@ -40,11 +42,15 @@ import { attributesOf } from "./markup.ts";
  *
  * Bounded: each stylesheet is read once per page, at most `SHEETS` of them and `READ` bytes in all;
  * past that, the rest isn't read. Each element keeps, per property, only each layer's winner so
- * far, and a compound is matched against an element's classes (a set) in bounded work, so time and
- * memory are linear in what it reads, the page and its sheets added, not multiplied. What it echoes
+ * far, and a compound is matched against an element's classes (a set) in bounded work. For a
+ * version's pages (`lintFiles`, with `scrollBudget()`), each sheet is read once and replayed for
+ * each page, only its rules that may match the page's top and its scroll rules, within one budget
+ * for all the pages (`VERSION_READ` bytes, `VERSION_STEPS` match steps): past it, the pages left
+ * aren't checked. So time and memory are linear in the version's pages and sheets. What it echoes
  * to the agent is only values of a known shape, and selectors of plain characters and the root's
  * plain id, each at most `ECHOED` characters with its !important (a selector or id that isn't: the
- * element's own name, `#root`, `body > div`, or `body > *` for a tag HTML doesn't have).
+ * element's own name, `#root`, `body > div`, or `body > *` for a tag HTML doesn't have; the fix is
+ * then !important where the name has less specificity than the selector).
  */
 
 /** A stylesheet the page links, as the caller finds it from `from` (a path), or null. */
@@ -72,6 +78,13 @@ const LAYER_PARTS = 16;
 export const SHEETS = 32;
 /** The most bytes of stylesheets read for one page, in all. */
 export const READ = 4 * 1024 * 1024;
+/**
+ * The most bytes of stylesheets read and replayed for a version's pages, all together (each sheet
+ * read once, then the rules each page may match), and the most steps matching scroll rules
+ * against their markup: past either, the pages left aren't checked for this rule.
+ */
+export const VERSION_READ = 16 * 1024 * 1024;
+export const VERSION_STEPS = 2_000_000;
 /** The most elements below body, and how deep, that scroll rules are matched against. */
 const MOST_ELEMENTS = 2_000;
 const DEEPEST_ELEMENT = 32;
@@ -742,6 +755,7 @@ function longhands(property: string, value: string): [string, string][] {
     case "overflow-y":
     case "height":
     case "max-height":
+    case "display":
     case "position":
     case "top":
     case "bottom":
@@ -782,7 +796,14 @@ const UTILITIES: Readonly<Record<string, readonly [string, string]>> = {
   "inset-y-0": ["inset-block", "0"],
   "top-0": ["top", "0"],
   "bottom-0": ["bottom", "0"],
+  flex: ["display", "flex"],
+  "inline-flex": ["display", "inline-flex"],
+  grid: ["display", "grid"],
+  "inline-grid": ["display", "inline-grid"],
+  block: ["display", "block"],
 };
+/** Tailwind's arbitrary heights: `h-[calc(100vh-4rem)]`, `max-h-[80vh]`. */
+const ARBITRARY_HEIGHT = /^(max-)?h-\[([^\]]{1,64})\]$/u;
 
 const compare = (a: readonly number[], b: readonly number[]): number => {
   for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
@@ -819,24 +840,312 @@ const tooDeep = (name: string): string | null => {
 /** A stylesheet found for the page, once: its path and text. */
 type Found = { readonly path: string; readonly text: string } | null;
 
+/** A declaration a rule gives, read once: as the agent may be told it, and where it is. */
+interface Declaration {
+  readonly property: string;
+  readonly value: string;
+  readonly important: boolean;
+  readonly written: string;
+  readonly at: number;
+}
+
+/** A rule whose selectors the check can match, and that says something it reads. */
+interface Rule {
+  /** The layer it is in, from the sheet's top (`a.b`, an anonymous one `\u0000n`), or null. */
+  readonly layer: string | null;
+  readonly selectors: readonly { readonly text: string; readonly selector: Selector }[];
+  readonly declarations: readonly Declaration[];
+  /** It gives overflow-y auto or scroll. */
+  readonly scrolls: boolean;
+  /** Its length in the sheet: what replaying it for a page costs. */
+  readonly size: number;
+}
+
+/** What comes between a sheet's rules, in order: an `@import`, a layer declared or opened. */
+type Step =
+  | {
+      readonly kind: "import";
+      /** How many of the sheet's rules come before it. */
+      readonly at: number;
+      /** The layer it is in, from the sheet's top. */
+      readonly layer: string | null;
+      readonly href: string;
+      /** The layer it imports into, within its own (`layer(a)`, `layer`), or null for its own. */
+      readonly into: string | null;
+    }
+  | { readonly kind: "layer"; readonly at: number; readonly name: string };
+
+/**
+ * A stylesheet read once, for every page that links it (P106): its rules in order, the steps
+ * between them, and its rules by the key of each selector's last compound (`#id`, `.class`, a tag,
+ * `*`), so a page replays only those that may match its html, body or root.
+ */
+interface Parsed {
+  readonly source: Source;
+  readonly rules: readonly Rule[];
+  readonly steps: readonly Step[];
+  readonly index: ReadonlyMap<string, readonly number[]>;
+  /** The size of the rules under each key: what replaying them costs. */
+  readonly sizes: ReadonlyMap<string, number>;
+  /** The rules that give overflow-y auto or scroll, in order. */
+  readonly scrolling: readonly number[];
+}
+
+/** Anonymous layers' names, each its own (a sheet read once has its own for every page). */
+let anonymousLayers = 0;
+
+/** A key an element is found under in a sheet's index: `#id`, `.class`, `<tag`, `*`. */
+const keyOf = (compound: Compound): string =>
+  compound.ids[0] !== undefined
+    ? `#${compound.ids[0]}`
+    : compound.classes[0] !== undefined
+      ? `.${compound.classes[0]}`
+      : compound.tag !== null
+        ? `<${compound.tag}`
+        : "*";
+const keysOf = (node: Element): string[] => [
+  "*",
+  `<${node.tag}`,
+  ...(node.id === "" ? [] : [`#${node.id}`]),
+  ...[...node.classes].map((name) => `.${name}`),
+];
+
+/** The declarations of a block (`from`..`to` of `text`) that the check reads. */
+function declarationsOf(text: string, from: number, to: number, base: number): Declaration[] {
+  const out: Declaration[] = [];
+  let start = from;
+  let index = from;
+  let parens = 0;
+  const take = (end: number) => {
+    const segment = text.slice(start, end);
+    const colon = segment.indexOf(":");
+    if (colon > 0) {
+      const property = segment.slice(0, colon).trim().toLowerCase();
+      let value = segment
+        .slice(colon + 1)
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/gu, " ");
+      const important = /!\s*important$/u.test(value);
+      if (important) {
+        value = value.replace(/\s*!\s*important$/u, "");
+      }
+      if (!property.startsWith("--") && longhands(property, value).length > 0) {
+        const offset = start + (segment.length - segment.trimStart().length);
+        out.push({
+          property,
+          value,
+          important,
+          written: echoed(property, value, important),
+          at: base + offset,
+        });
+      }
+    }
+  };
+  while (index < to) {
+    const code = text[index];
+    if (code === '"' || code === "'") {
+      index = stringEnd(text, index, to);
+      continue;
+    }
+    if (code === "(") {
+      parens += 1;
+    } else if (code === ")") {
+      parens = Math.max(0, parens - 1);
+    } else if (parens === 0 && code === ";") {
+      take(index);
+      start = index + 1;
+    } else if (parens === 0 && code === "{") {
+      // A nested rule: not read (its prelude is dropped with it).
+      index = blockEnd(text, index, to);
+      start = index;
+      continue;
+    }
+    index += 1;
+  }
+  take(to);
+  return out;
+}
+
+/** An `@import`'s address and layer (`layer(a)`, `layer`), or null where it isn't read. */
+function importOf(rest: string): { href: string; into: string | null } | null {
+  const parsed = /^(?:url\(\s*(["']?)([^"'()\s]+)\1\s*\)|(["'])([^"']+)\3)\s*([\s\S]*)$/iu.exec(
+    rest,
+  );
+  if (parsed === null) {
+    return null;
+  }
+  const href = parsed[2] ?? parsed[4] ?? "";
+  let tail = parsed[5]?.trim() ?? "";
+  let into: string | null = null;
+  const named = /^layer\(\s*([\w.-]+)\s*\)\s*/iu.exec(tail);
+  if (named !== null) {
+    into = named[1] ?? "";
+    tail = tail.slice(named[0].length);
+  } else if (/^layer\b\s*/iu.test(tail)) {
+    anonymousLayers += 1;
+    into = `\u0000${anonymousLayers}`;
+    tail = tail.replace(/^layer\b\s*/iu, "");
+  }
+  return tail === "" || /^(?:only\s+)?(?:all|screen)$/iu.test(tail) ? { href, into } : null;
+}
+
+/** A stylesheet's rules and steps (`text` is comment-free; offsets are `base` + its own). */
+function parseSheet(text: string, source: Source, base: number): Parsed {
+  const rules: Rule[] = [];
+  const steps: Step[] = [];
+  const walk = (from: number, to: number, layer: string | null, depth: number) => {
+    if (depth > DEEPEST) {
+      return;
+    }
+    const within = (name: string) => (layer === null ? name : `${layer}.${name}`);
+    let ruled = false;
+    let at = from;
+    for (let item = nextItem(text, at, to); item !== null; item = nextItem(text, at, to)) {
+      const begun = at;
+      at = item.end;
+      const { prelude, block } = item;
+      if (prelude.startsWith("@")) {
+        const name = /^@([\w-]+)/u.exec(prelude)?.[1]?.toLowerCase() ?? "";
+        const rest = prelude.slice(name.length + 1).trim();
+        if (name === "import" && block === null && !ruled) {
+          const imported = importOf(rest);
+          if (imported !== null) {
+            steps.push({ kind: "import", at: rules.length, layer, ...imported });
+          }
+        } else if (name === "layer") {
+          const names = splitList(rest);
+          if (block === null) {
+            for (const each of names) {
+              steps.push({ kind: "layer", at: rules.length, name: within(each) });
+            }
+          } else {
+            anonymousLayers += 1;
+            const inner = within(names[0] ?? `\u0000${anonymousLayers}`);
+            // Its place is where its block opens, whatever it holds.
+            steps.push({ kind: "layer", at: rules.length, name: inner });
+            walk(block[0], block[1], inner, depth + 1);
+          }
+        } else if (
+          name === "media" &&
+          block !== null &&
+          /^(?:only\s+)?(?:all|screen)$/iu.test(rest)
+        ) {
+          walk(block[0], block[1], layer, depth + 1);
+        }
+        continue;
+      }
+      ruled = true;
+      if (block === null) {
+        continue;
+      }
+      // Each selector once (a repeat matches what the first does), and only those it can match.
+      const seen = new Set<string>();
+      const selectors: { text: string; selector: Selector }[] = [];
+      for (const each of splitList(prelude)) {
+        if (seen.has(each)) {
+          continue;
+        }
+        seen.add(each);
+        const selector = parseSelector(each);
+        if (selector !== null) {
+          selectors.push({ text: each, selector });
+        }
+      }
+      if (selectors.length === 0) {
+        continue;
+      }
+      const declarations = declarationsOf(text, block[0], block[1], base);
+      const scrolls = declaresScroll(text.slice(block[0], block[1]));
+      if (declarations.length > 0 || scrolls) {
+        rules.push({ layer, selectors, declarations, scrolls, size: at - begun });
+      }
+    }
+  };
+  walk(0, text.length, null, 0);
+  const index = new Map<string, number[]>();
+  const sizes = new Map<string, number>();
+  const scrolling: number[] = [];
+  for (const [number, rule] of rules.entries()) {
+    if (rule.scrolls) {
+      scrolling.push(number);
+    }
+    for (const { selector } of rule.selectors) {
+      const last = selector.compounds.at(-1);
+      const key = last === undefined ? "*" : keyOf(last);
+      const listed = index.get(key);
+      if (listed === undefined) {
+        index.set(key, [number]);
+      } else if (listed.at(-1) !== number) {
+        listed.push(number);
+      } else {
+        continue;
+      }
+      sizes.set(key, (sizes.get(key) ?? 0) + rule.size);
+    }
+  }
+  return { source, rules, steps, index, sizes, scrolling };
+}
+
+const compose = (outer: string | null, inner: string | null): string | null =>
+  outer === null ? inner : inner === null ? outer : `${outer}.${inner}`;
+
+/**
+ * What the check may spend on a version's pages, all together (P106): the bytes of stylesheets
+ * read and replayed, and the steps of matching scroll rules against markup. Past either, the pages
+ * left aren't checked for this rule. With the sheets read so far, by path.
+ */
+export interface ScrollBudget {
+  readonly sheets: Map<string, Parsed>;
+  bytes: number;
+  steps: number;
+}
+
+/** A version's budget, for one `lintFiles`: `VERSION_READ` bytes and `VERSION_STEPS` steps. */
+export const scrollBudget = (): ScrollBudget => ({
+  sheets: new Map(),
+  bytes: VERSION_READ,
+  steps: VERSION_STEPS,
+});
+
 /** The cascade over the chain: each declaration that matches, then the one that wins. */
 class Cascade {
   readonly chain: readonly Node[];
+  /** The keys html, body and the root are found under in a sheet's index. */
+  readonly keys: ReadonlySet<string>;
   /** Layer names, in the order they were first declared or opened (`a`, `a.b`). */
   readonly layers: string[] = [];
   readonly known = new Set<string>();
   /** The selectors of rules that give something below body overflow-y auto or scroll. */
   readonly scrollSelectors: Selector[] = [];
   order = 0;
-  anonymous = 0;
   /** The stylesheets read for this page, by path: each once, within the budget. */
   readonly read = new Set<string>();
   bytes = 0;
   readonly find: (href: string, from: string) => Found;
+  readonly budget: ScrollBudget;
+  /** The version's budget ran out on this page: it can't be told. */
+  spent = false;
 
-  constructor(chain: readonly Node[], find: (href: string, from: string) => Found) {
+  constructor(
+    chain: readonly Node[],
+    find: (href: string, from: string) => Found,
+    budget: ScrollBudget,
+  ) {
     this.chain = chain;
+    this.keys = new Set(chain.flatMap(keysOf));
     this.find = find;
+    this.budget = budget;
+  }
+
+  /** Spends `bytes` of the version's budget; false (and spent) where there aren't as many left. */
+  spend(bytes: number): boolean {
+    if (this.spent || bytes > this.budget.bytes) {
+      this.spent = true;
+      return false;
+    }
+    this.budget.bytes -= bytes;
+    return true;
   }
 
   /** A layer, declared (its parents first): its place is where it first comes. */
@@ -979,234 +1288,160 @@ class Cascade {
     }
   }
 
-  /** The declarations of a block (`from`..`to` of `text`), for the nodes given. */
+  /** The declarations given, for the nodes given. */
   declarations(
-    text: string,
-    from: number,
-    to: number,
+    declarations: readonly Declaration[],
     targets: readonly Target[],
     rank: { layer: string | null; inline: boolean },
     source: Source,
-    base: number,
   ) {
-    let start = from;
-    let index = from;
-    let parens = 0;
-    const take = (end: number) => {
-      const segment = text.slice(start, end);
-      const colon = segment.indexOf(":");
-      if (colon > 0) {
-        const property = segment.slice(0, colon).trim().toLowerCase();
-        let value = segment
-          .slice(colon + 1)
-          .trim()
-          .toLowerCase()
-          .replace(/\s+/gu, " ");
-        const important = /!\s*important$/u.test(value);
-        if (important) {
-          value = value.replace(/\s*!\s*important$/u, "");
-        }
-        if (!property.startsWith("--") && longhands(property, value).length > 0) {
-          const offset = start + (segment.length - segment.trimStart().length);
-          for (const target of targets) {
-            this.set(
-              target.node,
-              property,
-              value,
-              {
-                important,
-                layer: rank.layer,
-                inline: rank.inline,
-                specificity: target.specificity,
-              },
-              { source, at: base + offset, selector: target.selector },
-            );
-          }
-        }
+    for (const each of declarations) {
+      for (const target of targets) {
+        this.set(
+          target.node,
+          each.property,
+          each.value,
+          {
+            important: each.important,
+            layer: rank.layer,
+            inline: rank.inline,
+            specificity: target.specificity,
+          },
+          { source, at: each.at, selector: target.selector, written: each.written },
+        );
       }
-    };
-    while (index < to) {
-      const code = text[index];
-      if (code === '"' || code === "'") {
-        index = stringEnd(text, index, to);
-        continue;
-      }
-      if (code === "(") {
-        parens += 1;
-      } else if (code === ")") {
-        parens = Math.max(0, parens - 1);
-      } else if (parens === 0 && code === ";") {
-        take(index);
-        start = index + 1;
-      } else if (parens === 0 && code === "{") {
-        // A nested rule: not read (its prelude is dropped with it).
-        index = blockEnd(text, index, to);
-        start = index;
-        continue;
-      }
-      index += 1;
     }
-    take(to);
   }
 
-  /** A stylesheet the page links or a sheet imports, if it may still be read. */
+  /** A stylesheet the page links or a sheet imports, if it may still be read: read once a version. */
   file(found: Found, layer: string | null) {
     if (!this.take(found)) {
       return;
     }
-    const text = found.text.slice(0, SCANNED);
-    this.sheet(withoutComments(text), 0, text.length, {
-      source: { path: found.path, text },
-      base: 0,
-      layer,
-      // A file starts again at the top: it is read once, within the budget, however it's reached.
-      depth: 0,
-      from: found.path,
-    });
-  }
-
-  /** A stylesheet's rules (`text` is comment-free; offsets are `base` + its own). */
-  sheet(
-    text: string,
-    from: number,
-    to: number,
-    context: {
-      source: Source;
-      base: number;
-      layer: string | null;
-      depth: number;
-      /** Where its imports are found from: its own path, or the page's. */
-      from: string;
-    },
-  ) {
-    if (context.depth > DEEPEST) {
-      return;
-    }
-    let ruled = false;
-    let at = from;
-    for (let item = nextItem(text, at, to); item !== null; item = nextItem(text, at, to)) {
-      at = item.end;
-      const { prelude, block } = item;
-      const within = (name: string) => (context.layer === null ? name : `${context.layer}.${name}`);
-      if (prelude.startsWith("@")) {
-        const name = /^@([\w-]+)/u.exec(prelude)?.[1]?.toLowerCase() ?? "";
-        const rest = prelude.slice(name.length + 1).trim();
-        if (name === "import" && block === null && !ruled) {
-          this.import(rest, context, within);
-        } else if (name === "layer") {
-          const names = splitList(rest);
-          if (block === null) {
-            for (const each of names) {
-              const layer = within(each);
-              this.declare(tooDeep(layer) ?? layer);
-            }
-          } else {
-            this.anonymous += 1;
-            const layer = within(names[0] ?? `\u0000${this.anonymous}`);
-            const cut = tooDeep(layer);
-            if (cut !== null) {
-              this.declare(cut);
-              continue;
-            }
-            // Its place is where its block opens, whatever it holds.
-            this.declare(layer);
-            this.sheet(text, block[0], block[1], { ...context, layer, depth: context.depth + 1 });
-          }
-        } else if (
-          name === "media" &&
-          block !== null &&
-          /^(?:only\s+)?(?:all|screen)$/iu.test(rest)
-        ) {
-          this.sheet(text, block[0], block[1], { ...context, depth: context.depth + 1 });
-        }
-        continue;
-      }
-      ruled = true;
-      if (block === null) {
-        continue;
-      }
-      const targets: Target[] = [];
-      const below: Selector[] = [];
-      for (const each of splitList(prelude)) {
-        const selector = parseSelector(each);
-        let top = false;
-        if (selector !== null) {
-          this.chain.forEach((node, index) => {
-            if (!matches(selector, this.chain, index)) {
-              return;
-            }
-            top ||= index < 2;
-            const found = targets.find((target) => target.node === node);
-            if (found === undefined) {
-              targets.push({ node, specificity: selector.specificity, selector: each });
-            } else if (compare(selector.specificity, found.specificity) > 0) {
-              targets.splice(targets.indexOf(found), 1, {
-                node,
-                specificity: selector.specificity,
-                selector: each,
-              });
-            }
-          });
-        }
-        // A selector for anything but html or body may name an element below body; one the
-        // check can't read names nothing it can see.
-        if (selector !== null && !top) {
-          below.push(selector);
-        }
-      }
-      if (
-        below.length > 0 &&
-        this.scrollSelectors.length < MOST_SCROLL_SELECTORS &&
-        declaresScroll(text.slice(block[0], block[1]))
-      ) {
-        this.scrollSelectors.push(
-          ...below.slice(0, MOST_SCROLL_SELECTORS - this.scrollSelectors.length),
-        );
-      }
-      if (targets.length > 0) {
-        this.declarations(
-          text,
-          block[0],
-          block[1],
-          targets,
-          { layer: context.layer, inline: false },
-          context.source,
-          context.base,
-        );
-      }
-    }
-  }
-
-  import(rest: string, context: Parameters<Cascade["sheet"]>[3], within: (name: string) => string) {
-    const parsed = /^(?:url\(\s*(["']?)([^"'()\s]+)\1\s*\)|(["'])([^"']+)\3)\s*([\s\S]*)$/iu.exec(
-      rest,
-    );
-    if (parsed === null) {
-      return;
-    }
-    const href = parsed[2] ?? parsed[4] ?? "";
-    let tail = parsed[5]?.trim() ?? "";
-    let layer = context.layer;
-    const named = /^layer\(\s*([\w.-]+)\s*\)\s*/iu.exec(tail);
-    if (named !== null) {
-      layer = within(named[1] ?? "");
-      tail = tail.slice(named[0].length);
-    } else if (/^layer\b\s*/iu.test(tail)) {
-      this.anonymous += 1;
-      layer = within(`\u0000${this.anonymous}`);
-      tail = tail.replace(/^layer\b\s*/iu, "");
-    }
-    if (tail !== "" && !/^(?:only\s+)?(?:all|screen)$/iu.test(tail)) {
-      return;
-    }
-    if (layer !== null) {
-      const cut = tooDeep(layer);
-      this.declare(cut ?? layer);
-      if (cut !== null) {
+    let parsed = this.budget.sheets.get(found.path);
+    if (parsed === undefined) {
+      const text = found.text.slice(0, SCANNED);
+      if (!this.spend(text.length)) {
         return;
       }
+      parsed = parseSheet(withoutComments(text), { path: found.path, text }, 0);
+      this.budget.sheets.set(found.path, parsed);
     }
-    this.file(this.find(href, context.from), layer);
+    // A file starts again at the top: it is read once, within the budget, however it's reached.
+    this.replay(parsed, layer, found.path, true);
+  }
+
+  /**
+   * A sheet's rules for this page, in order, in `layer`: only those that may match html, body or
+   * the root, and the scroll rules until there are enough. Charged to the version's budget where
+   * `charged` (a linked sheet; a page's own `<style>` is the page's own length).
+   */
+  replay(parsed: Parsed, layer: string | null, from: string, charged: boolean) {
+    let cost = 0;
+    for (const key of this.keys) {
+      cost += parsed.sizes.get(key) ?? 0;
+    }
+    if (charged && !this.spend(cost)) {
+      return;
+    }
+    const candidates = new Set<number>();
+    for (const key of this.keys) {
+      for (const number of parsed.index.get(key) ?? []) {
+        candidates.add(number);
+      }
+    }
+    const matched = [...candidates].sort((a, b) => a - b);
+    let next = 0;
+    let scroll = 0;
+    const upTo = (end: number) => {
+      for (;;) {
+        const candidate = matched[next] ?? Infinity;
+        const scrolling =
+          this.scrollSelectors.length < MOST_SCROLL_SELECTORS
+            ? (parsed.scrolling[scroll] ?? Infinity)
+            : Infinity;
+        const number = Math.min(candidate, scrolling);
+        if (number >= end || this.spent) {
+          return;
+        }
+        next += candidate === number ? 1 : 0;
+        scroll += scrolling === number ? 1 : 0;
+        const rule = parsed.rules[number];
+        if (rule !== undefined) {
+          if (candidate !== number && charged && !this.spend(rule.size)) {
+            return;
+          }
+          this.rule(rule, candidate === number, compose(layer, rule.layer), parsed.source);
+        }
+      }
+    };
+    for (const step of parsed.steps) {
+      upTo(step.at);
+      if (
+        this.spent ||
+        (charged && !this.spend(1 + (step.kind === "layer" ? step.name : step.href).length))
+      ) {
+        return;
+      }
+      if (step.kind === "layer") {
+        const name = compose(layer, step.name) ?? step.name;
+        this.declare(tooDeep(name) ?? name);
+        continue;
+      }
+      const into = compose(compose(layer, step.layer), step.into);
+      if (into !== null) {
+        const cut = tooDeep(into);
+        this.declare(cut ?? into);
+        if (cut !== null) {
+          continue;
+        }
+      }
+      this.file(this.find(step.href, from), into);
+    }
+    upTo(Infinity);
+  }
+
+  /** One rule, for the elements it matches (`matching`: it may match one), and as a scroll rule. */
+  rule(rule: Rule, matching: boolean, layer: string | null, source: Source) {
+    if (layer !== null && tooDeep(layer) !== null) {
+      // In a layer too deep: not read (its parents are declared where it opens).
+      return;
+    }
+    const targets: Target[] = [];
+    const below: Selector[] = [];
+    for (const { text, selector } of rule.selectors) {
+      let top = false;
+      if (matching) {
+        this.chain.forEach((node, index) => {
+          if (!matches(selector, this.chain, index)) {
+            return;
+          }
+          top ||= index < 2;
+          const found = targets.find((target) => target.node === node);
+          if (found === undefined) {
+            targets.push({ node, specificity: selector.specificity, selector: text });
+          } else if (compare(selector.specificity, found.specificity) > 0) {
+            targets.splice(targets.indexOf(found), 1, {
+              node,
+              specificity: selector.specificity,
+              selector: text,
+            });
+          }
+        });
+      }
+      // A selector for anything but html or body may name an element below body.
+      if (!top) {
+        below.push(selector);
+      }
+    }
+    if (rule.scrolls && below.length > 0 && this.scrollSelectors.length < MOST_SCROLL_SELECTORS) {
+      this.scrollSelectors.push(
+        ...below.slice(0, MOST_SCROLL_SELECTORS - this.scrollSelectors.length),
+      );
+    }
+    if (targets.length > 0) {
+      this.declarations(rule.declarations, targets, { layer, inline: false }, source);
+    }
   }
 }
 
@@ -1219,12 +1454,25 @@ const echoed = (property: string, value: string, important: boolean): string => 
   const room = ECHOED - flag.length;
   return `${said.length > room ? `${said.slice(0, room - 1)}…` : said}${flag}`;
 };
+/** An element's own name's specificity: `#root`, `body > div`, `body > *`, `html`, `body`. */
+const specificityOf = (label: string): readonly number[] =>
+  label.startsWith("#")
+    ? [1, 0, 0]
+    : label.startsWith("body > ") && !label.endsWith("*")
+      ? [0, 0, 2]
+      : [0, 0, 1];
 /** A selector the agent may be told: plain characters, short. */
 const PLAIN_SELECTOR = new RegExp(`^[\\w#.:>* ()-]{1,${ECHOED}}$`, "u");
 
-const SCREEN = /^(?:100(?:d|s|l)?vh|calc\(\s?100(?:d|s|l)?vh\s?-[^()]*\))$/u;
+/** One positive length taken from a whole: `calc(100vh - 4rem)`, `calc(100% - 56px)`. */
+const LESS = String.raw` - (?:\d{1,6}(?:\.\d{1,4})?|\.\d{1,4})(?:px|rem|em|%|[dsl]?vh)\s?\)`;
+const SCREEN = new RegExp(String.raw`^(?:100[dsl]?vh|calc\(\s?100[dsl]?vh${LESS})$`, "u");
 /** 100% of the parent, less something: one screen where the parent is. */
-const PARENT = /^(?:100%|calc\(\s?100%\s?-[^()]*\))$/u;
+const PARENT = new RegExp(String.raw`^(?:100%|calc\(\s?100%${LESS})$`, "u");
+/** Heights that are the content's (the box grows with what it holds). */
+const CONTENT_HEIGHT = /^(?:auto|none|fit-content|min-content|max-content)$/u;
+/** A display that lays its children out by flex or grid: their heights are its to give. */
+const FLEX_OR_GRID = /^(?:(?:block|inline) )?(?:inline-)?(?:flex|grid)$/u;
 const CLIPS = new Set(["hidden", "clip"]);
 const SCROLLS = new Set(["auto", "scroll", "overlay"]);
 const RESET = new Set(["initial", "unset", "revert", "revert-layer"]);
@@ -1250,8 +1498,19 @@ interface Hold {
  */
 export function scrollLock(
   page: string,
-  options: { readonly noun: string; readonly path?: string; readonly sheet?: LinkedSheet },
+  options: {
+    readonly noun: string;
+    readonly path?: string;
+    readonly sheet?: LinkedSheet;
+    /** The version's, shared by its pages (`scrollBudget()`); else this page's own. */
+    readonly budget?: ScrollBudget;
+  },
 ): ScrollLock | null {
+  const shared = options.budget ?? { sheets: new Map(), bytes: Infinity, steps: Infinity };
+  if (shared.bytes <= 0 || shared.steps <= 0) {
+    // The version's budget is spent: this page isn't checked.
+    return null;
+  }
   const scanned = scanPage(page);
   const pageSource: Source = { path: options.path, text: page };
   const nodeOf = (tag: Tag | null, name: string, label: string, child: boolean): Node => {
@@ -1299,7 +1558,7 @@ export function scrollLock(
     }
     return asked.get(key) ?? null;
   };
-  const cascade = new Cascade(chain, find);
+  const cascade = new Cascade(chain, find, shared);
   const from = options.path ?? "";
   for (const sheet of scanned.sheets) {
     const media = attribute(sheet.tag, "media")?.value.trim() ?? "";
@@ -1308,13 +1567,7 @@ export function scrollLock(
     }
     if (sheet.kind === "style") {
       const text = withoutComments(page.slice(sheet.start, sheet.end));
-      cascade.sheet(text, 0, text.length, {
-        source: pageSource,
-        base: sheet.start,
-        layer: null,
-        depth: 0,
-        from,
-      });
+      cascade.replay(parseSheet(text, pageSource, sheet.start), null, from, false);
       continue;
     }
     const rel = (attribute(sheet.tag, "rel")?.value ?? "").toLowerCase().split(/\s+/u);
@@ -1332,33 +1585,44 @@ export function scrollLock(
   for (const node of chain) {
     if (node.style !== null) {
       cascade.declarations(
-        node.style.text,
-        0,
-        node.style.text.length,
+        declarationsOf(node.style.text, 0, node.style.text.length, node.style.at),
         [{ node, specificity: [0, 0, 0], selector: "" }],
         { layer: null, inline: true },
         pageSource,
-        node.style.at,
       );
     }
   }
   if (scanned.tailwind) {
     for (const node of chain) {
       for (const name of node.classes) {
-        const utility = Object.hasOwn(UTILITIES, name) ? UTILITIES[name] : undefined;
+        const arbitrary = ARBITRARY_HEIGHT.exec(name);
+        const height = (arbitrary?.[2] ?? "").replaceAll("_", " ").toLowerCase();
+        const utility = Object.hasOwn(UTILITIES, name)
+          ? UTILITIES[name]
+          : arbitrary === null
+            ? undefined
+            : ([arbitrary[1] === undefined ? "height" : "max-height", height] as const);
+        // An arbitrary class is page text: told as it is only where its value is of a known shape.
+        const written =
+          arbitrary === null || SCREEN.test(height) || PARENT.test(height)
+            ? name
+            : `${arbitrary[1] ?? ""}h-[…]`;
         if (utility !== undefined) {
           cascade.set(
             node,
             utility[0],
             utility[1],
             { important: false, layer: null, inline: false, specificity: [0, 1, 0] },
-            { source: pageSource, at: node.classAt, selector: "", written: name, kind: "utility" },
+            { source: pageSource, at: node.classAt, selector: "", written, kind: "utility" },
           );
         }
       }
     }
   }
 
+  if (cascade.spent) {
+    return null;
+  }
   cascade.resolve();
   // Something in the page's own markup below body scrolls itself: the page may scroll in it (the
   // manual's line on the wheel says the rest). Not a hold the check can be sure of. A scroll rule
@@ -1367,7 +1631,9 @@ export function scrollLock(
   // values say whether it scrolls the page (one screen tall) or grows with it (`scrollBox`).
   const outer = chain.slice(0, 2);
   const rooted = chain.length > 2;
-  const budget = { steps: MATCH_STEPS };
+  // Each page's steps, within what the version has left.
+  const allowed = Math.min(MATCH_STEPS, shared.steps);
+  const budget = { steps: allowed };
   const scrollsInside =
     scanned.styleScrolls ||
     (scanned.tailwind && scanned.classScrolls) ||
@@ -1380,7 +1646,8 @@ export function scrollLock(
         return matches(selector, elements, elements.length - 1, budget);
       }),
     );
-  if (scrollsInside) {
+  shared.steps -= allowed - Math.max(0, budget.steps);
+  if (scrollsInside || (budget.steps <= 0 && allowed < MATCH_STEPS)) {
     return null;
   }
   // Drawn by its script (body holds an empty root at most): a box it draws may scroll the content.
@@ -1447,9 +1714,31 @@ export function scrollLock(
     }
     states.push({ screen: height || maxHeight || spanned, shown, position: position?.value ?? "" });
   }
+  // The root scrolling in a height the check can't read: its own box, as an inner one is (no
+  // warning). Under a flex or grid body (its height is the layout's), or a height of a shape it
+  // doesn't know (a length, calc(), min(), var(), an arbitrary class). Not a height that is the
+  // content's, or 100% of a body that is (it grows with the page).
+  const unread = (index: number): boolean => {
+    const node = chain[index];
+    const parent = chain[index - 1];
+    if (index !== 2 || node === undefined || parent === undefined) {
+      return false;
+    }
+    if (FLEX_OR_GRID.test(value(parent, "display")?.value ?? "")) {
+      return true;
+    }
+    return ["height", "max-height"].some((property) => {
+      const found = value(node, property)?.value;
+      return found !== undefined && !CONTENT_HEIGHT.test(found) && !PARENT.test(found);
+    });
+  };
   const scrollBox = (index: number): boolean => {
     const node = chain[index];
-    return node !== undefined && SCROLLS.has(overflowY(node)) && (states[index]?.screen ?? false);
+    return (
+      node !== undefined &&
+      SCROLLS.has(overflowY(node)) &&
+      ((states[index]?.screen ?? false) || unread(index))
+    );
   };
   const holds: Hold[] = [];
   for (const [index, node] of chain.entries()) {
@@ -1513,6 +1802,9 @@ export function scrollLock(
   // The fix: a later rule that undoes the rules' values, under their own selectors (so it wins
   // by coming later); what style="" and utility classes say is taken out where it is.
   const rules = holds.flatMap((hold) => hold.shown.filter((each) => each.kind === "rule"));
+  // Where an element's own name stands for a rule's selector, the rule may outrank it: then the
+  // fix is !important, or it couldn't win.
+  let outranked = false;
   const selectors = [
     ...new Set(
       holds.flatMap((hold) => {
@@ -1523,15 +1815,20 @@ export function scrollLock(
           undefined,
         );
         // A selector the agent may be told as it is; else the element's own name.
-        return strongest === undefined
-          ? []
-          : [PLAIN_SELECTOR.test(strongest.selector) ? strongest.selector : hold.node.label];
+        if (strongest === undefined) {
+          return [];
+        }
+        if (PLAIN_SELECTOR.test(strongest.selector)) {
+          return [strongest.selector];
+        }
+        outranked ||= compare(strongest.specificity, specificityOf(hold.node.label)) > 0;
+        return [hold.node.label];
       }),
     ),
   ];
   const says = (prefixes: readonly string[]) =>
     rules.some((each) => prefixes.some((prefix) => each.written.startsWith(prefix)));
-  const important = rules.some((each) => each.important) ? " !important" : "";
+  const important = outranked || rules.some((each) => each.important) ? " !important" : "";
   const reset = [
     says(["height", "inset", "top", "bottom", "block-size"]) ? "height: auto" : null,
     says(["max-height", "max-block-size"]) ? "max-height: none" : null,
