@@ -14,6 +14,7 @@ const POLICY = "src/compile/policy.ts";
 const BRIDGE = "src/bridge/bridge.ts";
 const SHELL_ADAPTER = "src/protocol/shell-adapter.ts";
 const MCP_ADAPTER = "src/mcp/adapter.ts";
+const REQUESTS = "src/runtime/requests.ts";
 /**
  * Each weakening: edits to the core's sources (served to the browser as they are stripped or
  * bundled), or a name the leak server (`embedder-csp`) or the served harness (`harness`) acts on.
@@ -458,6 +459,14 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       file: BRIDGE,
       find: "          return { ok: true, value: (value === true) as Result };",
       replace: "          return { ok: true, value: value as Result };",
+    },
+  ],
+  // A comment's draft taken as the page gave it (P108): past the limit, unseen characters, not text.
+  "comment-draft": [
+    {
+      file: REQUESTS,
+      find: "    (draft !== undefined && !draftText(draft))",
+      replace: "    false",
     },
   ],
   // The asset library's CSP (P089), taken out by the served harness: scripts from it run

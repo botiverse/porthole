@@ -661,7 +661,10 @@ section.
   code-typed asset runs as code only when an admin uploaded it where uploaded code may run, and
   only while the config still lets uploaded code run, asked at every load, in bearer mode too
   (where every artifact config must; P103); anything else is a download.
-- `comments` is write-only: the page learns only whether the composer opened.
+- `comments` is write-only: the page learns only whether the composer opened. A draft it gives
+  (P108) is at most 2,000 characters of text a person can see: no zero-width, bidi or tag
+  characters, no controls but a new line and a tab (P100's `unseen`); anything else is refused
+  before the handler.
 - `defineRuntimeConformance` checks the host's handlers, and with `api` its own API for `db`,
   `artifact` and `assets`, with a forged context (a viewer claiming to be the owner, no rules).
 
@@ -677,6 +680,12 @@ section.
 - Keep each person's data apart in its own stores, and refuse moved bases and versions
   (`Refused("conflict")`).
 - Handle abuse on shared pages (S4).
+- Show a comment's draft (P108) whole, as the person's editable plain text in its own composer,
+  and post it only on the person's own Send, never on the page's word. A composer that opens with
+  a draft is a view the content brought (§6's guard): it takes no press, and no Enter that sends,
+  for 500 ms after it opens, doesn't focus Send, and opens beside the frame where it can. Once
+  posted, the comment is the person's: mentions in it act as theirs, which is why they must see
+  it all first.
 
 **Not guaranteed**
 
@@ -685,6 +694,10 @@ section.
   page's rules allow) can read it.
 - `db` rewrites only paths: an id the page stores inside a document's data is returned as stored.
 - In bearer mode, assets are served by id alone, without the host's check.
+- A draft is the page's words in the person's composer: a person who posts it without reading
+  posts what the page chose, and an agent that reads the comment takes it as theirs. Porthole
+  bounds what can hide in it (visible text, 2,000 characters, a click to open); reading it is the
+  person's.
 
 ## 8. Fixes in flight
 

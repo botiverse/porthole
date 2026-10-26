@@ -1,3 +1,4 @@
+import { unseen } from "../bridge/unseen.ts";
 import type { Limits } from "../config/schema.ts";
 import { fileLimits, filePathProblem } from "../files/paths.ts";
 import { fileTypeOf } from "../files/types.ts";
@@ -69,6 +70,19 @@ export interface CommentRequest {
   readonly draft?: string;
 }
 
+/**
+ * A draft (P108): text the person will post in their own name, so all of it must be text they can
+ * see: at most 2,000 characters, well-formed, not blank, and nothing `unseen` (P100: no zero-width
+ * or bidi characters, no tags, no controls but a new line and a tab), which a host would show as
+ * nothing and an agent would read as the person's words. Lines and tabs are fine: a checklist.
+ */
+const draftText = (value: unknown): value is string =>
+  typeof value === "string" &&
+  value.trim() !== "" &&
+  value.length <= 2_000 &&
+  value.isWellFormed() &&
+  !unseen(value);
+
 export function parseCommentRequest(args: unknown): CommentRequest | null {
   const anchor = isRecord(args) ? args.anchor : undefined;
   if (!isRecord(anchor) || !shortText(anchor.name, 256)) {
@@ -78,7 +92,7 @@ export function parseCommentRequest(args: unknown): CommentRequest | null {
   if (
     (anchor.label !== undefined && !shortText(anchor.label, 200)) ||
     (anchor.quote !== undefined && !shortText(anchor.quote, 2_000)) ||
-    (draft !== undefined && !shortText(draft, 2_000))
+    (draft !== undefined && !draftText(draft))
   ) {
     return null;
   }

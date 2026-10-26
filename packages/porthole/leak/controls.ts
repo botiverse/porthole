@@ -508,6 +508,12 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     specs: [RUNTIME],
     fails: all("comments are write-only: the composer opens from a click, content hears only that"),
   },
+  "comment-draft": {
+    specs: [RUNTIME],
+    fails: all(
+      "a comment's draft is the host's to check: past the limit, holding what a person can't see, or not text, it opens no composer (P108)",
+    ),
+  },
   // Two walls stand behind a script from /_blob/: the CSP and the type it is served as. Each
   // control alone takes one out; the CSP's probe fails only with both out.
   "blob-script": {

@@ -525,7 +525,9 @@ handlers: {
   db: (args, { viewer, declared, instance, changed, signal }) => myApi.db(instance, viewer, args, declared?.rules, { changed, signal }),
   artifact: (args, { viewer, instance }) => myApi.artifact(instance, viewer, args),   // Refused("conflict") when base moved
   assets: (args, { viewer, instance }) => myApi.assets(instance, viewer, args),
-  comments: ({ anchor }) => composer.open(anchor),                                     // true if it opened
+  // true if it opened; a draft (P108) is shown whole and editable, posted only on the person's Send,
+  // the composer armed for 500 ms (THREAT_MODEL §6)
+  comments: ({ anchor, draft }) => composer.open(anchor, { draft }),
 },
 // 5. The mount: what this version declared, within what the artifact declares now; null for a
 //    page published before 0.7 (required under a runtime). Before rendering: a stored

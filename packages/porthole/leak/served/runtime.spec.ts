@@ -519,6 +519,44 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
     ).toEqual(["data/users/bob/prefs"]);
   });
 
+  test("a comment's draft is the host's to check: past the limit, holding what a person can't see, or not text, it opens no composer (P108)", async ({
+    page,
+  }) => {
+    const { frame, key } = await show(page, {
+      declaration: {},
+      viewer: { level: "view", id: "vic" },
+    });
+    // Each from its own click, the last outcome cleared first (clicked() waits for a new one).
+    const open = async (options: string) => {
+      await frame.evaluate(() => delete (window as unknown as { clicked?: unknown }).clicked);
+      return clicked(
+        frame,
+        `const comments = await porthole.use("comments"); return comments.open({ name: "card-2" }, ${options});`,
+      );
+    };
+    const refused = [
+      await open(`{ draft: "Appro\\u200Bved" }`),
+      await open(`{ draft: "Approved" + String.fromCodePoint(0xE0049, 0xE0067, 0xE006E) }`),
+      await open(`{ draft: "x".repeat(2001) }`),
+      await open(`{ draft: 42 }`),
+      await open(`"Approved"`),
+    ];
+    expect(
+      refused.map((each) => (each as { code?: unknown }).code ?? "opened"),
+      "probe: no such draft opened the composer (an invalid call reads as not_allowed to content)",
+    ).toEqual(["not_allowed", "not_allowed", "not_allowed", "not_allowed", "not_allowed"]);
+    expect(
+      (await runtimeCalls(page, key)).filter((each) => each.capability === "comments"),
+      "probe: no such draft reached the host's handler",
+    ).toEqual([]);
+    // A checklist is text a person can see: it reaches the host's composer (the harness's answers false).
+    await open(`{ draft: "Approved\\n- [ ] tests" }`);
+    expect(
+      (await runtimeCalls(page, key)).map((each) => each.args),
+      "a checklist reaches the composer",
+    ).toEqual([{ anchor: { name: "card-2" }, draft: "Approved\n- [ ] tests" }]);
+  });
+
   test("comments are write-only: the composer opens from a click, content hears only that", async ({
     page,
   }) => {
