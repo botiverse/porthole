@@ -588,6 +588,15 @@ export function defineRuntimeConformance(
         "open",
       );
       expect(typeof opened === "boolean", "comments.open answers a boolean");
+      // A draft (P108): the handler takes the new field (a strict schema of its own must not refuse it).
+      const drafted = ok(
+        await as(handlers, viewers.view)("comments", {
+          anchor: { name: "slide-3" },
+          draft: "Approved",
+        }),
+        "open with a draft",
+      );
+      expect(typeof drafted === "boolean", "comments.open with a draft answers a boolean");
     });
   }
   return cases;

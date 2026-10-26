@@ -3,6 +3,16 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## Unreleased
+
+- **A comment's draft from the page** (P108): `comments.open(anchor, { draft })` opens the host's
+  composer starting with `draft` (at most 2,000 characters), which the person edits and posts, or
+  doesn't; the handler gets `{ anchor, draft }`. The page still never posts or reads a comment. A
+  draft is visible text only (P100's `unseen`): anything else is refused before the handler.
+  - **Hosts:** show the draft whole, as the person's editable plain text; post it only on their
+    Send; arm the composer as THREAT_MODEL §6 arms a view the content brought (no press, and no
+    Enter that sends, for 500 ms; Send not focused). `defineRuntimeConformance` now sends a draft.
+
 ## 0.11.0
 
 The agent hears, before publishing, that its page's own styles hold it to one screen (P106), and

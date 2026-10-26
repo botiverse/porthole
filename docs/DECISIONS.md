@@ -3033,7 +3033,7 @@ store); `test/runtime.test.ts` (the CSP sources; upload limits and names).
 the public suffix list (CORP becomes defense in depth), or a host needs assets shared across
 artifacts (`copy_from`: a new id in the destination).
 
-## P090 · 2026-10-18 · Comments from the page: the host's composer at the page's anchor, write-only · Accepted; amended by P091
+## P090 · 2026-10-18 · Comments from the page: the host's composer at the page's anchor, write-only · Accepted; amended by P091, P108
 
 **Decision.** `comments` is a built-in (P086) host function served by a handler: `open({ name,
 label?, quote? })` (a name the page chose, ≤ 256 characters, `slide-3`, `refs/a.md#L12`; a label ≤
@@ -5446,3 +5446,50 @@ fact more (a mark is a draft), bounded by the host's duty above.
 **Revisit when** a host needs drafts in a frame others see (then the host draws them itself), a
 third state is asked for (resolved, private: then a state list, still not a style knob), the
 shell gets forced-colors styles, or MCP Apps defines annotations.
+
+## P108 · 2026-10-26 · A comment's draft from the page: text the composer starts with, never posted by the page · Accepted
+
+Amends P090. A page that asks for decisions (Raft's "decision sheet": a card per question with
+"Approve" and "Needs changes" buttons) opens the host's composer at the card with `comments.open`
+(P090), and the person then types the same words every time. xxchan asked for the button to carry
+them (#proj-workspace, 2026-10-26).
+
+**Decision.**
+1. **`comments.open(anchor, { draft })`.** `draft` is text the composer starts with: a string, not
+   blank, at most 2,000 characters (the quote's limit), well-formed, and nothing a person can't see
+   (P100's `unseen`: no zero-width, bidi or tag characters, no controls but a new line and a tab,
+   so a checklist is fine). Anything else refuses the call as `invalid` before any handler, as a
+   draft that isn't a string does: the shell sends it as the page gave it (options that aren't an
+   object send `null`), read after the click's check, so a getter that throws is a rejection. The
+   handler gets `{ anchor, draft }`.
+2. **The rest is P090's.** From a click (`user-activation`, 30 a minute), view level; content hears
+   only whether the composer opened; no method reads a thread; the page never posts.
+3. **The host's duties** (THREAT_MODEL §6 and §7, ADOPTING's example): show the draft whole, as the
+   person's editable plain text, in its own composer; post it only on the person's Send; arm the
+   composer as §6 arms a view the content brought: no press, and no Enter that sends, for 500 ms
+   after it opens, Send not focused, beside the frame where the layout allows. Once posted the
+   comment is the person's, mentions in it included: that is why they must see it all first.
+   `defineRuntimeConformance` checks that the handler takes a draft (answers a boolean); that it
+   never posts on its own can't be seen from a handler and is the host's.
+
+**Why.** The comment is still the person's word: they see all of the text, can change or drop it,
+and post it themselves, as P090 requires. What the page saves them is typing.
+**Threats it opens, and their bounds.**
+- *Words the person didn't read:* a long draft hiding a line they wouldn't sign, or one an agent
+  reading the comment later takes as their instruction. Bounded by visible text only (no hidden
+  characters: the review found tags, U+200B and U+202E would otherwise pass), 2,000 characters, and
+  the host showing it whole; reading it is the person's.
+- *Click-through:* before P108 a stray press on Send posted nothing; now the first click already
+  loads a postable comment, and the page can place its button where Send will appear (the second
+  click of a double click), or ask the person to press Enter. Bounded by the host's arming (above).
+**Rejected.** The page posting the comment (P090); a draft without a gesture; rich text or
+mentions resolved from the draft before posting (the host would be acting on the content's names);
+coercing what isn't text into text (`String(null)` is "null", which the person never meant).
+**Tested.** `test/runtime.test.ts` ("a draft (P108)": as given, a checklist too; past 2,000,
+blank, a number, null, a lone surrogate, tag characters, U+200B, U+202E, a bell: `invalid`, no
+handler); `leak/served/runtime.spec.ts` ("a comment's draft is the host's to check": from real
+clicks, a zero-width space, tags, 2,001 characters, a number and a string as options open nothing
+and reach no handler, a checklist reaches the composer; "comments are write-only": the draft beside
+the anchor). Negative control `comment-draft` (the draft taken as given) → the first case, every
+engine. `types/runtime/v1/check.ts` (the page-shaped call compiles); the runtime conformance's
+comments case sends a draft.

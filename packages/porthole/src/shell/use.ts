@@ -131,7 +131,15 @@ export const USE_RUNTIME = String.raw`
   const METHODS = {
     user: { get: () => call("user", "get", {}) },
     comments: {
-      open: (anchor) => clicked("comments", "comments.open") || call("comments", "open", { anchor: typeof anchor === "string" ? { name: anchor } : record(anchor) }),
+      // The draft goes as the page gave it, for the host to refuse what isn't text (P108): read
+      // after the click's check, so a getter that throws is a rejection; options that aren't an
+      // object send a null draft, refused.
+      open: (anchor, options) =>
+        clicked("comments", "comments.open") ||
+        Promise.resolve().then(() => {
+          const draft = options === undefined || options === null ? undefined : typeof options === "object" ? options.draft : null;
+          return call("comments", "open", { anchor: typeof anchor === "string" ? { name: anchor } : record(anchor), ...(draft === undefined ? {} : { draft }) });
+        }),
     },
     clipboard: { copy: (text) => clicked("copyText", "clipboard.copy") || call("clipboard", "copy", { text: String(text) }) },
     links: { open: (url) => clicked("openLink", "links.open") || call("links", "open", { url: String(url) }) },
