@@ -14,7 +14,8 @@ interface PortholeCommentAnchor {
 interface PortholeCommentOptions {
   /**
    * Text the composer starts with (at most 2,000 characters): a draft the person edits, posts
-   * or discards in the app. It is never posted without them.
+   * or discards in the app. It is never posted without them. Visible text only: new lines and
+   * tabs are fine; a draft with zero-width, bidi or tag characters is refused.
    */
   readonly draft?: string;
 }
