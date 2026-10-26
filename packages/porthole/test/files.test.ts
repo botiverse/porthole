@@ -985,7 +985,7 @@ describe("a page with files held to one screen (P106)", () => {
     const sheet = (href: string) => {
       asked += 1;
       const text = sheets[href];
-      return text === undefined ? null : { path: href, text };
+      return text === undefined ? null : { path: href, size: text.length, text: () => text };
     };
     const started = performance.now();
     const fanned = scrollLock(page('<link rel="stylesheet" href="s0.css">'), {
@@ -1016,10 +1016,45 @@ describe("a page with files held to one screen (P106)", () => {
       scrollLock(page(links), {
         noun: "page",
         path: "index.html",
-        sheet: (href) => (many[href] === undefined ? null : { path: href, text: many[href] }),
+        sheet: (href) => {
+          const text = many[href];
+          return text === undefined ? null : { path: href, size: text.length, text: () => text };
+        },
       }),
     ).toBeNull();
     expect(performance.now() - started).toBeLessThan(2_000);
+  });
+
+  it("asks for no sheet past a page's caps, and decodes none it won't read (P110)", async () => {
+    const { scrollLock, READ, SHEETS } = await import("../src/check/scroll.ts");
+    // The 1026 audit: lintFiles decoded every sheet a page linked and kept it for the set, though
+    // the rule reads at most SHEETS of them and READ bytes (400 sheets of 240 KB held 200 MB).
+    const links = Array.from(
+      { length: 400 },
+      (_, index) => `<link rel="stylesheet" href="s${index}.css">`,
+    ).join("");
+    let asked = 0;
+    let decoded = 0;
+    const sized = (size: number) => (href: string) => {
+      asked += 1;
+      return {
+        path: href,
+        size,
+        text: () => {
+          decoded += 1;
+          return "p { color: red }";
+        },
+      };
+    };
+    // SHEETS read, and none asked for after them.
+    scrollLock(page(links), { noun: "page", path: "index.html", sheet: sized(16) });
+    expect([asked, decoded]).toEqual([SHEETS, SHEETS]);
+    // 240 KB each: those that fit READ decoded; the rest asked for their size only (a later one
+    // that fits would still be read), and none decoded.
+    asked = 0;
+    decoded = 0;
+    scrollLock(page(links), { noun: "page", path: "index.html", sheet: sized(240 * 1024) });
+    expect([asked, decoded]).toEqual([400, Math.floor(READ / (240 * 1024))]);
   });
 
   /** An app's stylesheet of `bytes`: many class rules, some scroll boxes, nothing that holds. */

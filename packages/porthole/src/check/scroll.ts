@@ -43,7 +43,8 @@ import { attributesOf } from "./markup.ts";
  *
  * Bounded: each stylesheet is read once per page, as it streams (nothing parsed is kept past the
  * rule it is in, a rule's selectors one at a time), at most `SHEETS` of them and `READ` bytes in
- * all, its own `<style>` included; past that, the rest isn't read. At most `MOST_LAYERS` layers a
+ * all, its own `<style>` included; past that, the rest isn't read, nor asked for, and a sheet is
+ * decoded only once its size is taken (P110). At most `MOST_LAYERS` layers a
  * page, each named in at most `LONGEST_LAYER` characters: a new one past either isn't read. Each
  * element keeps, per property, only each layer's winner so far, and a compound is matched against
  * an element's classes (a set) in bounded work, so time and memory are linear in what it reads. A
@@ -57,11 +58,16 @@ import { attributesOf } from "./markup.ts";
  * selector).
  */
 
-/** A stylesheet the page links, as the caller finds it from `from` (a path), or null. */
+/**
+ * A stylesheet the page links, as the caller finds it from `from` (a path), or null: its path, its
+ * size (an upper bound on its characters: a string's length, or its bytes), and its text, decoded
+ * only where the rule reads it (P110: one page linking 400 sheets decoded and kept all of them,
+ * though the rule reads at most `SHEETS`, `READ` bytes in all).
+ */
 export type LinkedSheet = (
   href: string,
   from: string,
-) => { readonly path: string; readonly text: string } | null;
+) => { readonly path: string; readonly size: number; readonly text: () => string } | null;
 
 export interface ScrollLock {
   /** What to change, for the agent. */
@@ -879,8 +885,8 @@ const tooDeep = (name: string): string | null => {
   return null;
 };
 
-/** A stylesheet found for the page, once: its path and text. */
-type Found = { readonly path: string; readonly text: string } | null;
+/** A stylesheet found for the page, once: its path, size, and text when it is read. */
+type Found = ReturnType<LinkedSheet>;
 
 /** The cascade over the chain: each declaration that matches, then the one that wins. */
 class Cascade {
@@ -983,12 +989,23 @@ class Cascade {
     return true;
   }
 
-  /** Whether a stylesheet may still be read for this page (once, within the budget). */
-  take(found: Found): found is { path: string; text: string } {
+  /**
+   * Whether nothing more may be read for this page: `SHEETS` read, `READ` spent, or the version's
+   * budget. Then no sheet is asked for (P110).
+   */
+  full(): boolean {
+    return this.read.size >= SHEETS || this.bytes >= READ || this.budget.spent;
+  }
+
+  /**
+   * Whether a stylesheet may still be read for this page (once, within the budget), by its size,
+   * before its text is decoded.
+   */
+  take(found: Found): found is NonNullable<Found> {
     if (found === null || this.read.has(found.path) || this.read.size >= SHEETS) {
       return false;
     }
-    const size = Math.min(found.text.length, SCANNED);
+    const size = Math.min(found.size, SCANNED);
     if (this.bytes + size > READ || !this.spend(size)) {
       return false;
     }
@@ -1150,12 +1167,19 @@ class Cascade {
     take(to);
   }
 
-  /** A stylesheet the page links or a sheet imports, if it may still be read. */
-  file(found: Found, layer: string | null) {
+  /**
+   * A stylesheet the page links or a sheet imports (`href`, from `from`), if it may still be read:
+   * asked for only while the page may read more, decoded only once taken.
+   */
+  file(href: string, from: string, layer: string | null) {
+    if (this.full()) {
+      return;
+    }
+    const found = this.find(href, from);
     if (!this.take(found)) {
       return;
     }
-    const text = found.text.slice(0, SCANNED);
+    const text = found.text().slice(0, SCANNED);
     this.sheet(withoutComments(text), 0, text.length, {
       source: { path: found.path, text },
       base: 0,
@@ -1315,7 +1339,7 @@ class Cascade {
         return;
       }
     }
-    this.file(this.find(href, context.from), layer);
+    this.file(href, context.from, layer);
   }
 }
 
@@ -1478,7 +1502,7 @@ function readScrollLock(page: string, options: ScrollOptions): ScrollLock | null
     ) {
       continue;
     }
-    cascade.file(find(href, from), null);
+    cascade.file(href, from, null);
   }
   for (const node of chain) {
     if (node.style !== null) {
