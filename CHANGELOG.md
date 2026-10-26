@@ -22,6 +22,9 @@ it reads only the stylesheets it may.
 - **A fixed body is warned** (P110): `body { position: fixed; top: 0 }` with no bottom or height,
   and `body { position: fixed; inset: 0; overflow: auto }` where html's overflow is visible, hold
   the page on Chromium, Firefox and WebKit, and are now `scroll-lock` warnings.
+- **`<html style="…">` is no longer warned** (P110): the shell drops html's `style` attribute, so
+  `<html style="overflow: hidden">` never held the page in Porthole's frame; the warning, and its
+  advice to edit the attribute, were wrong.
 
 ## 0.12.0
 

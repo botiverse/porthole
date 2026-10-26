@@ -30,7 +30,8 @@ import { attributesOf } from "./markup.ts";
  * and bottom set (`inset: 0`).
  *
  * What it reads: the page's `<style>` elements, the stylesheets it links that the caller finds
- * (a version's own files) and what they `@import`, in document order; style="" on the three; the
+ * (a version's own files) and what they `@import`, in document order; style="" on body and the
+ * root (not html's: the shell drops it, P110); the
  * class rules that match their classes; and, where the page loads Tailwind from its CDN, the few
  * Tailwind utilities that hold a page (h-screen, overflow-hidden, fixed, inset-0…). Specificity,
  * order, !important and cascade layers decide between rules, so a later override is seen.
@@ -1454,7 +1455,9 @@ function readScrollLock(page: string, options: ScrollOptions): ScrollLock | null
     };
   };
   const chain: Node[] = [
-    nodeOf(scanned.html, "html", "html", false),
+    // Not html's style="": the shell imports a page's html attributes but that one
+    // (`renderDocument`), so it never applies in Porthole's frame (P110).
+    { ...nodeOf(scanned.html, "html", "html", false), style: null },
     nodeOf(scanned.body, "body", "body", false),
   ];
   const rootTag =

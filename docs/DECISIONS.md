@@ -5550,7 +5550,13 @@ call, and what it misses.
    `<!doctype html>` document (its head and body imported, `renderDocument`), which stays in
    standards mode. The same page rendered that way is held on all three engines (compatMode
    `CSS1Compat`), so the warning is right there, and the doctype is rightly not read.
-6. **The budget test has the minute its neighbours have** (S5), as do the two timing tests in
+6. **Not html's `style=""`** (the re-review, from P106). The shell imports a page's html
+   attributes but `style` (`renderDocument`), so `<html style="height: 100%; overflow: hidden">`
+   never applies in Porthole's frame: such a page scrolls on Chromium, Firefox and WebKit as the
+   shell renders it (held only as a raw document). The rule warned it, and told the agent to edit
+   the attribute, which would change nothing; it no longer reads it. Body's and the root's
+   `style=""` are imported, and still read.
+7. **The budget test has the minute its neighbours have** (S5), as do the two timing tests in
    `check.test.ts` (one took 5.5 s, past the default 5 s, at a load of 23): their own bounds are
    what they check.
 
@@ -5577,7 +5583,8 @@ it may have is said only as that warning.
 class and an id lint and admit; `\ffffff`, `\110000`, `\dfff` and `\0` read as U+FFFD (a
 `body.\ffffffx` rule holds a `<body class="�x">`); a fixed body with `top: 0` and no height warned (the message and
 the fix), with `inset: 0; overflow: auto` warned, neither under html hidden, a fixed root without
-a height not. `test/files.test.ts`: one page linking 400 sheets asks for 32
+a height not; html's `style="height: 100%; overflow: hidden"` not warned, body's
+`style="overflow: hidden"` warned. `test/files.test.ts`: one page linking 400 sheets asks for 32
 and decodes 32; of 240 KB each, decodes the 17 that fit 4 MiB, the rest asked for their fewest
 characters only; the re-review's two versions of megabytes of CJK CSS (an override past 2 MiB of a
 sheet's bytes, and one in a third sheet past 4 MiB of bytes) silent as strings and as bytes; a sheet finder

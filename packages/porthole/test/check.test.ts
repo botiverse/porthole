@@ -195,12 +195,17 @@ describe("a page held to one screen (P106)", () => {
       held(page("body > div:only-child { height: 100dvh; overflow: hidden }", "<div></div>"))[0]
         ?.message,
     ).toContain("add body > div:only-child { height: auto; overflow: visible }");
-    // style="" on html: taken out where it is, as a rule can't undo it.
+    // style="" on html isn't read: the shell drops it, and such a page scrolls on every engine
+    // (P110's re-review). Body's is imported, and holds it.
     expect(
       held(
         '<!doctype html><html style="height: 100%; overflow: hidden"><body><p>x</p></body></html>',
-      )[0]?.message,
-    ).toContain("take height: 100%; overflow: hidden out of html's style attribute");
+      ),
+    ).toEqual([]);
+    expect(
+      held('<!doctype html><html><body style="overflow: hidden"><p>x</p></body></html>')[0]
+        ?.message,
+    ).toContain("take overflow: hidden out of body's style attribute");
     // !important: the rule that undoes it is !important too.
     expect(
       held(page("html { overflow: hidden !important }\nhtml { overflow: visible }"))[0]?.message,
