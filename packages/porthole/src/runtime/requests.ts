@@ -1,4 +1,4 @@
-import { unseen } from "../bridge/unseen.ts";
+import { unseenStrict, withoutUnseen } from "../bridge/unseen.ts";
 import type { Limits } from "../config/schema.ts";
 import { fileLimits, filePathProblem } from "../files/paths.ts";
 import { fileTypeOf } from "../files/types.ts";
@@ -70,18 +70,42 @@ export interface CommentRequest {
   readonly draft?: string;
 }
 
+/** Characters that draw as a blank: spaces of every kind, tabs, new lines, the braille blank. */
+const BLANK = /^[\p{White_Space}\u2800]*$/u;
+/** More than 32 blanks in a row on a line, or more than two blank lines in a row (P109). */
+const BLANK_RUN = /[\p{Zs}\t\u2800]{33}|\n(?:[\p{Zs}\t\u2800]*\n){3}/u;
+/** Line and paragraph separators: a line break a person may see as nothing (Firefox, WebKit). */
+const SEPARATORS = /[\u2028\u2029]/u;
+
 /**
- * A draft (P108): text the person will post in their own name, so all of it must be text they can
- * see: at most 2,000 characters, well-formed, not blank, and nothing `unseen` (P100: no zero-width
- * or bidi characters, no tags, no controls but a new line and a tab), which a host would show as
- * nothing and an agent would read as the person's words. Lines and tabs are fine: a checklist.
+ * A draft (P108, P109): text the person will post in their own name, so all of it must be text
+ * they can see: at most 2,000 characters, well-formed, and nothing invisible with none of P100's
+ * joiners (`unseenStrict`: no zero-width characters or joiners, bidi or tag characters, controls
+ * but a new line and a tab; a variation selector after a pictograph is fine), no line or paragraph
+ * separator, not blank-looking, at most 32 blanks in a row and two blank lines in a row (so that
+ * "whole" is something a host can show). Lines and tabs are fine: a checklist.
  */
 const draftText = (value: unknown): value is string =>
   typeof value === "string" &&
-  value.trim() !== "" &&
   value.length <= 2_000 &&
   value.isWellFormed() &&
-  !unseen(value);
+  !BLANK.test(value) &&
+  !unseenStrict(value) &&
+  !SEPARATORS.test(value) &&
+  !BLANK_RUN.test(value);
+
+/**
+ * An anchor's label or quote, shown beside the draft (P109): the page's short text, without what a
+ * person can't see (P105's `withoutUnseen`, line and paragraph separators too), or null if nothing
+ * visible is left. Shown, never posted as the person's words, so cleaned rather than refused.
+ */
+const shownText = (value: unknown, max: number): string | null => {
+  if (!shortText(value, max)) {
+    return null;
+  }
+  const seen = withoutUnseen(value).replace(/[\u2028\u2029]/gu, "");
+  return BLANK.test(seen) ? null : seen;
+};
 
 export function parseCommentRequest(args: unknown): CommentRequest | null {
   const anchor = isRecord(args) ? args.anchor : undefined;
@@ -89,18 +113,16 @@ export function parseCommentRequest(args: unknown): CommentRequest | null {
     return null;
   }
   const draft = isRecord(args) ? args.draft : undefined;
-  if (
-    (anchor.label !== undefined && !shortText(anchor.label, 200)) ||
-    (anchor.quote !== undefined && !shortText(anchor.quote, 2_000)) ||
-    (draft !== undefined && !draftText(draft))
-  ) {
+  const label = anchor.label === undefined ? undefined : shownText(anchor.label, 200);
+  const quote = anchor.quote === undefined ? undefined : shownText(anchor.quote, 2_000);
+  if (label === null || quote === null || (draft !== undefined && !draftText(draft))) {
     return null;
   }
   return {
     anchor: {
       name: anchor.name,
-      ...(anchor.label === undefined ? {} : { label: anchor.label }),
-      ...(anchor.quote === undefined ? {} : { quote: anchor.quote }),
+      ...(label === undefined ? {} : { label }),
+      ...(quote === undefined ? {} : { quote }),
     },
     ...(draft === undefined ? {} : { draft }),
   };

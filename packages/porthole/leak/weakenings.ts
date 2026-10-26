@@ -483,8 +483,8 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "comment-draft": [
     {
       file: REQUESTS,
-      find: "    (draft !== undefined && !draftText(draft))",
-      replace: "    false",
+      find: "(draft !== undefined && !draftText(draft))",
+      replace: "false",
     },
   ],
   // The asset library's CSP (P089), taken out by the served harness: scripts from it run

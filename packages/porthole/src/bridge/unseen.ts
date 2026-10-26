@@ -80,3 +80,18 @@ const UNSEEN_EACH = new RegExp(UNSEEN.source, "gu");
 export function withoutUnseen(text: string): string {
   return text.replace(UNSEEN_EACH, "");
 }
+
+/** A variation selector where an emoji has one: after a pictograph, or in a keycap. */
+const EMOJI_SELECTORS = new RegExp(
+  "(?<=\\p{Extended_Pictographic})[\\uFE0E\\uFE0F]|(?<=[0-9#*])[\\uFE0E\\uFE0F](?=\\u20E3)",
+  "gu",
+);
+
+/**
+ * Whether `text` holds what a person can't see, with none of `unseen`'s joiners (P109): for text
+ * a page puts in the person's own words (a comment's draft), where a joiner between shaped letters
+ * or pictographs draws the same as none (measured) and carries a bit. Only a variation selector
+ * right after a pictograph, or in a keycap, is let by (❤️, 1️⃣): one choice beside a visible emoji.
+ */
+export const unseenStrict = (text: string): boolean =>
+  UNSEEN.test(text.replace(EMOJI_SELECTORS, ""));
