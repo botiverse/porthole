@@ -15,9 +15,10 @@ interface PortholeCommentOptions {
   /**
    * Text the composer starts with (at most 2,000 characters): a draft the person edits, posts
    * or discards in the app. It is never posted without them. Visible text only: new lines and
-   * tabs are fine (at most 32 blanks in a row, two blank lines in a row); a draft with zero-width
-   * characters or joiners (an emoji joined with U+200D too; ❤️ is fine), bidi or tag characters,
-   * or a line or paragraph separator (U+2028, U+2029) is refused.
+   * tabs are fine (at most 32 blanks in a row, two blank lines in a row), and so are U+200C and
+   * U+200D between two letters or marks (Persian, the Indic scripts); a draft with zero-width
+   * characters, a joiner anywhere else (an emoji joined with U+200D too; ❤️ is fine), bidi or tag
+   * characters, or a line or paragraph separator (U+2028, U+2029) is refused.
    */
   readonly draft?: string;
 }

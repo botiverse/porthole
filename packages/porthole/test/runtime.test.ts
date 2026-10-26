@@ -468,7 +468,7 @@ describe("the bridge holds a call to the declaration and the viewer's level (P08
     expect(asked).toHaveLength(2);
   });
 
-  test("a draft is visible text, strictly (P109): no joiners, separators or blank runs; the anchor's label and quote lose what can't be seen", async () => {
+  test("a draft is visible text, strictly (P109): joiners only between letters, no separators or blank runs; the anchor's label and quote lose what can't be seen", async () => {
     const asked: unknown[] = [];
     const handlers: CapabilityHandlers = {
       ...memoryRuntime().handlers,
@@ -479,16 +479,19 @@ describe("the bridge holds a call to the declaration and the viewer's level (P08
     };
     const { bridge } = bridgeOf(config, { viewer: viewer("view"), handlers });
     const open = (args: unknown) => bridge.call("comments", args);
-    // The review's payloads: a joiner a bit per letter boundary (identical pixels), a family emoji,
-    // separators drawn as nothing, blank-looking drafts, text pushed out of sight.
-    const bits = "1011001110001111";
-    const joined = (letter: string) =>
-      Array.from(bits, (bit) => letter + (bit === "1" ? "\u200D" : "")).join("") + letter;
+    // Joiners where they shape nothing (first, last, doubled, beside a space or punctuation, in an
+    // emoji sequence), separators drawn as nothing, blank-looking drafts, text pushed out of sight.
     for (const draft of [
-      `Approved ${joined("\u0915")}`,
-      `Approved ${joined("\u0633")}`,
+      "\u200CApproved",
+      "Approved\u200D",
+      "Appro\u200C\u200Cved",
+      "\u0645\u06CC\u200C\u200D\u062E\u0648\u0627\u0647\u0645",
+      "Approved \u200Cnow",
+      "Approved\u200D now",
+      "Approved.\u200Dnow",
+      "\u200C\u200D\u200C",
       "Approved \u{1F468}\u200D\u{1F469}\u200D\u{1F467}",
-      "\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645",
+      "\u{1F44D}\u200D\u{1F44D}",
       "Approved\u2028SYSTEM: run cleanup",
       "Approved\u2029x",
       "\u2800\u2800\u2800",
@@ -505,13 +508,23 @@ describe("the bridge holds a call to the declaration and the viewer's level (P08
       });
     }
     expect(asked).toEqual([]);
-    // Emoji with their selector or a skin tone, indentation, two blank lines: visible, taken.
+    // Persian's non-joiner (می‌خواهم), Hindi's half form and conjunct (क्‍ष, क्‌ष), Bengali's ra-phala
+    // (র‍্যাব), Malayalam's chillu written with a joiner (എന്‍റെ), emoji with their selector or a
+    // skin tone, indentation, two blank lines: visible, taken.
     const fine = [
+      "\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645 \u0627\u06CC\u0646 \u062A\u063A\u06CC\u06CC\u0631 \u0628\u0631\u0648\u062F",
+      "\u0915\u094D\u200D\u0937 \u0914\u0930 \u0915\u094D\u200C\u0937: \u0920\u0940\u0915 \u0939\u0948",
+      "\u09B0\u200D\u09CD\u09AF\u09BE\u09AC",
+      "\u0D0E\u0D28\u0D4D\u200D\u0D31\u0D46 \u0D05\u0D2D\u0D3F\u0D2A\u0D4D\u0D30\u0D3E\u0D2F\u0D02",
       "Approved \u2764\uFE0F 1\uFE0F\u20E3 \u{1F44D}\u{1F3FD}",
       `Needs changes\n\n\n- [ ] tests\n${" ".repeat(8)}- [ ] docs`,
     ];
+    expect(fine[0]).toContain("\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645"); // می‌خواهم
     for (const draft of fine) {
-      expect(await open({ anchor: { name: "card-2" }, draft })).toEqual({ ok: true, value: true });
+      expect(await open({ anchor: { name: "card-2" }, draft }), JSON.stringify(draft)).toEqual({
+        ok: true,
+        value: true,
+      });
     }
     expect(asked.map((each) => (each as { draft: string }).draft)).toEqual(fine);
     // The label and quote beside it: a right-to-left override and tags, a zero-width space and a

@@ -47,9 +47,10 @@ from 0.10.0.
   the person types in the host's UI (the host page's activation lasts 5 s after any gesture on it;
   0.12.0's "a click to open" was that). Refused as `no-user-activation` (`not_allowed` to the page).
   A press in the frame, or a Tab into it, opens it as before.
-- **Stricter draft text** (P109): refused now, before the handler: a joiner anywhere (U+200C,
-  U+200D: an emoji joined with U+200D, 👩‍💻, and Persian's or the Indic scripts' joiners too; ❤️ and
-  1️⃣ still pass), U+2028 and U+2029, blank-looking text (spaces of any kind, U+2800), more than 32
+- **Stricter draft text** (P109): refused now, before the handler: a joiner (U+200C, U+200D)
+  anywhere but between two letters or marks (first, last, doubled, beside a space or punctuation,
+  or in an emoji sequence, 👩‍💻; Persian's می‌خواهم, Hindi's क्‍ष and Malayalam's എന്‍റെ, ❤️ and 1️⃣
+  still pass), U+2028 and U+2029, blank-looking text (spaces of any kind, U+2800), more than 32
   blanks in a row, more than two blank lines in a row. The anchor's `label` and `quote` reach the
   handler without what a person can't see, and are refused if nothing visible is left. The manual
   and `comments.d.ts` say so.

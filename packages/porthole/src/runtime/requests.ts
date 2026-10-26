@@ -79,9 +79,9 @@ const SEPARATORS = /[\u2028\u2029]/u;
 
 /**
  * A draft (P108, P109): text the person will post in their own name, so all of it must be text
- * they can see: at most 2,000 characters, well-formed, and nothing invisible with none of P100's
- * joiners (`unseenStrict`: no zero-width characters or joiners, bidi or tag characters, controls
- * but a new line and a tab; a variation selector after a pictograph is fine), no line or paragraph
+ * they can see: at most 2,000 characters, well-formed, and nothing invisible (`unseenStrict`: no
+ * zero-width characters, bidi or tag characters, controls but a new line and a tab; a joiner or
+ * non-joiner only between two letters or marks, a variation selector only after a pictograph), no line or paragraph
  * separator, not blank-looking, at most 32 blanks in a row and two blank lines in a row (so that
  * "whole" is something a host can show). Lines and tabs are fine: a checklist.
  */

@@ -577,21 +577,24 @@ if (shown && !shown.ok) return <VersionError problems={shown.problems} />;   // 
   ```js
   // A composer the page filled: its words are the page's until the person acts in it.
   function openPageDraft(composer, anchor, draft) {
-    // Opens beside the frame, armed as THREAT_MODEL §6 says (no press for 500 ms: guardPresses),
-    // and takes no focus: keys stay where the person was typing, so what they type for the page
-    // never lands in a postable comment.
+    // Opens beside the frame, and takes no focus: keys stay where the person was typing, so what
+    // they type for the page never lands in a postable comment.
     composer.open(anchor, { text: draft, focus: false });
+    // Armed as THREAT_MODEL §6 says: no press of any kind for 500 ms (guardPresses, § Annotations).
+    guardPresses(composer.element).placed();
     // Said by you, outside the frame where the page can't draw, until they edit it: never shown as
     // one of their own drafts.
     composer.setNote("Suggested by this page");
     composer.input.addEventListener("input", () => composer.setNote(null), { once: true });
-    // Enter sends only once they pressed in the composer; until then Send is a click (a keyboard
-    // user's Enter on the Send button is one). A composer whose own code focuses it would
-    // otherwise take keys typed for the page, and their Enter.
-    let pressed = false;
-    composer.input.addEventListener("pointerdown", () => (pressed = true), { once: true });
+    // Enter sends only once the person has focused or edited the composer themselves (a press in
+    // it, a Tab into it, their typing); until then Send is a click. It opened without focus, and a
+    // page can't move focus into your page's fields, so its focus is theirs.
+    let theirs = false;
+    for (const type of ["pointerdown", "focus", "input"]) {
+      composer.input.addEventListener(type, () => (theirs = true), { once: true });
+    }
     composer.input.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && !pressed) event.preventDefault();
+      if (event.key === "Enter" && !theirs) event.preventDefault();
     });
     return true;
   }

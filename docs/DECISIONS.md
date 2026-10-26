@@ -5597,9 +5597,11 @@ through Playwright 1.63; WebKit with libraries extracted on a box that lacks the
    the frame's markers, which the page can draw too); and a view a frame's report opens, a draft's
    included, puts nothing one click away that posts, submits, resolves, deletes or discards.
 4. **Stricter draft text** (`parseCommentRequest`): a draft is refused for any invisible character
-   with none of P100's exceptions for joiners (U+200C and U+200D anywhere, so an emoji sequence
-   joined with U+200D, 👩‍💻, and Persian's or the Indic scripts' joiners are refused; a variation
-   selector after a pictograph or in a keycap stays, so ❤️ and 1️⃣ pass), a line or paragraph
+   but a joiner or non-joiner with a letter or mark on each side (U+200C, U+200D: Persian's
+   می‌خواهم, Hindi's क्‍ष, Malayalam's എന്‍റെ; in any script, since a person's text needs them
+   wherever letters shape) and a variation selector after a pictograph or in a keycap (❤️, 1️⃣):
+   so a joiner first or last, doubled, beside a space or punctuation, or in an emoji sequence
+   (👩‍💻) is refused, where it shapes nothing and hides text or makes a blank-looking draft; a line or paragraph
    separator (U+2028, U+2029), blank-looking text (only spaces of any kind, blank lines and U+2800),
    more than 32 blanks in a row, or more than two blank lines in a row. The anchor's `label` and
    `quote` lose what a person can't see (P105's `withoutUnseen`, and U+2028/2029) and are refused if
@@ -5640,8 +5642,9 @@ or quote with invisible characters reaches the handler without them.
 
 **Tested.** `test/focus-guard.test.ts`: `personMoved` per rule, per engine kind, the composer
 opened on a selection and the Tab window. `test/runtime.test.ts` (D5, D6): the review's payloads
-refused (a joiner between Devanagari or Arabic letters, a family emoji, U+2028, U+2029, a draft of
-U+2800, 1,900 no-break spaces, four blank lines), ❤️, 1️⃣, 👍🏽 and a checklist pass; a label with a
+refused (a family emoji, a joiner first, last, doubled, beside a space or punctuation, U+2028,
+U+2029, a draft of U+2800, 1,900 no-break spaces, four blank lines), Persian, Hindi, Bengali and
+Malayalam with their joiners, ❤️, 1️⃣, 👍🏽 and a checklist pass; a label with a
 right-to-left override and tags, and a quote with a zero-width space, reach the handler without
 them, and one with nothing visible left is refused. `leak/served/runtime.spec.ts`, Chromium,
 WebKit and Firefox: "a page that takes the keyboard while the person types in the host's
@@ -5653,6 +5656,12 @@ Tab, an activation in the frame with no host event 5.5 s after the composer's la
 call or the shell's; from a press in the frame it does". Negative controls `focus-guard` (every
 move taken for the person's) and `comments-in-frame` (the focus check out) → exactly their probe,
 every engine.
+
+A joiner between two letters that shapes nothing draws as nothing (the review's Devanagari and
+Arabic payloads, about a bit per letter boundary): accepted, as P100 accepts it, because refusing
+it refuses Persian and the Indic scripts' ordinary text (the coordinator's call after the first
+cut refused all joiners). A Malayalam word that ends in an old-style chillu (a virama and U+200D
+before a space) is refused; the atomic chillus (U+0D7A–U+0D7F) pass.
 
 **Threat it re-opens.** None: no default, gate or policy loosens. A draft, a label or a quote
 refused before is refused still.
@@ -5668,10 +5677,12 @@ refused before is refused still.
 - The focus check on every gesture gate: the others don't write into the person's words (above),
   and pages that call them from a gesture the host's page had (Playwright's evaluate in tests, a
   host button that forwards a click) would change behavior for no closed threat.
-- A draft refused for joiners only in some scripts, or stripped rather than refused: no rule tells
-  a joiner that shapes from one that carries a bit (identical pixels), and a draft is the page's
-  words in the person's name, which Porthole refuses rather than rewrites (P100); a label and a
-  quote are shown, never posted, so they are cleaned (P105).
+- Refusing every joiner in a draft (the first cut): it refused Persian and the Indic scripts'
+  ordinary text; P100's list of shaping scripts instead: any letters may need them, and the
+  hiding needs a place where nothing shapes (a space, punctuation, an edge, a run), which is
+  refused. Stripping rather than refusing: a draft is the page's words in the person's name,
+  which Porthole refuses rather than rewrites (P100); a label and a quote are shown, never
+  posted, so they are cleaned (P105).
 
 **Revisit when** an engine stops blurring the host's window on a move into a frame, or shows a
 press on the frame without `:active`, or Firefox starts doing either (the guard then judges every

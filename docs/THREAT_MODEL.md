@@ -719,10 +719,13 @@ section.
   a gesture with the host page's focus in the calling frame (P109: a press in it or a Tab into it;
   not the person typing in the host's UI, nor a gesture in another display; negative control
   `comments-in-frame`). A draft it gives (P108) is at most 2,000 characters of text a person can
-  see (P109): nothing invisible (zero-width characters and joiners, U+200D in an emoji sequence
-  too, bidi and tag characters, controls but a new line and a tab; a variation selector after a
-  pictograph is fine), no line or paragraph separator, not blank-looking, at most 32 blanks in a
-  row and two blank lines in a row; anything else is refused before the handler. The anchor's
+  see (P109): nothing invisible (zero-width characters, bidi and tag characters, controls but a
+  new line and a tab; U+200C and U+200D only between two letters or marks, where Persian and the
+  Indic scripts need them, never first, last, doubled, beside a space or punctuation, or in an
+  emoji sequence; a variation selector after a pictograph is fine), no line or paragraph
+  separator, not blank-looking, at most 32 blanks in a row and two blank lines in a row; anything
+  else is refused before the handler. A joiner between two letters that shapes nothing still
+  draws as nothing (about a bit per letter boundary, measured): accepted, as P100 accepts it. The anchor's
   label and quote reach the handler without what a person can't see, and are refused if nothing
   visible is left.
 - `defineRuntimeConformance` checks the host's handlers, and with `api` its own API for `db`,
