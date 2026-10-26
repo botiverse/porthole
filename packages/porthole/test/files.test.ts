@@ -1144,7 +1144,8 @@ describe("a page with files held to one screen (P106)", () => {
     expect(budget.spent).toBe(true);
     // Spent: a page that would cost nothing isn't checked either.
     expect(scrollLock(page(`<style>${SHELL}</style>`), { noun: "page", budget })).toBeNull();
-  });
+    // Heavy by design (about 8 MiB of sheets, as its neighbours): a minute, not the default 5 s.
+  }, 60_000);
 
   it("matches scroll rules against a version's markup within one budget of steps", () => {
     // VERSION_STEPS (2,000,000) for the pages checked: each of these spends a page's million

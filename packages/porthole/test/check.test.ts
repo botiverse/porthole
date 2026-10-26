@@ -851,7 +851,8 @@ describe("a page held to one screen (P106)", () => {
       const said = `${name}: 80,000 ${once.toFixed(1)} ms, 16 × 5,000 ${parts.toFixed(1)} ms`;
       expect(once / parts, said).toBeLessThan(8);
     }
-  });
+    // Heavy by design: a minute, not the default 5 s, on a busy machine (its bounds are above).
+  }, 60_000);
 
   it("matches classes in time linear in the page and its sheets: 4,000 classes and a 2 MB compound cost what sixteen sixteenths do", () => {
     // What this guards (P106's third review): each class of a compound was looked for in a list of
@@ -883,7 +884,8 @@ describe("a page held to one screen (P106)", () => {
     }
     const said = `whole ${once.toFixed(1)} ms, 16 sixteenths ${parts.toFixed(1)} ms`;
     expect(once / parts, said).toBeLessThan(8);
-  });
+    // Heavy by design: a minute, not the default 5 s, on a busy machine (its bounds are above).
+  }, 60_000);
 
   it("warns on a fixed body whatever its height, and where the viewport takes its overflow (P110)", () => {
     // The 1026 audit's misses, held on Chromium, Firefox and WebKit: a fixed box adds nothing to
