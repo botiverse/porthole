@@ -885,6 +885,37 @@ describe("a page held to one screen (P106)", () => {
     expect(once / parts, said).toBeLessThan(8);
   });
 
+  it("warns on a fixed body whatever its height, and where the viewport takes its overflow (P110)", () => {
+    // The 1026 audit's misses, held on Chromium, Firefox and WebKit: a fixed box adds nothing to
+    // what the frame scrolls (`top: 0` and no bottom or height, the scroll-lock libraries' way),
+    // and where html's overflow is visible the viewport takes body's `auto`: body doesn't scroll.
+    const content = '<div id="root"><h1>Plan</h1><p>A long page.</p></div>';
+    expect(held(page("body { position: fixed; top: 0; left: 0; right: 0 }", content))).toEqual([
+      expect.objectContaining({
+        message:
+          "The page won't scroll in its frame: body (position: fixed) holds it to one screen, and what's below can't be reached. Unless it is meant to fit one screen, let it scroll as a document: add body { position: static } after those rules.",
+      }),
+    ]);
+    expect(
+      held(page("body { position: fixed; inset: 0; overflow: auto }", content))[0]?.message,
+    ).toContain("body (position: fixed; inset: 0) holds it");
+    // Where body scrolls itself (html's overflow isn't visible, body one screen), nothing is held.
+    expect(
+      held(page("html { overflow: hidden } body { position: fixed; inset: 0; overflow: auto }")),
+    ).toEqual([]);
+    expect(
+      held(
+        page(
+          "html { overflow: hidden } body { position: fixed; top: 0; height: 100%; overflow: auto }",
+        ),
+      ),
+    ).toEqual([]);
+    // The root fixed without a height isn't read as held: a card centered on the screen is one.
+    expect(held(page("#root { position: fixed; top: 0; left: 0; width: 100% }", content))).toEqual(
+      [],
+    );
+  });
+
   it("the manual says a page scrolls as a document", () => {
     for (const each of [
       presets.artifact(),

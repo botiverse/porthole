@@ -12,7 +12,9 @@ import { attributesOf } from "./markup.ts";
  * - body with overflow-y hidden or clip, where html's overflow is visible (body's then becomes the
  *   viewport's) or body is one screen tall;
  * - the root with overflow-y hidden or clip and one screen tall;
- * - any of them position: fixed and one screen tall (a fixed box's content scrolls nothing);
+ * - any of them position: fixed and one screen tall (a fixed box's content scrolls nothing), and
+ *   body fixed whatever its height, unless it scrolls itself (where html's overflow is visible,
+ *   body's is the viewport's and body itself doesn't: P110);
  * and nothing in the page's markup below body that scrolls itself: no element there with style=""
  * or a Tailwind utility giving it overflow-y auto or scroll, or matched by a rule the check reads
  * that does (a rule whose selector it can't read, or that matches nothing in the markup, doesn't
@@ -1645,7 +1647,10 @@ function readScrollLock(page: string, options: ScrollOptions): ScrollLock | null
     }
     const height = tall("height");
     const maxHeight = tall("max-height");
-    if (positioned && position !== undefined && (spanned || height || maxHeight)) {
+    // A fixed body holds the page whatever its height (P110): a fixed box adds nothing to what the
+    // frame scrolls, so `body { position: fixed; top: 0 }`, the scroll-lock libraries' way, does.
+    const fixedBody = index === 1 && position?.value === "fixed";
+    if (positioned && position !== undefined && (spanned || height || maxHeight || fixedBody)) {
       shown.unshift(position);
     }
     states.push({ screen: height || maxHeight || spanned, shown, position: position?.value ?? "" });
@@ -1669,11 +1674,16 @@ function readScrollLock(page: string, options: ScrollOptions): ScrollLock | null
       return found !== undefined && !CONTENT_HEIGHT.test(found) && !PARENT.test(found);
     });
   };
+  // An element's own overflow-y: body's is the viewport's where html's overflow is visible, and
+  // body's own is then visible (P110: `body { position: fixed; inset: 0; overflow: auto }` doesn't
+  // scroll itself, the viewport takes its auto).
+  const ownOverflowY = (index: number, node: Node): string =>
+    index === 1 && htmlVisible ? "visible" : overflowY(node);
   const scrollBox = (index: number): boolean => {
     const node = chain[index];
     return (
       node !== undefined &&
-      SCROLLS.has(overflowY(node)) &&
+      SCROLLS.has(ownOverflowY(index, node)) &&
       ((states[index]?.screen ?? false) || unread(index))
     );
   };
@@ -1690,7 +1700,10 @@ function readScrollLock(page: string, options: ScrollOptions): ScrollLock | null
     const overflow = value(node, "overflow-y");
     const clipped =
       clips && (index === 0 ? true : index === 1 ? state.screen || htmlVisible : state.screen);
-    const fixed = state.position === "fixed" && state.screen && !SCROLLS.has(overflowY(node));
+    const fixed =
+      state.position === "fixed" &&
+      (state.screen || index === 1) &&
+      !SCROLLS.has(ownOverflowY(index, node));
     if (!clipped && !fixed) {
       continue;
     }
