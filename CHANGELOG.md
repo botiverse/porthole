@@ -3,6 +3,25 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
+## Unreleased
+
+After the audit of P106's scroll-lock warning (P110): it no longer fails a show or a publish, and
+it reads only the stylesheets it may.
+
+- **A CSS escape past U+10FFFF no longer fails the check** (P110): one selector like `.\ffffff`
+  in a page or a linked stylesheet threw out of `lintContent`, `admitContent`, `lintFiles`,
+  `admitFiles` and `checkPage`. Such an escape (or 0, or a surrogate) is now U+FFFD, as CSS reads
+  it, and the rule fails soft: anything that throws in it is that page "not checked for scroll
+  lock" (a warning), never a failed check.
+- **`lintFiles` decodes only the stylesheets the rule reads** (P110): a page linking many sheets
+  had every one decoded and kept for the whole call (400 sheets of 240 KB: 200 MB of heap, out of
+  memory at 64 MB), though the rule reads at most 32 sheets and 4 MiB a page. Sheets are now
+  sized before they are decoded, none is asked for past the caps, and none is kept: the same
+  version runs under a 32 MB heap.
+- **A fixed body is warned** (P110): `body { position: fixed; top: 0 }` with no bottom or height,
+  and `body { position: fixed; inset: 0; overflow: auto }` where html's overflow is visible, hold
+  the page on Chromium, Firefox and WebKit, and are now `scroll-lock` warnings.
+
 ## 0.12.0
 
 A page's button can open the host's comment composer with a draft the person reviews and posts

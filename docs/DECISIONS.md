@@ -5108,7 +5108,7 @@ none`), a host shows right-to-left text (the gutter is on the right), a host nee
 markers itself (then it draws them from `anchored`), an engine changes what gives a page
 activation, or MCP Apps defines annotations.
 
-## P106 · 2026-10-23 · A page held to one screen by its own styles is warned before it is published · Accepted
+## P106 · 2026-10-23 · A page held to one screen by its own styles is warned before it is published · Accepted; amended by P110
 
 From Raft's triage of its Artifacts (task #71): agents' first versions of high-fidelity mockups,
 bundled from an app's own code, carry the app shell's global styles, `html, body { height: 100%;
@@ -5493,3 +5493,88 @@ and reach no handler, a checklist reaches the composer; "comments are write-only
 the anchor). Negative control `comment-draft` (the draft taken as given) → the first case, every
 engine. `types/runtime/v1/check.ts` (the page-shaped call compiles); the runtime conformance's
 comments case sends a draft.
+
+## P110 · 2026-10-26 · After the audit of P106: the scroll-lock rule fails soft, reads only the sheets it may, and sees a fixed body · Accepted
+
+Amends P106. The audit of 0.12.0 (2026-10-26, part "scroll") found no isolation surface in P106
+(text in, a string out, on the host's side) and five findings about what a page's text does to the
+call, and what it misses.
+
+**Decision.**
+1. **A CSS escape is read as CSS Syntax reads it** (S1). An escape of 0, a surrogate or past
+   U+10FFFF (six hex digits reach U+FFFFFF) is U+FFFD. `String.fromCodePoint` threw on the last:
+   one selector like `.\ffffff`, in a page, a linked sheet or a page past the entry, threw out of
+   `lintContent`, `admitContent`, `lintFiles`, `admitFiles` and `checkPage`, and so failed the
+   show or publish of a page browsers accept (0.10.0 had no such path).
+2. **The rule fails soft.** It is advisory, so a throw inside it is that page not checked, never
+   a failed lint: `scrollLock` catches it and says "The page wasn't checked for scroll lock: its
+   styles couldn't be read. If it holds html, body or its root to one screen (…), let it scroll
+   as a document.", a warning with the page's path and no line. The other pages of a version are
+   still checked.
+3. **Only the sheets the rule may read are asked for and decoded** (S2). A linked sheet is found
+   by its size first (`LinkedSheet` gives `{ path, size, text() }`: a string's length, or its
+   bytes, an upper bound on its characters), so `take` refuses one past 32 sheets, a page's
+   4 MiB or the version's 8 MiB before its text is decoded; once a page has read 32 sheets or
+   4 MiB, or the version's budget is spent, no sheet more is asked for. `lintFiles` keeps no
+   decoded sheet past its read (it kept every one for the set) and decodes a sheet given as bytes
+   only to its first 2 MiB. Sheets are now counted against the caps by that size: as bytes, a
+   sheet of other than ASCII counts its bytes, more than its characters, which only reads less.
+   Measured with the audit's shape (one page linking 400 sheets of 240 KB, each with one CJK
+   character, as bytes, 96 MB; node 24, arm64): before, out of memory under a 64 MB heap, and with
+   2 GB 209 MB of heap in use after the call, 445 MB peak RSS, 922 decodes of 198 M characters;
+   after, it runs under a 32 MB heap, 28 MB in use after the call under 64 MB, 259-269 MB peak
+   RSS (220-237 MB with the page linking none), 539 decodes of 104 M characters (522 and 100 M linking
+   none: the rest is the 17 sheets that fit 4 MiB).
+4. **A fixed body holds the page whatever its height** (S3), and **body's own overflow is the
+   viewport's where html's is visible**. A fixed box adds nothing to what the frame scrolls, so
+   `body { position: fixed; top: 0; left: 0; right: 0 }` (the scroll-lock libraries' way, as
+   static CSS) holds it, as does `body { position: fixed; inset: 0; overflow: auto }` with html's
+   overflow visible: the viewport takes body's `auto`, and body itself doesn't scroll. Both are
+   warned now ("body (position: fixed) holds it to one screen …: add body { position: static }
+   after those rules"). Where html's overflow isn't visible, body's own overflow decides, as
+   before: `html { overflow: hidden } body { position: fixed; inset: 0; overflow: auto }`
+   scrolls in body, and isn't warned. Measured on Chromium, Firefox and WebKit (WPE, with the
+   audit's extracted libraries; a cross-origin 600x400 frame, a 3,050 px page, twelve wheel
+   steps): both held on all three; with html hidden, and with `top: 0; height: 100%; overflow:
+   auto` under html hidden, the end is reached on all three, and the rule is silent.
+5. **The quirks-mode case is not one in Porthole** (S4). The audit's false warning,
+   `html { overflow: hidden } body { height: 100%; overflow: auto }` with no doctype, scrolls
+   when the page is its own document in quirks mode (body's 100% is then the frame's). Porthole
+   never shows it so: every page, a version's files included, is rendered into the shell's
+   `<!doctype html>` document (its head and body imported, `renderDocument`), which stays in
+   standards mode. The same page rendered that way is held on all three engines (compatMode
+   `CSS1Compat`), so the warning is right there, and the doctype is rightly not read.
+6. **The budget test has the minute its neighbours have** (S5), as do the two timing tests in
+   `check.test.ts` (one took 5.5 s, past the default 5 s, at a load of 23): their own bounds are
+   what they check.
+
+**Why.** P106's rule is advice: whatever a page holds, it should cost what P106 says it costs and
+never stop a show or a publish. The fixed body is the one hold the audit found that every engine
+agrees on and that has no reading other than "held".
+
+**Rejected.**
+- *The root fixed without a height as held too* (the audit's `#root { position: fixed; top: 0;
+  width: 100% }`, held on all three engines): a card centered on the screen, `#root { position:
+  fixed; top: 50%; left: 50%; transform: … }`, is the same shape and meant to fit; it would be
+  warned for nothing. Nor html fixed: not measured, and not seen in pages. Both stay misses.
+- *Reading the doctype for quirks mode* (the audit's fix): the page is never in quirks mode in
+  Porthole's frames (above); it would trade a right warning for a miss.
+- *A cache of decoded sheets for the version* (as before): a sheet two pages link is decoded for
+  each now, which the version's 8 MiB already bounds; the cache held every linked sheet.
+
+**Limits.** Added to P106's: the root or html fixed without a one-screen height; a fixed body
+without one, with its own `overflow: auto`, under an html of `overflow: auto` or `scroll` (body
+grows with what it holds, so likely nothing scrolls; taken as scrolling itself, not warned). Where a throw makes a page "not checked", the hold
+it may have is said only as that warning.
+
+**Tested.** `test/check.test.ts` (P110): `\ffffff`, `\110000`, `\d800`, `\0` and `\10ffff` in a
+class and an id lint and admit; `\ffffff`, `\110000`, `\dfff` and `\0` read as U+FFFD (a
+`body.\ffffffx` rule holds a `<body class="�x">`); a fixed body with `top: 0` and no height warned (the message and
+the fix), with `inset: 0; overflow: auto` warned, neither under html hidden, a fixed root without
+a height not. `test/files.test.ts`: one page linking 400 sheets asks for 32 and decodes 32; of
+240 KB each, decodes the 17 that fit 4 MiB, the rest asked for their size only; a sheet finder
+that throws gives the "wasn't checked" warning; `admitFiles` with `\ffffff` in a linked sheet and
+`\110000` on a second page admits it, the hold after the escape found.
+
+**Revisit when** a page's own document is ever shown outside the shell (then quirks mode is real),
+or an engine starts counting fixed boxes in what the viewport scrolls.
