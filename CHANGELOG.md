@@ -3,7 +3,10 @@
 `@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
 [docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
 
-## Unreleased
+## 0.12.0
+
+A page's button can open the host's comment composer with a draft the person reviews and posts
+themselves (P108).
 
 - **A comment's draft from the page** (P108): `comments.open(anchor, { draft })` opens the host's
   composer starting with `draft` (at most 2,000 characters), which the person edits and posts, or
