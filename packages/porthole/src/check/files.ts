@@ -378,7 +378,7 @@ export function lintFiles(
         severity: "warning",
         message: held.message,
         path: held.path ?? path,
-        line: held.line,
+        ...(held.line === undefined ? {} : { line: held.line }),
       });
     }
   }

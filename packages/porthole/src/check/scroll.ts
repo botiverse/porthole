@@ -68,8 +68,8 @@ export interface ScrollLock {
   readonly message: string;
   /** The file the rule that holds it is in (the page's own `path`, or a stylesheet's). */
   readonly path?: string;
-  /** Its line (1-based). */
-  readonly line: number;
+  /** Its line (1-based); none where the page couldn't be checked (P110). */
+  readonly line?: number;
 }
 
 /** How much of one stylesheet is read: its first 2 MiB. */
@@ -575,7 +575,11 @@ function identAt(text: string, at: number): { value: string; end: number } | nul
     if (code === "\\") {
       const hex = /^[0-9a-f]{1,6}\s?/iu.exec(text.slice(index + 1, index + 8));
       if (hex !== null) {
-        value += String.fromCodePoint(Number.parseInt(hex[0].trim(), 16) || 0xfffd);
+        // CSS Syntax's "consume an escaped code point": 0, a surrogate or past U+10FFFF is U+FFFD
+        // (six hex digits reach 0xFFFFFF, which String.fromCodePoint throws on: P110).
+        const point = Number.parseInt(hex[0].trim(), 16);
+        const valid = point !== 0 && point <= 0x10ffff && (point < 0xd800 || point > 0xdfff);
+        value += String.fromCodePoint(valid ? point : 0xfffd);
         index += 1 + hex[0].length;
       } else if (index + 1 < text.length) {
         value += text[index + 1];
@@ -1362,20 +1366,33 @@ interface Hold {
   readonly at: Value;
 }
 
+interface ScrollOptions {
+  readonly noun: string;
+  readonly path?: string;
+  readonly sheet?: LinkedSheet;
+  /** The version's, shared by its pages (`scrollBudget()`); else this page's own. */
+  readonly budget?: ScrollBudget;
+}
+
 /**
  * Whether `page`'s own styles hold it to one screen, and what to tell the agent; null where they
  * don't (or where it can't tell). `sheet` finds what the page links (a version's own files).
+ * Advisory, so it fails soft (P110): a throw in it is this page not checked, said as such (no
+ * line), never a failed lint (a CSS escape past U+10FFFF threw out of `admitContent` and
+ * `admitFiles` in 0.11).
  */
-export function scrollLock(
-  page: string,
-  options: {
-    readonly noun: string;
-    readonly path?: string;
-    readonly sheet?: LinkedSheet;
-    /** The version's, shared by its pages (`scrollBudget()`); else this page's own. */
-    readonly budget?: ScrollBudget;
-  },
-): ScrollLock | null {
+export function scrollLock(page: string, options: ScrollOptions): ScrollLock | null {
+  try {
+    return readScrollLock(page, options);
+  } catch {
+    return {
+      message: `The ${options.noun} wasn't checked for scroll lock: its styles couldn't be read. If it holds html, body or its root to one screen (overflow: hidden with height: 100% or 100vh, or position: fixed), let it scroll as a document.`,
+      ...(options.path === undefined ? {} : { path: options.path }),
+    };
+  }
+}
+
+function readScrollLock(page: string, options: ScrollOptions): ScrollLock | null {
   const shared = options.budget ?? { bytes: Infinity, steps: Infinity, spent: false };
   if (shared.spent) {
     return null;

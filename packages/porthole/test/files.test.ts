@@ -1221,6 +1221,35 @@ describe("a page with files held to one screen (P106)", () => {
       "- shell.css line 1: The page looks held to one screen in its frame",
     );
   });
+
+  it("fails soft: a throw in the rule is the page not checked, said so, never a failed lint (P110)", async () => {
+    const { scrollLock } = await import("../src/check/scroll.ts");
+    expect(
+      scrollLock(page('<link rel="stylesheet" href="s.css">'), {
+        noun: "page",
+        path: "index.html",
+        sheet: () => {
+          throw new RangeError("Invalid code point 16777215");
+        },
+      }),
+    ).toEqual({
+      message:
+        "The page wasn't checked for scroll lock: its styles couldn't be read. If it holds html, body or its root to one screen (overflow: hidden with height: 100% or 100vh, or position: fixed), let it scroll as a document.",
+      path: "index.html",
+    });
+    // The escape that threw out of admitFiles in 0.11, in a linked sheet and in a page past the
+    // entry: admitted, the rule read (the hold after it is found).
+    const admitted = admitFiles(served, {
+      "index.html": page('<link rel="stylesheet" href="vendor.css">'),
+      "vendor.css": `.icon-\\ffffff:before { content: "x" }\n${SHELL}`,
+      "other.html": page("<style>.\\110000 { color: red }</style>"),
+      "app.js": "",
+    });
+    expect(admitted.ok).toBe(true);
+    expect(admitted.ok ? admitted.note : "").toContain(
+      "- vendor.css line 2: The page looks held to one screen in its frame",
+    );
+  });
 });
 
 describe("after the security review of 0.6.0's first cut", () => {

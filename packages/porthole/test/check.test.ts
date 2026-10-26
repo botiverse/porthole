@@ -800,6 +800,21 @@ describe("a page held to one screen (P106)", () => {
     expect(classed(33)).toBe(0);
   });
 
+  it("reads a CSS escape of 0, a surrogate or past U+10FFFF as U+FFFD, as browsers do (P110)", () => {
+    // String.fromCodePoint threw on them: one such selector failed the show and publish checks.
+    for (const escape of ["\\ffffff", "\\110000", "\\d800", "\\0", "\\10ffff"]) {
+      expect(held(page(`.${escape} { color: red }`, "<p>x</p>"))).toEqual([]);
+      expect(admitContent(config, page(`#${escape} x { color: red }`, "<p>x</p>")).ok).toBe(true);
+    }
+    // As U+FFFD: the class matches, so the rule ran (not "wasn't checked").
+    for (const escape of ["\\ffffff", "\\110000", "\\dfff", "\\0 "]) {
+      const found = held(
+        `<!doctype html><html><head><style>body.${escape}x { overflow: hidden }</style></head><body class="\ufffdx"><p>x</p></body></html>`,
+      );
+      expect(found[0]?.message).toContain("body (overflow: hidden) holds it to one screen");
+    }
+  });
+
   it("reads a sheet in time linear in its length: 80,000 declarations or layer names cost what sixteen times 5,000 do", () => {
     // What this guards (P106's second review): each declaration for an element was kept by copying
     // the list of those before it, and each layer's name the list of its siblings: 80,000
