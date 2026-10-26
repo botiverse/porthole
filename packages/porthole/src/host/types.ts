@@ -202,6 +202,14 @@ export interface DisplayEvents {
   /** Too many declines: the display stops asking until it runs again. */
   readonly muted: undefined;
   /**
+   * The content moved the keyboard into its frame from one of the page's text fields without the
+   * person (no press on the frame, no Tab, P109), and focus went back where it was; `typing`: the
+   * person had pressed a key on the page within the last second. The content's doing. Three while
+   * typing within 10 s, or five within 2 s, stop the display (`contentError` says so; `reload()`
+   * runs it again).
+   */
+  readonly focusTaken: { readonly typing: boolean };
+  /**
    * What the frame reported about annotations (`annotate`, P053), checked and taken only while
    * the host asked for it: a selection, its clearing, a cancelled pick, where marks are. The
    * content's word: UI hints, never permissions.
@@ -242,6 +250,11 @@ export interface DisplayControls {
   readonly annotations: AnnotationControls;
   /** Runs the content again from the start, in a new frame. */
   reload(): void;
+  /**
+   * Moves focus into the display's frame, as the host's own move: from one of the page's text
+   * fields, a frame's own `focus()` is taken for the content's and undone (P109).
+   */
+  focus(): void;
   /** Tears the view down and removes the frame. */
   destroy(): void;
 }

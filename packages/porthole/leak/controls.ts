@@ -508,6 +508,21 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     specs: [RUNTIME],
     fails: all("comments are write-only: the composer opens from a click, content hears only that"),
   },
+  // The focus guard (P109): a page's focus() keeps the person's keys, and is never stopped.
+  "focus-guard": {
+    specs: [RUNTIME],
+    fails: all(
+      "a page that takes the keyboard while the person types in the host's composer gets a key or two at most, and is stopped",
+    ),
+  },
+  // comments.open needs the person in the calling frame (P109): without it, any gesture on the
+  // host's page (typing in its composer) opens it.
+  "comments-in-frame": {
+    specs: [RUNTIME],
+    fails: all(
+      "comments.open while the person types in the host's composer reaches no handler, by the page's own call or the shell's; from a press in the frame it does",
+    ),
+  },
   "comment-draft": {
     specs: [RUNTIME],
     fails: all(

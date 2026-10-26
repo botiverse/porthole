@@ -29,6 +29,7 @@ import { locateServed } from "./locate.ts";
 import { watchOutcome, type OutcomeWatch } from "./outcome.ts";
 import type { FrameSource } from "../isolation/types.ts";
 import { webPlatform } from "../platform/web.ts";
+import { TAKES } from "../platform/focus-guard.ts";
 import type { Surface } from "../platform/types.ts";
 import type { AdapterConnection, ProtocolAdapter, ShellConnection } from "../protocol/adapter.ts";
 import {
@@ -495,6 +496,27 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             })
           : framed;
         surface = created;
+        // The focus guard undid a move of the keyboard into this frame (P109): heard each time,
+        // and a frame that keeps taking it is stopped, as one that keeps navigating away is.
+        const takes: { at: number; typing: boolean }[] = [];
+        created.onFocusTaken?.((typing) => {
+          const at = Date.now();
+          takes.push({ at, typing });
+          const within = (ms: number) => takes.filter((take) => at - take.at <= ms);
+          emit("focusTaken", { typing });
+          if (
+            surface === created &&
+            (within(TAKES.typing.withinMs).filter((take) => take.typing).length >=
+              TAKES.typing.most ||
+              within(TAKES.any.withinMs).length >= TAKES.any.most)
+          ) {
+            stop();
+            contentError("The content kept taking the keyboard from the page; it was stopped.");
+          }
+          while (takes.length > 0 && at - (takes[0] as { at: number }).at > TAKES.typing.withinMs) {
+            takes.shift();
+          }
+        });
         const watch = watchOutcome({
           surface: created,
           source,
@@ -530,6 +552,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           ...(options.show === undefined ? {} : { show: options.show }),
           ...(options.cached === undefined ? {} : { cached: options.cached }),
           userActivation: () => created.userActivation(),
+          // The person in this frame (P109): the page's focus in it, after the focus guard.
+          focused: () => created.focused?.(),
           onEvent: onBridge,
           ...(declaration === null ? {} : { declaration }),
           ...(viewer === undefined ? {} : { viewer }),
@@ -650,6 +674,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         reload() {
           restarts = 0;
           run();
+        },
+        focus() {
+          surface?.focus?.();
         },
         destroy() {
           destroyed = true;

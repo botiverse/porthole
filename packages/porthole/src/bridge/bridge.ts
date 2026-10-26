@@ -71,7 +71,8 @@ import type {
  * every capability its host function's own rate (P091, P095) → arguments well formed and within
  * their limits → who may (P087: the level of each method the call runs for the viewer, a page's
  * named data with or without a viewer, db's rules) → not muted, if confirm-gated → the own rate
- * of each method it runs (P094: a batch's writes count each) → a user gesture, if gated so → the
+ * of each method it runs (P094: a batch's writes count each) → a user gesture, if gated so (and
+ * for `comments`, the host page's focus in the calling frame: P109) → the
  * viewer's consent, if gated so → a person's confirmation, if gated so (at most 10 waiting) →
  * shown to the person, if gated so (P100) → the handler (or, for a read, a result the host already
  * gave for it, or for a stale-allowed one the host's cache).
@@ -106,6 +107,12 @@ export interface BridgeOptions {
   readonly cached?: DataCache;
   /** Whether the embedding page has user activation now; undefined where it can't tell. */
   readonly userActivation?: () => boolean | undefined;
+  /**
+   * Whether the embedding page's focus is in this display's frame now (P109); undefined where it
+   * can't tell. A capability whose gesture must be in its frame (`inFrame`: `comments`) is refused
+   * without it.
+   */
+  readonly focused?: () => boolean | undefined;
   readonly onEvent: (event: BridgeEvent) => void;
   /** The clock, in milliseconds (tests pass their own). */
   readonly now?: () => number;
@@ -124,6 +131,10 @@ export interface BridgeOptions {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
+
+/** Whether `capability`'s gesture must be in its own frame (P109: the host page's focus there). */
+const inFrame = (capability: CapabilityName): boolean =>
+  capabilitySpec(capability).inFrame === true;
 
 const MAX_URL = 4_096;
 
@@ -651,6 +662,11 @@ export function createBridge(options: BridgeOptions): DisplayBridge {
       if (gates.includes("user-activation")) {
         const activated = callOptions?.userActivated ?? options.userActivation?.();
         if (activated === false) {
+          return refuse<Result>(capability, "no-user-activation");
+        }
+        // A gesture in this frame, not anywhere on the host's page (P109): the person typing in
+        // the host's composer gives its page activation, which a frame's call would borrow.
+        if (inFrame(capability) && options.focused?.() === false) {
           return refuse<Result>(capability, "no-user-activation");
         }
       }

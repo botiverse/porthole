@@ -47,6 +47,21 @@ export interface Surface {
    */
   viewport?(): { readonly width: number; readonly height: number } | undefined;
   /**
+   * Whether the embedding page's focus is in this frame now, once the platform's focus guard
+   * judged any move into it (P109); undefined, or absent, where the platform can't tell. A gesture
+   * gate that asks for the person in the calling frame (`comments`) reads it: false refuses.
+   */
+  focused?(): boolean | undefined;
+  /**
+   * Each time the content moved the keyboard into its frame from one of the embedding page's text
+   * fields without the person (no press on the frame, no Tab) and the platform gave focus back
+   * (P109), with whether the person was typing then (a key within the last second). Absent where
+   * the platform has no guard.
+   */
+  onFocusTaken?(listener: (typing: boolean) => void): () => void;
+  /** The host moves focus into the frame itself: the guard takes it as the person's (P109). */
+  focus?(): void;
+  /**
    * The frame loaded a document other than the one it was given: the content navigated it. The
    * framework starts it again from its content and reports it.
    */

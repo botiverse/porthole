@@ -612,6 +612,179 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
   });
 });
 
+/** A page with a text field first (a Tab from the host's composer lands in it), then a button. */
+const KEYS_PAGE = `<!doctype html><html><head><title>Keys</title></head><body><input id="field" style="width:200px"><button id="go" style="width:200px;height:40px">go</button><main id="artifact">runtime</main></body></html>`;
+
+/**
+ * The host's own composer, before the displays (so a Tab from it goes into the frame), and what
+ * the display tells the host about the keyboard (P109): each `focusTaken`, and content errors.
+ */
+const hostComposer = (page: Page) =>
+  page.evaluate(() => {
+    const box = document.createElement("textarea");
+    box.id = "host-composer";
+    box.style.cssText = "width:300px;height:60px";
+    document.body.prepend(box);
+    const w = window as unknown as {
+      keyboard: { taken: boolean[]; errors: string[] };
+      portholeHost: { displays: { on(event: string, listener: (detail: never) => void): void }[] };
+    };
+    w.keyboard = { taken: [], errors: [] };
+    const display = w.portholeHost.displays.at(-1);
+    display?.on("focusTaken", (detail: { typing: boolean }) =>
+      w.keyboard.taken.push(detail.typing),
+    );
+    display?.on("contentError", (detail: { message: string }) =>
+      w.keyboard.errors.push(detail.message),
+    );
+  });
+const keyboardOf = (page: Page) =>
+  page.evaluate(
+    () => (window as unknown as { keyboard: { taken: boolean[]; errors: string[] } }).keyboard,
+  );
+const composerText = (page: Page) =>
+  page.evaluate(() => (document.getElementById("host-composer") as HTMLTextAreaElement).value);
+const hostActive = (page: Page) => page.evaluate(() => document.activeElement?.tagName ?? null);
+
+test.describe("the person at the keyboard (P109)", () => {
+  test.setTimeout(60_000);
+
+  test("a page that takes the keyboard while the person types in the host's composer gets a key or two at most, and is stopped", async ({
+    page,
+  }) => {
+    const { frame } = await show(page, { html: KEYS_PAGE });
+    await hostComposer(page);
+    // The pointer rests over the frame, as after the person selected words in it; the composer
+    // then takes focus beside it (a host's composer opening on `selected`).
+    const box = await page.locator("#displays iframe").boundingBox();
+    await page.mouse.move((box?.x ?? 0) + 120, (box?.y ?? 0) + 60, { steps: 4 });
+    // The page moves the keyboard into its own field, again and again, with no gesture of its own.
+    await frame.evaluate(() => {
+      const field = document.getElementById("field") as HTMLInputElement;
+      setInterval(() => field.focus(), 500);
+    });
+    await page.evaluate(() => document.getElementById("host-composer")?.focus());
+    const text = "my unposted comment about the chart";
+    await page.keyboard.type(text, { delay: 120 });
+    await page.waitForTimeout(300);
+    const typed = await composerText(page);
+    const { taken, errors } = await keyboardOf(page);
+    expect(
+      text.length - typed.length,
+      `probe: the composer kept the person's words but a key or two (got ${JSON.stringify(typed)})`,
+    ).toBeLessThanOrEqual(2);
+    expect(taken.length, "focusTaken heard").toBeGreaterThan(0);
+    expect(errors, "probe: the display that kept taking the keyboard was stopped").toContain(
+      "The content kept taking the keyboard from the page; it was stopped.",
+    );
+  });
+
+  test("the person's own moves into the frame keep the keyboard: a press on its field, a Tab, an activation that sends the host no event", async ({
+    page,
+  }, info) => {
+    const { frame } = await show(page, { html: KEYS_PAGE });
+    await hostComposer(page);
+    const field = () =>
+      frame.evaluate(() => (document.getElementById("field") as HTMLInputElement).value);
+    // A press on the page's field, after typing in the host's composer.
+    await page.locator("#host-composer").click();
+    await page.keyboard.type("ab");
+    await frame.locator("#field").click();
+    await page.keyboard.type("xy");
+    await page.waitForTimeout(300);
+    expect(await hostActive(page), "a press moved focus into the frame, and it stayed").toBe(
+      "IFRAME",
+    );
+    expect(await composerText(page), "the composer kept its own").toBe("ab");
+    // Firefox focuses the frame's document but not its field on that press, with or without the
+    // guard (measured): the keys go to the frame, not to the field.
+    if (info.project.name !== "firefox") {
+      expect(await field(), "typed into the page's field after a press on it").toBe("xy");
+    }
+    // A Tab from the composer into the frame.
+    await page.locator("#host-composer").click();
+    await page.keyboard.press("Tab");
+    await page.waitForTimeout(300);
+    await page.keyboard.type("t");
+    await page.waitForTimeout(300);
+    expect(await hostActive(page), "a Tab moved focus into the frame, and it stayed").toBe(
+      "IFRAME",
+    );
+    expect(await composerText(page), "the key after the Tab didn't go to the composer").toBe("ab");
+    // An activation in the frame that sends the host's page no event (as an assistive technology's
+    // is; Playwright's evaluate is a gesture in the frame on all three engines, measured), once the
+    // composer has had focus and the host no gesture for longer than activation lasts.
+    await page.locator("#host-composer").click();
+    await page.waitForTimeout(5_500);
+    await frame.evaluate(() => (document.getElementById("field") as HTMLInputElement).focus());
+    await page.waitForTimeout(500);
+    expect(
+      await hostActive(page),
+      "an activation in the frame moved focus there, and it stayed",
+    ).toBe("IFRAME");
+    expect((await keyboardOf(page)).taken, "nothing was taken back").toEqual([]);
+  });
+
+  test("comments.open while the person types in the host's composer reaches no handler, by the page's own call or the shell's; from a press in the frame it does", async ({
+    page,
+  }) => {
+    const { frame, key } = await show(page, {
+      html: KEYS_PAGE,
+      declaration: {},
+      viewer: { level: "view", id: "vic" },
+    });
+    await hostComposer(page);
+    await page.locator("#host-composer").click();
+    // Every 400 ms, past the shell (a raw call) and through it (Firefox gives a frame activation
+    // while the person types in the host's page: measured).
+    await frame.evaluate(() => {
+      const w = window as unknown as {
+        poll: number;
+        porthole: {
+          use(name: string): Promise<{ open(a: unknown, o: unknown): Promise<unknown> }>;
+        };
+      };
+      let n = 0;
+      w.poll = setInterval(() => {
+        n += 1;
+        parent.postMessage(
+          {
+            jsonrpc: "2.0",
+            id: `poll-${n}`,
+            method: "porthole/call",
+            params: {
+              capability: "comments",
+              method: "open",
+              args: { anchor: { name: "card-2", label: "Card 2" }, draft: "Approved. Ship it." },
+            },
+          },
+          "*",
+        );
+        void w.porthole
+          .use("comments")
+          .then((comments) => comments.open({ name: "card-3" }, { draft: "Approved." }))
+          .catch(() => {});
+      }, 400) as unknown as number;
+    });
+    await page.keyboard.type("my own words about the chart, still typing", { delay: 100 });
+    const during = (await runtimeCalls(page, key)).filter((each) => each.capability === "comments");
+    await frame.evaluate(() => clearInterval((window as unknown as { poll: number }).poll));
+    expect(
+      during.map((each) => each.args),
+      "probe: no open reached the handler while the person typed in the host's composer",
+    ).toEqual([]);
+    // The person presses the page's button: its open reaches the composer.
+    await clicked(
+      frame,
+      `const comments = await porthole.use("comments"); return comments.open({ name: "card-4" }, { draft: "Approved" });`,
+    );
+    expect(
+      (await runtimeCalls(page, key)).map((each) => each.args),
+      "a press in the frame opens the composer",
+    ).toEqual([{ anchor: { name: "card-4" }, draft: "Approved" }]);
+  });
+});
+
 test.describe("the asset library (P089)", () => {
   /** A script asset of `artifact`'s library that marks the page it runs in. */
   async function scriptAsset(scope: string, artifact: string, trusted: boolean): Promise<string> {

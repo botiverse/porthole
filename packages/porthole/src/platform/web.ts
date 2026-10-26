@@ -1,6 +1,7 @@
 import type { ColorScheme } from "../config/schema.ts";
 import { FRAME_STATUS_METHOD } from "../isolation/types.ts";
 import { postMessageTransport } from "../transport/post-message.ts";
+import { focusGuard } from "./focus-guard.ts";
 import type { PlatformHost, Surface, SurfaceSpec } from "./types.ts";
 
 /** A frame-status message (`porthole/notifications/frame-status`), by its method alone. */
@@ -62,6 +63,15 @@ export const webPlatform: PlatformHost = {
     container.append(frame);
 
     const view = container.ownerDocument.defaultView ?? window;
+    // The focus guard (P109): a move of the keyboard into this frame from one of the page's text
+    // fields that the person didn't make is undone.
+    const guard = focusGuard(view);
+    const taken = new Set<(typing: boolean) => void>();
+    const unguard = guard.add(frame, (typing) => {
+      for (const listener of taken) {
+        listener(typing);
+      }
+    });
     // A served frame may pass through the host's own pages (a redirect entry's, P068): what they
     // say of the frame's status is heard too, and nothing else from there.
     const own = view.origin;
@@ -100,6 +110,16 @@ export const webPlatform: PlatformHost = {
         ).userActivation;
         return activation === undefined ? undefined : activation.isActive;
       },
+      focused() {
+        return guard.focused(frame);
+      },
+      onFocusTaken(listener) {
+        taken.add(listener);
+        return () => taken.delete(listener);
+      },
+      focus() {
+        guard.focus(frame);
+      },
       onLoad(listener) {
         loaded.add(listener);
         return () => loaded.delete(listener);
@@ -111,6 +131,8 @@ export const webPlatform: PlatformHost = {
       destroy() {
         navigated.clear();
         loaded.clear();
+        taken.clear();
+        unguard();
         transport.close();
         frame.remove();
       },

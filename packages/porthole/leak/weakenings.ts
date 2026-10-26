@@ -461,6 +461,24 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "          return { ok: true, value: value as Result };",
     },
   ],
+  // The focus guard (P109): every move of the keyboard into a frame taken as the person's, so a
+  // page that calls focus() while the person types in the host's composer keeps their keys.
+  "focus-guard": [
+    {
+      file: "src/platform/focus-guard.ts",
+      find: "    if (moved) {\n      return;\n    }",
+      replace: "    if (moved || true) {\n      return;\n    }",
+    },
+  ],
+  // comments.open's gesture in the calling frame (P109): any gesture on the host's page will do,
+  // the person typing in the host's own composer included.
+  "comments-in-frame": [
+    {
+      file: BRIDGE,
+      find: "        if (inFrame(capability) && options.focused?.() === false) {",
+      replace: "        if (false) {",
+    },
+  ],
   // A comment's draft taken as the page gave it (P108): past the limit, unseen characters, not text.
   "comment-draft": [
     {

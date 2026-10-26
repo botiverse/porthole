@@ -45,9 +45,14 @@ export type CapabilityName = (typeof CAPABILITY_NAMES)[number];
 /**
  * What must hold before a call reaches the host's handler. A capability's gates all apply.
  *
- * - `user-activation`: the call follows a real user gesture in the frame. The shell refuses a call
- *   without one, and the host checks its own page's activation (which a gesture in a child frame
- *   propagates to). It stops calls made on load or on a timer; it is not proof of intent.
+ * - `user-activation`: the call follows a real user gesture. The shell refuses a call without one
+ *   in its frame, but that check is the page's own (a page posts the call itself and skips it).
+ *   The host checks its own page's transient activation, which a gesture in a child frame
+ *   propagates to, and which lasts 5 s after any gesture anywhere on the host's page: a click on
+ *   the host's own UI, or the person typing in its own composer, counts. So it stops calls made on
+ *   load, or on a timer while nobody does anything; it is not proof that the gesture was in this
+ *   frame, nor of intent. Where a capability needs that (`comments`, P109: its draft goes into
+ *   the person's composer), the host also asks that its page's focus be in the calling frame.
  * - `confirm`: the host's `confirm` function shows a person the call's whole effect, and the call
  *   goes only if they accept. No `confirm` function means the call is refused (fail closed).
  * - `rateLimit`: at most `perMinute` calls per display per minute; the rest are refused.
@@ -82,6 +87,13 @@ export interface CapabilitySpec {
    * Absent for what the shell does by itself (sizes, errors, annotations).
    */
   readonly request?: { readonly method: string; readonly sdk?: string };
+  /**
+   * Its `user-activation` gate also needs the person in the calling frame (P109): the host page's
+   * focus in that frame, which a press on it or a Tab into it gives and the focus guard keeps from
+   * a frame's own `focus()`. Activation alone lasts 5 s after any gesture on the host's page,
+   * typing in its own composer included.
+   */
+  readonly inFrame?: true;
 }
 
 const rate = (perMinute: number): Gate => ({ rateLimit: { perMinute } });
@@ -170,6 +182,7 @@ export const CAPABILITIES = {
     defaultGates: ["user-activation", rate(30)],
     served: "handler",
     request: { method: "porthole/call" },
+    inFrame: true,
   },
   /** This artifact's current version, and a new version of it, base-checked (P088). */
   artifact: { defaultGates: [rate(10)], served: "handler", request: { method: "porthole/call" } },
