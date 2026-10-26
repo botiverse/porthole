@@ -69,8 +69,6 @@ from 0.10.0.
   - **Lint** (P106): `LintRule` and `FileFinding["rule"]` take `"scroll-lock"` (a warning); a
     switch over rules needs the case.
 
-## Unreleased
-
 After the audit of P106's scroll-lock warning (P110): it no longer fails a show or a publish, and
 it reads only the stylesheets it may.
 
