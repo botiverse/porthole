@@ -62,6 +62,11 @@ export interface CommentAnchor {
 
 export interface CommentRequest {
   readonly anchor: CommentAnchor;
+  /**
+   * Text to start the person's comment with (P108): the content's word, a draft in the composer
+   * that the person edits and posts themselves, or doesn't. Never posted by the host on its own.
+   */
+  readonly draft?: string;
 }
 
 export function parseCommentRequest(args: unknown): CommentRequest | null {
@@ -69,9 +74,11 @@ export function parseCommentRequest(args: unknown): CommentRequest | null {
   if (!isRecord(anchor) || !shortText(anchor.name, 256)) {
     return null;
   }
+  const draft = isRecord(args) ? args.draft : undefined;
   if (
     (anchor.label !== undefined && !shortText(anchor.label, 200)) ||
-    (anchor.quote !== undefined && !shortText(anchor.quote, 2_000))
+    (anchor.quote !== undefined && !shortText(anchor.quote, 2_000)) ||
+    (draft !== undefined && !shortText(draft, 2_000))
   ) {
     return null;
   }
@@ -81,6 +88,7 @@ export function parseCommentRequest(args: unknown): CommentRequest | null {
       ...(anchor.label === undefined ? {} : { label: anchor.label }),
       ...(anchor.quote === undefined ? {} : { quote: anchor.quote }),
     },
+    ...(draft === undefined ? {} : { draft }),
   };
 }
 

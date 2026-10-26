@@ -21,6 +21,7 @@ async function page(): Promise<void> {
   }
   try {
     await (await porthole.use("comments"))?.open({ name: "slide-3" });
+    await (await porthole.use("comments"))?.open("slide-4", { draft: "Approved" });
   } catch (error) {
     void (error as PortholeError).code;
   }

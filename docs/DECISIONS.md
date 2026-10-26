@@ -5446,3 +5446,32 @@ fact more (a mark is a draft), bounded by the host's duty above.
 **Revisit when** a host needs drafts in a frame others see (then the host draws them itself), a
 third state is asked for (resolved, private: then a state list, still not a style knob), the
 shell gets forced-colors styles, or MCP Apps defines annotations.
+
+## P108 · 2026-10-26 · A comment's draft from the page: text the composer starts with, never posted by the page · Accepted
+
+Amends P090. A page that asks for decisions (Raft's "decision sheet": a card per question with
+"Approve" and "Needs changes" buttons) opens the host's composer at the card with `comments.open`
+(P090), and the person then types the same words every time. xxchan asked for the button to carry
+them (#proj-workspace, 2026-10-26).
+
+**Decision.** `comments.open(anchor, { draft })`: `draft` is text the composer starts with, at most
+2,000 characters, well-formed and not blank (the anchor's own checks, P095); anything else refuses
+the call as `invalid`, before any handler. The handler gets `{ anchor, draft }`. Everything else is
+P090's: from a click (`user-activation`, 30 a minute), view level, content hears only whether the
+composer opened, and no method reads a thread. The host shows the draft as the person's editable
+text, in its own composer, and posts it only when they do; it never posts on the page's word, and
+treats the draft as the content's (plain text: no mentions resolved or notifications sent before
+the person posts, as for anything they type).
+**Why.** The comment is still the person's word: they see the text, can change or drop it, and
+post it themselves, as P090 requires. What the page saves them is typing.
+**Threat it opens.** A page can put words in front of the person, who might post them without
+reading (a long draft hiding a line they wouldn't sign). Bounded by: a click on the page to open,
+the composer's own Send, the 2,000 limit (the quote's), and the host showing the whole draft before
+it can be posted. A page still can't post, read a thread, or open the composer without a gesture.
+**Rejected.** The page posting the comment (P090: a comment is a person's word); a draft without a
+gesture (a composer appearing on its own is the page acting for them); rich text or mentions in the
+draft (the host would be resolving the content's names).
+**Tested.** `test/runtime.test.ts` ("a draft (P108)": the handler gets it as given; past 2,000,
+blank, a number, a lone surrogate: `invalid`, no handler); `leak/served/runtime.spec.ts` ("comments
+are write-only": the draft reaches the composer beside the anchor from a click, content still hears
+only whether it opened); `types/runtime/v1/check.ts` (the page-shaped call compiles).

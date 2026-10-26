@@ -28,7 +28,7 @@ import { sizeWords } from "./limits.ts";
 /** How each method is called, as the manual writes it. */
 const CALLS: Readonly<Record<RuntimeCapabilityName, Readonly<Record<string, string>>>> = {
   user: { get: "user.get()" },
-  comments: { open: "comments.open({ name, label, quote })" },
+  comments: { open: "comments.open({ name, label, quote }, { draft })" },
   clipboard: { copy: "clipboard.copy(text)" },
   links: { open: "links.open(url)" },
   downloads: { save: "downloads.save({ name, text | data })" },
@@ -61,7 +61,7 @@ const CALLS: Readonly<Record<RuntimeCapabilityName, Readonly<Record<string, stri
 const WHAT: Readonly<Partial<Record<CapabilityName, (config: PortholeConfig) => string>>> = {
   user: () => "who is viewing: { id, name, level }, as the app says",
   comments: () =>
-    "opens the app's comment composer at a place the page names (a stable name like slide-3 or refs/a.md#L12, a label, the quoted text); the person writes it in the app. True if it opened. Write-only: a page never reads comments",
+    "opens the app's comment composer at a place the page names (a stable name like slide-3 or refs/a.md#L12, a label, the quoted text), optionally starting with a draft (at most 2,000 characters, e.g. a button's \"Approved\" or a checklist to fill in); the person edits and posts it in the app, or doesn't. True if it opened. Write-only: a page never reads comments, and never posts one",
   copyText: () =>
     `copies text to the person's clipboard (at most ${MAX_COPY_CHARS.toLocaleString("en-US")} characters), and the app shows them what was copied; nothing else in the page can write the clipboard. True if copied`,
   openLink: () =>

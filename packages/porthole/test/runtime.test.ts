@@ -422,6 +422,28 @@ describe("the bridge holds a call to the declaration and the viewer's level (P08
     expect(await bridge.call("comments", { anchor: {} })).toMatchObject({ refusal: "invalid" });
   });
 
+  test("a draft (P108): the handler gets it as given; past 2,000 characters, blank or not text, refused", async () => {
+    const asked: unknown[] = [];
+    const handlers: CapabilityHandlers = {
+      ...memoryRuntime().handlers,
+      comments: (args) => {
+        asked.push(args);
+        return true;
+      },
+    };
+    const { bridge } = bridgeOf(config, { viewer: viewer("view"), handlers });
+    expect(
+      await bridge.call("comments", { anchor: { name: "card-2" }, draft: "Approved: ship it" }),
+    ).toEqual({ ok: true, value: true });
+    expect(asked).toEqual([{ anchor: { name: "card-2" }, draft: "Approved: ship it" }]);
+    for (const draft of ["x".repeat(2_001), "  ", 42, "\ud800"]) {
+      expect(await bridge.call("comments", { anchor: { name: "card-2" }, draft })).toMatchObject({
+        refusal: "invalid",
+      });
+    }
+    expect(asked).toHaveLength(1);
+  });
+
   test("past a limit: too_large, before any handler", async () => {
     const small = everything({ limits: { maxFileBytes: 10, maxFiles: 2 } });
     const declaration = declared({ db: {}, artifact: {}, assets: {} });

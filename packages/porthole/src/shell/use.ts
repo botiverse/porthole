@@ -131,7 +131,10 @@ export const USE_RUNTIME = String.raw`
   const METHODS = {
     user: { get: () => call("user", "get", {}) },
     comments: {
-      open: (anchor) => clicked("comments", "comments.open") || call("comments", "open", { anchor: typeof anchor === "string" ? { name: anchor } : record(anchor) }),
+      open: (anchor, options) => {
+        const draft = options === undefined || options === null ? undefined : record(options).draft;
+        return clicked("comments", "comments.open") || call("comments", "open", { anchor: typeof anchor === "string" ? { name: anchor } : record(anchor), ...(draft === undefined ? {} : { draft: String(draft) }) });
+      },
     },
     clipboard: { copy: (text) => clicked("copyText", "clipboard.copy") || call("clipboard", "copy", { text: String(text) }) },
     links: { open: (url) => clicked("openLink", "links.open") || call("links", "open", { url: String(url) }) },

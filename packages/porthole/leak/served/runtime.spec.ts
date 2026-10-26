@@ -529,12 +529,14 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
     await frame.evaluate(async () => {
       const comments = await (
         window as unknown as {
-          porthole: { use(n: string): Promise<{ open(a: unknown): Promise<unknown> } & object> };
+          porthole: {
+            use(n: string): Promise<{ open(a: unknown, o?: unknown): Promise<unknown> } & object>;
+          };
         }
       ).porthole.use("comments");
       (window as unknown as { keys: string[] }).keys = Object.keys(comments);
       document.getElementById("go")?.addEventListener("click", () => {
-        void comments.open({ name: "slide-3", label: "Slide 3" }).then(
+        void comments.open({ name: "slide-3", label: "Slide 3" }, { draft: "Approved" }).then(
           (value) => ((window as unknown as { opened: unknown }).opened = value),
           (error: { code?: string }) =>
             ((window as unknown as { opened: unknown }).opened = error.code),
@@ -565,6 +567,10 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
       (await runtimeCalls(page, key)).map((each) => each.capability),
       "probe: only the open reached a handler",
     ).toEqual(["comments"]);
+    expect(
+      (await runtimeCalls(page, key))[0]?.args,
+      "probe: the draft reached the composer as given, beside the anchor",
+    ).toEqual({ anchor: { name: "slide-3", label: "Slide 3" }, draft: "Approved" });
   });
 });
 
