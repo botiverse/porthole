@@ -5,13 +5,18 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes Porthole 0.12.0 (2026-10-26). A review on 2026-10-19 found gaps, and every
-decision it led to has merged. P096 changed the negative-control runner and CI, and the shipped
-conformance probes' messages and timing, not what they check. P104 (0.9.0's annotation markers) had
-a review of its own, and P105, in 0.10.0, is what it led to. 0.11.0 adds draft marks (P107, §7
-"Drafts": what a page learns from them and who may receive them) and an advisory lint (P106, no
-change to isolation). 0.12.0 lets `comments.open` carry a draft (P108, §7: visible text only, and
-the host's duties around it). [§8](#8-fixes-in-flight) lists the decisions.
+**Status.** This describes Porthole 0.12.0 (2026-10-26) and the unreleased changes after it
+(P109, CHANGELOG's "Unreleased"). A review on 2026-10-19 found gaps, and every decision it led to
+has merged ([§8](#8-fixes-in-flight) lists them). P096 changed the negative-control runner and CI,
+and the shipped conformance probes' messages and timing, not what they check. P104 (0.9.0's
+annotation markers) had a review of its own, and P105, in 0.10.0, is what it led to. 0.11.0 was
+never published (its release stopped at the CI gate), and 0.12.0 carries all of it: draft marks
+(P107, §7 "Drafts": what a page learns from them and who may receive them), an advisory lint
+(P106, no change to isolation), and `comments.open` with a draft (P108, §7: the host's duties
+around it). The review of 0.12.0's drafts led to P109: a display can take the keyboard, which
+`createHost` now gives back (§6, §7 "The keyboard"); `comments.open` needs the person in the
+calling frame; a page's draft text is stricter, and the composer it fills is the person's to act
+on (§7).
 
 ## 1. Two layers
 
@@ -153,10 +158,18 @@ Whatever the use:
   second click lands on the bubble's). Such a view takes no press of any kind for 500 ms after it
   appears or moves (not a `click` only: menu triggers act on `pointerdown`, and menu items click
   themselves on a release), ignores a press that began before that, opens beside the frame rather
-  than over the report's box where the layout allows, takes no focus when it opens, and puts no
-  destructive action (resolve, delete) one click away. Its menus and popovers are part of it,
-  portaled ones too (P105; ADOPTING.md § Annotations has the code: the view `inert` while it
-  arms).
+  than over the report's box where the layout allows, takes no focus when it opens, and puts
+  nothing one click away that posts, submits, resolves, deletes or discards (a draft's view, P107,
+  included: no "Post" or "Submit review" in it). Its menus and popovers are part of it, portaled
+  ones too (P105; ADOPTING.md § Annotations has the code: the view `inert` while it arms).
+- Know that a display can take the keyboard: a page calls `focus()` on its own input whenever it
+  likes (on Chromium and WebKit with no gesture), and what the person goes on typing goes to it.
+  `createHost` (every `PortholeView` too) gives focus back when it leaves one of the page's text
+  fields for a frame without the person's press on the frame or a Tab, tells the display
+  (`focusTaken`), and stops a display that keeps doing it (§7 "The keyboard", P109). Move focus
+  into a display yourself with `display.focus()`, never the frame's own `focus()`, and with a
+  platform of your own, implement its focus guard (`focused`, `onFocusTaken`, `focus`) or accept
+  that a display can read what is typed beside it.
 - List every app origin in `appOrigins` (`hostOrigins` in `/server`): only those may frame content,
   and only those are checked against the content domain for a shared site.
 - Under the app runtime, run `defineRuntimeConformance` with `api` in CI (§7).
@@ -548,7 +561,8 @@ its realm with the content, so:
   where the content can listen: each mark's id, anchor and, where given, `count` (the number on
   its marker). A host gives ids that say nothing (never a person's name or a comment's words), and
   a count only where the page may know how many there are. Who commented and what they wrote stay
-  in the host's own UI, outside the frame.
+  in the host's own UI, outside the frame, and so does what the person types there, within the
+  keyboard's limits below (P109).
 - *Drafts* (P107). A mark with `kind: "draft"` (a comment its author hasn't posted) is drawn apart,
   a dashed line and a hollow marker with no number, so the page also learns which of its marks are
   drafts: that the person viewing it is writing a comment there, before they post it. That is new
@@ -566,7 +580,9 @@ its realm with the content, so:
   app runtime below). A host that sends drafts to such a page accepts that its author and other viewers can
   learn of them. A draft carries nothing else: the host drops its count before the frame (control
   `draft-count`), so a page can't read how many drafts are at an anchor unless the host sends a
-  mark per draft, and its id is the host's, as any mark's (random, never the draft's words). A host
+  mark per draft, and its id is the host's, as any mark's (random, never the draft's words); the
+  draft's words are typed into the host's composer, which the page can try to take the keyboard
+  from ("The keyboard" below). A host
   that sends drafts into a frame others see (a shared screen, a frame several viewers share) tells
   that page, and anything it draws for them, what its author hasn't posted.
 - *What content can fake.* Any report: a selection while the host asks for one, where marks are,
@@ -628,8 +644,45 @@ its realm with the content, so:
   follow-up reports, of the marks (while one has a marker) and of the person's selection after a
   scroll, share one clock: at most one a second together, each only when its box moved (P105).
 - So `activated` opens the host's own view of a mark it already shows, placed within the frame's
-  box (better: beside it), guarded as §6 says, and never acts on it (no resolve, delete or reply);
-  an anchor or a rect decides where something is drawn, never who may see or do anything.
+  box (better: beside it), guarded as §6 says, and never acts on it (no post, submit, discard,
+  resolve, delete or reply); an anchor or a rect decides where something is drawn, never who may
+  see or do anything.
+
+**The keyboard** (P109). Any display, of any kind and any version, can move the keyboard into its
+frame: `element.focus()` runs in the content's realm, where nothing of Porthole can stop it, and on
+Chromium and WebKit it needs no gesture. What the person goes on typing then goes to the page,
+which can keep it (`db`) or send it out through any egress it has. The page knows when it matters:
+its shell reports `selected` when the host opens a composer on it, and draft marks (P107) say
+where the person is writing. P107 and P108 didn't make this possible; they put the person's
+unposted words beside the frame and tell the page when.
+
+- *What holds* (the web platform's focus guard, in every `createHost` display): when focus leaves
+  one of the host page's text fields (a text area, an `<input>` that takes text, an editable region,
+  in open shadow roots too) for a display's frame, and the person didn't move it there, focus goes
+  back to the field once the engine has finished the move, the display hears `focusTaken`, and
+  three such moves while the person types within 10 s (or five within 2 s) stop the display. The
+  person moved it if they pressed Tab just before; pressed the frame (on Chromium and WebKit the
+  frame element is `:active` as focus moves; on Firefox, which tells the host's page nothing of the
+  move or the press, the pointer came over the frame after the field got focus and after the person
+  last typed); made a gesture the host's own events don't explain (the page has activation, but no
+  key, press or click of its own for longer than activation lasts, and the field has had focus that
+  long: a press or an assistive technology's activation in a frame); or the host moved it
+  (`display.focus()`).
+  Measured on all three engines: a page calling `focus()` every 700 ms down to a busy loop while
+  the person types a sentence gets no key of it on Chromium and WebKit and at most one on Firefox
+  before it is stopped (negative control `focus-guard`); a press on the page's own field, a Tab
+  into the frame, and an activation in the frame that sends the host no event keep the keyboard
+  there. `comments.open` needs that focus in the calling frame (the app runtime, below).
+- *What doesn't*: a page gets the keys typed before focus is back (on Firefox, the keys of an
+  animation frame); on Firefox a page keeps the keyboard if the pointer came over its frame after
+  the person last typed and after the field got focus (a person who typed, moved the pointer over
+  the frame, and types on without clicking); moves between two frames, or from what isn't a text
+  field, aren't judged (a frame beside another: S7); and a platform of the host's own has no guard
+  unless it implements one. The guard can take a person's own move for the page's (a press on
+  Firefox with the pointer resting over the frame since before the field got focus; an assistive
+  technology's activation within 5 s of their key or press on the page): focus goes back, and
+  their next press once the pointer has left the frame and come back, a Tab, or an activation 5 s
+  later keeps it.
 
 ### The app runtime
 
@@ -662,10 +715,16 @@ section.
   code-typed asset runs as code only when an admin uploaded it where uploaded code may run, and
   only while the config still lets uploaded code run, asked at every load, in bearer mode too
   (where every artifact config must; P103); anything else is a download.
-- `comments` is write-only: the page learns only whether the composer opened. A draft it gives
-  (P108) is at most 2,000 characters of text a person can see: no zero-width, bidi or tag
-  characters, no controls but a new line and a tab (P100's `unseen`); anything else is refused
-  before the handler.
+- `comments` is write-only: the page learns only whether the composer opened. It opens only from
+  a gesture with the host page's focus in the calling frame (P109: a press in it or a Tab into it;
+  not the person typing in the host's UI, nor a gesture in another display; negative control
+  `comments-in-frame`). A draft it gives (P108) is at most 2,000 characters of text a person can
+  see (P109): nothing invisible (zero-width characters and joiners, U+200D in an emoji sequence
+  too, bidi and tag characters, controls but a new line and a tab; a variation selector after a
+  pictograph is fine), no line or paragraph separator, not blank-looking, at most 32 blanks in a
+  row and two blank lines in a row; anything else is refused before the handler. The anchor's
+  label and quote reach the handler without what a person can't see, and are refused if nothing
+  visible is left.
 - `defineRuntimeConformance` checks the host's handlers, and with `api` its own API for `db`,
   `artifact` and `assets`, with a forged context (a viewer claiming to be the owner, no rules).
 
@@ -682,11 +741,28 @@ section.
   (`Refused("conflict")`).
 - Handle abuse on shared pages (S4).
 - Show a comment's draft (P108) whole, as the person's editable plain text in its own composer,
-  and post it only on the person's own Send, never on the page's word. A composer that opens with
-  a draft is a view the content brought (§6's guard): it takes no press, and no Enter that sends,
-  for 500 ms after it opens, doesn't focus Send, and opens beside the frame where it can. Once
-  posted, the comment is the person's: mentions in it act as theirs, which is why they must see
-  it all first.
+  and post it only on the person's own Send, never on the page's word. Once posted, the comment is
+  the person's: mentions in it act as theirs, which is why they must see it all first. So (P109;
+  ADOPTING.md has the code):
+  - An open never replaces, appends to or moves what the person has typed, or the place they
+    chose: while the composer holds their words, answer `false`, or show the page's words as a
+    separate suggestion that takes no focus. (The page knows they are writing anyway: its
+    `selected`, and draft marks.)
+  - A composer the page filled takes no focus when it opens (keys stay where the person was
+    typing: what they type for the page must not land in a postable comment), and doesn't send on
+    Enter until the person has focused or edited it themselves: Send is a click until then. It is
+    a view the content brought (§6's guard): no press for 500 ms after it opens, Send not focused,
+    beside the frame where it can.
+  - It says the text is the page's ("Suggested by this page", or the page's name), drawn by the
+    host outside the frame, until the person edits it, and never shows it as one of their own
+    drafts: the host's own list of drafts is how a person finds theirs, not the frame's markers,
+    which a page can draw too.
+  - The draft's view (P107) and the composer put nothing one click away that posts, submits or
+    discards.
+  - Render a page-drafted comment as plain text, or show the person before Send what readers will
+    see: markup a markdown renderer hides (an HTML comment, a link definition) is still read by an
+    agent. Show the anchor's label and quote as isolated text (`<bdi>`, `dir="auto"`), and hand
+    them to a model only as the page's words.
 
 **Not guaranteed**
 
@@ -697,14 +773,18 @@ section.
 - In bearer mode, assets are served by id alone, without the host's check.
 - A draft is the page's words in the person's composer: a person who posts it without reading
   posts what the page chose, and an agent that reads the comment takes it as theirs. Porthole
-  bounds what can hide in it (visible text, 2,000 characters, a click to open); reading it is the
-  person's.
+  bounds what can hide in it (visible text, 2,000 characters) and when it opens (a gesture with the
+  person in the calling frame, P109: before P109, any gesture on the host's page in the last 5 s,
+  typing in its own composer included); reading it is the person's. A page can still open the
+  composer on the person's own press in its frame, at a moment it chooses (the second click of a
+  double click, a field it asked them to type into): the composer's duties above are the bound.
 
 ## 8. Fixes in flight
 
-The decisions below come from the 2026-10-19 review. "Planned" means not in 0.9.0: the gap its
-row names exists today, and the sections it cites say "open until" that decision. Each merged row
-says what was wrong, what holds now, and the limit its decision accepts, if any.
+The decisions below come from the 2026-10-19 review, and all of them have merged. Each row says
+what was wrong, what holds now, and the limit its decision accepts, if any. Later reviews' decisions
+are in the status line and in DECISIONS.md: P105 (after the review of P104), P109 (after the review
+of 0.12.0's drafts).
 
 | Decision | State | What it closes | Sections |
 | --- | --- | --- | --- |
