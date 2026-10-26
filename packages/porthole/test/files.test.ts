@@ -985,7 +985,7 @@ describe("a page with files held to one screen (P106)", () => {
     const sheet = (href: string) => {
       asked += 1;
       const text = sheets[href];
-      return text === undefined ? null : { path: href, size: text.length, text: () => text };
+      return text === undefined ? null : { path: href, least: text.length, text: () => text };
     };
     const started = performance.now();
     const fanned = scrollLock(page('<link rel="stylesheet" href="s0.css">'), {
@@ -1018,7 +1018,7 @@ describe("a page with files held to one screen (P106)", () => {
         path: "index.html",
         sheet: (href) => {
           const text = many[href];
-          return text === undefined ? null : { path: href, size: text.length, text: () => text };
+          return text === undefined ? null : { path: href, least: text.length, text: () => text };
         },
       }),
     ).toBeNull();
@@ -1028,34 +1028,70 @@ describe("a page with files held to one screen (P106)", () => {
   it("asks for no sheet past a page's caps, and decodes none it won't read (P110)", async () => {
     const { scrollLock, READ, SHEETS } = await import("../src/check/scroll.ts");
     // The 1026 audit: lintFiles decoded every sheet a page linked and kept it for the set, though
-    // the rule reads at most SHEETS of them and READ bytes (400 sheets of 240 KB held 200 MB).
+    // the rule reads at most SHEETS of them and READ characters (400 sheets of 240 KB held 200 MB).
     const links = Array.from(
       { length: 400 },
       (_, index) => `<link rel="stylesheet" href="s${index}.css">`,
     ).join("");
     let asked = 0;
     let decoded = 0;
-    const sized = (size: number) => (href: string) => {
+    const sized = (least: number) => (href: string) => {
       asked += 1;
       return {
         path: href,
-        size,
+        least,
         text: () => {
           decoded += 1;
-          return "p { color: red }";
+          return `p{}${" ".repeat(least - 3)}`;
         },
       };
     };
     // SHEETS read, and none asked for after them.
     scrollLock(page(links), { noun: "page", path: "index.html", sheet: sized(16) });
     expect([asked, decoded]).toEqual([SHEETS, SHEETS]);
-    // 240 KB each: those that fit READ decoded; the rest asked for their size only (a later one
-    // that fits would still be read), and none decoded.
+    // 240 KB each: those that fit READ decoded; the rest asked for their fewest characters only (a
+    // later one that fits would still be read), and none decoded.
     asked = 0;
     decoded = 0;
     scrollLock(page(links), { noun: "page", path: "index.html", sheet: sized(240 * 1024) });
     expect([asked, decoded]).toEqual([400, Math.floor(READ / (240 * 1024))]);
   });
+
+  it("counts a sheet's characters, as strings or as bytes: non-ASCII CSS keeps its overrides (P110)", () => {
+    // P110's re-review: sheets given as bytes were charged and cut by their bytes (up to three a
+    // character), so an override past 2 MiB of a sheet's bytes, or in a sheet past the page's 4 MiB
+    // of them, went unread and the hold before it was warned. Caps count characters, as given.
+    const cjk = (count: number) => `/* ${"一".repeat(count)} */\n`;
+    const versions: Record<string, string>[] = [
+      // The override past 2 MiB of the sheet's bytes, within 2 MiB of its characters.
+      {
+        "a.css": "html { overflow: hidden }\n",
+        "b.css": `${cjk(800_000)}html { overflow: visible }\n`,
+      },
+      // Two sheets of 1.4 M characters (8.4 MB as bytes) fit the page's 4 MiB of characters.
+      {
+        "a.css": "html { overflow: hidden }\n",
+        "b.css": cjk(1_400_000),
+        "c.css": `html { overflow: visible }\n${cjk(1_400_000)}`,
+      },
+    ];
+    const encoder = new TextEncoder();
+    for (const sheets of versions) {
+      const links = Object.keys(sheets)
+        .map((path) => `<link rel="stylesheet" href="${path}">`)
+        .join("");
+      const index = `<!doctype html><html><head>${links}</head><body><p>x</p></body></html>`;
+      for (const bytes of [false, true]) {
+        const files: Record<string, string | Uint8Array> = { "index.html": index };
+        for (const [path, text] of Object.entries(sheets)) {
+          files[path] = bytes ? encoder.encode(text) : text;
+        }
+        const found = lintFiles(served, files).filter((each) => each.rule === "scroll-lock");
+        expect(found, bytes ? "as bytes" : "as strings").toEqual([]);
+      }
+    }
+    // Heavy by design (megabytes of CSS, decoded): a minute, not the default 5 s, on a busy machine.
+  }, 60_000);
 
   /** An app's stylesheet of `bytes`: many class rules, some scroll boxes, nothing that holds. */
   const appSheet = (bytes: number) => {

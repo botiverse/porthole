@@ -15,9 +15,10 @@ it reads only the stylesheets it may.
   lock" (a warning), never a failed check.
 - **`lintFiles` decodes only the stylesheets the rule reads** (P110): a page linking many sheets
   had every one decoded and kept for the whole call (400 sheets of 240 KB: 200 MB of heap, out of
-  memory at 64 MB), though the rule reads at most 32 sheets and 4 MiB a page. Sheets are now
-  sized before they are decoded, none is asked for past the caps, and none is kept: the same
-  version runs under a 32 MB heap.
+  memory at 64 MB), though the rule reads at most 32 sheets and 4 MiB a page. A sheet past the
+  caps is now refused before it is decoded, none is asked for once they are reached, and none is
+  kept: the same version runs under a 32 MB heap. The caps still count characters, whether the
+  host gives strings or bytes.
 - **A fixed body is warned** (P110): `body { position: fixed; top: 0 }` with no bottom or height,
   and `body { position: fixed; inset: 0; overflow: auto }` where html's overflow is visible, hold
   the page on Chromium, Firefox and WebKit, and are now `scroll-lock` warnings.

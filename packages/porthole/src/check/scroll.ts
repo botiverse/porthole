@@ -61,15 +61,16 @@ import { attributesOf } from "./markup.ts";
  */
 
 /**
- * A stylesheet the page links, as the caller finds it from `from` (a path), or null: its path, its
- * size (an upper bound on its characters: a string's length, or its bytes), and its text, decoded
- * only where the rule reads it (P110: one page linking 400 sheets decoded and kept all of them,
- * though the rule reads at most `SHEETS`, `READ` bytes in all).
+ * A stylesheet the page links, as the caller finds it from `from` (a path), or null: its path, the
+ * fewest characters it may hold (`least`: a string's length; as bytes, a third of them, less a
+ * BOM's), and its text (at least its first `SCANNED` characters), decoded only where the rule may
+ * read it (P110: one page linking 400 sheets decoded and kept all of them, though the rule reads at
+ * most `SHEETS`, `READ` characters in all).
  */
 export type LinkedSheet = (
   href: string,
   from: string,
-) => { readonly path: string; readonly size: number; readonly text: () => string } | null;
+) => { readonly path: string; readonly least: number; readonly text: () => string } | null;
 
 export interface ScrollLock {
   /** What to change, for the agent. */
@@ -887,7 +888,7 @@ const tooDeep = (name: string): string | null => {
   return null;
 };
 
-/** A stylesheet found for the page, once: its path, size, and text when it is read. */
+/** A stylesheet found for the page, once: its path, its fewest characters, its text when read. */
 type Found = ReturnType<LinkedSheet>;
 
 /** The cascade over the chain: each declaration that matches, then the one that wins. */
@@ -1000,20 +1001,30 @@ class Cascade {
   }
 
   /**
-   * Whether a stylesheet may still be read for this page (once, within the budget), by its size,
-   * before its text is decoded.
+   * A stylesheet's first `SCANNED` characters, if it may still be read for this page (once, within
+   * the budget), else null. The caps count characters, whatever the caller gives: where even its
+   * fewest are past what's left, it is refused before it is decoded (past the version's budget,
+   * spent); else it is decoded, cut, and charged what it holds, or dropped if that doesn't fit.
    */
-  take(found: Found): found is NonNullable<Found> {
+  take(found: Found): string | null {
     if (found === null || this.read.has(found.path) || this.read.size >= SHEETS) {
-      return false;
+      return null;
     }
-    const size = Math.min(found.size, SCANNED);
-    if (this.bytes + size > READ || !this.spend(size)) {
-      return false;
+    const least = Math.min(found.least, SCANNED);
+    if (this.bytes + least > READ) {
+      return null;
+    }
+    if (this.budget.spent || least > this.budget.bytes) {
+      this.budget.spent = true;
+      return null;
+    }
+    const text = found.text().slice(0, SCANNED);
+    if (this.bytes + text.length > READ || !this.spend(text.length)) {
+      return null;
     }
     this.read.add(found.path);
-    this.bytes += size;
-    return true;
+    this.bytes += text.length;
+    return text;
   }
 
   /**
@@ -1178,10 +1189,10 @@ class Cascade {
       return;
     }
     const found = this.find(href, from);
-    if (!this.take(found)) {
+    const text = this.take(found);
+    if (found === null || text === null) {
       return;
     }
-    const text = found.text().slice(0, SCANNED);
     this.sheet(withoutComments(text), 0, text.length, {
       source: { path: found.path, text },
       base: 0,

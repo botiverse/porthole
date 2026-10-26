@@ -5512,13 +5512,19 @@ call, and what it misses.
    as a document.", a warning with the page's path and no line. The other pages of a version are
    still checked.
 3. **Only the sheets the rule may read are asked for and decoded** (S2). A linked sheet is found
-   by its size first (`LinkedSheet` gives `{ path, size, text() }`: a string's length, or its
-   bytes, an upper bound on its characters), so `take` refuses one past 32 sheets, a page's
-   4 MiB or the version's 8 MiB before its text is decoded; once a page has read 32 sheets or
-   4 MiB, or the version's budget is spent, no sheet more is asked for. `lintFiles` keeps no
-   decoded sheet past its read (it kept every one for the set) and decodes a sheet given as bytes
-   only to its first 2 MiB. Sheets are now counted against the caps by that size: as bytes, a
-   sheet of other than ASCII counts its bytes, more than its characters, which only reads less.
+   with the fewest characters it may hold first (`LinkedSheet` gives `{ path, least, text() }`:
+   a string's length; as bytes, a third of them less a BOM's, as UTF-8 takes at most 3 bytes a
+   character), so `take` refuses one whose fewest characters are already past what's left (32
+   sheets, a page's 4 MiB, the version's 8 MiB) before its text is decoded; once a page has read
+   32 sheets or 4 MiB, or the version's budget is spent, no sheet more is asked for. Otherwise it
+   is decoded (as bytes, at most the 6 MiB that hold its first 2 MiB of characters), cut to 2 MiB
+   of characters, and charged what it holds, or dropped if that doesn't fit. The caps count
+   characters, as they did, whether the host gives strings or bytes: the first cut of this
+   charged and cut a sheet given as bytes by its bytes, and the re-review showed that reads less
+   in a way that also warns wrongly (an override past 2 MiB of a non-ASCII sheet's bytes, or in a
+   sheet past the page's 4 MiB of them, went unread, and the hold before it was warned; as
+   strings, the same version was silent). `lintFiles` keeps no decoded sheet past its read (it
+   kept every one for the set).
    Measured with the audit's shape (one page linking 400 sheets of 240 KB, each with one CJK
    character, as bytes, 96 MB; node 24, arm64): before, out of memory under a 64 MB heap, and with
    2 GB 209 MB of heap in use after the call, 445 MB peak RSS, 922 decodes of 198 M characters;
@@ -5571,8 +5577,10 @@ it may have is said only as that warning.
 class and an id lint and admit; `\ffffff`, `\110000`, `\dfff` and `\0` read as U+FFFD (a
 `body.\ffffffx` rule holds a `<body class="�x">`); a fixed body with `top: 0` and no height warned (the message and
 the fix), with `inset: 0; overflow: auto` warned, neither under html hidden, a fixed root without
-a height not. `test/files.test.ts`: one page linking 400 sheets asks for 32 and decodes 32; of
-240 KB each, decodes the 17 that fit 4 MiB, the rest asked for their size only; a sheet finder
+a height not. `test/files.test.ts`: one page linking 400 sheets asks for 32
+and decodes 32; of 240 KB each, decodes the 17 that fit 4 MiB, the rest asked for their fewest
+characters only; the re-review's two versions of megabytes of CJK CSS (an override past 2 MiB of a
+sheet's bytes, and one in a third sheet past 4 MiB of bytes) silent as strings and as bytes; a sheet finder
 that throws gives the "wasn't checked" warning; `admitFiles` with `\ffffff` in a linked sheet and
 `\110000` on a second page admits it, the hold after the escape found.
 

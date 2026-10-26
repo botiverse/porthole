@@ -737,7 +737,7 @@ describe("a page held to one screen (P106)", () => {
         {
           noun: "page",
           path: "index.html",
-          sheet: () => ({ path: "s.css", size: 25, text: () => "body { overflow: hidden }" }),
+          sheet: () => ({ path: "s.css", least: 25, text: () => "body { overflow: hidden }" }),
         },
       );
     expect(imported(1_023)).not.toBeNull();
@@ -750,7 +750,7 @@ describe("a page held to one screen (P106)", () => {
         {
           noun: "page",
           path: "index.html",
-          sheet: () => ({ path: "s.css", size: 25, text: () => "body { overflow: hidden }" }),
+          sheet: () => ({ path: "s.css", least: 25, text: () => "body { overflow: hidden }" }),
         },
       );
     expect(into("z".repeat(256))).not.toBeNull();
