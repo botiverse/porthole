@@ -76,6 +76,14 @@ const SERVED = "leak/served/served.spec.ts";
 const TAB = "leak/served/tab.spec.ts";
 const ANNOTATE = "leak/annotate.spec.ts";
 
+/** The keyboard's probes (P109). */
+const TAKE =
+  "a page that takes the keyboard while the person types in the host's composer gets a key or two at most, and is stopped";
+const BLUR_TAKE =
+  "a page that takes the keyboard back on its own blur keeps none of it: the composer keeps its words, and comments.open reaches no handler";
+const FIELD_TAKE =
+  "a composer the host focuses with focusField, beside a page with the person's gesture that takes focus back on its blur, gets their words";
+
 /** What the CSP sandbox alone holds on a tab (P099), every engine. */
 const TAB_SANDBOX = [
   "served.domain.tab-escapes",
@@ -511,9 +519,22 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   // The focus guard (P109): a page's focus() keeps the person's keys, and is never stopped.
   "focus-guard": {
     specs: [RUNTIME],
-    fails: all(
-      "a page that takes the keyboard while the person types in the host's composer gets a key or two at most, and is stopped",
-    ),
+    // A page that takes focus back on its blur gets nothing on Chromium and WebKit, guard or not:
+    // they don't let it take focus back from its own blur (measured).
+    fails: {
+      chromium: [TAKE],
+      webkit: [TAKE],
+      firefox: [TAKE, BLUR_TAKE, FIELD_TAKE],
+    },
+  },
+  // What the guard does after a take-back (P109, GK-1): the watch, the look at every animation
+  // frame, focus left on nothing taken back. Only Firefox lands a fought take-back on nothing.
+  "focus-guard-watch": {
+    specs: [RUNTIME],
+    fails: { chromium: [], webkit: [], firefox: [BLUR_TAKE, FIELD_TAKE] },
+    holds: {
+      why: "no probe can see it on Chromium and WebKit: they blur the host's window on every move into a frame and a take-back lands, and a page can't take focus back from its own blur there (measured)",
+    },
   },
   // comments.open needs the person in the calling frame (P109): without it, any gesture on the
   // host's page (typing in its composer) opens it.

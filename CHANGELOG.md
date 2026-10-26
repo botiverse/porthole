@@ -26,6 +26,9 @@ from 0.10.0.
     §6, P107).
   - **Moving focus into a display yourself:** `display.focus()` (new), not the frame's own
     `focus()`, which from one of your text fields is taken for the page's and undone.
+  - **Opening your composer focused:** `focusField(textarea)` (new), not `textarea.focus()`: on
+    Firefox a page that has the person's gesture (the selection that opened the composer) and takes
+    focus back on its blur keeps a plain `focus()` from landing, and gets the keys.
   - **A platform of your own** (not the web platform): implement `focused`, `onFocusTaken` and
     `focus` on its surfaces, or a display can read what is typed beside it, and `comments` keeps
     its old gate.
@@ -34,14 +37,15 @@ from 0.10.0.
   typing in the host's composer. When focus leaves one of the host page's text fields for a
   display's frame without the person's press on the frame or a Tab into it, `createHost` (every
   `PortholeView`) gives it back once the move is over, and the display hears `focusTaken`
-  (`{ typing }`; React `onFocusTaken`). Three while the person types within 10 s, or five within
-  2 s, stop the display: a `contentError`, "The content kept taking the keyboard from the page; it
-  was stopped." Measured on Chromium, Firefox and WebKit: a page calling `focus()` every 700 ms
-  down to a busy loop gets none or one key of a sentence before it is stopped; a press on the
-  page's own field, a Tab into it, and an assistive technology's activation keep the keyboard
-  there. Limits (THREAT_MODEL §7 "The keyboard"): on Firefox, which tells the host's page nothing
-  of a press in a frame, a page keeps the keyboard if the pointer came over its frame after the
-  person last typed and after the field got focus.
+  (`{ typing }`; React `onFocusTaken`); it keeps watching that focus stays back. Three within
+  10 s that came while the person typed or that kept focus from staying back, or five within 2 s,
+  stop the display: a `contentError`, "The content kept taking the keyboard from the page; it was
+  stopped." Measured on Chromium, Firefox and WebKit: a page calling `focus()` every 700 ms down to
+  a busy loop, or taking focus back on its own blur, gets none or one key of a sentence before it
+  is stopped; a press on the page's own field, a Tab into it, and an assistive technology's
+  activation keep the keyboard there. Limits (THREAT_MODEL §7 "The keyboard"): on Firefox, which
+  shows the host's page no press in a frame, a page keeps the keyboard if the pointer came over its
+  frame after the person last typed and after the field got focus.
 - **`comments.open` from the frame the person is in** (P109): its gesture gate also needs the host
   page's focus in the calling frame, so a page no longer opens the composer, draft and all, while
   the person types in the host's UI (the host page's activation lasts 5 s after any gesture on it;
@@ -57,7 +61,7 @@ from 0.10.0.
 - **Docs:** THREAT_MODEL §6, §7, §8 and its status line; P108's "a click to open" corrected;
   capabilities' `user-activation` described as it is (any gesture on the host's page in the last
   5 s, `comments` also the person in the frame).
-- New: `DisplayEvents.focusTaken`, `DisplayControls.focus()`, `onFocusTaken` (React),
+- New: `focusField`, `DisplayEvents.focusTaken`, `DisplayControls.focus()`, `onFocusTaken` (React),
   `Surface.focused`, `Surface.onFocusTaken`, `Surface.focus` (optional, the platform seam).
 - **From 0.10.0** (0.11.0's notes, never published on its own; all of it is in 0.12.0):
   - **Drafts** (P107): send a person's drafts only to the frame that person views, and none to a

@@ -275,6 +275,7 @@ export type {
   DbContext,
 } from "./bridge/types.ts";
 export { createHost } from "./host/create-host.ts";
+export { focusField } from "./platform/focus-guard.ts";
 // The client half of the host kit, and the display registry (P072).
 export {
   entryTarget,

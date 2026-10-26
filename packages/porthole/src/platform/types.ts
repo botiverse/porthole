@@ -55,10 +55,12 @@ export interface Surface {
   /**
    * Each time the content moved the keyboard into its frame from one of the embedding page's text
    * fields without the person (no press on the frame, no Tab) and the platform gave focus back
-   * (P109), with whether the person was typing then (a key within the last second). Absent where
-   * the platform has no guard.
+   * (P109): whether the person was typing then (a key within the last second), and whether focus
+   * failed to go back (the frame kept it or took it again). Absent where the platform has no guard.
    */
-  onFocusTaken?(listener: (typing: boolean) => void): () => void;
+  onFocusTaken?(
+    listener: (take: { readonly typing: boolean; readonly failed: boolean }) => void,
+  ): () => void;
   /** The host moves focus into the frame itself: the guard takes it as the person's (P109). */
   focus?(): void;
   /**

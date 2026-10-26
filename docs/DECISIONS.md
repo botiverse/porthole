@@ -5536,10 +5536,10 @@ through Playwright 1.63; WebKit with libraries extracted on a box that lacks the
 - What the host's page sees of a move into a frame. Chromium and WebKit blur its window as it
   happens; at that blur a press on the frame (a click, a held press, a tap) leaves the frame element
   `:active`, and a page's own `focus()` doesn't; a Tab is the host's own keydown just before.
-  Firefox sends the host's page nothing (no blur, no focusout, `:active` false even while a press is
-  held): `document.activeElement` changes, read at the next animation frame, and the pointer over
-  the frame (`:hover`, `pointerover` on the frame element, for a touch too) is all it shows of a
-  press.
+  Firefox doesn't blur the host's window and shows no `:active` (false even while a press is
+  held); a focusout on the field wasn't seen in these runs (the review of the guard saw one):
+  `document.activeElement` changes, read at the next animation frame, and the pointer over the
+  frame (`:hover`, `pointerover` on the frame element, for a touch too) is all it shows of a press.
 - Transient activation lasts 5.04–5.10 s after a gesture on all three, and Playwright's
   `evaluate` in a frame is a gesture there on all three.
 - Focus given back inside that blur (synchronously or in a microtask) leaves Chromium and WebKit
@@ -5653,9 +5653,10 @@ composer focused by the host as on `selected`, the page's `focus()` every 500 ms
 own moves into the frame keep the keyboard" (a press on its field after typing in the composer, a
 Tab, an activation in the frame with no host event 5.5 s after the composer's last gesture);
 "comments.open while the person types in the host's composer reaches no handler, by the page's own
-call or the shell's; from a press in the frame it does". Negative controls `focus-guard` (every
-move taken for the person's) and `comments-in-frame` (the focus check out) → exactly their probe,
-every engine.
+call or the shell's; from a press in the frame it does"; "a page that takes the keyboard back on
+its own blur keeps none of it" (GK-1, below). Negative controls `focus-guard` (every move taken for
+the person's) → its two probes, and `comments-in-frame` (the focus check out) → its probe, every
+engine; `focus-guard-watch` (the watch after a take-back out) → the blur probe on Firefox.
 
 A joiner between two letters that shapes nothing draws as nothing (the review's Devanagari and
 Arabic payloads, about a bit per letter boundary): accepted, as P100 accepts it, because refusing
@@ -5683,6 +5684,49 @@ refused before is refused still.
   refused. Stripping rather than refusing: a draft is the page's words in the person's name,
   which Porthole refuses rather than rewrites (P100); a label and a quote are shown, never
   posted, so they are cleaned (P105).
+
+**After the review of the guard** (2026-10-26, GK-1, P1 on Firefox; Chromium and WebKit held
+against every strategy tried). A page that only takes focus back on its own blur
+(`field.onblur = () => field.focus()`, no timer, no gesture) beat the guard on Firefox: 38 of 38
+keys of a sentence reached the frame, `focusTaken` fired once, the display was never stopped, and
+`comments.open` reached the handler 10 to 13 times. The take-back's `frame.blur()` fires the page's
+blur, whose `focus()` left Firefox's focus on `<body>`; the next look then took `<body>` for where
+focus was and stopped looking (it looked only while a text field had focus); and the person's keys
+went to the frame, so the page saw no typing to count. Now:
+- **The guard keeps watching after each take-back** (each animation frame, `HELD_MS` 300 ms): focus
+  found in the frame again, or on nothing, is a take-back that failed (after `GIVE_BACK_MS`, 100 ms,
+  for one that hasn't landed yet; at once for one taken again after it landed), given back again
+  and counted as `failed`; the watch ends once focus has stayed in the field, the person presses
+  the host's page or puts focus somewhere of theirs, or the frame presses through as the person's.
+  A move into a text field from a frame is watched the same way, and focus going from a frame to
+  nothing just after the person pressed a text field is taken back to it (on Firefox, a page with a
+  gesture of the person's that fights back leaves focus there; the keys would be lost).
+- **The guard looks at each animation frame while any frame is guarded**, not only while a text
+  field has focus, so it knows where focus is when it next moves (one read of the focused element a
+  frame), and looks at once after a focusout.
+- **The stop counts a failed take-back like one made while the person typed**: three of either
+  within 10 s, or five within 2 s. A person's own move never fails a take-back.
+- **`focused()` asks for the person's own move into the frame**: a frame that took focus when
+  nothing of the host's had it (no press, Tab or unexplained gesture) holds it, but isn't the
+  person's for a gesture gate; and it is false for 1 s after a press on the host's page that came
+  after focus went into the frame (the press gives the page activation before focus leaves it).
+- **`focusField(field)`** (new export): the host's own move into one of its text fields, for a
+  composer that opens focused. Firefox ignores a host's plain `focus()` while a frame that has a
+  gesture of the person's (the selection that opened the composer) holds focus and takes it back on
+  its blur: no focus event, the keys go to the frame (measured; Chromium and WebKit move it).
+  `focusField` blurs the frame first and has the guard watch that focus lands, a frame that keeps it
+  failing take-backs toward its stop. A host that opens a composer with a plain `focus()` beside
+  such a page on Firefox isn't covered (THREAT_MODEL §7).
+Measured, the review's probe (`blurOnly`, `blurPlusInterval`, `focusoutOnly`; the person types a
+38-character sentence 70 ms a key): Firefox before, 38 of 38 keys to the frame, never stopped, 10
+opens; after, at most 1 key to the frame, four `focusTaken`, stopped, no open; Chromium and WebKit
+0 keys, no open, before and after. A page that fights with a gesture of the person's, the person
+clicking the composer: Firefox before, every key lost to `<body>` and nothing counted; after, 1 key
+to the frame, stopped. The host opening its composer with `focusField` beside such a page after the
+person's selection in it: Firefox, all but one key in the composer, stopped after three failed
+take-backs; with a plain `focus()`, every key to the frame. The new probes and the honest ones
+passed three times in a row on all three engines. Rejected: a one-off check of the give-back, or a
+focusout listener alone (the review tried both: the page's re-take races any single check).
 
 **Revisit when** an engine stops blurring the host's window on a move into a frame, or shows a
 press on the frame without `:active`, or Firefox starts doing either (the guard then judges every

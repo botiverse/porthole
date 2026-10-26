@@ -1,7 +1,7 @@
 import type { ColorScheme } from "../config/schema.ts";
 import { FRAME_STATUS_METHOD } from "../isolation/types.ts";
 import { postMessageTransport } from "../transport/post-message.ts";
-import { focusGuard } from "./focus-guard.ts";
+import { focusGuard, type FocusTake } from "./focus-guard.ts";
 import type { PlatformHost, Surface, SurfaceSpec } from "./types.ts";
 
 /** A frame-status message (`porthole/notifications/frame-status`), by its method alone. */
@@ -66,10 +66,10 @@ export const webPlatform: PlatformHost = {
     // The focus guard (P109): a move of the keyboard into this frame from one of the page's text
     // fields that the person didn't make is undone.
     const guard = focusGuard(view);
-    const taken = new Set<(typing: boolean) => void>();
-    const unguard = guard.add(frame, (typing) => {
+    const taken = new Set<(take: FocusTake) => void>();
+    const unguard = guard.add(frame, (take) => {
       for (const listener of taken) {
-        listener(typing);
+        listener(take);
       }
     });
     // A served frame may pass through the host's own pages (a redirect entry's, P068): what they

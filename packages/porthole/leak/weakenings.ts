@@ -466,8 +466,29 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "focus-guard": [
     {
       file: "src/platform/focus-guard.ts",
-      find: "    if (moved) {\n      return;\n    }",
-      replace: "    if (moved || true) {\n      return;\n    }",
+      find: "    hostMove = null;\n    return moved;",
+      replace: "    hostMove = null;\n    return moved || true;",
+    },
+  ],
+  // What the guard does after a take-back (P109, after GK-1): no watch that focus stays back, a
+  // look only while a text field has focus, and focus left on nothing after a press on a field not
+  // taken back, as before the review of the guard; so a page that takes focus back on its own
+  // blur, where Firefox lands the take-back on nothing, keeps it.
+  "focus-guard-watch": [
+    {
+      file: "src/platform/focus-guard.ts",
+      find: "    const watched = contest;\n",
+      replace: "    const watched = null as typeof contest;\n",
+    },
+    {
+      file: "src/platform/focus-guard.ts",
+      find: "    if (polling === 0 && frames.size > 0) {",
+      replace: "    if (polling === 0 && frames.size > 0 && takesText(known)) {",
+    },
+    {
+      file: "src/platform/focus-guard.ts",
+      find: "      pressed !== null &&\n",
+      replace: "      false &&\n      pressed !== null &&\n",
     },
   ],
   // comments.open's gesture in the calling frame (P109): any gesture on the host's page will do,

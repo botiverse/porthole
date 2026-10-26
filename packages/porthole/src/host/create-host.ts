@@ -498,15 +498,17 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         surface = created;
         // The focus guard undid a move of the keyboard into this frame (P109): heard each time,
         // and a frame that keeps taking it is stopped, as one that keeps navigating away is.
-        const takes: { at: number; typing: boolean }[] = [];
-        created.onFocusTaken?.((typing) => {
+        const takes: { at: number; counts: boolean }[] = [];
+        created.onFocusTaken?.(({ typing, failed }) => {
           const at = Date.now();
-          takes.push({ at, typing });
+          // While the person typed, or a take-back that failed (the keys then go to the frame and
+          // the page sees no typing): either counts toward the first rule.
+          takes.push({ at, counts: typing || failed });
           const within = (ms: number) => takes.filter((take) => at - take.at <= ms);
           emit("focusTaken", { typing });
           if (
             surface === created &&
-            (within(TAKES.typing.withinMs).filter((take) => take.typing).length >=
+            (within(TAKES.typing.withinMs).filter((take) => take.counts).length >=
               TAKES.typing.most ||
               within(TAKES.any.withinMs).length >= TAKES.any.most)
           ) {

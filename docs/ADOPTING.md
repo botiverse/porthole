@@ -359,15 +359,20 @@ display.on("focusTaken", ({ typing }) => toast(typing ? "This page tried to take
 display.on("contentError", ({ message }) => log(message)); // "The content kept taking the keyboard from the page; it was stopped."
 // Moving focus into a display yourself (a "focus the page" shortcut): use the display's own move.
 display.focus(); // not frame.focus(): from a text field, that one is taken for the page's and undone
+// Opening your composer focused (on `selected`, say): Porthole's move, not textarea.focus().
+import { focusField } from "@botiverse/porthole";
+focusField(composer.textarea); // Firefox ignores a plain focus() while a fighting frame holds focus
 ```
 
 - **Free:** the guard, on by default, with no option. A page gets at most the keys typed before
   focus is back (none or one in a sentence, measured on all three engines); three tries while the
   person types (within 10 s), or five within 2 s, stop the display (`reload()` runs it again).
 - **Yours:** don't move focus from a text field into a display with the frame's own `focus()`
-  (use `display.focus()`); with a platform of your own (a native web view), implement `focused`,
+  (use `display.focus()`), nor into your composer with the field's own `focus()` where a display
+  may hold focus (use `focusField`: on Firefox a page with the person's gesture that takes focus
+  back on its blur keeps a plain `focus()` from landing, and gets the keys); with a platform of your own (a native web view), implement `focused`,
   `onFocusTaken` and `focus` on its surface, or a display can read what is typed beside it; know
-  the limits (THREAT_MODEL §7 "The keyboard": on Firefox, which tells your page nothing of a press
+  the limits (THREAT_MODEL §7 "The keyboard": on Firefox, which shows your page no press
   in a frame, a page keeps the keyboard if the pointer came over its frame after the person last
   typed and after the field got focus; moves between two frames aren't judged).
 
@@ -579,7 +584,7 @@ if (shown && !shown.ok) return <VersionError problems={shown.problems} />;   // 
   function openPageDraft(composer, anchor, draft) {
     // Opens beside the frame, and takes no focus: keys stay where the person was typing, so what
     // they type for the page never lands in a postable comment.
-    composer.open(anchor, { text: draft, focus: false });
+    composer.open(anchor, { text: draft, focus: false }); // where your composer focuses, focusField
     // Armed as THREAT_MODEL §6 says: no press of any kind for 500 ms (guardPresses, § Annotations).
     guardPresses(composer.element).placed();
     // Said by you, outside the frame where the page can't draw, until they edit it: never shown as

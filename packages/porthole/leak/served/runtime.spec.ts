@@ -679,6 +679,103 @@ test.describe("the person at the keyboard (P109)", () => {
     );
   });
 
+  test("a page that takes the keyboard back on its own blur keeps none of it: the composer keeps its words, and comments.open reaches no handler", async ({
+    page,
+  }) => {
+    const { frame, key } = await show(page, {
+      html: KEYS_PAGE,
+      declaration: {},
+      viewer: { level: "view", id: "vic" },
+    });
+    await hostComposer(page);
+    // Once this evaluate's activation has lapsed (it is a gesture in the frame), the page holds its
+    // field and takes focus back whenever it loses it (the take-back blurs it), with no gesture or
+    // timer of its own (the review of the guard, GK-1: on Firefox this kept every key), and from
+    // the first time it loses it asks for the composer every 400 ms.
+    await frame.evaluate(() => {
+      const field = document.getElementById("field") as HTMLInputElement;
+      const focus = () => field.focus();
+      const w = window as unknown as {
+        porthole: {
+          use(name: string): Promise<{ open(a: unknown, o: unknown): Promise<unknown> }>;
+        };
+      };
+      const ask = () =>
+        setInterval(() => {
+          void w.porthole
+            .use("comments")
+            .then((comments) => comments.open({ name: "card-5" }, { draft: "Approved." }))
+            .catch(() => {});
+        }, 400);
+      setTimeout(() => {
+        field.addEventListener("blur", focus);
+        field.addEventListener("blur", ask, { once: true });
+        addEventListener("blur", focus);
+        focus();
+      }, 5_500);
+    });
+    // Where the composer is, read now: Playwright's own checks before a locator's click run a
+    // script in the page, which Firefox takes for a gesture (activation with no event of the page's).
+    const box = await page.locator("#host-composer").boundingBox();
+    await page.waitForTimeout(5_800);
+    // The person clicks into the composer.
+    await page.mouse.click((box?.x ?? 0) + 20, (box?.y ?? 0) + 20);
+    const text = "my unposted comment to the team";
+    await page.keyboard.type(text, { delay: 100 });
+    await page.waitForTimeout(500);
+    const typed = await composerText(page);
+    const { errors } = await keyboardOf(page);
+    const opened = (await runtimeCalls(page, key)).filter((each) => each.capability === "comments");
+    expect(
+      text.length - typed.length,
+      // On Firefox the keys typed while a take-back is fought go to nothing or the frame (measured:
+      // one to the frame at most).
+      `probe: the composer kept the person's words but a few keys (got ${JSON.stringify(typed)})`,
+    ).toBeLessThanOrEqual(3);
+    expect(
+      opened.map((each) => each.args),
+      "probe: no open from the page holding the keyboard reached the handler",
+    ).toEqual([]);
+    expect(
+      errors.includes("The content kept taking the keyboard from the page; it was stopped.") ||
+        (await hostActive(page)) === "TEXTAREA",
+      "probe: the page doesn't keep the keyboard: focus is back in the composer, or the display was stopped",
+    ).toBe(true);
+  });
+
+  test("a composer the host focuses with focusField, beside a page with the person's gesture that takes focus back on its blur, gets their words", async ({
+    page,
+  }) => {
+    const { frame } = await show(page, { html: `${KEYS_PAGE}<p id="words">words to select</p>` });
+    await hostComposer(page);
+    await frame.evaluate(() => {
+      const field = document.getElementById("field") as HTMLInputElement;
+      const focus = () => field.focus();
+      field.addEventListener("blur", focus);
+      addEventListener("blur", focus);
+    });
+    // The person selects words in the page (their gesture, the frame's focus), and the host opens
+    // its composer focused (Firefox ignores a plain focus() here: measured).
+    await frame.locator("#artifact").click({ clickCount: 2 });
+    await page.evaluate(() =>
+      setTimeout(() => {
+        const composer = document.getElementById("host-composer") as HTMLTextAreaElement;
+        (window as unknown as { portholeFocusField(field: HTMLElement): void }).portholeFocusField(
+          composer,
+        );
+      }, 50),
+    );
+    await page.waitForTimeout(400);
+    const text = "my unposted comment about it";
+    await page.keyboard.type(text, { delay: 100 });
+    await page.waitForTimeout(300);
+    const typed = await composerText(page);
+    expect(
+      text.length - typed.length,
+      `probe: the composer got the person's words but a key or two (got ${JSON.stringify(typed)})`,
+    ).toBeLessThanOrEqual(2);
+  });
+
   test("the person's own moves into the frame keep the keyboard: a press on its field, a Tab, an activation that sends the host no event", async ({
     page,
   }, info) => {

@@ -167,9 +167,10 @@ Whatever the use:
   `createHost` (every `PortholeView` too) gives focus back when it leaves one of the page's text
   fields for a frame without the person's press on the frame or a Tab, tells the display
   (`focusTaken`), and stops a display that keeps doing it (§7 "The keyboard", P109). Move focus
-  into a display yourself with `display.focus()`, never the frame's own `focus()`, and with a
-  platform of your own, implement its focus guard (`focused`, `onFocusTaken`, `focus`) or accept
-  that a display can read what is typed beside it.
+  into a display yourself with `display.focus()`, never the frame's own `focus()`; move it into
+  your composer with `focusField(field)`, not the field's own `focus()` (Firefox ignores that while
+  a fighting frame holds focus); and with a platform of your own, implement its focus guard
+  (`focused`, `onFocusTaken`, `focus`) or accept that a display can read what is typed beside it.
 - List every app origin in `appOrigins` (`hostOrigins` in `/server`): only those may frame content,
   and only those are checked against the content domain for a shared site.
 - Under the app runtime, run `defineRuntimeConformance` with `api` in CI (§7).
@@ -659,22 +660,29 @@ unposted words beside the frame and tell the page when.
 - *What holds* (the web platform's focus guard, in every `createHost` display): when focus leaves
   one of the host page's text fields (a text area, an `<input>` that takes text, an editable region,
   in open shadow roots too) for a display's frame, and the person didn't move it there, focus goes
-  back to the field once the engine has finished the move, the display hears `focusTaken`, and
-  three such moves while the person types within 10 s (or five within 2 s) stop the display. The
+  back to the field once the engine has finished the move, the guard watches that it stays there
+  (a page that takes it again on its own blur, which the take-back fires, is caught, as is focus
+  left on nothing), and the display hears `focusTaken`. Three such moves within 10 s that came while
+  the person typed or that kept focus from staying back, or five within 2 s, stop the display. The
   person moved it if they pressed Tab just before; pressed the frame (on Chromium and WebKit the
-  frame element is `:active` as focus moves; on Firefox, which tells the host's page nothing of the
-  move or the press, the pointer came over the frame after the field got focus and after the person
-  last typed); made a gesture the host's own events don't explain (the page has activation, but no
+  frame element is `:active` as focus moves; on Firefox, which doesn't blur the window or show the
+  press, the pointer came over the frame after the field got focus and after the person last
+  typed); made a gesture the host's own events don't explain (the page has activation, but no
   key, press or click of its own for longer than activation lasts, and the field has had focus that
   long: a press or an assistive technology's activation in a frame); or the host moved it
   (`display.focus()`).
-  Measured on all three engines: a page calling `focus()` every 700 ms down to a busy loop while
-  the person types a sentence gets no key of it on Chromium and WebKit and at most one on Firefox
-  before it is stopped (negative control `focus-guard`); a press on the page's own field, a Tab
-  into the frame, and an activation in the frame that sends the host no event keep the keyboard
-  there. `comments.open` needs that focus in the calling frame (the app runtime, below).
+  Measured on all three engines: a page calling `focus()` every 700 ms down to a busy loop, or
+  taking focus back on its own blur, while the person types a sentence gets no key of it on
+  Chromium and WebKit and at most one on Firefox before it is stopped or gives up (negative
+  controls `focus-guard`, and `focus-guard-watch` on Firefox); a press on the page's own field, a
+  Tab into the frame, and an activation in the frame that sends the host no event keep the
+  keyboard there. `comments.open` needs that focus in the calling frame, moved there by the
+  person, and not just after a press on the host's page (the app runtime, below).
 - *What doesn't*: a page gets the keys typed before focus is back (on Firefox, the keys of an
-  animation frame); on Firefox a page keeps the keyboard if the pointer came over its frame after
+  animation frame, or a few lost to nothing while a take-back is fought); on Firefox a host's plain
+  `focus()` doesn't move focus from a frame that holds it with the person's gesture and takes it
+  back on its blur (no focus event: the keys go to the frame), so a composer that opens focused
+  must use `focusField`; on Firefox a page keeps the keyboard if the pointer came over its frame after
   the person last typed and after the field got focus (a person who typed, moved the pointer over
   the frame, and types on without clicking); moves between two frames, or from what isn't a text
   field, aren't judged (a frame beside another: S7); and a platform of the host's own has no guard
