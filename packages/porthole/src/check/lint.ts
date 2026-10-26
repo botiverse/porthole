@@ -295,7 +295,7 @@ export function lintPage(
       rule: "scroll-lock",
       severity: "warning",
       message: held.message,
-      line: held.line,
+      ...(held.line === undefined ? {} : { line: held.line }),
     });
   }
   const opens = /target\s*=\s*["']?_blank|\bwindow\s*\.\s*open\s*\(/u.exec(content);

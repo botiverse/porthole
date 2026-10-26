@@ -985,7 +985,7 @@ describe("a page with files held to one screen (P106)", () => {
     const sheet = (href: string) => {
       asked += 1;
       const text = sheets[href];
-      return text === undefined ? null : { path: href, text };
+      return text === undefined ? null : { path: href, least: text.length, text: () => text };
     };
     const started = performance.now();
     const fanned = scrollLock(page('<link rel="stylesheet" href="s0.css">'), {
@@ -1016,11 +1016,82 @@ describe("a page with files held to one screen (P106)", () => {
       scrollLock(page(links), {
         noun: "page",
         path: "index.html",
-        sheet: (href) => (many[href] === undefined ? null : { path: href, text: many[href] }),
+        sheet: (href) => {
+          const text = many[href];
+          return text === undefined ? null : { path: href, least: text.length, text: () => text };
+        },
       }),
     ).toBeNull();
     expect(performance.now() - started).toBeLessThan(2_000);
   });
+
+  it("asks for no sheet past a page's caps, and decodes none it won't read (P110)", async () => {
+    const { scrollLock, READ, SHEETS } = await import("../src/check/scroll.ts");
+    // The 1026 audit: lintFiles decoded every sheet a page linked and kept it for the set, though
+    // the rule reads at most SHEETS of them and READ characters (400 sheets of 240 KB held 200 MB).
+    const links = Array.from(
+      { length: 400 },
+      (_, index) => `<link rel="stylesheet" href="s${index}.css">`,
+    ).join("");
+    let asked = 0;
+    let decoded = 0;
+    const sized = (least: number) => (href: string) => {
+      asked += 1;
+      return {
+        path: href,
+        least,
+        text: () => {
+          decoded += 1;
+          return `p{}${" ".repeat(least - 3)}`;
+        },
+      };
+    };
+    // SHEETS read, and none asked for after them.
+    scrollLock(page(links), { noun: "page", path: "index.html", sheet: sized(16) });
+    expect([asked, decoded]).toEqual([SHEETS, SHEETS]);
+    // 240 KB each: those that fit READ decoded; the rest asked for their fewest characters only (a
+    // later one that fits would still be read), and none decoded.
+    asked = 0;
+    decoded = 0;
+    scrollLock(page(links), { noun: "page", path: "index.html", sheet: sized(240 * 1024) });
+    expect([asked, decoded]).toEqual([400, Math.floor(READ / (240 * 1024))]);
+  });
+
+  it("counts a sheet's characters, as strings or as bytes: non-ASCII CSS keeps its overrides (P110)", () => {
+    // P110's re-review: sheets given as bytes were charged and cut by their bytes (up to three a
+    // character), so an override past 2 MiB of a sheet's bytes, or in a sheet past the page's 4 MiB
+    // of them, went unread and the hold before it was warned. Caps count characters, as given.
+    const cjk = (count: number) => `/* ${"一".repeat(count)} */\n`;
+    const versions: Record<string, string>[] = [
+      // The override past 2 MiB of the sheet's bytes, within 2 MiB of its characters.
+      {
+        "a.css": "html { overflow: hidden }\n",
+        "b.css": `${cjk(800_000)}html { overflow: visible }\n`,
+      },
+      // Two sheets of 1.4 M characters (8.4 MB as bytes) fit the page's 4 MiB of characters.
+      {
+        "a.css": "html { overflow: hidden }\n",
+        "b.css": cjk(1_400_000),
+        "c.css": `html { overflow: visible }\n${cjk(1_400_000)}`,
+      },
+    ];
+    const encoder = new TextEncoder();
+    for (const sheets of versions) {
+      const links = Object.keys(sheets)
+        .map((path) => `<link rel="stylesheet" href="${path}">`)
+        .join("");
+      const index = `<!doctype html><html><head>${links}</head><body><p>x</p></body></html>`;
+      for (const bytes of [false, true]) {
+        const files: Record<string, string | Uint8Array> = { "index.html": index };
+        for (const [path, text] of Object.entries(sheets)) {
+          files[path] = bytes ? encoder.encode(text) : text;
+        }
+        const found = lintFiles(served, files).filter((each) => each.rule === "scroll-lock");
+        expect(found, bytes ? "as bytes" : "as strings").toEqual([]);
+      }
+    }
+    // Heavy by design (megabytes of CSS, decoded): a minute, not the default 5 s, on a busy machine.
+  }, 60_000);
 
   /** An app's stylesheet of `bytes`: many class rules, some scroll boxes, nothing that holds. */
   const appSheet = (bytes: number) => {
@@ -1109,7 +1180,8 @@ describe("a page with files held to one screen (P106)", () => {
     expect(budget.spent).toBe(true);
     // Spent: a page that would cost nothing isn't checked either.
     expect(scrollLock(page(`<style>${SHELL}</style>`), { noun: "page", budget })).toBeNull();
-  });
+    // Heavy by design (about 8 MiB of sheets, as its neighbours): a minute, not the default 5 s.
+  }, 60_000);
 
   it("matches scroll rules against a version's markup within one budget of steps", () => {
     // VERSION_STEPS (2,000,000) for the pages checked: each of these spends a page's million
@@ -1219,6 +1291,35 @@ describe("a page with files held to one screen (P106)", () => {
     expect(admitted.ok).toBe(true);
     expect(admitted.ok ? admitted.note : "").toContain(
       "- shell.css line 1: The page looks held to one screen in its frame",
+    );
+  });
+
+  it("fails soft: a throw in the rule is the page not checked, said so, never a failed lint (P110)", async () => {
+    const { scrollLock } = await import("../src/check/scroll.ts");
+    expect(
+      scrollLock(page('<link rel="stylesheet" href="s.css">'), {
+        noun: "page",
+        path: "index.html",
+        sheet: () => {
+          throw new RangeError("Invalid code point 16777215");
+        },
+      }),
+    ).toEqual({
+      message:
+        "The page wasn't checked for scroll lock: its styles couldn't be read. If it holds html, body or its root to one screen (overflow: hidden with height: 100% or 100vh, or position: fixed), let it scroll as a document.",
+      path: "index.html",
+    });
+    // The escape that threw out of admitFiles in 0.11, in a linked sheet and in a page past the
+    // entry: admitted, the rule read (the hold after it is found).
+    const admitted = admitFiles(served, {
+      "index.html": page('<link rel="stylesheet" href="vendor.css">'),
+      "vendor.css": `.icon-\\ffffff:before { content: "x" }\n${SHELL}`,
+      "other.html": page("<style>.\\110000 { color: red }</style>"),
+      "app.js": "",
+    });
+    expect(admitted.ok).toBe(true);
+    expect(admitted.ok ? admitted.note : "").toContain(
+      "- vendor.css line 2: The page looks held to one screen in its frame",
     );
   });
 });

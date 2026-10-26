@@ -272,8 +272,10 @@ export function lintFiles(
       }
     }
   };
-  // A stylesheet a page links or a stylesheet imports, found in the set by its path (P106).
-  const decoded = new Map<string, string>();
+  // A stylesheet a page links or a stylesheet imports, found in the set by its path (P106). The
+  // fewest characters it may hold first: the rule decodes its text only where it may read it, and
+  // nothing keeps it after (P110: kept for the set, one page linking 400 sheets of 240 KB held
+  // them all, 200 MB, for the 4 MiB the rule reads).
   const stylesheet: LinkedSheet = (href, from) => {
     if (href === "" || elsewhere(href) || href.startsWith("/")) {
       return null;
@@ -283,13 +285,15 @@ export function lintFiles(
     if (sheet === undefined || target === null) {
       return null;
     }
-    // Decoded once for the whole set, however many pages link it.
-    let text = decoded.get(target);
-    if (text === undefined) {
-      text = textOf(sheet).slice(0, SCANNED);
-      decoded.set(target, text);
-    }
-    return { path: target, text };
+    // As bytes, at most 3 a character (after a BOM's 3): its fewest characters, and the bytes that
+    // hold its first SCANNED.
+    return typeof sheet === "string"
+      ? { path: target, least: sheet.length, text: () => sheet }
+      : {
+          path: target,
+          least: Math.max(0, Math.ceil(sheet.byteLength / 3) - 1),
+          text: () => textOf(sheet.subarray(0, 3 * SCANNED + 3)),
+        };
   };
   const it = config.mode === "mcp-app" ? "view" : config.mode === "inline" ? "widget" : "page";
   const maxPage = config.limits.maxBytes;
@@ -378,7 +382,7 @@ export function lintFiles(
         severity: "warning",
         message: held.message,
         path: held.path ?? path,
-        line: held.line,
+        ...(held.line === undefined ? {} : { line: held.line }),
       });
     }
   }

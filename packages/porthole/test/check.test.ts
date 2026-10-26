@@ -195,12 +195,17 @@ describe("a page held to one screen (P106)", () => {
       held(page("body > div:only-child { height: 100dvh; overflow: hidden }", "<div></div>"))[0]
         ?.message,
     ).toContain("add body > div:only-child { height: auto; overflow: visible }");
-    // style="" on html: taken out where it is, as a rule can't undo it.
+    // style="" on html isn't read: the shell drops it, and such a page scrolls on every engine
+    // (P110's re-review). Body's is imported, and holds it.
     expect(
       held(
         '<!doctype html><html style="height: 100%; overflow: hidden"><body><p>x</p></body></html>',
-      )[0]?.message,
-    ).toContain("take height: 100%; overflow: hidden out of html's style attribute");
+      ),
+    ).toEqual([]);
+    expect(
+      held('<!doctype html><html><body style="overflow: hidden"><p>x</p></body></html>')[0]
+        ?.message,
+    ).toContain("take overflow: hidden out of body's style attribute");
     // !important: the rule that undoes it is !important too.
     expect(
       held(page("html { overflow: hidden !important }\nhtml { overflow: visible }"))[0]?.message,
@@ -737,7 +742,7 @@ describe("a page held to one screen (P106)", () => {
         {
           noun: "page",
           path: "index.html",
-          sheet: () => ({ path: "s.css", text: "body { overflow: hidden }" }),
+          sheet: () => ({ path: "s.css", least: 25, text: () => "body { overflow: hidden }" }),
         },
       );
     expect(imported(1_023)).not.toBeNull();
@@ -750,7 +755,7 @@ describe("a page held to one screen (P106)", () => {
         {
           noun: "page",
           path: "index.html",
-          sheet: () => ({ path: "s.css", text: "body { overflow: hidden }" }),
+          sheet: () => ({ path: "s.css", least: 25, text: () => "body { overflow: hidden }" }),
         },
       );
     expect(into("z".repeat(256))).not.toBeNull();
@@ -800,6 +805,21 @@ describe("a page held to one screen (P106)", () => {
     expect(classed(33)).toBe(0);
   });
 
+  it("reads a CSS escape of 0, a surrogate or past U+10FFFF as U+FFFD, as browsers do (P110)", () => {
+    // String.fromCodePoint threw on them: one such selector failed the show and publish checks.
+    for (const escape of ["\\ffffff", "\\110000", "\\d800", "\\0", "\\10ffff"]) {
+      expect(held(page(`.${escape} { color: red }`, "<p>x</p>"))).toEqual([]);
+      expect(admitContent(config, page(`#${escape} x { color: red }`, "<p>x</p>")).ok).toBe(true);
+    }
+    // As U+FFFD: the class matches, so the rule ran (not "wasn't checked").
+    for (const escape of ["\\ffffff", "\\110000", "\\dfff", "\\0 "]) {
+      const found = held(
+        `<!doctype html><html><head><style>body.${escape}x { overflow: hidden }</style></head><body class="\ufffdx"><p>x</p></body></html>`,
+      );
+      expect(found[0]?.message).toContain("body (overflow: hidden) holds it to one screen");
+    }
+  });
+
   it("reads a sheet in time linear in its length: 80,000 declarations or layer names cost what sixteen times 5,000 do", () => {
     // What this guards (P106's second review): each declaration for an element was kept by copying
     // the list of those before it, and each layer's name the list of its siblings: 80,000
@@ -836,7 +856,8 @@ describe("a page held to one screen (P106)", () => {
       const said = `${name}: 80,000 ${once.toFixed(1)} ms, 16 × 5,000 ${parts.toFixed(1)} ms`;
       expect(once / parts, said).toBeLessThan(8);
     }
-  });
+    // Heavy by design: a minute, not the default 5 s, on a busy machine (its bounds are above).
+  }, 60_000);
 
   it("matches classes in time linear in the page and its sheets: 4,000 classes and a 2 MB compound cost what sixteen sixteenths do", () => {
     // What this guards (P106's third review): each class of a compound was looked for in a list of
@@ -868,6 +889,38 @@ describe("a page held to one screen (P106)", () => {
     }
     const said = `whole ${once.toFixed(1)} ms, 16 sixteenths ${parts.toFixed(1)} ms`;
     expect(once / parts, said).toBeLessThan(8);
+    // Heavy by design: a minute, not the default 5 s, on a busy machine (its bounds are above).
+  }, 60_000);
+
+  it("warns on a fixed body whatever its height, and where the viewport takes its overflow (P110)", () => {
+    // The 1026 audit's misses, held on Chromium, Firefox and WebKit: a fixed box adds nothing to
+    // what the frame scrolls (`top: 0` and no bottom or height, the scroll-lock libraries' way),
+    // and where html's overflow is visible the viewport takes body's `auto`: body doesn't scroll.
+    const content = '<div id="root"><h1>Plan</h1><p>A long page.</p></div>';
+    expect(held(page("body { position: fixed; top: 0; left: 0; right: 0 }", content))).toEqual([
+      expect.objectContaining({
+        message:
+          "The page won't scroll in its frame: body (position: fixed) holds it to one screen, and what's below can't be reached. Unless it is meant to fit one screen, let it scroll as a document: add body { position: static } after those rules.",
+      }),
+    ]);
+    expect(
+      held(page("body { position: fixed; inset: 0; overflow: auto }", content))[0]?.message,
+    ).toContain("body (position: fixed; inset: 0) holds it");
+    // Where body scrolls itself (html's overflow isn't visible, body one screen), nothing is held.
+    expect(
+      held(page("html { overflow: hidden } body { position: fixed; inset: 0; overflow: auto }")),
+    ).toEqual([]);
+    expect(
+      held(
+        page(
+          "html { overflow: hidden } body { position: fixed; top: 0; height: 100%; overflow: auto }",
+        ),
+      ),
+    ).toEqual([]);
+    // The root fixed without a height isn't read as held: a card centered on the screen is one.
+    expect(held(page("#root { position: fixed; top: 0; left: 0; width: 100% }", content))).toEqual(
+      [],
+    );
   });
 
   it("the manual says a page scrolls as a document", () => {

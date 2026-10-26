@@ -12,7 +12,9 @@ import { attributesOf } from "./markup.ts";
  * - body with overflow-y hidden or clip, where html's overflow is visible (body's then becomes the
  *   viewport's) or body is one screen tall;
  * - the root with overflow-y hidden or clip and one screen tall;
- * - any of them position: fixed and one screen tall (a fixed box's content scrolls nothing);
+ * - any of them position: fixed and one screen tall (a fixed box's content scrolls nothing), and
+ *   body fixed whatever its height, unless it scrolls itself (where html's overflow is visible,
+ *   body's is the viewport's and body itself doesn't: P110);
  * and nothing in the page's markup below body that scrolls itself: no element there with style=""
  * or a Tailwind utility giving it overflow-y auto or scroll, or matched by a rule the check reads
  * that does (a rule whose selector it can't read, or that matches nothing in the markup, doesn't
@@ -28,7 +30,8 @@ import { attributesOf } from "./markup.ts";
  * and bottom set (`inset: 0`).
  *
  * What it reads: the page's `<style>` elements, the stylesheets it links that the caller finds
- * (a version's own files) and what they `@import`, in document order; style="" on the three; the
+ * (a version's own files) and what they `@import`, in document order; style="" on body and the
+ * root (not html's: the shell drops it, P110); the
  * class rules that match their classes; and, where the page loads Tailwind from its CDN, the few
  * Tailwind utilities that hold a page (h-screen, overflow-hidden, fixed, inset-0…). Specificity,
  * order, !important and cascade layers decide between rules, so a later override is seen.
@@ -43,7 +46,8 @@ import { attributesOf } from "./markup.ts";
  *
  * Bounded: each stylesheet is read once per page, as it streams (nothing parsed is kept past the
  * rule it is in, a rule's selectors one at a time), at most `SHEETS` of them and `READ` bytes in
- * all, its own `<style>` included; past that, the rest isn't read. At most `MOST_LAYERS` layers a
+ * all, its own `<style>` included; past that, the rest isn't read, nor asked for, and a sheet is
+ * decoded only once its size is taken (P110). At most `MOST_LAYERS` layers a
  * page, each named in at most `LONGEST_LAYER` characters: a new one past either isn't read. Each
  * element keeps, per property, only each layer's winner so far, and a compound is matched against
  * an element's classes (a set) in bounded work, so time and memory are linear in what it reads. A
@@ -57,19 +61,25 @@ import { attributesOf } from "./markup.ts";
  * selector).
  */
 
-/** A stylesheet the page links, as the caller finds it from `from` (a path), or null. */
+/**
+ * A stylesheet the page links, as the caller finds it from `from` (a path), or null: its path, the
+ * fewest characters it may hold (`least`: a string's length; as bytes, a third of them, less a
+ * BOM's), and its text (at least its first `SCANNED` characters), decoded only where the rule may
+ * read it (P110: one page linking 400 sheets decoded and kept all of them, though the rule reads at
+ * most `SHEETS`, `READ` characters in all).
+ */
 export type LinkedSheet = (
   href: string,
   from: string,
-) => { readonly path: string; readonly text: string } | null;
+) => { readonly path: string; readonly least: number; readonly text: () => string } | null;
 
 export interface ScrollLock {
   /** What to change, for the agent. */
   readonly message: string;
   /** The file the rule that holds it is in (the page's own `path`, or a stylesheet's). */
   readonly path?: string;
-  /** Its line (1-based). */
-  readonly line: number;
+  /** Its line (1-based); none where the page couldn't be checked (P110). */
+  readonly line?: number;
 }
 
 /** How much of one stylesheet is read: its first 2 MiB. */
@@ -575,7 +585,11 @@ function identAt(text: string, at: number): { value: string; end: number } | nul
     if (code === "\\") {
       const hex = /^[0-9a-f]{1,6}\s?/iu.exec(text.slice(index + 1, index + 8));
       if (hex !== null) {
-        value += String.fromCodePoint(Number.parseInt(hex[0].trim(), 16) || 0xfffd);
+        // CSS Syntax's "consume an escaped code point": 0, a surrogate or past U+10FFFF is U+FFFD
+        // (six hex digits reach 0xFFFFFF, which String.fromCodePoint throws on: P110).
+        const point = Number.parseInt(hex[0].trim(), 16);
+        const valid = point !== 0 && point <= 0x10ffff && (point < 0xd800 || point > 0xdfff);
+        value += String.fromCodePoint(valid ? point : 0xfffd);
         index += 1 + hex[0].length;
       } else if (index + 1 < text.length) {
         value += text[index + 1];
@@ -875,8 +889,8 @@ const tooDeep = (name: string): string | null => {
   return null;
 };
 
-/** A stylesheet found for the page, once: its path and text. */
-type Found = { readonly path: string; readonly text: string } | null;
+/** A stylesheet found for the page, once: its path, its fewest characters, its text when read. */
+type Found = ReturnType<LinkedSheet>;
 
 /** The cascade over the chain: each declaration that matches, then the one that wins. */
 class Cascade {
@@ -979,18 +993,39 @@ class Cascade {
     return true;
   }
 
-  /** Whether a stylesheet may still be read for this page (once, within the budget). */
-  take(found: Found): found is { path: string; text: string } {
+  /**
+   * Whether nothing more may be read for this page: `SHEETS` read, `READ` spent, or the version's
+   * budget. Then no sheet is asked for (P110).
+   */
+  full(): boolean {
+    return this.read.size >= SHEETS || this.bytes >= READ || this.budget.spent;
+  }
+
+  /**
+   * A stylesheet's first `SCANNED` characters, if it may still be read for this page (once, within
+   * the budget), else null. The caps count characters, whatever the caller gives: where even its
+   * fewest are past what's left, it is refused before it is decoded (past the version's budget,
+   * spent); else it is decoded, cut, and charged what it holds, or dropped if that doesn't fit.
+   */
+  take(found: Found): string | null {
     if (found === null || this.read.has(found.path) || this.read.size >= SHEETS) {
-      return false;
+      return null;
     }
-    const size = Math.min(found.text.length, SCANNED);
-    if (this.bytes + size > READ || !this.spend(size)) {
-      return false;
+    const least = Math.min(found.least, SCANNED);
+    if (this.bytes + least > READ) {
+      return null;
+    }
+    if (this.budget.spent || least > this.budget.bytes) {
+      this.budget.spent = true;
+      return null;
+    }
+    const text = found.text().slice(0, SCANNED);
+    if (this.bytes + text.length > READ || !this.spend(text.length)) {
+      return null;
     }
     this.read.add(found.path);
-    this.bytes += size;
-    return true;
+    this.bytes += text.length;
+    return text;
   }
 
   /**
@@ -1146,12 +1181,19 @@ class Cascade {
     take(to);
   }
 
-  /** A stylesheet the page links or a sheet imports, if it may still be read. */
-  file(found: Found, layer: string | null) {
-    if (!this.take(found)) {
+  /**
+   * A stylesheet the page links or a sheet imports (`href`, from `from`), if it may still be read:
+   * asked for only while the page may read more, decoded only once taken.
+   */
+  file(href: string, from: string, layer: string | null) {
+    if (this.full()) {
       return;
     }
-    const text = found.text.slice(0, SCANNED);
+    const found = this.find(href, from);
+    const text = this.take(found);
+    if (found === null || text === null) {
+      return;
+    }
     this.sheet(withoutComments(text), 0, text.length, {
       source: { path: found.path, text },
       base: 0,
@@ -1311,7 +1353,7 @@ class Cascade {
         return;
       }
     }
-    this.file(this.find(href, context.from), layer);
+    this.file(href, context.from, layer);
   }
 }
 
@@ -1362,20 +1404,33 @@ interface Hold {
   readonly at: Value;
 }
 
+interface ScrollOptions {
+  readonly noun: string;
+  readonly path?: string;
+  readonly sheet?: LinkedSheet;
+  /** The version's, shared by its pages (`scrollBudget()`); else this page's own. */
+  readonly budget?: ScrollBudget;
+}
+
 /**
  * Whether `page`'s own styles hold it to one screen, and what to tell the agent; null where they
  * don't (or where it can't tell). `sheet` finds what the page links (a version's own files).
+ * Advisory, so it fails soft (P110): a throw in it is this page not checked, said as such (no
+ * line), never a failed lint (a CSS escape past U+10FFFF threw out of `admitContent` and
+ * `admitFiles` in 0.11).
  */
-export function scrollLock(
-  page: string,
-  options: {
-    readonly noun: string;
-    readonly path?: string;
-    readonly sheet?: LinkedSheet;
-    /** The version's, shared by its pages (`scrollBudget()`); else this page's own. */
-    readonly budget?: ScrollBudget;
-  },
-): ScrollLock | null {
+export function scrollLock(page: string, options: ScrollOptions): ScrollLock | null {
+  try {
+    return readScrollLock(page, options);
+  } catch {
+    return {
+      message: `The ${options.noun} wasn't checked for scroll lock: its styles couldn't be read. If it holds html, body or its root to one screen (overflow: hidden with height: 100% or 100vh, or position: fixed), let it scroll as a document.`,
+      ...(options.path === undefined ? {} : { path: options.path }),
+    };
+  }
+}
+
+function readScrollLock(page: string, options: ScrollOptions): ScrollLock | null {
   const shared = options.budget ?? { bytes: Infinity, steps: Infinity, spent: false };
   if (shared.spent) {
     return null;
@@ -1400,7 +1455,9 @@ export function scrollLock(
     };
   };
   const chain: Node[] = [
-    nodeOf(scanned.html, "html", "html", false),
+    // Not html's style="": the shell imports a page's html attributes but that one
+    // (`renderDocument`), so it never applies in Porthole's frame (P110).
+    { ...nodeOf(scanned.html, "html", "html", false), style: null },
     nodeOf(scanned.body, "body", "body", false),
   ];
   const rootTag =
@@ -1461,7 +1518,7 @@ export function scrollLock(
     ) {
       continue;
     }
-    cascade.file(find(href, from), null);
+    cascade.file(href, from, null);
   }
   for (const node of chain) {
     if (node.style !== null) {
@@ -1604,7 +1661,10 @@ export function scrollLock(
     }
     const height = tall("height");
     const maxHeight = tall("max-height");
-    if (positioned && position !== undefined && (spanned || height || maxHeight)) {
+    // A fixed body holds the page whatever its height (P110): a fixed box adds nothing to what the
+    // frame scrolls, so `body { position: fixed; top: 0 }`, the scroll-lock libraries' way, does.
+    const fixedBody = index === 1 && position?.value === "fixed";
+    if (positioned && position !== undefined && (spanned || height || maxHeight || fixedBody)) {
       shown.unshift(position);
     }
     states.push({ screen: height || maxHeight || spanned, shown, position: position?.value ?? "" });
@@ -1628,11 +1688,16 @@ export function scrollLock(
       return found !== undefined && !CONTENT_HEIGHT.test(found) && !PARENT.test(found);
     });
   };
+  // An element's own overflow-y: body's is the viewport's where html's overflow is visible, and
+  // body's own is then visible (P110: `body { position: fixed; inset: 0; overflow: auto }` doesn't
+  // scroll itself, the viewport takes its auto).
+  const ownOverflowY = (index: number, node: Node): string =>
+    index === 1 && htmlVisible ? "visible" : overflowY(node);
   const scrollBox = (index: number): boolean => {
     const node = chain[index];
     return (
       node !== undefined &&
-      SCROLLS.has(overflowY(node)) &&
+      SCROLLS.has(ownOverflowY(index, node)) &&
       ((states[index]?.screen ?? false) || unread(index))
     );
   };
@@ -1649,7 +1714,10 @@ export function scrollLock(
     const overflow = value(node, "overflow-y");
     const clipped =
       clips && (index === 0 ? true : index === 1 ? state.screen || htmlVisible : state.screen);
-    const fixed = state.position === "fixed" && state.screen && !SCROLLS.has(overflowY(node));
+    const fixed =
+      state.position === "fixed" &&
+      (state.screen || index === 1) &&
+      !SCROLLS.has(ownOverflowY(index, node));
     if (!clipped && !fixed) {
       continue;
     }
