@@ -679,7 +679,8 @@ unposted words beside the frame and tell the page when.
   keyboard there. `comments.open` needs that focus in the calling frame, moved there by the
   person, and not just after a press on the host's page (the app runtime, below).
 - *What doesn't*: a page gets the keys typed before focus is back (on Firefox, the keys of an
-  animation frame, or a few lost to nothing while a take-back is fought); on Firefox a host's plain
+  animation frame: one in a sentence, measured on a slowed machine too; a few more can be lost to
+  nothing while a take-back is fought, and the composer then has focus again); on Firefox a host's plain
   `focus()` doesn't move focus from a frame that holds it with the person's gesture and takes it
   back on its blur (no focus event: the keys go to the frame), so a composer that opens focused
   must use `focusField`; on Firefox a page keeps the keyboard if the pointer came over its frame after

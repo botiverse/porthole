@@ -207,8 +207,12 @@ export function focusGuard(view: Window): FocusGuard {
   /** When focus last went into a guarded frame, and whether the person moved it there. */
   let enteredAt = -Infinity;
   let earned = false;
-  /** The text field the person last pressed, and when. */
-  let pressed: { readonly field: HTMLElement; readonly at: number } | null = null;
+  /** The text field the person last pressed, when, and what had focus as they pressed it. */
+  let pressed: {
+    readonly field: HTMLElement;
+    readonly at: number;
+    readonly from: Element | null;
+  } | null = null;
   let hostMove: { frame: HTMLIFrameElement; at: number } | null = null;
   let polling = 0;
   /**
@@ -306,8 +310,18 @@ export function focusGuard(view: Window): FocusGuard {
       return false;
     }
     const { field, frame, guarded } = watched;
-    if (!field.isConnected || !frames.has(frame) || pressAt > watched.gaveAt) {
+    if (!field.isConnected || pressAt > watched.gaveAt) {
       // Gone, or the person pressed the page since: theirs to place focus now.
+      contest = null;
+      return false;
+    }
+    if (!frames.has(frame)) {
+      // The frame was removed mid-fight (its display stopped): Firefox may leave focus on nothing
+      // once the focused frame goes. Back into the field, for a moment after.
+      if ((active === null || active === document.body) && at - watched.gaveAt <= HELD_MS) {
+        field.focus({ preventScroll: true });
+        return true;
+      }
       contest = null;
       return false;
     }
@@ -348,6 +362,28 @@ export function focusGuard(view: Window): FocusGuard {
       return;
     }
     const was = known;
+    // The person pressed a text field and focus is on nothing: on Firefox, a page that takes focus
+    // as they press, or takes it back on its blur with a gesture of theirs, leaves it there
+    // (measured, on a slow machine too), and their keys are lost. Into the field, once: as a
+    // take-back the page failed if a frame had focus as they pressed, else simply.
+    const press = pressed;
+    if (
+      press !== null &&
+      (active === null || active === document.body) &&
+      at - press.at <= HELD_MS &&
+      press.field.isConnected
+    ) {
+      pressed = null;
+      const from = press.from ?? was;
+      const blamed = from === null ? undefined : frames.get(from as HTMLIFrameElement);
+      if (blamed === undefined) {
+        known = active;
+        press.field.focus({ preventScroll: true });
+      } else {
+        takeBack(press.field, from as HTMLIFrameElement, blamed, at, true);
+      }
+      return;
+    }
     known = active;
     if (active === was || active === null) {
       return;
@@ -363,18 +399,6 @@ export function focusGuard(view: Window): FocusGuard {
     // had focus): watched as a take-back is, since a page that takes focus back on its own blur
     // leaves it on nothing on Firefox (measured), where the keys are lost to the page's doing.
     const left = was === null ? undefined : frames.get(was as HTMLIFrameElement);
-    // Or the person pressed a text field and focus went from the frame to nothing: on Firefox, a
-    // page that has a gesture of the person's and takes focus back on its blur leaves it there.
-    if (
-      left !== undefined &&
-      (active === document.body || active === null) &&
-      pressed !== null &&
-      at - pressed.at <= HELD_MS &&
-      pressed.field.isConnected
-    ) {
-      takeBack(pressed.field, was as HTMLIFrameElement, left, at, true);
-      return;
-    }
     if (left !== undefined && takesText(active)) {
       contest = {
         field: active,
@@ -407,7 +431,7 @@ export function focusGuard(view: Window): FocusGuard {
     schedule();
   };
   const schedule = () => {
-    if (polling === 0 && frames.size > 0) {
+    if (polling === 0 && (frames.size > 0 || contest !== null)) {
       polling = view.requestAnimationFrame(poll);
     }
   };
@@ -420,7 +444,9 @@ export function focusGuard(view: Window): FocusGuard {
     gestureAt = pressAt;
     const target = event.composedPath()[0];
     pressed =
-      target instanceof Element && takesText(target) ? { field: target, at: pressAt } : null;
+      target instanceof Element && takesText(target)
+        ? { field: target, at: pressAt, from: deepActive(document) }
+        : null;
   };
   view.addEventListener(
     "keydown",

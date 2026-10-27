@@ -482,13 +482,13 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
     },
     {
       file: "src/platform/focus-guard.ts",
-      find: "    if (polling === 0 && frames.size > 0) {",
+      find: "    if (polling === 0 && (frames.size > 0 || contest !== null)) {",
       replace: "    if (polling === 0 && frames.size > 0 && takesText(known)) {",
     },
     {
       file: "src/platform/focus-guard.ts",
-      find: "      pressed !== null &&\n",
-      replace: "      false &&\n      pressed !== null &&\n",
+      find: "      press !== null &&\n",
+      replace: "      false &&\n      press !== null &&\n",
     },
   ],
   // comments.open's gesture in the calling frame (P109): any gesture on the host's page will do,

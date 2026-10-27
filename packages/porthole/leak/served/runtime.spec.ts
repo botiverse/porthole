@@ -645,6 +645,20 @@ const keyboardOf = (page: Page) =>
 const composerText = (page: Page) =>
   page.evaluate(() => (document.getElementById("host-composer") as HTMLTextAreaElement).value);
 const hostActive = (page: Page) => page.evaluate(() => document.activeElement?.tagName ?? null);
+/**
+ * Until a fight over the keyboard is over (P109): the display stopped, or the composer holding
+ * focus; at most `ms`. It decides nothing (a control that takes the guard out leaves the fight on):
+ * the probes after it do.
+ */
+async function fightOver(page: Page, ms = 10_000): Promise<void> {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if ((await keyboardOf(page)).errors.length > 0 || (await hostActive(page)) === "TEXTAREA") {
+      return;
+    }
+    await page.waitForTimeout(100);
+  }
+}
 
 test.describe("the person at the keyboard (P109)", () => {
   test.setTimeout(60_000);
@@ -688,9 +702,17 @@ test.describe("the person at the keyboard (P109)", () => {
       viewer: { level: "view", id: "vic" },
     });
     await hostComposer(page);
-    // Once this evaluate's activation has lapsed (it is a gesture in the frame), the page holds its
-    // field and takes focus back whenever it loses it (the take-back blurs it), with no gesture or
-    // timer of its own (the review of the guard, GK-1: on Firefox this kept every key), and from
+    const box = await page.locator("#host-composer").boundingBox();
+    await page.evaluate(() =>
+      addEventListener("message", (event) => {
+        if ((event.data as { armed?: unknown } | null)?.armed === true) {
+          (window as unknown as { armed: boolean }).armed = true;
+        }
+      }),
+    );
+    // Once its own activation has lapsed (this evaluate is a gesture in the frame), the page holds
+    // its field and takes focus back whenever it loses it (the take-back blurs it), with no gesture
+    // or timer of its own (the review of the guard, GK-1: on Firefox this kept every key), and from
     // the first time it loses it asks for the composer every 400 ms.
     await frame.evaluate(() => {
       const field = document.getElementById("field") as HTMLInputElement;
@@ -707,22 +729,33 @@ test.describe("the person at the keyboard (P109)", () => {
             .then((comments) => comments.open({ name: "card-5" }, { draft: "Approved." }))
             .catch(() => {});
         }, 400);
-      setTimeout(() => {
+      const arm = () => {
+        if (navigator.userActivation?.isActive ?? false) {
+          setTimeout(arm, 100);
+          return;
+        }
         field.addEventListener("blur", focus);
         field.addEventListener("blur", ask, { once: true });
         addEventListener("blur", focus);
         focus();
-      }, 5_500);
+        parent.postMessage({ armed: true }, "*");
+      };
+      setTimeout(arm, 100);
     });
-    // Where the composer is, read now: Playwright's own checks before a locator's click run a
-    // script in the page, which Firefox takes for a gesture (activation with no event of the page's).
-    const box = await page.locator("#host-composer").boundingBox();
-    await page.waitForTimeout(5_800);
-    // The person clicks into the composer.
+    // States, not times: the page armed and holding focus, then the person's press on the composer.
+    await page.waitForFunction(
+      () => (window as unknown as { armed?: boolean }).armed === true,
+      null,
+      {
+        timeout: 15_000,
+      },
+    );
+    await expect.poll(() => hostActive(page), { timeout: 10_000 }).toBe("IFRAME");
     await page.mouse.click((box?.x ?? 0) + 20, (box?.y ?? 0) + 20);
     const text = "my unposted comment to the team";
     await page.keyboard.type(text, { delay: 100 });
-    await page.waitForTimeout(500);
+    // Until the fight is over: the display stopped, or the composer holding focus.
+    await fightOver(page);
     const typed = await composerText(page);
     const { errors } = await keyboardOf(page);
     const opened = (await runtimeCalls(page, key)).filter((each) => each.capability === "comments");
@@ -757,6 +790,7 @@ test.describe("the person at the keyboard (P109)", () => {
     // The person selects words in the page (their gesture, the frame's focus), and the host opens
     // its composer focused (Firefox ignores a plain focus() here: measured).
     await frame.locator("#artifact").click({ clickCount: 2 });
+    await expect.poll(() => hostActive(page), { timeout: 10_000 }).toBe("IFRAME");
     await page.evaluate(() =>
       setTimeout(() => {
         const composer = document.getElementById("host-composer") as HTMLTextAreaElement;
@@ -765,10 +799,11 @@ test.describe("the person at the keyboard (P109)", () => {
         );
       }, 50),
     );
-    await page.waitForTimeout(400);
+    // Until the composer has focus, or the display that kept it was stopped.
+    await fightOver(page);
     const text = "my unposted comment about it";
     await page.keyboard.type(text, { delay: 100 });
-    await page.waitForTimeout(300);
+    await fightOver(page);
     const typed = await composerText(page);
     expect(
       text.length - typed.length,

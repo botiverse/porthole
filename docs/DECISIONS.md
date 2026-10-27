@@ -5728,6 +5728,16 @@ take-backs; with a plain `focus()`, every key to the frame. The new probes and t
 passed three times in a row on all three engines. Rejected: a one-off check of the give-back, or a
 focusout listener alone (the review tried both: the page's re-take races any single check).
 
+CI's slower Firefox then failed the blur probe twice ("got ''"). Reproduced on two cores, four
+workers, 20 runs: 2 failed. The trace: the page's own `focus()` came late (its timer, under load)
+and met the person's press on the composer; Firefox left focus on `<body>` (not the frame, not the
+composer), no move the guard judged, so every key was lost to `<body>`, none reached the frame,
+and nothing was counted. Now a press on a text field that leaves focus on nothing within 300 ms is
+taken into that field (a take-back the page failed if a frame had focus as the person pressed),
+and a display stopped mid-fight gives the field focus back if Firefox leaves it on nothing as the
+frame goes. The probes wait for states (the page armed once its own activation lapsed, the frame
+holding focus, the fight over) instead of times.
+
 **Revisit when** an engine stops blurring the host's window on a move into a frame, or shows a
 press on the frame without `:active`, or Firefox starts doing either (the guard then judges every
 engine alike); browsers give the embedder a way to stop a frame's `focus()` (Permissions Policy's
