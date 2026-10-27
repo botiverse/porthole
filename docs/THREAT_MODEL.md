@@ -5,18 +5,18 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes Porthole 0.12.0 (2026-10-26) and the unreleased changes after it
-(P109, CHANGELOG's "Unreleased"). A review on 2026-10-19 found gaps, and every decision it led to
+**Status.** This describes Porthole 0.13.0 (2026-10-27). A review on 2026-10-19 found gaps, and every decision it led to
 has merged ([§8](#8-fixes-in-flight) lists them). P096 changed the negative-control runner and CI,
 and the shipped conformance probes' messages and timing, not what they check. P104 (0.9.0's
 annotation markers) had a review of its own, and P105, in 0.10.0, is what it led to. 0.11.0 was
 never published (its release stopped at the CI gate), and 0.12.0 carries all of it: draft marks
 (P107, §7 "Drafts": what a page learns from them and who may receive them), an advisory lint
 (P106, no change to isolation), and `comments.open` with a draft (P108, §7: the host's duties
-around it). The review of 0.12.0's drafts led to P109: a display can take the keyboard, which
+around it). The review of 0.12.0's drafts led to P109, in 0.13.0: a display can take the keyboard, which
 `createHost` now gives back (§6, §7 "The keyboard"); `comments.open` needs the person in the
 calling frame; a page's draft text is stricter, and the composer it fills is the person's to act
-on (§7).
+on (§7). 0.13.0 also makes P106's lint fail soft and read only what it may (P110, no change to
+isolation).
 
 ## 1. Two layers
 
