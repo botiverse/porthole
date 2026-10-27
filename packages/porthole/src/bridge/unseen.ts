@@ -80,3 +80,27 @@ const UNSEEN_EACH = new RegExp(UNSEEN.source, "gu");
 export function withoutUnseen(text: string): string {
   return text.replace(UNSEEN_EACH, "");
 }
+
+/** A variation selector where an emoji has one: after a pictograph, or in a keycap. */
+const EMOJI_SELECTORS = new RegExp(
+  "(?<=\\p{Extended_Pictographic})[\\uFE0E\\uFE0F]|(?<=[0-9#*])[\\uFE0E\\uFE0F](?=\\u20E3)",
+  "gu",
+);
+
+/**
+ * A joiner or non-joiner with a letter or mark on each side (P109): how Persian separates its
+ * letters (می‌خواهم) and the Indic scripts choose a half form or a conjunct (क्‍ष, എന്‍റെ). Never
+ * first or last, doubled, beside a space, punctuation or a pictograph: there it shapes nothing, and
+ * hides text or makes a blank-looking draft.
+ */
+const LETTER_JOINERS = /(?<=[\p{L}\p{M}])[\u200C\u200D](?=[\p{L}\p{M}])/gu;
+
+/**
+ * Whether `text` holds what a person can't see, for text a page puts in the person's own words (a
+ * comment's draft, P109): `unseen`'s list, with only a joiner or non-joiner between two letters or
+ * marks let by (in any script: a person's text needs them, and one that draws as nothing there is
+ * a bit at most), and a variation selector right after a pictograph or in a keycap (❤️, 1️⃣). A
+ * joiner between pictographs (an emoji sequence) is refused: it can join any two.
+ */
+export const unseenStrict = (text: string): boolean =>
+  UNSEEN.test(text.replace(LETTER_JOINERS, "").replace(EMOJI_SELECTORS, ""));

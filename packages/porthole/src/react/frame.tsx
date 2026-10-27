@@ -565,6 +565,12 @@ export interface PortholeFrameProps {
   /** Too many declines: the display stops asking until it runs again. */
   readonly onMuted?: () => void;
   /**
+   * The content moved the keyboard into its frame from one of the page's text fields without the
+   * person, and focus went back (P109); `typing`: the person was typing on the page. A display
+   * that keeps doing it is stopped (`onContentError` says so).
+   */
+  readonly onFocusTaken?: (taken: { readonly typing: boolean }) => void;
+  /**
    * How the frame's first document went: loaded, blocked (and why), or a timeout. A host shows its
    * own fallback (a url-mode app "Open in a new tab") on anything but loaded.
    */
@@ -839,6 +845,9 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
         case "muted":
           frame.onMuted?.();
           return;
+        case "focusTaken":
+          frame.onFocusTaken?.(detail as DisplayEvents["focusTaken"]);
+          return;
         case "outcome":
           frame.onOutcome?.(detail as DisplayEvents["outcome"]);
           return;
@@ -967,6 +976,7 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
       "navigationBlocked",
       "refused",
       "muted",
+      "focusTaken",
       "outcome",
       "annotation",
       "contentError",

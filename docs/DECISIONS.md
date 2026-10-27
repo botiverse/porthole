@@ -3033,7 +3033,7 @@ store); `test/runtime.test.ts` (the CSP sources; upload limits and names).
 the public suffix list (CORP becomes defense in depth), or a host needs assets shared across
 artifacts (`copy_from`: a new id in the destination).
 
-## P090 · 2026-10-18 · Comments from the page: the host's composer at the page's anchor, write-only · Accepted; amended by P091, P108
+## P090 · 2026-10-18 · Comments from the page: the host's composer at the page's anchor, write-only · Accepted; amended by P091, P108, P109
 
 **Decision.** `comments` is a built-in (P086) host function served by a handler: `open({ name,
 label?, quote? })` (a name the page chose, ≤ 256 characters, `slide-3`, `refs/a.md#L12`; a label ≤
@@ -5447,7 +5447,7 @@ fact more (a mark is a draft), bounded by the host's duty above.
 third state is asked for (resolved, private: then a state list, still not a style knob), the
 shell gets forced-colors styles, or MCP Apps defines annotations.
 
-## P108 · 2026-10-26 · A comment's draft from the page: text the composer starts with, never posted by the page · Accepted
+## P108 · 2026-10-26 · A comment's draft from the page: text the composer starts with, never posted by the page · Accepted; amended by P109
 
 Amends P090. A page that asks for decisions (Raft's "decision sheet": a card per question with
 "Approve" and "Needs changes" buttons) opens the host's composer at the card with `comments.open`
@@ -5462,13 +5462,18 @@ them (#proj-workspace, 2026-10-26).
    draft that isn't a string does: the shell sends it as the page gave it (options that aren't an
    object send `null`), read after the click's check, so a getter that throws is a rejection. The
    handler gets `{ anchor, draft }`.
-2. **The rest is P090's.** From a click (`user-activation`, 30 a minute), view level; content hears
-   only whether the composer opened; no method reads a thread; the page never posts.
+2. **The rest is P090's.** From a gesture (`user-activation`, 30 a minute), view level; content
+   hears only whether the composer opened; no method reads a thread; the page never posts. (The
+   review of 0.12.0, P109: that gate was the host page's activation, which any gesture on it gives
+   for 5 s, the person typing in the host's own composer included, not "a click" in the frame;
+   P109 asks for the person in the calling frame.)
 3. **The host's duties** (THREAT_MODEL §6 and §7, ADOPTING's example): show the draft whole, as the
    person's editable plain text, in its own composer; post it only on the person's Send; arm the
    composer as §6 arms a view the content brought: no press, and no Enter that sends, for 500 ms
    after it opens, Send not focused, beside the frame where the layout allows. Once posted the
    comment is the person's, mentions in it included: that is why they must see it all first.
+   (P109 adds: an open never replaces what the person typed; the composer takes no focus, sends
+   on no Enter until the person has acted in it, and says the text is the page's.)
    `defineRuntimeConformance` checks that the handler takes a draft (answers a boolean); that it
    never posts on its own can't be seen from a handler and is the host's.
 
@@ -5493,6 +5498,251 @@ and reach no handler, a checklist reaches the composer; "comments are write-only
 the anchor). Negative control `comment-draft` (the draft taken as given) → the first case, every
 engine. `types/runtime/v1/check.ts` (the page-shaped call compiles); the runtime conformance's
 comments case sends a draft.
+
+## P109 · 2026-10-26 · After the review of 0.12.0's drafts: the keyboard given back, `comments.open` from the frame the person is in, a page's draft the person's to act on, stricter draft text · Accepted
+
+Amends P090 and P108, and THREAT_MODEL §6 and §7. From the review of P107 and P108 at 0.12.0
+(2026-10-26: no P0, two P1s, three P2s, two P3s) and the review of the 0.11.0 and 0.12.0 releases
+(three documentation findings). Both P1s are about the person at the keyboard beside the frame,
+where P107 and P108 put the person's unposted words (a composer, its drafts) and tell the page when.
+
+- **D0 (P1).** A framed page calls `focus()` on its own input whenever it likes, and on Chromium and
+  WebKit needs no gesture for it: the keyboard leaves the host's focused composer, and the rest of
+  what the person types goes to the page (measured on all three engines, the take at once, the
+  page's input then holding everything after it). True of every display since 0.1, not only of
+  drafts; nothing in THREAT_MODEL, ADOPTING or the suite named focus as a channel, and §7's "what
+  they wrote stay[s] in the host's own UI" didn't hold.
+- **D1 (P1).** The `comments` gate was the host page's transient activation, which lasts 5 s after
+  any gesture anywhere on it, typing in the host's own composer included; the shell's click check is
+  the page's own and a raw `porthole/call` skips it (on Firefox, where the person typing in the host
+  gives the frame activation too, the shell's own call passed). So a page opened the composer with
+  its draft every 2 s while the person typed their own comment, never clicked; P108's and §7's "a
+  click to open" was wrong, and nothing said what an open does to a composer that holds the
+  person's words.
+- **D2–D4 (P2).** The host duties let a page-drafted composer take focus (keys typed for the page
+  land in it) and send on Enter after 500 ms; P107's "no submit, no discard one click away" in a
+  draft's view wasn't in the host docs; nothing asked the composer to say its text came from the
+  page, while the page can draw the person's own draft markers.
+- **D5, D6 (P3).** The draft's "visible text" kept P100's joiners between shaped letters and in
+  emoji (identical pixels on all three engines: about a bit per letter boundary), U+2028/2029
+  (drawn as nothing on Firefox and WebKit), and blank-looking text; the anchor's label and quote
+  beside the draft weren't checked for any of it.
+- **R-1–R-3 (docs).** P108's duty wording (R-1, as D1); 0.11.0 was never published (its release
+  stopped at the CI gate) though CHANGELOG and THREAT_MODEL read as if it were, and 0.12.0's notes
+  left out 0.11.0's (R-2); THREAT_MODEL §8 and its status line were stale (R-3).
+
+**Measured** (served frames on Porthole's own `createHost`, Chromium 153, Firefox 155, WebKit 26.6
+through Playwright 1.63; WebKit with libraries extracted on a box that lacks them):
+- What the host's page sees of a move into a frame. Chromium and WebKit blur its window as it
+  happens; at that blur a press on the frame (a click, a held press, a tap) leaves the frame element
+  `:active`, and a page's own `focus()` doesn't; a Tab is the host's own keydown just before.
+  Firefox doesn't blur the host's window and shows no `:active` (false even while a press is
+  held); a focusout on the field wasn't seen in these runs (the review of the guard saw one):
+  `document.activeElement` changes, read at the next animation frame, and the pointer over the
+  frame (`:hover`, `pointerover` on the frame element, for a touch too) is all it shows of a press.
+- Transient activation lasts 5.04–5.10 s after a gesture on all three, and Playwright's
+  `evaluate` in a frame is a gesture there on all three.
+- Focus given back inside that blur (synchronously or in a microtask) leaves Chromium and WebKit
+  split: the host's `activeElement` is its text area, the keys still go to the frame (all 47 of a
+  sentence). Given back in a task after, it holds; Firefox takes it back only from a frame that was
+  blurred first.
+- Nothing the host sets on the frame stops its `focus()`: an `inert` frame took focus 60 times in
+  2 s on Chromium and Firefox. So focus given back can't stop a page trying again, and each try
+  leaves it the keys typed until focus is back.
+- With the guard below, a page calling `focus()` every 700 ms, 250 ms, 30 ms or in a busy loop
+  while the person types a 47-character sentence 60 ms a key into the host's text area (one run
+  each, on a loaded box): the composer kept every key on Chromium and WebKit and all but one in one
+  of four runs on Firefox, and the display was stopped after three tries; without it the page got
+  every key after its first try. Each try the guard undoes leaves the page the keys typed until
+  focus is back, which is why it stops a page that keeps trying (point 1).
+
+**Decision.**
+1. **The focus guard** (`src/platform/focus-guard.ts`, in the web platform, so every `createHost`
+   display and `PortholeView` has it, on by default with no option). When focus leaves one of the
+   host page's text fields (a text area, a text-taking `<input>`, an editable region, inside open
+   shadow roots too) for a display's frame, the move is the person's if:
+   - the host moved it (`DisplayHandle.focus()`, new: a frame's `iframe.focus()` called by the host
+     itself would be taken for the page's);
+   - their last key on the page was Tab or Shift+Tab, within a second;
+   - a press on the frame: where the engine tells the move as it happens (Chromium, WebKit), the
+     frame element is `:active`; where it doesn't (Firefox), the pointer is over the frame and came
+     over it after the text field got focus and after the person last typed on the page;
+   - or a gesture the host's own events don't explain: the page has transient activation, and for
+     longer than activation lasts (5 s) it saw no gesture of its own (a key, a press, a click, text
+     typed) and the text field has had focus: the person pressed or activated something in a frame
+     since (an assistive technology's activation moves no pointer and sends the host no key).
+   Anything else is the page's: once the engine has finished the move, focus goes back to the text
+   field (the frame blurred first), and the display hears `focusTaken` (`{ typing }`: a key on the
+   page within the last second; React `onFocusTaken`). Three while the person types within 10 s,
+   or five within 2 s, stop the display, as a frame that keeps navigating away is (P031): a
+   `contentError`, "The content kept taking the keyboard from the page; it was stopped.", and
+   `reload()` runs it again. A page that takes focus once on its own (an input it focuses on load)
+   gets it taken back once, and isn't stopped.
+2. **`comments` asks for the person in the calling frame** (`CapabilitySpec.inFrame`): its
+   `user-activation` gate also needs the host page's focus in that frame (`Surface.focused()`),
+   after the guard judged any move into it, so keys that reached the frame before focus went back
+   count for nothing. A press in the frame or a Tab into it gives that focus (measured: a click on
+   a button, on text or in a field puts the host's `activeElement` on the frame, on all three); the
+   person typing in the host's UI, or a gesture in another display, doesn't. Refused as
+   `no-user-activation`. The other gesture-gated functions keep the page's activation alone:
+   `sendPrompt` and `callTool` are confirmed by the person, a copy shows its notice, a link opens a
+   tab; none of them writes into the person's words.
+3. **A page's draft is the person's to act on** (THREAT_MODEL §7 and ADOPTING, with code): an open
+   never replaces, appends to or moves what the person typed or the place they chose (answer
+   `false`, or show the page's words as a separate suggestion that takes no focus); a composer the
+   page filled takes no focus when it opens and doesn't send on Enter until the person has focused
+   or edited it themselves (Send is a click until then); it says the text is the page's ("Suggested
+   by this page", drawn by the host outside the frame) until the person edits it, and never shows
+   it as one of their own drafts (the host's own list of drafts is how a person finds theirs, not
+   the frame's markers, which the page can draw too); and a view a frame's report opens, a draft's
+   included, puts nothing one click away that posts, submits, resolves, deletes or discards.
+4. **Stricter draft text** (`parseCommentRequest`): a draft is refused for any invisible character
+   but a joiner or non-joiner with a letter or mark on each side (U+200C, U+200D: Persian's
+   می‌خواهم, Hindi's क्‍ष, Malayalam's എന്‍റെ; in any script, since a person's text needs them
+   wherever letters shape) and a variation selector after a pictograph or in a keycap (❤️, 1️⃣):
+   so a joiner first or last, doubled, beside a space or punctuation, or in an emoji sequence
+   (👩‍💻) is refused, where it shapes nothing and hides text or makes a blank-looking draft; a line or paragraph
+   separator (U+2028, U+2029), blank-looking text (only spaces of any kind, blank lines and U+2800),
+   more than 32 blanks in a row, or more than two blank lines in a row. The anchor's `label` and
+   `quote` lose what a person can't see (P105's `withoutUnseen`, and U+2028/2029) and are refused if
+   that leaves them blank: they are shown beside the draft, never posted as the person's words, so
+   they are cleaned as P105 cleans an annotation's label rather than refused.
+5. **The docs say what holds** (R-1–R-3): THREAT_MODEL §6 (what every host gets and must do about
+   the keyboard; no action one click away in a draft's view), §7 (the keyboard, the composer's
+   duties, the gate as it is), §8 (the 2026-10-19 review's decisions, all merged) and its status
+   line; CHANGELOG marks 0.11.0 as never published, its changes shipped in 0.12.0, and carries its
+   upgrade notes into the next version's; capabilities.ts says what `user-activation` is.
+
+**Trust.** What holds, and what doesn't:
+- A page can still take the keyboard; what it gets is the keys typed until focus is back (none to
+  one in a sentence, measured), and a page that keeps trying is stopped. On Firefox, which tells
+  the host's page nothing of the move or of a press in the frame, the guard reads focus at each
+  animation frame, so the keys typed in that frame go to the page; and a page can keep the
+  keyboard while the pointer rests over its frame if it came over the frame after the person last
+  typed on the page and after the text field got focus (a person who typed, moved the pointer over
+  the frame, and types on without clicking). Accepted, and said in THREAT_MODEL §7.
+- A false take-back: a press on the frame on Firefox while the pointer has rested over it since
+  before the text field got focus (a composer that opened on a selection in the frame), and an
+  assistive technology's activation within 5 s of the person's own key or press on the page, are
+  taken for the page's, and focus goes back to the text field; the next press once the pointer has
+  left the frame and come back, a Tab, or an activation after those 5 s, is the person's. Firefox also
+  focuses a frame's document but not its field on a press that follows typing in the host, with or
+  without the guard (measured).
+- Moves between two frames, or into a frame from what isn't a text field, aren't judged: no text
+  of the host's page goes with them (S7 covers a frame beside another).
+- A host with its own platform (a native web view) has no guard unless it implements `focused`,
+  `onFocusTaken` and `focus` the same way; without `focused`, `comments` keeps the activation gate
+  alone, as before.
+
+**API.** `DisplayEvents.focusTaken` (`{ typing: boolean }`), `DisplayControls.focus()`,
+`PortholeFrameProps.onFocusTaken`; `Surface.focused?`, `onFocusTaken?`, `focus?` (the platform
+seam); `BridgeOptions.focused`; `CapabilitySpec.inFrame`. A draft or an anchor refused before is
+refused still; some accepted before are refused now (joiners, separators, blank runs), and a label
+or quote with invisible characters reaches the handler without them.
+
+**Tested.** `test/focus-guard.test.ts`: `personMoved` per rule, per engine kind, the composer
+opened on a selection and the Tab window. `test/runtime.test.ts` (D5, D6): the review's payloads
+refused (a family emoji, a joiner first, last, doubled, beside a space or punctuation, U+2028,
+U+2029, a draft of U+2800, 1,900 no-break spaces, four blank lines), Persian, Hindi, Bengali and
+Malayalam with their joiners, ❤️, 1️⃣, 👍🏽 and a checklist pass; a label with a
+right-to-left override and tags, and a quote with a zero-width space, reach the handler without
+them, and one with nothing visible left is refused. `leak/served/runtime.spec.ts`, Chromium,
+WebKit and Firefox: "a page that takes the keyboard while the person types in the host's
+composer gets a key or two at most, and is stopped" (the pointer resting over the frame, the
+composer focused by the host as on `selected`, the page's `focus()` every 500 ms); "the person's
+own moves into the frame keep the keyboard" (a press on its field after typing in the composer, a
+Tab, an activation in the frame with no host event 5.5 s after the composer's last gesture);
+"comments.open while the person types in the host's composer reaches no handler, by the page's own
+call or the shell's; from a press in the frame it does"; "a page that takes the keyboard back on
+its own blur keeps none of it" (GK-1, below). Negative controls `focus-guard` (every move taken for
+the person's) → its two probes, and `comments-in-frame` (the focus check out) → its probe, every
+engine; `focus-guard-watch` (the watch after a take-back out) → the blur probe on Firefox.
+
+A joiner between two letters that shapes nothing draws as nothing (the review's Devanagari and
+Arabic payloads, about a bit per letter boundary): accepted, as P100 accepts it, because refusing
+it refuses Persian and the Indic scripts' ordinary text (the coordinator's call after the first
+cut refused all joiners). A Malayalam word that ends in an old-style chillu (a virama and U+200D
+before a space) is refused; the atomic chillus (U+0D7A–U+0D7F) pass.
+
+**Threat it re-opens.** None: no default, gate or policy loosens. A draft, a label or a quote
+refused before is refused still.
+
+**Rejected.**
+- Making the frame `inert` while the person types (or after a take-back): it doesn't stop a
+  cross-origin frame's `focus()` (measured), and it hides the frame from assistive technology.
+- Giving focus back inside the blur: Chromium and WebKit then show the text area focused while
+  the keys go to the frame (measured), worse than no guard, since the host believes it.
+- The pointer over the frame as a press on every engine: the composer that opens on a selection
+  has the pointer resting there, which is the case D0 is about; on Chromium and WebKit `:active`
+  says more, and only Firefox, which says nothing else, falls back to it.
+- The focus check on every gesture gate: the others don't write into the person's words (above),
+  and pages that call them from a gesture the host's page had (Playwright's evaluate in tests, a
+  host button that forwards a click) would change behavior for no closed threat.
+- Refusing every joiner in a draft (the first cut): it refused Persian and the Indic scripts'
+  ordinary text; P100's list of shaping scripts instead: any letters may need them, and the
+  hiding needs a place where nothing shapes (a space, punctuation, an edge, a run), which is
+  refused. Stripping rather than refusing: a draft is the page's words in the person's name,
+  which Porthole refuses rather than rewrites (P100); a label and a quote are shown, never
+  posted, so they are cleaned (P105).
+
+**After the review of the guard** (2026-10-26, GK-1, P1 on Firefox; Chromium and WebKit held
+against every strategy tried). A page that only takes focus back on its own blur
+(`field.onblur = () => field.focus()`, no timer, no gesture) beat the guard on Firefox: 38 of 38
+keys of a sentence reached the frame, `focusTaken` fired once, the display was never stopped, and
+`comments.open` reached the handler 10 to 13 times. The take-back's `frame.blur()` fires the page's
+blur, whose `focus()` left Firefox's focus on `<body>`; the next look then took `<body>` for where
+focus was and stopped looking (it looked only while a text field had focus); and the person's keys
+went to the frame, so the page saw no typing to count. Now:
+- **The guard keeps watching after each take-back** (each animation frame, `HELD_MS` 300 ms): focus
+  found in the frame again, or on nothing, is a take-back that failed (after `GIVE_BACK_MS`, 100 ms,
+  for one that hasn't landed yet; at once for one taken again after it landed), given back again
+  and counted as `failed`; the watch ends once focus has stayed in the field, the person presses
+  the host's page or puts focus somewhere of theirs, or the frame presses through as the person's.
+  A move into a text field from a frame is watched the same way, and focus going from a frame to
+  nothing just after the person pressed a text field is taken back to it (on Firefox, a page with a
+  gesture of the person's that fights back leaves focus there; the keys would be lost).
+- **The guard looks at each animation frame while any frame is guarded**, not only while a text
+  field has focus, so it knows where focus is when it next moves (one read of the focused element a
+  frame), and looks at once after a focusout.
+- **The stop counts a failed take-back like one made while the person typed**: three of either
+  within 10 s, or five within 2 s. A person's own move never fails a take-back.
+- **`focused()` asks for the person's own move into the frame**: a frame that took focus when
+  nothing of the host's had it (no press, Tab or unexplained gesture) holds it, but isn't the
+  person's for a gesture gate; and it is false for 1 s after a press on the host's page that came
+  after focus went into the frame (the press gives the page activation before focus leaves it).
+- **`focusField(field)`** (new export): the host's own move into one of its text fields, for a
+  composer that opens focused. Firefox ignores a host's plain `focus()` while a frame that has a
+  gesture of the person's (the selection that opened the composer) holds focus and takes it back on
+  its blur: no focus event, the keys go to the frame (measured; Chromium and WebKit move it).
+  `focusField` blurs the frame first and has the guard watch that focus lands, a frame that keeps it
+  failing take-backs toward its stop. A host that opens a composer with a plain `focus()` beside
+  such a page on Firefox isn't covered (THREAT_MODEL §7).
+Measured, the review's probe (`blurOnly`, `blurPlusInterval`, `focusoutOnly`; the person types a
+38-character sentence 70 ms a key): Firefox before, 38 of 38 keys to the frame, never stopped, 10
+opens; after, at most 1 key to the frame, four `focusTaken`, stopped, no open; Chromium and WebKit
+0 keys, no open, before and after. A page that fights with a gesture of the person's, the person
+clicking the composer: Firefox before, every key lost to `<body>` and nothing counted; after, 1 key
+to the frame, stopped. The host opening its composer with `focusField` beside such a page after the
+person's selection in it: Firefox, all but one key in the composer, stopped after three failed
+take-backs; with a plain `focus()`, every key to the frame. The new probes and the honest ones
+passed three times in a row on all three engines. Rejected: a one-off check of the give-back, or a
+focusout listener alone (the review tried both: the page's re-take races any single check).
+
+CI's slower Firefox then failed the blur probe twice ("got ''"). Reproduced on two cores, four
+workers, 20 runs: 2 failed. The trace: the page's own `focus()` came late (its timer, under load)
+and met the person's press on the composer; Firefox left focus on `<body>` (not the frame, not the
+composer), no move the guard judged, so every key was lost to `<body>`, none reached the frame,
+and nothing was counted. Now a press on a text field that leaves focus on nothing within 300 ms is
+taken into that field (a take-back the page failed if a frame had focus as the person pressed),
+and a display stopped mid-fight gives the field focus back if Firefox leaves it on nothing as the
+frame goes. The probes wait for states (the page armed once its own activation lapsed, the frame
+holding focus, the fight over) instead of times.
+
+**Revisit when** an engine stops blurring the host's window on a move into a frame, or shows a
+press on the frame without `:active`, or Firefox starts doing either (the guard then judges every
+engine alike); browsers give the embedder a way to stop a frame's `focus()` (Permissions Policy's
+`focus-without-user-activation`, Chromium-only and experimental today); a host needs drafts in a
+script whose joiners shape; or MCP Apps defines focus between a host and a view.
 
 ## P110 · 2026-10-26 · After the audit of P106: the scroll-lock rule fails soft, reads only the sheets it may, and sees a fixed body · Accepted
 

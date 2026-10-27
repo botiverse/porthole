@@ -1,9 +1,77 @@
 # Changelog
 
-`@botiverse/porthole`. Each release is a `v*` tag; the reasons for every change are in
-[docs/DECISIONS.md](docs/DECISIONS.md), by the P-numbers below.
+`@botiverse/porthole`. Each published release is a `v*` tag (0.11.0 was never published: see its
+section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
+P-numbers below.
 
 ## Unreleased
+
+After the review of 0.12.0's drafts (P109): a display no longer keeps the keyboard it takes from
+the host's composer, `comments.open` needs the person in the frame that calls it, a page's draft is
+stricter text, and the composer it fills is the person's to act on. What a host must act on comes
+first. 0.11.0 was never published, so its upgrade notes are repeated at the end for hosts coming
+from 0.10.0.
+
+- **Act on these when upgrading:**
+  - **The composer a page's draft fills** (THREAT_MODEL §7, ADOPTING.md `openPageDraft`): an open
+    never replaces, appends to or retargets what the person typed or the place they chose (answer
+    `false`, or show the page's words as a separate suggestion that takes no focus); it takes no
+    focus when it opens and sends on no Enter until the person has focused or edited it (Send is a
+    click until then); it says "Suggested by this page" (drawn by you, outside the frame) until they
+    edit it, and is never shown as one of their own drafts; render it as plain text, and show the
+    anchor's label and quote as isolated text (`<bdi>`, `dir="auto"`). The 0.12.0 one-liner,
+    `comments: ({ anchor, draft }) => composer.open(anchor, { draft })`, does none of this.
+  - **Nothing one click away that posts, submits, resolves, deletes or discards** in a view a
+    frame's report opens, a draft's view included (no "Post" or "Submit review" in it: THREAT_MODEL
+    §6, P107).
+  - **Moving focus into a display yourself:** `display.focus()` (new), not the frame's own
+    `focus()`, which from one of your text fields is taken for the page's and undone.
+  - **Opening your composer focused:** `focusField(textarea)` (new), not `textarea.focus()`: on
+    Firefox a page that has the person's gesture (the selection that opened the composer) and takes
+    focus back on its blur keeps a plain `focus()` from landing, and gets the keys.
+  - **A platform of your own** (not the web platform): implement `focused`, `onFocusTaken` and
+    `focus` on its surfaces, or a display can read what is typed beside it, and `comments` keeps
+    its old gate.
+- **The keyboard given back** (P109): a display's page could move the keyboard into its frame
+  whenever it liked (on Chromium and WebKit with no gesture) and read what the person went on
+  typing in the host's composer. When focus leaves one of the host page's text fields for a
+  display's frame without the person's press on the frame or a Tab into it, `createHost` (every
+  `PortholeView`) gives it back once the move is over, and the display hears `focusTaken`
+  (`{ typing }`; React `onFocusTaken`); it keeps watching that focus stays back. Three within
+  10 s that came while the person typed or that kept focus from staying back, or five within 2 s,
+  stop the display: a `contentError`, "The content kept taking the keyboard from the page; it was
+  stopped." Measured on Chromium, Firefox and WebKit: a page calling `focus()` every 700 ms down to
+  a busy loop, or taking focus back on its own blur, gets none or one key of a sentence before it
+  is stopped; a press on the page's own field, a Tab into it, and an assistive technology's
+  activation keep the keyboard there. Limits (THREAT_MODEL §7 "The keyboard"): on Firefox, which
+  shows the host's page no press in a frame, a page keeps the keyboard if the pointer came over its
+  frame after the person last typed and after the field got focus.
+- **`comments.open` from the frame the person is in** (P109): its gesture gate also needs the host
+  page's focus in the calling frame, so a page no longer opens the composer, draft and all, while
+  the person types in the host's UI (the host page's activation lasts 5 s after any gesture on it;
+  0.12.0's "a click to open" was that). Refused as `no-user-activation` (`not_allowed` to the page).
+  A press in the frame, or a Tab into it, opens it as before.
+- **Stricter draft text** (P109): refused now, before the handler: a joiner (U+200C, U+200D)
+  anywhere but between two letters or marks (first, last, doubled, beside a space or punctuation,
+  or in an emoji sequence, 👩‍💻; Persian's می‌خواهم, Hindi's क्‍ष and Malayalam's എന്‍റെ, ❤️ and 1️⃣
+  still pass), U+2028 and U+2029, blank-looking text (spaces of any kind, U+2800), more than 32
+  blanks in a row, more than two blank lines in a row. The anchor's `label` and `quote` reach the
+  handler without what a person can't see, and are refused if nothing visible is left. The manual
+  and `comments.d.ts` say so.
+- **Docs:** THREAT_MODEL §6, §7, §8 and its status line; P108's "a click to open" corrected;
+  capabilities' `user-activation` described as it is (any gesture on the host's page in the last
+  5 s, `comments` also the person in the frame).
+- New: `focusField`, `DisplayEvents.focusTaken`, `DisplayControls.focus()`, `onFocusTaken` (React),
+  `Surface.focused`, `Surface.onFocusTaken`, `Surface.focus` (optional, the platform seam).
+- **From 0.10.0** (0.11.0's notes, never published on its own; all of it is in 0.12.0):
+  - **Drafts** (P107): send a person's drafts only to the frame that person views, and none to a
+    page with the runtime's `db` and `user` or with egress, or accept that its author and other
+    viewers can learn of them (THREAT_MODEL §7). Upgrade the content server's Porthole before
+    sending drafts: an older shell draws a draft as a posted mark without a marker. A `kind` other
+    than `"posted"` or `"draft"` throws from `annotations.show` (React: `onHostError`, kind
+    `"annotations"`). New: `AnnotationMarkKind`.
+  - **Lint** (P106): `LintRule` and `FileFinding["rule"]` take `"scroll-lock"` (a warning); a
+    switch over rules needs the case.
 
 After the audit of P106's scroll-lock warning (P110): it no longer fails a show or a publish, and
 it reads only the stylesheets it may.
@@ -29,7 +97,9 @@ it reads only the stylesheets it may.
 ## 0.12.0
 
 A page's button can open the host's comment composer with a draft the person reviews and posts
-themselves (P108).
+themselves (P108). 0.12.0 also carries all of 0.11.0, which was never published: read 0.11.0's
+notes below when coming from 0.10.0. (The review of 0.12.0 tightened all of this: see Unreleased,
+P109.)
 
 - **A comment's draft from the page** (P108): `comments.open(anchor, { draft })` opens the host's
   composer starting with `draft` (at most 2,000 characters), which the person edits and posts, or
@@ -39,7 +109,10 @@ themselves (P108).
     Send; arm the composer as THREAT_MODEL §6 arms a view the content brought (no press, and no
     Enter that sends, for 500 ms; Send not focused). `defineRuntimeConformance` now sends a draft.
 
-## 0.11.0
+## 0.11.0 (not published)
+
+Its release stopped at the CI gate (a timed-out Firefox shard) and was never tagged or published;
+everything below shipped in 0.12.0.
 
 The agent hears, before publishing, that its page's own styles hold it to one screen (P106), and
 the manual says a page scrolls as a document. A host can mark a person's unposted comments,

@@ -612,6 +612,311 @@ test.describe("a page reaches only what it declared, at its viewer's level (P086
   });
 });
 
+/** A page with a text field first (a Tab from the host's composer lands in it), then a button. */
+const KEYS_PAGE = `<!doctype html><html><head><title>Keys</title></head><body><input id="field" style="width:200px"><button id="go" style="width:200px;height:40px">go</button><main id="artifact">runtime</main></body></html>`;
+
+/**
+ * The host's own composer, before the displays (so a Tab from it goes into the frame), and what
+ * the display tells the host about the keyboard (P109): each `focusTaken`, and content errors.
+ */
+const hostComposer = (page: Page) =>
+  page.evaluate(() => {
+    const box = document.createElement("textarea");
+    box.id = "host-composer";
+    box.style.cssText = "width:300px;height:60px";
+    document.body.prepend(box);
+    const w = window as unknown as {
+      keyboard: { taken: boolean[]; errors: string[] };
+      portholeHost: { displays: { on(event: string, listener: (detail: never) => void): void }[] };
+    };
+    w.keyboard = { taken: [], errors: [] };
+    const display = w.portholeHost.displays.at(-1);
+    display?.on("focusTaken", (detail: { typing: boolean }) =>
+      w.keyboard.taken.push(detail.typing),
+    );
+    display?.on("contentError", (detail: { message: string }) =>
+      w.keyboard.errors.push(detail.message),
+    );
+  });
+const keyboardOf = (page: Page) =>
+  page.evaluate(
+    () => (window as unknown as { keyboard: { taken: boolean[]; errors: string[] } }).keyboard,
+  );
+const composerText = (page: Page) =>
+  page.evaluate(() => (document.getElementById("host-composer") as HTMLTextAreaElement).value);
+const hostActive = (page: Page) => page.evaluate(() => document.activeElement?.tagName ?? null);
+/**
+ * Until a fight over the keyboard is over (P109): the display stopped, or the composer holding
+ * focus; at most `ms`. It decides nothing (a control that takes the guard out leaves the fight on):
+ * the probes after it do.
+ */
+async function fightOver(page: Page, ms = 10_000): Promise<void> {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if ((await keyboardOf(page)).errors.length > 0 || (await hostActive(page)) === "TEXTAREA") {
+      return;
+    }
+    await page.waitForTimeout(100);
+  }
+}
+
+test.describe("the person at the keyboard (P109)", () => {
+  test.setTimeout(60_000);
+
+  test("a page that takes the keyboard while the person types in the host's composer gets a key or two at most, and is stopped", async ({
+    page,
+  }) => {
+    const { frame } = await show(page, { html: KEYS_PAGE });
+    await hostComposer(page);
+    // The pointer rests over the frame, as after the person selected words in it; the composer
+    // then takes focus beside it (a host's composer opening on `selected`).
+    const box = await page.locator("#displays iframe").boundingBox();
+    await page.mouse.move((box?.x ?? 0) + 120, (box?.y ?? 0) + 60, { steps: 4 });
+    // The page moves the keyboard into its own field, again and again, with no gesture of its own.
+    await frame.evaluate(() => {
+      const field = document.getElementById("field") as HTMLInputElement;
+      setInterval(() => field.focus(), 500);
+    });
+    await page.evaluate(() => document.getElementById("host-composer")?.focus());
+    const text = "my unposted comment about the chart";
+    await page.keyboard.type(text, { delay: 120 });
+    await page.waitForTimeout(300);
+    const typed = await composerText(page);
+    const { taken, errors } = await keyboardOf(page);
+    expect(
+      text.length - typed.length,
+      `probe: the composer kept the person's words but a key or two (got ${JSON.stringify(typed)})`,
+    ).toBeLessThanOrEqual(2);
+    expect(taken.length, "focusTaken heard").toBeGreaterThan(0);
+    expect(errors, "probe: the display that kept taking the keyboard was stopped").toContain(
+      "The content kept taking the keyboard from the page; it was stopped.",
+    );
+  });
+
+  test("a page that takes the keyboard back on its own blur keeps none of it: the composer keeps its words, and comments.open reaches no handler", async ({
+    page,
+  }) => {
+    const { frame, key } = await show(page, {
+      html: KEYS_PAGE,
+      declaration: {},
+      viewer: { level: "view", id: "vic" },
+    });
+    await hostComposer(page);
+    const box = await page.locator("#host-composer").boundingBox();
+    await page.evaluate(() =>
+      addEventListener("message", (event) => {
+        if ((event.data as { armed?: unknown } | null)?.armed === true) {
+          (window as unknown as { armed: boolean }).armed = true;
+        }
+      }),
+    );
+    // Once its own activation has lapsed (this evaluate is a gesture in the frame), the page holds
+    // its field and takes focus back whenever it loses it (the take-back blurs it), with no gesture
+    // or timer of its own (the review of the guard, GK-1: on Firefox this kept every key), and from
+    // the first time it loses it asks for the composer every 400 ms.
+    await frame.evaluate(() => {
+      const field = document.getElementById("field") as HTMLInputElement;
+      const focus = () => field.focus();
+      const w = window as unknown as {
+        porthole: {
+          use(name: string): Promise<{ open(a: unknown, o: unknown): Promise<unknown> }>;
+        };
+      };
+      const ask = () =>
+        setInterval(() => {
+          void w.porthole
+            .use("comments")
+            .then((comments) => comments.open({ name: "card-5" }, { draft: "Approved." }))
+            .catch(() => {});
+        }, 400);
+      const arm = () => {
+        if (navigator.userActivation?.isActive ?? false) {
+          setTimeout(arm, 100);
+          return;
+        }
+        field.addEventListener("blur", focus);
+        field.addEventListener("blur", ask, { once: true });
+        addEventListener("blur", focus);
+        focus();
+        parent.postMessage({ armed: true }, "*");
+      };
+      setTimeout(arm, 100);
+    });
+    // States, not times: the page armed and holding focus, then the person's press on the composer.
+    await page.waitForFunction(
+      () => (window as unknown as { armed?: boolean }).armed === true,
+      null,
+      {
+        timeout: 15_000,
+      },
+    );
+    await expect.poll(() => hostActive(page), { timeout: 10_000 }).toBe("IFRAME");
+    await page.mouse.click((box?.x ?? 0) + 20, (box?.y ?? 0) + 20);
+    const text = "my unposted comment to the team";
+    await page.keyboard.type(text, { delay: 100 });
+    // Until the fight is over: the display stopped, or the composer holding focus.
+    await fightOver(page);
+    const typed = await composerText(page);
+    const { errors } = await keyboardOf(page);
+    const opened = (await runtimeCalls(page, key)).filter((each) => each.capability === "comments");
+    expect(
+      text.length - typed.length,
+      // On Firefox the keys typed while a take-back is fought go to nothing or the frame (measured:
+      // one to the frame at most).
+      `probe: the composer kept the person's words but a few keys (got ${JSON.stringify(typed)})`,
+    ).toBeLessThanOrEqual(3);
+    expect(
+      opened.map((each) => each.args),
+      "probe: no open from the page holding the keyboard reached the handler",
+    ).toEqual([]);
+    expect(
+      errors.includes("The content kept taking the keyboard from the page; it was stopped.") ||
+        (await hostActive(page)) === "TEXTAREA",
+      "probe: the page doesn't keep the keyboard: focus is back in the composer, or the display was stopped",
+    ).toBe(true);
+  });
+
+  test("a composer the host focuses with focusField, beside a page with the person's gesture that takes focus back on its blur, gets their words", async ({
+    page,
+  }) => {
+    const { frame } = await show(page, { html: `${KEYS_PAGE}<p id="words">words to select</p>` });
+    await hostComposer(page);
+    await frame.evaluate(() => {
+      const field = document.getElementById("field") as HTMLInputElement;
+      const focus = () => field.focus();
+      field.addEventListener("blur", focus);
+      addEventListener("blur", focus);
+    });
+    // The person selects words in the page (their gesture, the frame's focus), and the host opens
+    // its composer focused (Firefox ignores a plain focus() here: measured).
+    await frame.locator("#artifact").click({ clickCount: 2 });
+    await expect.poll(() => hostActive(page), { timeout: 10_000 }).toBe("IFRAME");
+    await page.evaluate(() =>
+      setTimeout(() => {
+        const composer = document.getElementById("host-composer") as HTMLTextAreaElement;
+        (window as unknown as { portholeFocusField(field: HTMLElement): void }).portholeFocusField(
+          composer,
+        );
+      }, 50),
+    );
+    // Until the composer has focus, or the display that kept it was stopped.
+    await fightOver(page);
+    const text = "my unposted comment about it";
+    await page.keyboard.type(text, { delay: 100 });
+    await fightOver(page);
+    const typed = await composerText(page);
+    expect(
+      text.length - typed.length,
+      `probe: the composer got the person's words but a key or two (got ${JSON.stringify(typed)})`,
+    ).toBeLessThanOrEqual(2);
+  });
+
+  test("the person's own moves into the frame keep the keyboard: a press on its field, a Tab, an activation that sends the host no event", async ({
+    page,
+  }, info) => {
+    const { frame } = await show(page, { html: KEYS_PAGE });
+    await hostComposer(page);
+    const field = () =>
+      frame.evaluate(() => (document.getElementById("field") as HTMLInputElement).value);
+    // A press on the page's field, after typing in the host's composer.
+    await page.locator("#host-composer").click();
+    await page.keyboard.type("ab");
+    await frame.locator("#field").click();
+    await page.keyboard.type("xy");
+    await page.waitForTimeout(300);
+    expect(await hostActive(page), "a press moved focus into the frame, and it stayed").toBe(
+      "IFRAME",
+    );
+    expect(await composerText(page), "the composer kept its own").toBe("ab");
+    // Firefox focuses the frame's document but not its field on that press, with or without the
+    // guard (measured): the keys go to the frame, not to the field.
+    if (info.project.name !== "firefox") {
+      expect(await field(), "typed into the page's field after a press on it").toBe("xy");
+    }
+    // A Tab from the composer into the frame.
+    await page.locator("#host-composer").click();
+    await page.keyboard.press("Tab");
+    await page.waitForTimeout(300);
+    await page.keyboard.type("t");
+    await page.waitForTimeout(300);
+    expect(await hostActive(page), "a Tab moved focus into the frame, and it stayed").toBe(
+      "IFRAME",
+    );
+    expect(await composerText(page), "the key after the Tab didn't go to the composer").toBe("ab");
+    // An activation in the frame that sends the host's page no event (as an assistive technology's
+    // is; Playwright's evaluate is a gesture in the frame on all three engines, measured), once the
+    // composer has had focus and the host no gesture for longer than activation lasts.
+    await page.locator("#host-composer").click();
+    await page.waitForTimeout(5_500);
+    await frame.evaluate(() => (document.getElementById("field") as HTMLInputElement).focus());
+    await page.waitForTimeout(500);
+    expect(
+      await hostActive(page),
+      "an activation in the frame moved focus there, and it stayed",
+    ).toBe("IFRAME");
+    expect((await keyboardOf(page)).taken, "nothing was taken back").toEqual([]);
+  });
+
+  test("comments.open while the person types in the host's composer reaches no handler, by the page's own call or the shell's; from a press in the frame it does", async ({
+    page,
+  }) => {
+    const { frame, key } = await show(page, {
+      html: KEYS_PAGE,
+      declaration: {},
+      viewer: { level: "view", id: "vic" },
+    });
+    await hostComposer(page);
+    await page.locator("#host-composer").click();
+    // Every 400 ms, past the shell (a raw call) and through it (Firefox gives a frame activation
+    // while the person types in the host's page: measured).
+    await frame.evaluate(() => {
+      const w = window as unknown as {
+        poll: number;
+        porthole: {
+          use(name: string): Promise<{ open(a: unknown, o: unknown): Promise<unknown> }>;
+        };
+      };
+      let n = 0;
+      w.poll = setInterval(() => {
+        n += 1;
+        parent.postMessage(
+          {
+            jsonrpc: "2.0",
+            id: `poll-${n}`,
+            method: "porthole/call",
+            params: {
+              capability: "comments",
+              method: "open",
+              args: { anchor: { name: "card-2", label: "Card 2" }, draft: "Approved. Ship it." },
+            },
+          },
+          "*",
+        );
+        void w.porthole
+          .use("comments")
+          .then((comments) => comments.open({ name: "card-3" }, { draft: "Approved." }))
+          .catch(() => {});
+      }, 400) as unknown as number;
+    });
+    await page.keyboard.type("my own words about the chart, still typing", { delay: 100 });
+    const during = (await runtimeCalls(page, key)).filter((each) => each.capability === "comments");
+    await frame.evaluate(() => clearInterval((window as unknown as { poll: number }).poll));
+    expect(
+      during.map((each) => each.args),
+      "probe: no open reached the handler while the person typed in the host's composer",
+    ).toEqual([]);
+    // The person presses the page's button: its open reaches the composer.
+    await clicked(
+      frame,
+      `const comments = await porthole.use("comments"); return comments.open({ name: "card-4" }, { draft: "Approved" });`,
+    );
+    expect(
+      (await runtimeCalls(page, key)).map((each) => each.args),
+      "a press in the frame opens the composer",
+    ).toEqual([{ anchor: { name: "card-4" }, draft: "Approved" }]);
+  });
+});
+
 test.describe("the asset library (P089)", () => {
   /** A script asset of `artifact`'s library that marks the page it runs in. */
   async function scriptAsset(scope: string, artifact: string, trusted: boolean): Promise<string> {

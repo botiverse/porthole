@@ -277,7 +277,9 @@ display.on("annotation", (report) => {
   drawn), so give a draft's id at random like any other; a `kind` other than `"posted"` or
   `"draft"` throws, as a bad anchor does (React: `onHostError`, kind `"annotations"`). The shell
   is your content server's: upgrade its Porthole first, or an older shell draws a draft as a
-  posted mark without a marker.
+  posted mark without a marker. The view a draft's `activated` opens is guarded like any (below)
+  and puts no "Post", "Submit review" or "Discard" one click away: a page can fake that click on
+  the person's own press in the content (P107, P109).
 - **No drafts to a page that can pass them on**, or accept that it does: a page with the runtime's
   `db` writes and `user` can store who is drafting where (`user.get()` and the marks it is shown)
   for its author and other viewers to read before the draft is posted, and tie the posted comment
@@ -290,8 +292,9 @@ display.on("annotation", (report) => {
   report opens or moves takes no press of any kind for 500 ms after it appears or moves (no
   `pointerdown`, `pointerup`, `click` or key: menu triggers act on a press, and menu items click
   themselves on a release), ignores a press that began before that, opens beside the frame rather
-  than over `rect` where the layout allows, takes no focus, and has no destructive action (resolve,
-  delete) one click away. Making it `inert` while it arms does all of the first:
+  than over `rect` where the layout allows, takes no focus, and has nothing one click away that
+  posts, submits, resolves, deletes or discards. Making it `inert` while it arms does all of the
+  first:
 
   ```js
   // Call placed() each time the view appears or moves. For 500 ms it takes nothing (inert: no
@@ -341,6 +344,37 @@ display.on("annotation", (report) => {
 - **Labels and quotes are the page's text**: shown only as text. Porthole takes out of a label what
   the person can't see; a quote (`exact`) keeps it, to be found again. Hand either to a model only
   as the page's words.
+
+### The keyboard: what a display can take, and what you get
+
+Any display can move the keyboard into its frame (`element.focus()` in the page, with no gesture
+on Chromium and WebKit), and what the person goes on typing in your composer or chat box then goes
+to the page. `createHost` (and so `PortholeView`) guards every display (P109): when focus leaves
+one of your page's text fields (a `<textarea>`, an `<input>` that takes text, a `contenteditable`
+region) for a display's frame without the person's press on the frame or a Tab into it, focus goes
+back to the field, and the display tells you; a display that keeps doing it is stopped.
+
+```js
+display.on("focusTaken", ({ typing }) => toast(typing ? "This page tried to take what you were typing." : "This page tried to take the keyboard."));
+display.on("contentError", ({ message }) => log(message)); // "The content kept taking the keyboard from the page; it was stopped."
+// Moving focus into a display yourself (a "focus the page" shortcut): use the display's own move.
+display.focus(); // not frame.focus(): from a text field, that one is taken for the page's and undone
+// Opening your composer focused (on `selected`, say): Porthole's move, not textarea.focus().
+import { focusField } from "@botiverse/porthole";
+focusField(composer.textarea); // Firefox ignores a plain focus() while a fighting frame holds focus
+```
+
+- **Free:** the guard, on by default, with no option. A page gets at most the keys typed before
+  focus is back (none or one in a sentence, measured on all three engines); three tries while the
+  person types (within 10 s), or five within 2 s, stop the display (`reload()` runs it again).
+- **Yours:** don't move focus from a text field into a display with the frame's own `focus()`
+  (use `display.focus()`), nor into your composer with the field's own `focus()` where a display
+  may hold focus (use `focusField`: on Firefox a page with the person's gesture that takes focus
+  back on its blur keeps a plain `focus()` from landing, and gets the keys); with a platform of your own (a native web view), implement `focused`,
+  `onFocusTaken` and `focus` on its surface, or a display can read what is typed beside it; know
+  the limits (THREAT_MODEL §7 "The keyboard": on Firefox, which shows your page no press
+  in a frame, a page keeps the keyboard if the pointer came over its frame after the person last
+  typed and after the field got focus; moves between two frames aren't judged).
 
 ## 4. Served pages: the host kit
 
@@ -525,9 +559,11 @@ handlers: {
   db: (args, { viewer, declared, instance, changed, signal }) => myApi.db(instance, viewer, args, declared?.rules, { changed, signal }),
   artifact: (args, { viewer, instance }) => myApi.artifact(instance, viewer, args),   // Refused("conflict") when base moved
   assets: (args, { viewer, instance }) => myApi.assets(instance, viewer, args),
-  // true if it opened; a draft (P108) is shown whole and editable, posted only on the person's Send,
-  // the composer armed for 500 ms (THREAT_MODEL §6)
-  comments: ({ anchor, draft }) => composer.open(anchor, { draft }),
+  // true if it opened. Never over the person's own words or place; a page's draft (P108) shown whole,
+  // editable, as the page's suggestion, taking no focus, posted only on the person's Send (below)
+  // (inUse: the composer holds the person's own words, or a place they chose)
+  comments: ({ anchor, draft }) =>
+    composer.inUse() ? false : draft === undefined ? composer.open(anchor) : openPageDraft(composer, anchor, draft),
 },
 // 5. The mount: what this version declared, within what the artifact declares now; null for a
 //    page published before 0.7 (required under a runtime). Before rendering: a stored
@@ -538,6 +574,49 @@ if (shown && !shown.ok) return <VersionError problems={shown.problems} />;   // 
 <PortholeView display="page" instance={instance} declaration={shown ? shown.declaration : null} />
 ```
 
+- **A page's draft in your composer** (P108, P109): `comments.open` reaches your handler only from
+  a gesture with the person in that frame (a press in it, a Tab into it; not their typing in your
+  UI), but the page still picks the moment (the second click of a double click, a field it asked
+  them to type into). So the composer it fills is the person's to act on:
+
+  ```js
+  // A composer the page filled: its words are the page's until the person acts in it.
+  function openPageDraft(composer, anchor, draft) {
+    // Opens beside the frame, and takes no focus: keys stay where the person was typing, so what
+    // they type for the page never lands in a postable comment.
+    composer.open(anchor, { text: draft, focus: false }); // where your composer focuses, focusField
+    // Armed as THREAT_MODEL §6 says: no press of any kind for 500 ms (guardPresses, § Annotations).
+    guardPresses(composer.element).placed();
+    // Said by you, outside the frame where the page can't draw, until they edit it: never shown as
+    // one of their own drafts.
+    composer.setNote("Suggested by this page");
+    composer.input.addEventListener("input", () => composer.setNote(null), { once: true });
+    // Enter sends only once the person has focused or edited the composer themselves (a press in
+    // it, a Tab into it, their typing); until then Send is a click. It opened without focus, and a
+    // page can't move focus into your page's fields, so its focus is theirs.
+    let theirs = false;
+    for (const type of ["pointerdown", "focus", "input"]) {
+      composer.input.addEventListener(type, () => (theirs = true), { once: true });
+    }
+    composer.input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !theirs) event.preventDefault();
+    });
+    return true;
+  }
+  ```
+
+  - Never over the person's words: while the composer holds their text, or a place they chose,
+    answer `false`, or show the page's words as a separate suggestion that takes no focus; never
+    replace, append to or retarget what they wrote.
+  - Show the draft whole, as plain text (a comment that renders as markdown hides an HTML comment
+    or a link definition from readers but not from an agent: render a page-drafted comment as
+    plain text, or show before Send what readers will see); show the anchor's `label` and `quote`
+    as isolated text (`<bdi>`, `dir="auto"`). Porthole has already refused a draft with anything
+    invisible, a line separator or a run of blanks, and taken what can't be seen out of the label
+    and quote.
+  - Nothing one click away in it, or in a draft's view, posts, submits or discards; your own list
+    of a person's drafts (not the frame's markers, which a page can draw too) is how they find
+    theirs.
 - **Built-ins** (`clipboard`, `links`, `downloads`, `comments`) reach every page whose kind offers
   them; everything else only a page that declared it. A page with no declaration (one published
   before 0.7) gets the built-ins through `use` and 0.6's globals as before: give it a declaration

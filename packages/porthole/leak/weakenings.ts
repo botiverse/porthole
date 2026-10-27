@@ -461,12 +461,51 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "          return { ok: true, value: value as Result };",
     },
   ],
+  // The focus guard (P109): every move of the keyboard into a frame taken as the person's, so a
+  // page that calls focus() while the person types in the host's composer keeps their keys.
+  "focus-guard": [
+    {
+      file: "src/platform/focus-guard.ts",
+      find: "    hostMove = null;\n    return moved;",
+      replace: "    hostMove = null;\n    return moved || true;",
+    },
+  ],
+  // What the guard does after a take-back (P109, after GK-1): no watch that focus stays back, a
+  // look only while a text field has focus, and focus left on nothing after a press on a field not
+  // taken back, as before the review of the guard; so a page that takes focus back on its own
+  // blur, where Firefox lands the take-back on nothing, keeps it.
+  "focus-guard-watch": [
+    {
+      file: "src/platform/focus-guard.ts",
+      find: "    const watched = contest;\n",
+      replace: "    const watched = null as typeof contest;\n",
+    },
+    {
+      file: "src/platform/focus-guard.ts",
+      find: "    if (polling === 0 && (frames.size > 0 || contest !== null)) {",
+      replace: "    if (polling === 0 && frames.size > 0 && takesText(known)) {",
+    },
+    {
+      file: "src/platform/focus-guard.ts",
+      find: "      press !== null &&\n",
+      replace: "      false &&\n      press !== null &&\n",
+    },
+  ],
+  // comments.open's gesture in the calling frame (P109): any gesture on the host's page will do,
+  // the person typing in the host's own composer included.
+  "comments-in-frame": [
+    {
+      file: BRIDGE,
+      find: "        if (inFrame(capability) && options.focused?.() === false) {",
+      replace: "        if (false) {",
+    },
+  ],
   // A comment's draft taken as the page gave it (P108): past the limit, unseen characters, not text.
   "comment-draft": [
     {
       file: REQUESTS,
-      find: "    (draft !== undefined && !draftText(draft))",
-      replace: "    false",
+      find: "(draft !== undefined && !draftText(draft))",
+      replace: "false",
     },
   ],
   // The asset library's CSP (P089), taken out by the served harness: scripts from it run

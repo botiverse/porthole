@@ -212,7 +212,9 @@ async function sourceOf(pathname: string): Promise<Response | null> {
 const PORTHOLE_HOST_PAGE = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Porthole host</title></head>
 <body><main id="displays"></main><script type="module">
-  import { createHost, Refused } from "/src/index.ts";
+  import { createHost, focusField, Refused } from "/src/index.ts";
+  // The host's own move into one of its text fields (P109), for cases that open a composer.
+  window.portholeFocusField = focusField;
   import { memoryRuntime } from "/leak/runtime/memory.ts";
   // The capability runtime's reference services (P085-P090), in memory, one per key a case names
   // (two people's displays share one): their calls are the cases' oracle. Assets go to the
