@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.13.0
 
 After the review of 0.12.0's drafts (P109): a display no longer keeps the keyboard it takes from
 the host's composer, `comments.open` needs the person in the frame that calls it, a page's draft is
