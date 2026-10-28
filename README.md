@@ -88,6 +88,15 @@ against its runtime services (0.7). A release publishes only a commit of main wh
 **Who uses it:** Raft (its workspace Artifacts, served by its content Worker, and its HTML
 attachment previews) and Ferry.
 
+**On one machine, for one person** (an agent harness's web UI, a local tool): it works the same.
+An opaque frame needs no second domain and no server; served pages run on loopback, the app on
+`http://localhost:<port>` and content on `http://a-<id>.content.localhost:<port>`, each its own
+site ([ADOPTING.md § Local development](docs/ADOPTING.md#local-development)). Isolation still
+matters there: a page an agent wrote can carry instructions from what it read, and without the
+wall it could read the UI's keys or call the agent's own local API. If content is fully trusted
+and only needs showing, a plain iframe is enough; Porthole earns its place once you want
+streaming, sizing and theming, MCP Apps, host functions, or annotations on top.
+
 Read, in order:
 
 1. [docs/PRINCIPLES.md](docs/PRINCIPLES.md) — the rules decisions are made by.
