@@ -363,7 +363,8 @@ display.on("contentError", ({ message }) => log(message)); // "The content kept 
 // Moving focus into a display yourself (a "focus the page" shortcut): use the display's own move.
 display.focus(); // not frame.focus(): from a text field, that one is taken for the page's and undone
 // Opening your composer focused: only in a comment mode the person started, for a composer that can
-// only save a draft (THREAT_MODEL §6, P112); any other view a report opens takes no focus. Then
+// only save a draft (Enter adds it to the batch; submitting is only your own "Submit N"), and that
+// shows plainly it is a draft (THREAT_MODEL §6, P112); any other view a report opens takes no focus. Then
 // Porthole's move, not textarea.focus().
 import { focusField } from "@botiverse/porthole";
 focusField(composer.textarea); // Firefox ignores a plain focus() while a fighting frame holds focus

@@ -167,7 +167,9 @@ Whatever the use:
   One exception to "takes no focus" (P112): in a comment mode the person started themselves (the
   host's own control, never a report), a composer their selection opens (`selected`) may take
   focus, with `focusField`, if all it can do is save a draft: nothing in it posts, submits or sends,
-  and the rest of this guard holds (no press for 500 ms, beside the frame). The page still chooses
+  Enter in it only adds the draft to the batch (submitting is only ever the host's own "Submit N"
+  control, outside the composer), it shows plainly that it is a draft (so the person can see where
+  their keys are going), and the rest of this guard holds (no press for 500 ms, beside the frame). The page still chooses
   when `selected` comes, so what it can do with that moment is put the person's next keys into a
   draft they see and can discard, never send one; outside such a mode, or for a composer that can
   send, it takes no focus.
