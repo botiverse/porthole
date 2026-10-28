@@ -87,10 +87,10 @@
     "test:bundle": "node scripts/bundle-test.ts"
   },
   "devDependencies": {
-    "@modelcontextprotocol/ext-apps": "2.0.3",
-    "@modelcontextprotocol/server-basic-react": "2.0.3",
-    "@modelcontextprotocol/server-basic-vanillajs": "2.0.3",
-    "@modelcontextprotocol/server-threejs": "2.0.3",
+    "@modelcontextprotocol/ext-apps": "2.0.4",
+    "@modelcontextprotocol/server-basic-react": "2.0.4",
+    "@modelcontextprotocol/server-basic-vanillajs": "2.0.4",
+    "@modelcontextprotocol/server-threejs": "2.0.4",
     "@playwright/test": "1.63.0",
     "@types/node": "26.6.3",
     "@types/react": "19.3.0",
