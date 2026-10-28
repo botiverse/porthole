@@ -155,7 +155,20 @@ function results(value: unknown): AnchorResult[] | null {
     if (rect === null) {
       return null;
     }
-    out.push({ id: each.id, state: "attached", ...(rect === undefined ? {} : { rect }) });
+    // A place among the marks (P112): a whole number below the most marks a show carries.
+    const order = each.order;
+    if (
+      order !== undefined &&
+      !(typeof order === "number" && Number.isInteger(order) && order >= 0 && order < LIMITS.marks)
+    ) {
+      return null;
+    }
+    out.push({
+      id: each.id,
+      state: "attached",
+      ...(rect === undefined ? {} : { rect }),
+      ...(order === undefined ? {} : { order }),
+    });
   }
   return out;
 }

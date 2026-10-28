@@ -560,6 +560,13 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "a followed mark's box comes as it moves, for that mark only, at most 60 a second, clamped to the frame, until the host stops (P112)",
     ),
   },
+  // A mark's place is a whole number below the most marks (P112).
+  "order-check": {
+    specs: [ANNOTATE],
+    fails: all(
+      "every found mark's place in the document comes with its box, offscreen ones too; a place that isn't one is no report (P112)",
+    ),
+  },
   // A nested page's shell keeps its own namespace (P111): a page that says the shell's words, just
   // before a call of its own, has its comments.open believed.
   "shell-namespace": {

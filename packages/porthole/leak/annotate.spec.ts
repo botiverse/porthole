@@ -1853,6 +1853,57 @@ ${GUARD}
   expect(await fired(), "a key on the view after 500 ms").toEqual(["plain"]);
 });
 
+test("every found mark's place in the document comes with its box, offscreen ones too; a place that isn't one is no report (P112)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    content: SCROLLING,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#far")).toBeAttached();
+  // Shown last first: the places are the document's, not the show's.
+  await display.annotate("show", [
+    textMark("far", "far paragraph says", 1),
+    textMark("near", "The near paragraph.", 2),
+    textMark("lost", "words nowhere in it"),
+  ]);
+  const anchored = await next(display, "anchored");
+  const placeOf = (id: string) => anchored.results.find((each) => each.id === id)?.order;
+  expect(placeOf("near")).toBe(0);
+  expect(placeOf("far"), "the offscreen mark has its place too").toBe(1);
+  expect(placeOf("lost"), "an orphan has none").toBeUndefined();
+  const before = (await reports(display)).length;
+  for (const order of [-1, 1.5, 500, "0"]) {
+    await frame.evaluate(
+      (place) =>
+        parent.postMessage(
+          {
+            jsonrpc: "2.0",
+            method: "porthole/annotate.anchored",
+            params: {
+              results: [
+                {
+                  id: "near",
+                  state: "attached",
+                  rect: { x: 0, y: 0, width: 1, height: 1 },
+                  order: place,
+                },
+              ],
+            },
+          },
+          "*",
+        ),
+      order,
+    );
+  }
+  await page.waitForTimeout(500);
+  expect(
+    (await reports(display)).slice(before),
+    "probe: a place that isn't a whole number below the most marks is no report",
+  ).toEqual([]);
+});
+
 test("a followed mark's box comes as it moves, for that mark only, at most 60 a second, clamped to the frame, until the host stops (P112)", async ({
   page,
 }) => {

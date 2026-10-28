@@ -512,6 +512,14 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "          if (false) {",
     },
   ],
+  // A mark's place in the document (P112) taken as the page gives it: any number at all.
+  "order-check": [
+    {
+      file: "src/annotate/validate.ts",
+      find: '      !(typeof order === "number" && Number.isInteger(order) && order >= 0 && order < LIMITS.marks)',
+      replace: "      false",
+    },
+  ],
   // A nested page's shell (P111) passes on what its page says in the shell's own namespace: a page
   // that says its shell's activation turned on is believed.
   "shell-namespace": [

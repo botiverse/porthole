@@ -106,6 +106,12 @@ export interface AnchorResult {
   readonly state: AnchorState;
   /** Where it is now, when attached. */
   readonly rect?: AnnotationRect;
+  /**
+   * Its place in the document among the found marks, from 0 (P112): where it starts, offscreen
+   * marks included, for a host that lists marks in reading order. The content's word: an order to
+   * sort by, never a fact.
+   */
+  readonly order?: number;
 }
 
 /** What the frame reports, once the host has checked it. */

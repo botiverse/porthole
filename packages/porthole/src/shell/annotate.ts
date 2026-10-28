@@ -53,6 +53,9 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const elementRect = Element.prototype.getBoundingClientRect;
       const rangeRect = Range.prototype.getBoundingClientRect;
       const rangeRects = Range.prototype.getClientRects;
+      const setStart = Range.prototype.setStart;
+      const setStartBefore = Range.prototype.setStartBefore;
+      const compareBoundaryPoints = Range.prototype.compareBoundaryPoints;
       const attachShadow = Element.prototype.attachShadow;
       const getAttribute = Element.prototype.getAttribute;
       const listenOn = EventTarget.prototype.addEventListener;
@@ -851,7 +854,44 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
       };
 
-      const resultOf = (mark) => (mark.found === null ? { id: mark.id, state: "orphaned" } : { id: mark.id, state: "attached", rect: box(rectOf(mark.found)) });
+      // Where each found mark starts in the document, in order (P112): its place in a list the host
+      // sorts, offscreen ones too. Read now, every time results are told.
+      const startOf = (found) => {
+        const range = createRange.call(document);
+        if (found.range) {
+          setStart.call(range, found.range.startContainer, found.range.startOffset);
+        } else {
+          setStartBefore.call(range, found.element);
+        }
+        return range;
+      };
+      const ordersOf = () => {
+        const placed = [];
+        for (const mark of marks) {
+          if (mark.found !== null) {
+            try {
+              placed.push({ mark, start: startOf(mark.found) });
+            } catch (_) {}
+          }
+        }
+        placed.sort((a, b) => {
+          try {
+            return compareBoundaryPoints.call(a.start, Range.START_TO_START, b.start);
+          } catch (_) {
+            return 0;
+          }
+        });
+        const orders = new Map();
+        placed.forEach((each, at) => orders.set(each.mark, at));
+        return orders;
+      };
+      const resultOf = (mark, orders) => {
+        if (mark.found === null) {
+          return { id: mark.id, state: "orphaned" };
+        }
+        const order = (orders || ordersOf()).get(mark);
+        return Object.assign({ id: mark.id, state: "attached", rect: box(rectOf(mark.found)) }, order === undefined ? {} : { order });
+      };
       // Two boxes more than 0.5 px apart on any side (or one of them unknown).
       const apart = (a, b) => !a || !b || Math.abs(a.x - b.x) > 0.5 || Math.abs(a.y - b.y) > 0.5 || Math.abs(a.width - b.width) > 0.5 || Math.abs(a.height - b.height) > 0.5;
       // What the host was last told of each mark (mark.told), so a settle tells only what moved.
@@ -860,7 +900,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         if (!told || told.state !== result.state) {
           return true;
         }
-        return result.state === "attached" && apart(told.rect, result.rect);
+        return result.state === "attached" && (apart(told.rect, result.rect) || told.order !== result.order);
       };
       const report = (pairs) => {
         if (pairs.length > 0) {
@@ -870,7 +910,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           tell(M.anchored, { results: pairs.map((pair) => pair.result) });
         }
       };
-      const resultsOf = (only) => marks.map((mark) => ({ mark, result: resultOf(mark) })).filter((pair) => !only || moved(pair.mark, pair.result));
+      const resultsOf = (only) => {
+        const orders = ordersOf();
+        return marks.map((mark) => ({ mark, result: resultOf(mark, orders) })).filter((pair) => !only || moved(pair.mark, pair.result));
+      };
       // Finds every mark again; tells the host every result (after show, or when a state changed),
       // only the marks that moved (once the content is quiet), or nothing.
       const anchorAll = (all, quiet) => {

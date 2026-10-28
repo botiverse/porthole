@@ -5963,3 +5963,9 @@ takes it only while it asked for it. Each item below landed on its own, with its
   frame, only while the host follows a mark. The box is where to put a card, nothing more: a page
   can move it within its frame, as it can draw anything there. Tested: `leak/annotate.spec.ts` "a
   followed mark's box comes as it moves…"; negative control `track-checks` (any mark, any rate).
+- **A mark's place** (P2). Each attached result in `anchored` carries `order`: its place among the
+  found marks by where it starts in the document, from 0, offscreen marks included (orphans have
+  none); a change of place is reported as a move is. The host takes a whole number below the most
+  marks a show carries, or drops the report. The page knows where its anchors are anyway; the host
+  sorts by it and takes it as nothing more. Tested: `leak/annotate.spec.ts` "every found mark's
+  place in the document…"; negative control `order-check` (any number taken).
