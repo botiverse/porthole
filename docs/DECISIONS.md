@@ -6052,3 +6052,60 @@ takes it only while it asked for it. Each item below landed on its own, with its
   `comments` (the host's own UI; the composer is the person's, under the host's duties), and `user`
   (it only reads). Tested: `test/pass-on.test.ts`, each channel alone.
 
+## P115 · 2026-10-28 · The host clears the page's selection: `annotations.clearSelection()` · Accepted
+
+**Context.** In a comment mode (Raft's web app, Kirby) the person selects words, the host's
+composer opens beside them, and they post a comment or add a draft. The selection stays: the
+browser keeps drawing it (gray, since focus is in the host's composer) over words that now carry
+a mark, until the person clicks in the page. 0.13 and 0.14 give the host no way to clear it;
+Kirby asked for one (`selection.clear()`) to call once the selection is used.
+
+**Decision.** `display.annotations.clearSelection()`, beside `start`, `stop`, `show`, `focus`,
+`track` and `clear` (a control of the display's annotations, named for what it clears: `clear`
+already means every mark). It sends `porthole/annotate.clearSelection` (no params) to the frame,
+only where the config declares `annotate` (else it throws, as the others do), and to no frame that
+runs later (nothing is kept: a new frame has no selection). The shell then:
+
+- removes the page's selection with `Selection.prototype.removeAllRanges` as it was before content
+  ran (taken with the DOM's other functions), on `Document.prototype.getSelection`'s answer, so a
+  page that replaced either keeps nothing the host cleared;
+- forgets what it held of it: the report waiting for the selection to settle (250 ms), the one it
+  last told and its box, and a scroll's follow-up of it. So nothing is told back: the
+  `selectionchange` the clear makes finds nothing to report (no `unselected`: the host knows), and
+  the same words selected again are a new selection, told as any is;
+- changes nothing else: marks (posted and drafts), the active and the followed mark, the mode,
+  and an element picked. With nothing selected it is a no-op; it clears in any mode, text
+  selection on or not (the host is trusted with the page's view, as it is with `focus`, which
+  scrolls it).
+
+There is no highlight of Porthole's own to remove: a settled selection is drawn by the browser
+(the shell draws marks, and an outline only while picking).
+
+**Trust.** Host to frame only. The host takes no `clearSelection` from a frame (it is no report);
+the shell takes it only from its frame's parent and the host's origins, as every host message
+(a page that posts it to its own window is dropped). It gives the page nothing it hasn't: a page
+can clear or select its own text at any time, and can select the words again right after (the
+host hears that as a selection, while it asked for text). A report the shell posted just before
+the clear arrived (a selection that settled in the same moment) still reaches the host after its
+call; a host that cares drops a `selected` it gets right after clearing, as it would one it
+didn't ask for.
+
+**Rejected.** A `selection` namespace (`display.selection.clear()`, as Kirby wrote it): the
+selection is the annotation runtime's (only `annotate` reports it), and one namespace for
+annotations is what hosts already hold. Clearing the selection inside `stop()` or `clear()`: a
+host stops the mode or redraws its marks for other reasons, with a selection the person still
+means to use. Telling the host `unselected` after a clear: it would arrive after the host's own
+call, as if the person did it, and a host that opens or closes UI on it would act twice.
+Clearing through the page's own `getSelection().removeAllRanges()`: a page (or a library it
+loads) that patched it would keep the highlight.
+
+Tested: `test/annotate.test.ts` (sent as it is, after the handshake only, never replayed, throws
+without `annotate`; the shell uses the function it took); `leak/annotate.spec.ts` "clearSelection
+takes the page's selection away and tells nothing back; marks and drafts stay, the next selection
+is told (P115)", on a page that replaced `removeAllRanges`, with no selection, in text mode and with
+the mode stopped; `leak/served/nested.spec.ts` "the host's clearSelection reaches the nested page
+through its shell (P115)"; negative control `clear-selection` (the page's own `removeAllRanges`, and the
+told selection kept: each alone fails the probe, measured on Chromium).
+
+**Revisit when** a host needs the element picked (`elements: true`) or a held block cleared too
+(they leave no highlight now), or the MCP Apps spec gains a host-to-view way to clear a selection.

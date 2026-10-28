@@ -4,6 +4,17 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **New:** `display.annotations.clearSelection()` (P115): takes the page's text selection away,
+  and the highlight the browser leaves on it, once the host has used it (a comment posted, a draft
+  added; asked for by Raft's comment mode). The shell clears it with the DOM's own
+  `removeAllRanges`, taken before content runs, and reports nothing back (no `unselected`); marks,
+  drafts, the mode and a followed mark stay. With nothing selected, nothing happens. Host to frame
+  only (`porthole/annotate.clearSelection`); an older shell ignores it.
+- **Tests:** `leak/annotate.spec.ts` "clearSelection takes the page's selection away…", and through
+  a nested page's shell (`leak/served/nested.spec.ts`); negative control `clear-selection`.
+
 ## 0.14.0
 
 **Withdrawn: do not use; stay on 0.13.0.** It was published by mistake on 2026-10-28, while

@@ -4,12 +4,13 @@
  * functions as they were. Plain ES2020 like the rest of the shell; no template literals (it sits
  * in one).
  *
- * The host drives it (`porthole/annotate.start|stop|show|focus|clear`) and it reports
- * (`porthole/annotate.selected|unselected|cancelled|anchored|activated`):
+ * The host drives it (`porthole/annotate.start|stop|show|focus|clear|track|clearSelection`) and it
+ * reports (`porthole/annotate.selected|unselected|cancelled|anchored|activated|tracked`):
  * - picking an element: the element under the pointer (or finger) is outlined with its name; a
  *   click or tap picks it, and the content's own handlers never see that click (unless the content
  *   patched the DOM's built-ins, P105); Escape cancels (while selecting text too, P112);
  * - selecting text: each selection that settles is reported, with where it is, and its clearing;
+ *   the host's `clearSelection` (P115) takes the page's selection away and tells nothing back;
  * - marks: each anchor is found in the content as it is now (its CSS selector, its text where it
  *   was, its text anywhere, its words with any spacing) and drawn over it, in a layer of the
  *   shell's own (a closed shadow root), again whenever the content changes; what can't be found
@@ -41,6 +42,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         activated: "porthole/annotate.activated",
         track: "porthole/annotate.track",
         tracked: "porthole/annotate.tracked",
+        clearSelection: "porthole/annotate.clearSelection",
       };
       // The DOM's own functions, taken before content runs.
       const elementFromPoint = Document.prototype.elementFromPoint;
@@ -50,6 +52,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const createElement = Document.prototype.createElement;
       const createElementNS = Document.prototype.createElementNS;
       const selectionOf = Document.prototype.getSelection;
+      const removeAllRanges = Selection.prototype.removeAllRanges;
       const elementRect = Element.prototype.getBoundingClientRect;
       const rangeRect = Range.prototype.getBoundingClientRect;
       const rangeRects = Range.prototype.getClientRects;
@@ -1425,6 +1428,23 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           case M.track:
             track(params.id);
             break;
+          case M.clearSelection: {
+            // The host used the person's selection (P115): it goes, and with it what the shell
+            // held of it (a report waiting to settle, the one last told, a scroll's follow-up), so
+            // nothing is told back: the host knows, and the selectionchange this makes finds
+            // nothing to report. Marks, a pick and the mode stay as they are. With nothing
+            // selected, nothing changes.
+            cancelLater(selectionTimer);
+            selectionTimer = 0;
+            reported = null;
+            reportedBox = null;
+            selectionScrolled = false;
+            const selection = selectionOf.call(document);
+            if (selection !== null) {
+              removeAllRanges.call(selection);
+            }
+            break;
+          }
           case M.clear:
             track(null);
             pendingFocus = null;

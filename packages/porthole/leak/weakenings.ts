@@ -531,6 +531,21 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "",
     },
   ],
+  // The host's clearSelection (P115) through the page's own Selection, and the shell keeps the
+  // selection it told: a page that patched the way out keeps its selection, and the clear is told
+  // back as an `unselected`.
+  "clear-selection": [
+    {
+      file: "src/shell/annotate.ts",
+      find: "              removeAllRanges.call(selection);",
+      replace: "              selection.removeAllRanges();",
+    },
+    {
+      file: "src/shell/annotate.ts",
+      find: "            selectionTimer = 0;\n            reported = null;\n            reportedBox = null;\n",
+      replace: "            selectionTimer = 0;\n",
+    },
+  ],
   // A nested page's shell (P111) passes on what its page says in the shell's own namespace: a page
   // that says its shell's activation turned on is believed.
   "shell-namespace": [

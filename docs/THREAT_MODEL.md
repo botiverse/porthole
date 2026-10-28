@@ -671,6 +671,15 @@ own frame, below the shell, P111), so:
   `Element.prototype.matches` on them), so content can reach the closed shadow root that way,
   read the markers and rewrite them (the review of P104, on all three engines). Nothing in the
   layer is secret: it holds only what `show` sent, which the content can read anyway.
+- *Clearing the selection* (P115). `annotations.clearSelection()` is the host's word to the frame
+  (`porthole/annotate.clearSelection`), with nothing back: the shell takes the page's selection
+  away through `Selection.prototype.removeAllRanges` as it was before content ran (control
+  `clear-selection`: a page that replaced it keeps its selection otherwise) and forgets the one it
+  told, so the clear makes no `unselected` or `selected`. It goes host to frame only: the host
+  takes no such message from a frame, and the shell takes it only from its frame's parent (a page
+  that posts it to its own window is dropped). It gives the page nothing new: a page can clear or
+  select its own text at any time, and can select the words again right after a clear (the host
+  hears that as any selection, while it asked for text).
 - *What content can always do.* Hide, shrink, move or cover the layer (its scripts can rewrite the
   layer's style, lay elements over it, or transform the page it sits in), change its words so a
   mark is orphaned, or flood the shared rate so real reports are refused. It can also make the

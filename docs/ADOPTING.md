@@ -267,7 +267,18 @@ display.on("annotation", (report) => {
   if (report.type === "activated") bubble.openBeside(frame, report.rect, report.id);
   if (report.type === "anchored") bubble.follow(report.results);
 });
+// The selection was used (a comment posted, a draft added): take it, and its highlight, away.
+composer.onDone(() => display.annotations.clearSelection());
 ```
+
+- **Clear the selection once you used it** (`annotations.clearSelection()`, P115): the page's text
+  selection, and the highlight the browser leaves on it (gray while focus is in your composer),
+  stay until something clears them; the person's next click in the page would, and this does it
+  when your composer is done with it. No `unselected` follows it (you know), and nothing else
+  changes: your marks and drafts, the mode (`start`) and a followed mark stay. With nothing
+  selected it does nothing; it is never sent to a frame that runs later (a reload has no selection
+  to clear). Like `start` and `show`, only where the config declares `annotate`. The shell is your
+  content server's: an older one ignores it.
 
 - **Ids say nothing, and a count only where the page may know it**: the content reads every
   `show`. Who wrote what stays in your view, outside the frame.

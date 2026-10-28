@@ -132,7 +132,7 @@ const reference = {
   /** Drives a display's annotations (`annotate`); what it throws comes back as a string. */
   annotate(
     id: number,
-    operation: "start" | "stop" | "show" | "focus" | "track" | "clear",
+    operation: "start" | "stop" | "show" | "focus" | "track" | "clear" | "clearSelection",
     argument?: AnnotateMode | readonly AnnotationMark[] | string,
   ): string | null {
     const controls = displays.get(id)?.handle.annotations;
@@ -158,6 +158,9 @@ const reference = {
           break;
         case "clear":
           controls.clear();
+          break;
+        case "clearSelection":
+          controls.clearSelection();
           break;
       }
       return null;

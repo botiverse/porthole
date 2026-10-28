@@ -399,6 +399,34 @@ test.describe("a nested page (P111)", () => {
     await expect.poll(async () => (await seen(page)).activated).toEqual(["m1"]);
   });
 
+  test("the host's clearSelection reaches the nested page through its shell (P115)", async ({
+    page,
+  }) => {
+    const shown = await show(page);
+    const child = (await shown.shell()).childFrames()[0];
+    if (child === undefined) {
+      throw new Error("the shell has no child frame");
+    }
+    const selected = () => child.evaluate(() => String(getSelection()));
+    await child.evaluate(() => {
+      const range = document.createRange();
+      range.selectNodeContents(document.getElementById("target") as Node);
+      getSelection()?.removeAllRanges();
+      getSelection()?.addRange(range);
+    });
+    expect(await selected()).toBe("target");
+    await page.evaluate(() => {
+      (
+        window as unknown as {
+          portholeHost: { displays: { annotations: { clearSelection(): void } }[] };
+        }
+      ).portholeHost.displays
+        .at(-1)
+        ?.annotations.clearSelection();
+    });
+    await expect.poll(selected, { message: "the nested page's selection is gone" }).toBe("");
+  });
+
   test("the shell's words are the shell's alone: a page that says them, to its parent or to the host's window, moves nothing", async ({
     page,
   }) => {

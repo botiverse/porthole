@@ -425,6 +425,11 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           tracking = null;
           toFrame(ANNOTATE_METHODS.clear, {});
         },
+        clearSelection() {
+          // Host → frame only, and kept for no later frame (P115).
+          needsAnnotate("clearSelection");
+          toFrame(ANNOTATE_METHODS.clearSelection, {});
+        },
       };
 
       const hostContext = (): HostContext => {

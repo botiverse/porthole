@@ -245,6 +245,13 @@ export interface AnnotationControls {
   track(id: string | null): void;
   /** Removes every mark. */
   clear(): void;
+  /**
+   * Takes the page's text selection away (P115), its highlight with it: for when the host has
+   * used it (a comment posted, a draft added). No `unselected` follows; marks (posted and drafts),
+   * the mode and a followed mark stay as they are. Nothing selected: nothing happens. Not kept for
+   * a frame that runs later (it has no selection to clear).
+   */
+  clearSelection(): void;
 }
 
 export interface DisplayControls {

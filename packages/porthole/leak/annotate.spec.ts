@@ -270,6 +270,69 @@ test("selecting text: a settled selection is reported with its anchor and box, a
   await next(display, "unselected", count);
 });
 
+test("clearSelection takes the page's selection away and tells nothing back; marks and drafts stay, the next selection is told (P115)", async ({
+  page,
+}) => {
+  // A page that patched the Selection's own way out: the host's clear is the shell's, not its.
+  const display = await referenceHost.launch(page, {
+    config: annotated(),
+    content: `${WIDGET}<script>Selection.prototype.removeAllRanges = function () {}; Selection.prototype.empty = function () {};</script>`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#more")).toBeVisible();
+  const selectedText = () => frame.evaluate(() => String(getSelection()));
+  const textReports = async (after: number) =>
+    (await reports(display))
+      .slice(after)
+      .filter((each) => each.type === "selected" || each.type === "unselected");
+  // Nothing selected, nothing shown, no mode: nothing happens, nothing is told.
+  expect(await display.annotate("clearSelection")).toBeNull();
+  expect(await reports(display)).toEqual([]);
+
+  await display.annotate("show", [
+    textMark("posted", "Quarterly notes", 2),
+    { ...textMark("draft", "Read more"), kind: "draft" },
+  ]);
+  await next(display, "anchored");
+  await display.annotate("start", { elements: false, text: true });
+  await frame.locator("#p1").click({ clickCount: 3 });
+  const selected = await next(display, "selected");
+  expect(quoteOf(selected.anchor).trim()).toBe("Costs fell by 3%.");
+
+  const count = (await reports(display)).length;
+  expect(await display.annotate("clearSelection")).toBeNull();
+  await expect.poll(selectedText, { message: "probe: the page's selection is gone" }).toBe("");
+  // Past the selection's settle (250 ms): neither an `unselected` nor the old selection again.
+  await page.waitForTimeout(800);
+  expect(await textReports(count), "probe: nothing is told back").toEqual([]);
+
+  // Marks and drafts stay where they are, in the shell's own state.
+  for (const id of ["posted", "draft"]) {
+    const before = (await reports(display)).length;
+    expect(await display.annotate("focus", id)).toBeNull();
+    const focused = await next(display, "anchored", before);
+    expect(
+      focused.results.map((each) => each.state),
+      `the ${id} mark is still found`,
+    ).toEqual(["attached"]);
+  }
+
+  // The same words selected again are told: the shell forgot the one it told before.
+  const again = (await reports(display)).length;
+  await frame.locator("#p1").click({ clickCount: 3 });
+  const reselected = await next(display, "selected", again);
+  expect(quoteOf(reselected.anchor).trim()).toBe("Costs fell by 3%.");
+
+  // With the mode stopped, the host still clears what is selected; twice is as once.
+  await display.annotate("stop");
+  const stopped = (await reports(display)).length;
+  expect(await display.annotate("clearSelection")).toBeNull();
+  expect(await display.annotate("clearSelection")).toBeNull();
+  await expect.poll(selectedText, { message: "probe: cleared with no mode on" }).toBe("");
+  await page.waitForTimeout(500);
+  expect(await textReports(stopped)).toEqual([]);
+});
+
 test("picking and selecting together: a click picks an element, a drag selects text", async ({
   page,
 }) => {
