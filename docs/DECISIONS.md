@@ -5972,6 +5972,19 @@ and now a script's too (`sandbox`, where a served script had none). **Tested:**
 its own is an opaque origin…" (each opaque; its script wrote nothing to the shell's origin's
 storage); negative control `file-sandbox` (a file without its sandbox).
 
+**Workers in a nested page (the CTO's follow-up #85).** Whether the sandbox on a script's answer
+refuses a worker, measured on full Chromium, the headless shell, WebKit and Firefox
+(`leak/served/nested-workers.spec.ts`): it refuses none, every outcome the same with it taken out
+(the `file-sandbox` control). A worker from a script of the page's own set, classic or module, is
+refused on every engine, sandbox or not: a worker's script must be its creator's origin, and a
+nested page's is opaque (Chromium throws `SecurityError`, WebKit and Firefox fire `error`). A worker
+from a Blob URL starts and answers on every engine, and loads the set's scripts (`importScripts`,
+CORS-free) and, on WebKit and Firefox, its modules; Chromium refuses a module worker from a Blob URL
+in an opaque document, one that imports nothing included (no script's answer is involved). So no
+answer needs its sandbox taken off for a worker, and none is: the narrowest fix (no sandbox on a
+`Sec-Fetch-Dest: worker` answer) would fix nothing. The agent manual already teaches workers from
+`blob:` URLs only.
+
 ## P112 · 2026-10-28 · 0.14's comment UX: what annotations add for a host's comment modes · Accepted
 
 **Context.** Raft's comment design (its modes A–C, a card that follows its mark, a list in document

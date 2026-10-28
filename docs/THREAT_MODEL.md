@@ -5,7 +5,7 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes Porthole 0.13.0 (2026-10-27). A review on 2026-10-19 found gaps, and every decision it led to
+**Status.** This describes Porthole 0.14.0 (2026-10-28). A review on 2026-10-19 found gaps, and every decision it led to
 has merged ([§8](#8-fixes-in-flight) lists them). P096 changed the negative-control runner and CI,
 and the shipped conformance probes' messages and timing, not what they check. P104 (0.9.0's
 annotation markers) had a review of its own, and P105, in 0.10.0, is what it led to. 0.11.0 was
@@ -16,9 +16,10 @@ around it). The review of 0.12.0's drafts led to P109, in 0.13.0: a display can 
 `createHost` now gives back (§6, §7 "The keyboard"); `comments.open` needs the person in the
 calling frame; a page's draft text is stricter, and the composer it fills is the person's to act
 on (§7). 0.13.0 also makes P106's lint fail soft and read only what it may (P110, no change to
-isolation). Unreleased: P111 adds a nested page (`nested: true`, S3): the framed address is
-Porthole's shell alone and the page its opaque child, so a realm the page can't reach tells the host
-when the person, not the page, pressed in it (§7 "The keyboard", `comments`).
+isolation). 0.14.0 adds a nested page (P111, `nested: true`, S3): the framed address is Porthole's
+shell alone and the page its opaque child, so a realm the page can't reach tells the host when the
+person, not the page, pressed in it (§7 "The keyboard", `comments`); and P112's annotation
+additions for a host's comment modes (hints, as every report is, §7).
 
 ## 1. Two layers
 
@@ -353,7 +354,10 @@ encrypted into the path, since WebKit keeps no cookie in a frame (P083).
   within the hour. Every answer below the sealed prefix carries a CSP sandbox, never
   `allow-same-origin` (a page's `allow-scripts`, every other file's runs nothing): a file opened on
   a tab of its own (an SVG or XML file with a script) is opaque, never the shell's origin (negative
-  control `file-sandbox`). Assets and Porthole's libraries aren't served to a nested page yet.
+  control `file-sandbox`). The sandbox refuses no worker (measured on the four engines): a nested
+  page's workers come from Blob URLs (a worker from its set's own script is refused by its opaque
+  origin, sandbox or not), and those load the set's scripts. Assets and Porthole's libraries aren't
+  served to a nested page yet.
 
 **The host must**
 
@@ -862,7 +866,7 @@ section.
 The decisions below come from the 2026-10-19 review, and all of them have merged. Each row says
 what was wrong, what holds now, and the limit its decision accepts, if any. Later reviews' decisions
 are in the status line and in DECISIONS.md: P105 (after the review of P104), P109 (after the review
-of 0.12.0's drafts), P111 (a nested page, S3; unreleased).
+of 0.12.0's drafts), P111 (a nested page, S3; in 0.14.0).
 
 | Decision | State | What it closes | Sections |
 | --- | --- | --- | --- |

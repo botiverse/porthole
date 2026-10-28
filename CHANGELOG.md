@@ -4,12 +4,14 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.14.0
 
 A nested page (P111): the address a served artifact's frame loads is Porthole's shell alone, and the
 page runs in its child frame with an opaque origin, so the person's press in the page is seen in
 full Chromium too, where a cross-site frame is out of process and the host's page sees nothing of
-it. Fixes porthole#53.
+it. Fixes porthole#53. And what annotations add for a host's comment modes (P112): Escape while
+selecting text, a mark followed as it moves, marks' places in the document, holding a block on
+touch, and `mayPassOn`.
 
 - **New:** `nested: true` on an artifact config with domain isolation (`presets.artifact`,
   `defineDisplays` options). The host kit serves the shell at the framed address and the page at
@@ -28,6 +30,9 @@ it. Fixes porthole#53.
   activation it reports after a stall of over 100 ms is uncertain, no one's gesture, until it lapses.
 - **Every file of a nested page sandboxed** (after the review): a script's answer too, so no file
   opened on a tab of its own runs on the shell's origin.
+- **Workers in a nested page** (measured, P111): from Blob URLs, which may `importScripts` the
+  set's scripts; a worker from the set's own script is refused (the page's origin is opaque), and
+  Chromium refuses a Blob module worker there. The sandbox on scripts' answers refuses none.
 - **New event** `storage` (`{ used }`, once per run) for displays whose storage is the in-memory
   stand-in (opaque, nested): whether the page touched `localStorage` or `sessionStorage`.
 - **Annotations (P112):** Escape while selecting text reports `cancelled` too (the page keeps
