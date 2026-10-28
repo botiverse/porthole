@@ -217,8 +217,8 @@ export function sandboxTokens(config: PortholeConfig): string[] {
     case "opaque":
       return ["allow-scripts"];
     case "domain":
-      // Nested (P111), this frame holds Porthole's shell, on the content origin, and the page is
-      // the shell's child (`PAGE_SANDBOX_TOKENS`).
+      // Nested (P111), this frame holds Porthole's shell, on a label of its own where no content
+      // runs with this origin (P114), and the page is the shell's child (`PAGE_SANDBOX_TOKENS`).
       return ["allow-scripts", "allow-same-origin"];
     case "external":
       // The host may add a documented few (popups, modals, downloads), never top navigation.

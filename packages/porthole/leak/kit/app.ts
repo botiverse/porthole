@@ -44,6 +44,12 @@ export function kitConfigs(source: string): Record<string, PortholeConfig> {
   return {
     inlineWidget: presets.inlineWidget({ isolation: "domain", contentOrigins: [source] }),
     artifact: presets.artifact({ isolation: "domain", contentOrigins: [source] }),
+    // A nested page (P111): its shell on a label of its own (P114), which the edge must route too.
+    artifactNested: presets.artifact({
+      isolation: "domain",
+      contentOrigins: [source],
+      nested: true,
+    }),
     url: presets.url({ contentOrigins: [source] }),
   };
 }
@@ -224,7 +230,15 @@ export async function startKit(settings: KitSettings): Promise<Kit> {
             : null;
         case "artifact":
           return PAGES.has(`${document.id}@${document.version}`)
-            ? { scope, document: { kind: "artifact", id: document.id, version: document.version } }
+            ? {
+                scope,
+                document: {
+                  kind: "artifact",
+                  id: document.id,
+                  version: document.version,
+                  ...(document.preset === "artifactNested" ? { preset: "artifactNested" } : {}),
+                },
+              }
             : null;
         case "external":
           return { scope, document: { kind: "external", url: app.url } };
@@ -246,10 +260,17 @@ export async function startKit(settings: KitSettings): Promise<Kit> {
       return Promise.resolve(html === undefined ? null : { html });
     },
     upstream: proxyTo(),
-    // Clean addresses (P068): a scope's / is its stored page's first version, /v/2 its second.
+    // Clean addresses (P068): a scope's / is its stored page's first version, /v/2 its second, /n
+    // the first nested (P111, its shell on a label of its own: P114).
     entry: {
       authorizeUrl: `${settings.appOrigin}/porthole/authorize`,
       at: (scope, path) => {
+        if (path === "/n" && SCOPE.test(scope)) {
+          return {
+            scope,
+            document: { kind: "artifact", id: "page", version: "1", preset: "artifactNested" },
+          };
+        }
         const version = path === "/" ? "1" : /^\/v\/([12])$/u.exec(path)?.[1];
         return version === undefined || !SCOPE.test(scope)
           ? null

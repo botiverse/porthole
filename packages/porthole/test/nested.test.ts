@@ -11,7 +11,8 @@ import { ConfigError } from "../src/config/validate.ts";
 import { personMoved, shellGesture, type FocusMove } from "../src/platform/focus-guard.ts";
 import { FRAME_SHELL_RUNTIME, frameShellScript } from "../src/shell/frame.ts";
 import { nestedShellCsp, nestedShellResponse } from "../src/server/nested.ts";
-import { createServer } from "../src/server/index.ts";
+import { createServer, isNestedLabel, nestedLabelOf, prefixedName } from "../src/server/index.ts";
+import { LIBRARY_FILES } from "../src/libraries/files.generated.ts";
 
 /**
  * A nested page (P111): its config, its sandbox (never `allow-same-origin`, held statically over
@@ -398,5 +399,169 @@ describe("/server for a nested page (P111)", () => {
       { viewer: "ada" },
     );
     expect((await porthole.handle(ask(location.url, "script", "cross-site")))?.status).toBe(404);
+  });
+});
+
+describe("a nested page's shell on a label of its own (P114, porthole#56)", () => {
+  const SITE = "example-usercontent.com";
+  const SOURCE = `https://*.${SITE}`;
+  const encode = (text: string) => new TextEncoder().encode(text);
+  const files: Record<string, string> = {
+    "index.html": "<!doctype html><p>files</p>",
+    "app.js": "window.ran = true;",
+  };
+  const server = (more: { name?: (scope: string) => string; reserved?: string[] } = {}) =>
+    createServer({
+      content: { domain: SITE, scheme: "https", ...more },
+      secret: new Uint8Array(32).fill(7),
+      hostOrigins: [HOST],
+      configs: {
+        artifact: nested(),
+        plain: presets.artifact({ isolation: "domain", contentOrigins: [SOURCE] }),
+        inlineWidget: presets.inlineWidget({ isolation: "domain", contentOrigins: [SOURCE] }),
+      },
+      artifacts: {
+        get: () =>
+          Promise.resolve({
+            files: Object.fromEntries(
+              Object.entries(files).map(([name, body]) => [
+                name,
+                { size: encode(body).byteLength, sha256: "", type: "text/plain" },
+              ]),
+            ),
+            read: (name: string) =>
+              Promise.resolve(files[name] === undefined ? null : encode(files[name] ?? "")),
+          }),
+      },
+      assets: { get: () => Promise.resolve(null) },
+    });
+  const framed = (url: string) =>
+    new Request(url, {
+      headers: {
+        "sec-fetch-dest": "iframe",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-site": "cross-site",
+      },
+    });
+  const nestedPage = (scope: string) => ({
+    scope,
+    document: { kind: "artifact" as const, id: "set", version: "1" },
+  });
+  const plainPage = (scope: string) => ({
+    scope,
+    document: { kind: "artifact" as const, id: "set", version: "1", preset: "plain" },
+  });
+
+  test("the shell's label is its scope's own, one per scope, never a content label: its frame, its page and its files are there", async () => {
+    const porthole = server({ name: prefixedName("a-") });
+    const location = await porthole.issue(nestedPage("k3x9"), { viewer: "ada" });
+    const label = nestedLabelOf("a-k3x9");
+    expect(isNestedLabel(label)).toBe(true);
+    expect(label).toMatch(/^porthole-[a-z2-7]{24}$/u);
+    expect(location.origin).toBe(`https://${label}.${SITE}`);
+    expect(location.origin).not.toBe(porthole.originFor("k3x9"));
+    expect(new URL(location.url).origin).toBe(location.origin);
+    // One per scope: another nested page of it shares it, another scope's is another.
+    const again = await porthole.issue(
+      { scope: "k3x9", document: { kind: "artifact", id: "other", version: "2" } },
+      { viewer: "ada" },
+    );
+    expect(again.origin).toBe(location.origin);
+    expect((await porthole.issue(nestedPage("k3x8"), { viewer: "ada" })).origin).not.toBe(
+      location.origin,
+    );
+    // The scope's other displays stay on the scope's label.
+    expect((await porthole.issue(plainPage("k3x9"), { viewer: "ada" })).origin).toBe(
+      porthole.originFor("k3x9"),
+    );
+    const shell = await porthole.handle(framed(location.url));
+    expect(shell?.status).toBe(200);
+    const csp = shell?.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain(`frame-src ${location.origin}/__porthole/f/`);
+    const html = (await shell?.text()) ?? "";
+    const page = /"page":"([^"]+)"/u.exec(html)?.[1] ?? "";
+    expect(page.startsWith(`${location.origin}/__porthole/f/`)).toBe(true);
+    const answer = await porthole.handle(framed(page));
+    expect(answer?.status).toBe(200);
+    expect(answer?.headers.get("content-security-policy")).toContain(
+      `frame-ancestors ${location.origin} ${HOST}`,
+    );
+    // The keyed default names its shells the same way.
+    const keyed = server();
+    const keyedAt = await keyed.issue(nestedPage("k3x9"), { viewer: "ada" });
+    expect(keyedAt.origin).toBe(
+      `https://${nestedLabelOf(new URL(keyed.originFor("k3x9")).hostname.split(".")[0] ?? "")}.${SITE}`,
+    );
+  });
+
+  test("the scope's label never answers a nested page: not its frame's ticket, not its sealed address", async () => {
+    const porthole = server({ name: prefixedName("a-") });
+    const scope = porthole.originFor("k3x9");
+    const location = await porthole.issue(nestedPage("k3x9"), { viewer: "ada" });
+    const moved = `${scope}${new URL(location.url).pathname}${new URL(location.url).search}`;
+    const there = await porthole.handle(framed(moved));
+    expect(there?.status).toBe(401);
+    expect(await there?.text()).not.toContain("<title>Porthole</title>");
+    // Its sealed address, taken to the scope's label: nothing.
+    const fresh = await porthole.issue(nestedPage("k3x9"), { viewer: "ada" });
+    const html = (await (await porthole.handle(framed(fresh.url)))?.text()) ?? "";
+    const page = new URL(/"page":"([^"]+)"/u.exec(html)?.[1] ?? "");
+    for (const address of [page.pathname, `${page.pathname}app.js`]) {
+      const answer = await porthole.handle(framed(`${scope}${address}`));
+      expect(answer?.status, address).toBe(401);
+    }
+  });
+
+  test("the shell's label answers nothing but nested pages: no other display, clean address, asset, library, entry or app", async () => {
+    const porthole = server({ name: prefixedName("a-") });
+    const shell = `https://${nestedLabelOf("a-k3x9")}.${SITE}`;
+    // Another display of the scope, its ticket taken to the shell's label: refused (and spent).
+    for (const instance of [
+      plainPage("k3x9"),
+      { scope: "k3x9", document: { kind: "shell" as const, preset: "inlineWidget" } },
+    ]) {
+      const location = await porthole.issue(instance, { viewer: "ada" });
+      const url = new URL(location.url);
+      const answer = await porthole.handle(framed(`${shell}${url.pathname}${url.search}`));
+      expect(answer?.status, instance.document.kind).toBe(401);
+    }
+    // A plain page's sealed address, taken there: refused.
+    const plain = await porthole.issue(plainPage("k3x9"), { viewer: "ada" });
+    const html = (await (await porthole.handle(framed(plain.url)))?.text()) ?? "";
+    const sealed = /\/__porthole\/f\/[A-Za-z0-9_-]{40,}\//u.exec(html)?.[0] ?? "";
+    expect(sealed).not.toBe("");
+    expect((await porthole.handle(framed(`${shell}${sealed}`)))?.status).toBe(401);
+    const library = Object.keys(LIBRARY_FILES)[0] ?? "";
+    expect(library).not.toBe("");
+    expect((await porthole.handle(framed(`${porthole.originFor("k3x9")}${library}`)))?.status).toBe(
+      200,
+    );
+    for (const address of [
+      "/",
+      "/v/1/",
+      `/_blob/${"a".repeat(32)}`,
+      library,
+      "/__porthole/entry?code=x",
+      "/__porthole/enter?ticket=x",
+      "/__porthole/session",
+    ]) {
+      const answer = await porthole.handle(framed(`${shell}${address}`));
+      expect(answer?.status, address).toBe(404);
+    }
+    // A label of Porthole's form that names no scope's shell is nothing either, and any other
+    // porthole- label isn't served.
+    expect((await porthole.handle(framed(`https://porthole-x.${SITE}/`)))?.status).toBe(404);
+  });
+
+  test("no host's naming makes a porthole- label, and a reserved one is never a shell's", async () => {
+    expect(() => prefixedName("porthole-")).toThrow(/Porthole's own/u);
+    const named = server({ name: (scope) => `porthole-${scope}` });
+    await expect(named.issue(plainPage("x"), { viewer: "ada" })).rejects.toThrow(/porthole-/u);
+    const reserved = server({ name: prefixedName("a-"), reserved: ["porthole-*"] });
+    await expect(reserved.issue(nestedPage("x"), { viewer: "ada" })).rejects.toThrow(
+      /reserve no porthole- label/u,
+    );
+    // A label reserved by the host is the host's, a shell's form or not.
+    expect(await reserved.handle(framed(`https://${nestedLabelOf("a-x")}.${SITE}/`))).toBeNull();
   });
 });

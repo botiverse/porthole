@@ -202,13 +202,14 @@ holds the page and needs no stable origin, the shell writes it into an opaque
 frame instead.
 
 A **nested** page (P111) splits the shell from the page. The address the host frames
-serves Porthole's shell alone: a document with no content, on the content origin. It
+serves Porthole's shell alone: a document with no content, on an origin of its own (a
+label of the scope's, `porthole-<…>`, on which nothing else is ever served, P114). It
 frames the page in a child sandboxed without `allow-same-origin` (an opaque origin) at
-the page's sealed files' address, fetched without a cookie, and passes messages between
-the host and the page:
+the page's sealed files' address on that origin, fetched without a cookie, and passes
+messages between the host and the page:
 
 ```
-Host app                  Shell (content origin)            Page (opaque child)
+Host app                  Shell (its own origin)            Page (opaque child)
    │  frame src = ticketed URL ──►│ frames the sealed address ───►│ runtime + page
    │◄── the page's messages ──────│◄── postMessage (by source) ───│
    │── the host's messages ──────►│── postMessage ───────────────►│
@@ -281,7 +282,11 @@ several displays on one page are in [THREAT_MODEL.md](THREAT_MODEL.md).
    bounds it and uses it as a UI hint, never as a permission (P053).
    A nested page (P111) is the one place they don't: the shell is a document of its
    own, the page's parent, on another origin than the page's (opaque), so the page
-   reaches nothing of the shell's realm. The shell trusts the page's messages by
+   reaches nothing of the shell's realm. Nor does any other content: the shell's
+   origin is a label of its own that hosts nothing but nested pages' shells, their
+   opaque pages, those pages' files and status pages (P114), never the scope's
+   origin, where the scope's other displays run content with `allow-same-origin`
+   (porthole#56). The server holds that rule, not the host's layout. The shell trusts the page's messages by
    `event.source` alone and passes them on unchanged, never in its own namespace
    (`porthole/shell/`); what it says in that namespace is the shell's own word (its
    transient activation, which only a press or key in the page turns on, and whether

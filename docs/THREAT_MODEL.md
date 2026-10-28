@@ -19,7 +19,10 @@ on (§7). 0.13.0 also makes P106's lint fail soft and read only what it may (P11
 isolation). 0.14.0 adds a nested page (P111, `nested: true`, S3): the framed address is Porthole's
 shell alone and the page its opaque child, so a realm the page can't reach tells the host when the
 person, not the page, pressed in it (§7 "The keyboard", `comments`); and P112's annotation
-additions for a host's comment modes (hints, as every report is, §7).
+additions for a host's comment modes (hints, as every report is, §7). Unreleased (0.14.1): P114
+(porthole#56) serves a nested page's shell on a label of its own, on which nothing but nested
+pages' shells, their pages, those pages' files and status pages is ever served, so no other
+display of the scope is same-origin with the shell (S3).
 
 ## 1. Two layers
 
@@ -336,6 +339,16 @@ encrypted into the path, since WebKit keeps no cookie in a frame (P083).
   403 that says `denied`.
 - A nested page (`nested: true`, P111): the framed address answers Porthole's shell alone, its
   script the only one its CSP runs, framing and fetching only the origin's sealed files' prefix.
+  **The shell's origin hosts nothing but the shell, its opaque page, the sealed files and status
+  pages** (P114, porthole#56): the shell, the page and its files are served on a label of the
+  scope's own, `porthole-<24 base32>` (`nestedLabelOf`), never on the scope's label, where its
+  other displays (inline and live widgets, MCP apps, artifacts that aren't nested) run agent-made
+  content with `allow-same-origin`. `/server` holds it: that label answers no clean address,
+  entry, asset, library, app or other display, and takes no other instance's ticket, cookie or
+  sealed address; the scope's label answers no nested page (its clean address goes on to the
+  shell's label with a one-time ticket); no host's naming makes a `porthole-` label. So no
+  content, of any scope, can read the shell's realm (its word to the host, the page's sealed
+  address) or drive it (`leak/served/nested-siblings.spec.ts`, negative control `shell-label`).
   The page is the shell's child, `sandbox="allow-scripts"` (never `allow-same-origin`, held by a
   static check over every sandbox Porthole writes) and the same sandbox in its own CSP, so it is an
   opaque origin in its frame and on a tab; it is loaded, and loads its files, at its sealed address
@@ -371,6 +384,10 @@ encrypted into the path, since WebKit keeps no cookie in a frame (P083).
   uncached (the default; `authorizeTtlSeconds` in the host kit) or call `content.forget(…)` when
   revoking, or a cached answer holds for up to that long.
 - Send the page's `frame-src`.
+- With nested pages, route the shell's label (`porthole-<…>.<domain>`) to the content server as
+  every content label is (a wildcard needs nothing; a pattern of the host's own, `a-*`, must add
+  it). A content Worker of the host's own serves nested pages on that label alone, and nothing
+  else there (P114).
 
 **Not guaranteed**
 
@@ -875,7 +892,8 @@ section.
 The decisions below come from the 2026-10-19 review, and all of them have merged. Each row says
 what was wrong, what holds now, and the limit its decision accepts, if any. Later reviews' decisions
 are in the status line and in DECISIONS.md: P105 (after the review of P104), P109 (after the review
-of 0.12.0's drafts), P111 (a nested page, S3; in 0.14.0).
+of 0.12.0's drafts), P111 (a nested page, S3; in 0.14.0), P114 (a nested page's shell on a label of
+its own, after porthole#56; unreleased).
 
 | Decision | State | What it closes | Sections |
 | --- | --- | --- | --- |

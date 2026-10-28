@@ -555,7 +555,10 @@ entry: {
 ### Nested pages: the page below Porthole's shell
 
 `nested: true` (P111) on an artifact kind served by the host kit puts the page in a frame of its
-own below Porthole's shell, on the same origin, with an opaque origin of its own. Do it where people
+own below Porthole's shell, with an opaque origin of its own. The shell, the page and its files are
+served on a label of the scope's own, `porthole-<24 base32>.<content domain>` (P114), not on the
+scope's label: the scope's other displays run content there with `allow-same-origin`, which would
+reach the shell (porthole#56). Do it where people
 type beside your displays: in full Chromium (a person's browser, not Playwright's headless shell) a
 served page's frame is out of process, and your page can't see a press in it, so without nesting a
 real click into the page's field is taken back and `comments.open` from a real click is refused
@@ -572,7 +575,15 @@ const displays = defineDisplays({
 ```
 
 Nothing else changes on your page: the same `createHost` (or `PortholeFrame`), the same handlers
-and events, the same `frame-src`. The display has one more event, `storage` (`{ used }`, once per
+and events, the same `frame-src` (the content domain's wildcard covers the shell's label). Your
+frames route answers the shell's origin (`issue`'s location); a clean address stays on the scope's
+label and sends the browser on to the shell's with a one-time ticket.
+
+**Route the shell's label.** `porthole-<…>.<content domain>` must reach the content server as
+your other labels do. Wildcard DNS and a wildcard certificate (`*.<content domain>`) already cover
+it; a route, an edge rule or a firewall that matches labels by a pattern of yours (`a-*`) must let
+`porthole-*` through too. Every `porthole-` label is Porthole's: your naming may not make one
+(`content.name` giving one throws), and `reserved` may not hold one a shell would be on. The display has one more event, `storage` (`{ used }`, once per
 run: whether the page touched `localStorage` or `sessionStorage`, never what it kept), for you to
 count the pages that would need storage. A nested page's workers come from Blob URLs (a worker from
 a script of its own set is refused: its origin is opaque), which may `importScripts` the set's
@@ -580,14 +591,21 @@ scripts; Chromium refuses a Blob module worker there. Not yet with a nested page
 and Porthole's libraries (`egress.libraries`); the config refuses them.
 
 What a content origin serves for a nested page (`/server` does all of it; a content Worker of your
-own answers the same, with the helpers `/server` exports: `nestedShellResponse`,
-`NESTED_FILE_HEADERS`, `nestedAncestors`). `<origin>` is the artifact's own,
-`https://<label>.<content domain>`; `<token>` is the access in the path (Porthole's sealed
-session, or a signed token of your own: the shell only needs addresses under the prefix).
+own answers the same, with the helpers `/server` exports: `nestedLabelOf`, `nestedShellResponse`,
+`NESTED_FILE_HEADERS`, `nestedAncestors`). `<origin>` is the shell's own,
+`https://<nestedLabelOf(label)>.<content domain>`, where `label` is the scope's label (the one its
+other displays are served on); `<token>` is the access in the path (Porthole's sealed session, or a
+signed token of your own: the shell only needs addresses under the prefix). Your frame location
+for a nested page is on `<origin>`.
+
+**The rule** (P114): `<origin>` answers the four rows below and Porthole's status pages, nothing
+else (no other display, no clean address, no asset, no app), and the scope's label never answers a
+nested page's shell, page or files. That is what keeps the shell's realm (its word to your page,
+the page's sealed address) out of every other display's reach.
 
 | Request | Answer |
 | --- | --- |
-| The framed address (a ticket's, a cookie's reload, an entered clean address), a navigation | 200, `text/html`: Porthole's shell, `nestedShellResponse(compiled, { origin, origins: hostOrigins, page: "<origin>/__porthole/f/<token>/<entry>", renew: { url: "<origin>/__porthole/f/<token>/__porthole/renew", expires } })`. Headers: `Content-Security-Policy: default-src 'none'; script-src 'sha256-<its script>'; frame-src <origin>/__porthole/f/; connect-src <origin>/__porthole/f/; base-uri 'none'; form-action 'none'; frame-ancestors <host origins>`; `Cache-Control: no-store`; `Referrer-Policy: no-referrer`; `X-Content-Type-Options: nosniff`; the served `Permissions-Policy`. No content in it. Any other request there: 404. |
+| `<origin>/__porthole/d/<key>`, the framed address (a ticket's, a cookie's reload; an entered clean address on the scope's label answers a `303` here with a one-time ticket), a navigation | 200, `text/html`: Porthole's shell, `nestedShellResponse(compiled, { origin, origins: hostOrigins, page: "<origin>/__porthole/f/<token>/<entry>", renew: { url: "<origin>/__porthole/f/<token>/__porthole/renew", expires } })`. Headers: `Content-Security-Policy: default-src 'none'; script-src 'sha256-<its script>'; frame-src <origin>/__porthole/f/; connect-src <origin>/__porthole/f/; base-uri 'none'; form-action 'none'; frame-ancestors <host origins>`; `Cache-Control: no-store`; `Referrer-Policy: no-referrer`; `X-Content-Type-Options: nosniff`; the served `Permissions-Policy`. No content in it. Any other request there: 404. |
 | `<origin>/__porthole/f/<token>/<page>` (the shell's child, or a tab) | The page as served before (the shell's runtime and the page), its plan's `origins` the content origin alone (`[<origin>]`) and its storage `memory`. `Content-Security-Policy: <the page's directives, its files' prefix opened>; sandbox allow-scripts; frame-ancestors <origin> <host origins>` (never `allow-same-origin`). Access from `<token>` alone: no cookie is sent (the page's origin is opaque), and never decide by `Origin` (it is `null`) or `Sec-Fetch-Site` (`cross-site`). |
 | `<origin>/__porthole/f/<token>/<file>` (the page's loads) | As served files are, plus `Cross-Origin-Resource-Policy: cross-origin` and `Access-Control-Allow-Origin: *` (`NESTED_FILE_HEADERS`): the opaque page's images, scripts, modules, fonts and fetches are cross-origin. Every one carries a CSP sandbox, never `allow-same-origin`: a non-page file `default-src 'none'; sandbox`, a script its directives plus `sandbox`, so none opened on a tab of its own (an SVG, an XML file) runs on the shell's origin. |
 | `<origin>/__porthole/f/<token>/__porthole/renew` | Only the shell's own fetch (`Sec-Fetch-Site: same-origin`, not a navigation): `{ "base": "<origin>/__porthole/f/<new token>/", "expires": <epoch ms> }`, `no-store`; anything else 403. The shell renews 5 minutes before `expires` and moves the page to the new base. |

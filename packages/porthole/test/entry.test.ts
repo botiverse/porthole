@@ -4,6 +4,7 @@ import { presets } from "../src/index.ts";
 import type { InstanceRef } from "../src/isolation/types.ts";
 import {
   createContentHost,
+  nestedLabelOf,
   prefixedName,
   type ContentHostOptions,
   type EntryOptions,
@@ -396,6 +397,97 @@ describe("a clean address opened directly", () => {
     const app = kit({}, { at: () => page("other") });
     const { answer } = await open(app, new Browser(), `${origin("abc")}/`, "ada");
     expect(answer.status).toBe(409);
+  });
+});
+
+describe("a nested page's clean address (P114)", () => {
+  const SITE = "usercontent.example.net";
+  const encode = (text: string) => new TextEncoder().encode(text);
+  const files: Record<string, string> = {
+    "index.html": '<!doctype html><title>set</title><h1 id="t">entry</h1>',
+    "docs/a.html": '<!doctype html><title>a</title><h1 id="t">a</h1>',
+  };
+  const nestedKit = () =>
+    kit(
+      {
+        configs: (source) => ({
+          artifact: presets.artifact({
+            isolation: "domain",
+            contentOrigins: [source],
+            nested: true,
+          }),
+        }),
+        source: () =>
+          Promise.resolve({
+            files: Object.fromEntries(
+              Object.entries(files).map(([name, body]) => [
+                name,
+                { size: encode(body).byteLength, sha256: "", type: "text/html" },
+              ]),
+            ),
+            read: (name: string) =>
+              Promise.resolve(files[name] === undefined ? null : encode(files[name] ?? "")),
+          }),
+      },
+      {
+        at: (scope, path) =>
+          path.startsWith("/v/1/")
+            ? { instance: page(scope), base: "/v/1/", file: path.slice(5), pinned: true }
+            : null,
+      },
+    );
+
+  it("goes on to the shell's own label with a ticket of its own, the page it was entered at below its base", async () => {
+    const app = nestedKit();
+    const browser = new Browser();
+    const clean = `${origin("abc")}/v/1/docs/a.html`;
+    const { hops, answer, at } = await open(app, browser, clean, "ada");
+    const shell = `https://${nestedLabelOf("a-abc")}.${SITE}`;
+    expect(shell).toMatch(/^https:\/\/porthole-[a-z2-7]{24}\.usercontent\.example\.net$/u);
+    expect(hops.map((each) => new URL(each).origin + new URL(each).pathname).slice(0, 4)).toEqual([
+      `${origin("abc")}/v/1/docs/a.html`,
+      AUTHORIZE,
+      `${origin("abc")}/__porthole/entry`,
+      `${origin("abc")}/v/1/docs/a.html`,
+    ]);
+    // The scope's label never answers the shell: it sends the browser on, once.
+    expect(new URL(at).origin).toBe(shell);
+    expect(new URL(at).pathname).toMatch(/^\/__porthole\/d\/[a-z2-7]{16}$/u);
+    expect(new URL(at).searchParams.get("ticket")).not.toBeNull();
+    expect(answer.status).toBe(200);
+    const html = await answer.text();
+    expect(html).toContain("<title>Porthole</title>");
+    expect(html).not.toContain('id="t"');
+    const framed = /"page":"([^"]+)"/u.exec(html)?.[1] ?? "";
+    expect(framed.startsWith(`${shell}/__porthole/f/`)).toBe(true);
+    expect(framed.endsWith("/docs/a.html")).toBe(true);
+    // The shell's label keeps a session of its own: a reload there opens without a ticket.
+    const reload = await visit(app, browser, `${shell}${new URL(at).pathname}`);
+    expect(reload.status).toBe(200);
+    expect(await reload.text()).toContain("<title>Porthole</title>");
+    // The ticket was one use.
+    expect((await visit(app, new Browser(), at)).status).toBe(401);
+    // Entered again, the scope's label sends it on again; it never serves the shell itself.
+    const again = await visit(app, browser, clean);
+    expect(again.status).toBe(303);
+    expect(new URL(again.headers.get("location") ?? "").origin).toBe(shell);
+  });
+
+  it("an entry code is never a ticket at the shell's label: only its own browser redeems it, at its entry", async () => {
+    const app = nestedKit();
+    // The instance's document address on the shell's label, from one entry of the person's own.
+    const { at } = await open(app, new Browser(), `${origin("abc")}/v/1/`, "ada");
+    const document = `${new URL(at).origin}${new URL(at).pathname}`;
+    // An attacker's code, taken to another browser at that address: no shell, no session.
+    const attacker = new Browser();
+    const begin = await visit(app, attacker, `${origin("abc")}/v/1/`);
+    const authorized = await visit(app, attacker, begin.headers.get("location") ?? "", "eve");
+    const code = new URL(authorized.headers.get("location") ?? "").searchParams.get("code") ?? "";
+    const victim = new Browser();
+    const answer = await visit(app, victim, `${document}?ticket=${code}`);
+    expect(answer.status).toBe(401);
+    expect(await answer.text()).not.toContain("<title>Porthole</title>");
+    expect(answer.headers.getSetCookie()).toEqual([]);
   });
 });
 

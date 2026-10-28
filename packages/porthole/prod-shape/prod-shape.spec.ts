@@ -223,6 +223,42 @@ test.describe("prod shape", () => {
     });
   }
 
+  test("a nested page's shell is on a label of its own through the edge and DNS: framed, and from its clean address (P114)", async ({
+    page,
+  }) => {
+    const shellLabel = /^https:\/\/porthole-[a-z2-7]{24}\.content\.test$/u;
+    await page.goto(`${APP}/login?as=probe`);
+    const asked = await page.context().request.post(`${APP}/api/frames`, {
+      data: {
+        instance: {
+          scope: "nest-a",
+          document: { kind: "artifact", id: "page", version: "1", preset: "artifactNested" },
+        },
+      },
+      headers: { origin: APP },
+    });
+    expect(asked.status()).toBe(201);
+    const location = (await asked.json()) as { url: string; origin: string };
+    expect(location.origin).toMatch(shellLabel);
+    expect(new URL(location.url).origin).toBe(location.origin);
+    // Framed on the app's page (its CSP's frame-src is the content domain's wildcard): the shell,
+    // and below it the page, served over the edge's TLS on the shell's label.
+    await page.evaluate((url) => {
+      const frame = document.createElement("iframe");
+      frame.src = url;
+      document.body.append(frame);
+    }, location.url);
+    await expect
+      .poll(() => page.frames().some((frame) => frame.url().startsWith(`${location.origin}/`)))
+      .toBe(true);
+    await expect.poll(() => framesShow(page, ["artifact"]), { timeout: 15_000 }).toBe(true);
+    // Its clean address is on the scope's label (k-nest-b), which sends a tab on to the shell's.
+    await page.goto(`${content("k-nest-b")}/n`);
+    await expect.poll(() => new URL(page.url()).origin, { timeout: 15_000 }).toMatch(shellLabel);
+    expect(new URL(page.url()).origin).not.toBe(location.origin);
+    await expect(page.frameLocator("iframe").locator("#artifact")).toHaveText("version 1");
+  });
+
   test("a content domain that holds the app's origin is never served: opaque, and said once", async ({
     page,
     request,

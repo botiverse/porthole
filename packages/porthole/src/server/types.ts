@@ -101,6 +101,11 @@ export interface TicketRecord {
     /** Whether that address names this version and no other: its files are immutable there. */
     readonly pinned?: boolean;
   };
+  /**
+   * A nested page's ticket from its clean address to its shell's own label (P114): the path below
+   * its files' base the shell opens (the entry page when absent).
+   */
+  readonly page?: string;
 }
 
 /** Where tickets live between `issue` and their one use. Default: in memory (one process). */

@@ -6,6 +6,26 @@ P-numbers below.
 
 ## Unreleased
 
+- **Security (P114, porthole#56's P1):** a nested page's shell, its page and the page's files are
+  served on a label of their own, `porthole-<24 base32>.<content domain>` (`nestedLabelOf(label)`,
+  one per scope), on which nothing but nested pages' shells, their opaque pages, those pages' files
+  and status pages is ever served. In 0.14.0 the shell was on its scope's label, where the scope's
+  other displays (inline and live widgets, MCP apps, artifacts that aren't nested) run agent-made
+  content with `allow-same-origin`: such a display on the same page could read the shell's document,
+  drive its word to the host (the keyboard rule, `comments.open`) and take the page's sealed
+  address. `issue` answers the shell's origin for a nested page; the scope's label never answers a
+  nested page (a clean address sends the browser on to the shell's label with a one-time ticket).
+  An entry code is no longer taken as a document's ticket.
+- **Adopters with nested pages:** route `porthole-*.<content domain>` to the content server as
+  your other labels (a wildcard DNS name and certificate already cover it; a route or edge rule of
+  your own that matches `a-*` must add it). Every `porthole-` label is Porthole's: a naming that
+  makes one throws, and `prefixedName("porthole-")` is refused. A content Worker of your own serves
+  nested pages on `nestedLabelOf(label)` alone (ADOPTING "Nested pages"). New exports from
+  `/server`: `nestedLabelOf`, `isNestedLabel`, `PORTHOLE_LABEL_PREFIX`; `TicketRecord.page`.
+- **Tests (P114):** `leak/served/nested-siblings.spec.ts` (a same-scope inline widget and artifact
+  beside a nested page read nothing of its shell), negative control `shell-label`; the nested
+  suite's first case shares its scope with a widget; `test/nested.test.ts`, `test/entry.test.ts`;
+  the kit app and the prod-shape profile frame a nested page and open its clean address.
 - **New:** `display.annotations.clearSelection()` (P115): takes the page's text selection away,
   and the highlight the browser leaves on it, once the host has used it (a comment posted, a draft
   added; asked for by Raft's comment mode). The shell clears it with the DOM's own
