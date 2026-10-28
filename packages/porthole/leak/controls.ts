@@ -545,6 +545,14 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "comments.open while the person types in the host's composer reaches no handler, by the page's own call or the shell's; from a press in the frame it does",
     ),
   },
+  // A cancel only while the host asked for a pick or for text (P112).
+  "cancel-any-mode": {
+    specs: [ANNOTATE],
+    fails: all(
+      "Escape while selecting text is cancelled, and stays the page's key; with no mode on, a page's own cancel isn't heard (P112)",
+      "a hostile page fakes reports: the host takes none it didn't ask for, nothing malformed, and not a flood",
+    ),
+  },
   // A nested page's shell keeps its own namespace (P111): a page that says the shell's words, just
   // before a call of its own, has its comments.open believed.
   "shell-namespace": {

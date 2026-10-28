@@ -491,6 +491,14 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "      false &&\n      press !== null &&\n",
     },
   ],
+  // A cancel (P112) taken with no mode on: a page that says it is heard whenever it likes.
+  "cancel-any-mode": [
+    {
+      file: "src/host/create-host.ts",
+      find: "            if (annotating === null) {\n              return;\n            }\n            if (annotating.elements) {",
+      replace: "            if (annotating?.elements === true) {",
+    },
+  ],
   // A nested page's shell (P111) passes on what its page says in the shell's own namespace: a page
   // that says its shell's activation turned on is believed.
   "shell-namespace": [

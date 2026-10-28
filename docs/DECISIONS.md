@@ -5939,3 +5939,18 @@ quiet host needed) each fail their probe on Chromium, WebKit and Firefox.
 
 **Revisit when** an engine shows the host's page a press in an out-of-process frame, or a page needs
 its own storage (then a capability for it, never the content origin's), assets, or libraries.
+
+## P112 · 2026-10-28 · 0.14's comment UX: what annotations add for a host's comment modes · Accepted
+
+**Context.** Raft's comment design (its modes A–C, a card that follows its mark, a list in document
+order, block selection on touch) needs more from `annotate` than 0.13 has. Each addition is the
+content's word, as every report is (P053): the host uses it as a hint, never as a permission, and
+takes it only while it asked for it. Each item below landed on its own, with its negative control.
+
+- **Escape while selecting text** (P4). In text selection mode an Escape is reported as
+  `cancelled`, as it is while picking an element; the key stays the page's (a page that closes its
+  own dialog on Escape still does), and the host decides what ends (a pick ends with it, as
+  before). The host takes `cancelled` only while it asked for a pick or for text: a page can send
+  it, and then only gets the host out of a mode the person can enter again (Raft: mode B ends, its
+  drafts kept). Tested: `leak/annotate.spec.ts` "Escape while selecting text is cancelled…";
+  negative control `cancel-any-mode` (a cancel with no mode on is heard).

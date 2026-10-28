@@ -119,6 +119,35 @@ test("picking an element: the one under the pointer is outlined, a click picks i
   await expect(frame.locator("body")).toHaveAttribute("data-clicked", "yes");
 });
 
+test("Escape while selecting text is cancelled, and stays the page's key; with no mode on, a page's own cancel isn't heard (P112)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: annotated(),
+    content: `${WIDGET}<script>addEventListener("keydown", (event) => { if (event.key === "Escape") document.body.dataset.escape = "yes"; });</script>`,
+  });
+  const frame = await display.frame();
+  await display.annotate("start", { elements: false, text: true });
+  await frame.locator("#more").focus();
+  await page.keyboard.press("Escape");
+  await next(display, "cancelled");
+  await expect(frame.locator("body"), "the page still hears its Escape").toHaveAttribute(
+    "data-escape",
+    "yes",
+  );
+  // Stopped: neither the person's Escape nor the page's own word is a cancel the host hears.
+  await display.annotate("stop", {});
+  const before = (await reports(display)).length;
+  await page.keyboard.press("Escape");
+  await frame.evaluate(() =>
+    parent.postMessage({ jsonrpc: "2.0", method: "porthole/annotate.cancelled", params: {} }, "*"),
+  );
+  await page.waitForTimeout(500);
+  expect((await reports(display)).slice(before), "probe: no cancel heard with no mode on").toEqual(
+    [],
+  );
+});
+
 test("an element without an id is anchored by its path; Escape cancels a pick", async ({
   page,
 }) => {

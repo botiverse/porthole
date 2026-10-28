@@ -8,7 +8,7 @@
  * (`porthole/annotate.selected|unselected|cancelled|anchored|activated`):
  * - picking an element: the element under the pointer (or finger) is outlined with its name; a
  *   click or tap picks it, and the content's own handlers never see that click (unless the content
- *   patched the DOM's built-ins, P105); Escape cancels;
+ *   patched the DOM's built-ins, P105); Escape cancels (while selecting text too, P112);
  * - selecting text: each selection that settles is reported, with where it is, and its clearing;
  * - marks: each anchor is found in the content as it is now (its CSS selector, its text where it
  *   was, its text anywhere, its words with any spacing) and drawn over it, in a layer of the
@@ -1170,13 +1170,22 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         tell(M.selected, { anchor, rect: box(elementRect.call(element)) });
       }, true);
       window.addEventListener("keydown", (event) => {
-        if (mode.elements && event.key === "Escape") {
+        if (event.key !== "Escape") {
+          return;
+        }
+        if (mode.elements) {
           event.preventDefault();
           event.stopImmediatePropagation();
           mode = { elements: false, text: mode.text };
           hover = null;
           setCursor(false);
           draw();
+          tell(M.cancelled, {});
+          return;
+        }
+        // Selecting text (P112): the person wants out too. The key stays the page's (a page that
+        // closes its own dialog on Escape still does); the host decides what ends.
+        if (mode.text) {
           tell(M.cancelled, {});
         }
       }, true);

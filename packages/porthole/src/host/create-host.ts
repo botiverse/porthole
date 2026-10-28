@@ -302,10 +302,14 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             }
             break;
           case "cancelled":
-            if (annotating?.elements !== true) {
+            // While the host asked for a pick or for text (P112: Escape while selecting text);
+            // a pick ends with it, text selection is the host's to stop.
+            if (annotating === null) {
               return;
             }
-            annotating = annotating.text ? { elements: false, text: true } : null;
+            if (annotating.elements) {
+              annotating = annotating.text ? { elements: false, text: true } : null;
+            }
             break;
           case "anchored": {
             const known = new Set(marks.map((mark) => mark.id));

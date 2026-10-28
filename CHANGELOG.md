@@ -26,6 +26,8 @@ it. Fixes porthole#53.
   of the last one turns no activation on (THREAT_MODEL §7 "The keyboard").
 - **New event** `storage` (`{ used }`, once per run) for displays whose storage is the in-memory
   stand-in (opaque, nested): whether the page touched `localStorage` or `sessionStorage`.
+- **Annotations (P112):** Escape while selecting text reports `cancelled` too (the page keeps
+  the key); the host takes it only while it asked for a pick or for text.
 - **Tests:** `leak/served/nested.spec.ts` runs on full Chromium (`chromium-oopif`, a new CI leg),
   the headless shell, WebKit and Firefox; negative controls `shell-namespace`, `shell-host-input`.
   `PORTHOLE_WEBKIT_PATH` runs the leak suite on a WebKit build of the machine's own.

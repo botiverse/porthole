@@ -118,7 +118,11 @@ export type AnnotationReport =
     }
   /** The text selection went away. */
   | { readonly type: "unselected" }
-  /** The person pressed Escape while picking an element. */
+  /**
+   * The person pressed Escape while picking an element (the pick ends), or while selecting text
+   * (P112: the page keeps the key; the host decides what ends). The page's word too: a page can
+   * send it, and the host takes it only while it asked for a pick or for text.
+   */
   | { readonly type: "cancelled" }
   /**
    * Where the marked anchors are now: every mark after `show`, the focused one after `focus`,
