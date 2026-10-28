@@ -563,7 +563,9 @@ const displays = defineDisplays({
 Nothing else changes on your page: the same `createHost` (or `PortholeFrame`), the same handlers
 and events, the same `frame-src`. The display has one more event, `storage` (`{ used }`, once per
 run: whether the page touched `localStorage` or `sessionStorage`, never what it kept), for you to
-count the pages that would need storage. Not yet with a nested page: the asset library (`assets`)
+count the pages that would need storage. A nested page's workers come from Blob URLs (a worker from
+a script of its own set is refused: its origin is opaque), which may `importScripts` the set's
+scripts; Chromium refuses a Blob module worker there. Not yet with a nested page: the asset library (`assets`)
 and Porthole's libraries (`egress.libraries`); the config refuses them.
 
 What a content origin serves for a nested page (`/server` does all of it; a content Worker of your

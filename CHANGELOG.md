@@ -28,6 +28,9 @@ it. Fixes porthole#53.
   activation it reports after a stall of over 100 ms is uncertain, no one's gesture, until it lapses.
 - **Every file of a nested page sandboxed** (after the review): a script's answer too, so no file
   opened on a tab of its own runs on the shell's origin.
+- **Workers in a nested page** (measured, P111): from Blob URLs, which may `importScripts` the
+  set's scripts; a worker from the set's own script is refused (the page's origin is opaque), and
+  Chromium refuses a Blob module worker there. The sandbox on scripts' answers refuses none.
 - **New event** `storage` (`{ used }`, once per run) for displays whose storage is the in-memory
   stand-in (opaque, nested): whether the page touched `localStorage` or `sessionStorage`.
 - **Annotations (P112):** Escape while selecting text reports `cancelled` too (the page keeps

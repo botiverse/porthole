@@ -353,7 +353,10 @@ encrypted into the path, since WebKit keeps no cookie in a frame (P083).
   within the hour. Every answer below the sealed prefix carries a CSP sandbox, never
   `allow-same-origin` (a page's `allow-scripts`, every other file's runs nothing): a file opened on
   a tab of its own (an SVG or XML file with a script) is opaque, never the shell's origin (negative
-  control `file-sandbox`). Assets and Porthole's libraries aren't served to a nested page yet.
+  control `file-sandbox`). The sandbox refuses no worker (measured on the four engines): a nested
+  page's workers come from Blob URLs (a worker from its set's own script is refused by its opaque
+  origin, sandbox or not), and those load the set's scripts. Assets and Porthole's libraries aren't
+  served to a nested page yet.
 
 **The host must**
 

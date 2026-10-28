@@ -124,11 +124,17 @@ export const tell = (page: Page, message: Record<string, unknown>) =>
   }, message);
 
 /** Shows a nested page (`script` runs in it) under the reference services, the host's UI above. */
-export async function show(page: Page, script = "", before?: () => Promise<void>): Promise<Shown> {
+export async function show(
+  page: Page,
+  script = "",
+  before?: () => Promise<void>,
+  /** More files of the page's set, beside its `index.html`. */
+  files: Readonly<Record<string, string>> = {},
+): Promise<Shown> {
   const served = await harness();
   const scope = unique("nest");
   const id = unique("page");
-  served.fileSets.set(`${id}@1`, storedFiles({ "index.html": pageOf(script) }));
+  served.fileSets.set(`${id}@1`, storedFiles({ ...files, "index.html": pageOf(script) }));
   const instance: InstanceRef = {
     scope,
     document: { kind: "artifact", id, version: "1", preset: "artifactNested" },
