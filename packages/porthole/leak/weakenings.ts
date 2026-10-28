@@ -466,8 +466,8 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "focus-guard": [
     {
       file: "src/platform/focus-guard.ts",
-      find: "    hostMove = null;\n    return moved;",
-      replace: "    hostMove = null;\n    return moved || true;",
+      find: "    const moved = personMoved({",
+      replace: "    const moved = true || personMoved({",
     },
   ],
   // What the guard does after a take-back (P109, after GK-1): no watch that focus stays back, a
@@ -482,13 +482,31 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
     },
     {
       file: "src/platform/focus-guard.ts",
-      find: "    if (polling === 0 && (frames.size > 0 || contest !== null)) {",
+      find: "    if (polling === 0 && (frames.size > 0 || contest !== null || waiting !== null)) {",
       replace: "    if (polling === 0 && frames.size > 0 && takesText(known)) {",
     },
     {
       file: "src/platform/focus-guard.ts",
       find: "      press !== null &&\n",
       replace: "      false &&\n      press !== null &&\n",
+    },
+  ],
+  // A nested page's shell (P111) passes on what its page says in the shell's own namespace: a page
+  // that says its shell's activation turned on is believed.
+  "shell-namespace": [
+    {
+      file: "src/shell/frame.ts",
+      find: 'typeof data.method === "string" && data.method.indexOf(PREFIX) === 0) {',
+      replace: "false) {",
+    },
+  ],
+  // A nested page's gesture (P111) needs no quiet host: the person's press in the page counts for
+  // a second even after they pressed or typed on the host's page.
+  "shell-host-input": [
+    {
+      file: "src/platform/focus-guard.ts",
+      find: "    hostInputAt < word.activatedAt\n",
+      replace: "    true\n",
     },
   ],
   // comments.open's gesture in the calling frame (P109): any gesture on the host's page will do,
@@ -577,7 +595,15 @@ export function weaken(relative: string, text: string): string {
  * navigation guard (P079), whose wall in a served frame is the shell alone for another content
  * origin, and the shell's window.open and device locks on a tab (P099).
  */
-const SERVED = ["navigate-guard", "navigate-ask", "link-rule", "window-open", "device-locks"];
+const SERVED = [
+  "navigate-guard",
+  "navigate-ask",
+  "link-rule",
+  "window-open",
+  "device-locks",
+  // A nested page's shell (P111), made in the harness's process like the documents' shells.
+  "shell-namespace",
+];
 
 /** Whether a control asked for edits the served documents' shell (`weakenServed`). */
 export const servedShellWeakened = (): boolean => weakened.some((each) => SERVED.includes(each));

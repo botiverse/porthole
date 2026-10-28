@@ -45,13 +45,16 @@ jobs:
       - run: pnpm --filter @botiverse/porthole exec playwright install --with-deps chromium
       - run: pnpm --filter @botiverse/porthole run test:bundle
 
+  # `chromium-oopif` is full Chromium (P111), not the headless shell: its cross-site frames are out
+  # of process, as in a person's browser, and the nested page's cases (leak/served/nested.spec.ts)
+  # hold the keyboard rule there.
   loopback:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        engine: [chromium, webkit, firefox]
+        engine: [chromium, chromium-oopif, webkit, firefox]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -62,7 +65,7 @@ jobs:
           node-version: "24"
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @botiverse/porthole exec playwright install --with-deps ${{ matrix.engine }}
+      - run: pnpm --filter @botiverse/porthole exec playwright install --with-deps ${{ matrix.engine == 'chromium-oopif' && 'chromium' || matrix.engine }}
       - run: pnpm test:leak
         env:
           PORTHOLE_LEAK_ENGINES: ${{ matrix.engine }}

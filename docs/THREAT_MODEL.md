@@ -16,7 +16,9 @@ around it). The review of 0.12.0's drafts led to P109, in 0.13.0: a display can 
 `createHost` now gives back (§6, §7 "The keyboard"); `comments.open` needs the person in the
 calling frame; a page's draft text is stricter, and the composer it fills is the person's to act
 on (§7). 0.13.0 also makes P106's lint fail soft and read only what it may (P110, no change to
-isolation).
+isolation). Unreleased: P111 adds a nested page (`nested: true`, S3): the framed address is
+Porthole's shell alone and the page its opaque child, so a realm the page can't reach tells the host
+when the person, not the page, pressed in it (§7 "The keyboard", `comments`).
 
 ## 1. Two layers
 
@@ -322,6 +324,18 @@ encrypted into the path, since WebKit keeps no cookie in a frame (P083).
   worker; a page's CSP opens its own version's path, not its whole origin.
 - With a per-request check (`authorize`), the host decides again on every request; a deny is a
   403 that says `denied`.
+- A nested page (`nested: true`, P111): the framed address answers Porthole's shell alone, its
+  script the only one its CSP runs, framing and fetching only the origin's sealed files' prefix.
+  The page is the shell's child, `sandbox="allow-scripts"` (never `allow-same-origin`, held by a
+  static check over every sandbox Porthole writes) and the same sandbox in its own CSP, so it is an
+  opaque origin in its frame and on a tab; it is loaded, and loads its files, at its sealed address
+  without a cookie, and its files then carry `Cross-Origin-Resource-Policy: cross-origin` and
+  `Access-Control-Allow-Origin: *` (an opaque page's own loads are cross-origin: the address is
+  the access, never the request's origin). The page has none of the origin's storage, and nothing
+  of the shell's realm: messages between them go by `postMessage`, the page's trusted by
+  `event.source`, and the shell drops what the page says in the shell's own namespace. Only the
+  shell (same-origin) renews the page's address; a module the page loaded keeps one that ends
+  within the hour. Assets and Porthole's libraries aren't served to a nested page yet.
 
 **The host must**
 
@@ -556,7 +570,8 @@ wall on three engines, and `defineHostConformance` runs it against a host's own 
 effects are its own), and group displays by page (S7).
 
 **Annotations** (`annotate`, P053, P104, P107). The shell that draws marks and reports anchors shares
-its realm with the content, so:
+its realm with the content (a nested page's too: its marks are drawn by the runtime in the page's
+own frame, below the shell, P111), so:
 
 - *What content learns.* Everything the host sends in a `show` is posted into the frame's window,
   where the content can listen: each mark's id, anchor and, where given, `count` (the number on
@@ -692,6 +707,29 @@ unposted words beside the frame and tell the page when.
   technology's activation within 5 s of their key or press on the page): focus goes back, and
   their next press once the pointer has left the frame and come back, a Tab, or an activation 5 s
   later keeps it.
+- *Full Chromium* (P111, measured on Chromium 153, not the headless shell): a cross-site frame is
+  out of process, and the host's page sees nothing of a press in it (no `:active`, no `:hover`, no
+  pointer event past the frame's edge). For a served page that isn't nested, a person's real click
+  into its field is taken back every time there (the display stopped at the third), and
+  `comments.open` from a real click is refused within 5 s of any input on the host's page
+  (porthole#53). Nest it.
+- *A nested page* (P111): the guard asks the page's shell, a realm the page can't reach above its
+  frame, whose transient activation turns on only from a press or key in the page (activation goes
+  up, never down). A move into the frame is the person's if the shell's activation turned on within
+  the last second and the host's page had no trusted press or key since; or a Tab, the host's own
+  move, or a press the engine shows on the frame element. Nothing else counts: no pointer over the
+  frame, no host-wide activation. A move the shell hasn't spoken of yet waits for its word (its next
+  frame) at most 500 ms, then is taken back. Measured on full Chromium, the headless shell, WebKit
+  and Firefox (`leak/served/nested.spec.ts`): a real click into the page's field keeps the
+  keyboard; the page's `focus()` as it loads, on a timer while the person types, right after a
+  click on the host's own button, 1.2 to 4.5 s after the person paused typing, and 700 ms after
+  they pressed it and went back to the composer is taken back; what a page says in the shell's
+  name, to its parent or to the host's window, moves nothing (negative controls `shell-namespace`,
+  `shell-host-input`). *What doesn't*: a press in the page within 5 s of the last one turns no
+  activation on, so a second move into it after the person went back to the host's page is taken
+  back until 5 s after their last press or key in the page, or they Tab in; the page gets the keys
+  typed while a move waits for the shell's word; a shell without `navigator.userActivation` leaves
+  0.13's rule.
 
 ### The app runtime
 
@@ -727,7 +765,11 @@ section.
 - `comments` is write-only: the page learns only whether the composer opened. It opens only from
   a gesture with the host page's focus in the calling frame (P109: a press in it or a Tab into it;
   not the person typing in the host's UI, nor a gesture in another display; negative control
-  `comments-in-frame`). A draft it gives (P108) is at most 2,000 characters of text a person can
+  `comments-in-frame`). In a nested page (P111) it opens too while the page's shell saw the
+  person's gesture within the last second, with no press or key on the host's page since: a real
+  click on the page's button a moment after typing in the host's composer opens it, on full
+  Chromium too (porthole#53); with no click it is refused, whatever the page says in the shell's
+  name. A draft it gives (P108) is at most 2,000 characters of text a person can
   see (P109): nothing invisible (zero-width characters, bidi and tag characters, controls but a
   new line and a tab; U+200C and U+200D only between two letters or marks, where Persian and the
   Indic scripts need them, never first, last, doubled, beside a space or punctuation, or in an
@@ -796,7 +838,7 @@ section.
 The decisions below come from the 2026-10-19 review, and all of them have merged. Each row says
 what was wrong, what holds now, and the limit its decision accepts, if any. Later reviews' decisions
 are in the status line and in DECISIONS.md: P105 (after the review of P104), P109 (after the review
-of 0.12.0's drafts).
+of 0.12.0's drafts), P111 (a nested page, S3; unreleased).
 
 | Decision | State | What it closes | Sections |
 | --- | --- | --- | --- |

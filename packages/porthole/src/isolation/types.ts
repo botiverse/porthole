@@ -74,6 +74,15 @@ export interface FrameLocation {
 /** The message a served page sends its host about loading (own-prefixed, P040). */
 export const FRAME_STATUS_METHOD = "porthole/notifications/frame-status";
 
+/** A nested page's shell's report of its own state to the host (P111). */
+export const SHELL_STATE_METHOD = "porthole/shell/state";
+
+/** The shell's own namespace (P111): the shell drops a page's message that names a method in it. */
+export const SHELL_METHOD_PREFIX = "porthole/shell/";
+
+/** A page's word that it used storage, once per load (P111): never a key or a value. */
+export const STORAGE_USED_METHOD = "porthole/storage-used";
+
 /**
  * Turns an instance into the URL its frame loads. Implemented by the host, usually by asking its
  * own backend (which authenticates the viewer and calls `PortholeServer.issue`). Called on every

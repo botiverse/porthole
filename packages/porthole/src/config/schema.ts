@@ -258,6 +258,17 @@ export interface PortholeConfig {
    * `db`). Absent: 0.6's frames, globals and manual, exactly.
    */
   readonly runtime?: RuntimeVersion;
+  /**
+   * Domain isolation, artifact pages (P111): the address the host frames serves Porthole's shell
+   * alone, a document of Porthole's own with no content in it, and the page runs in a child frame
+   * of the shell's, sandboxed without `allow-same-origin` (an opaque origin), served from the same
+   * origin at its files' sealed address. The shell is then a realm the page can't reach, above the
+   * page's frame: it relays the page's messages, and tells the host when its own transient
+   * activation turns on (a press in the page activates its ancestors only), which is how the host
+   * knows the person, not the page, moved the keyboard into the frame or opened a comment. The
+   * page has no storage of its own (an in-memory stand-in) and fetches nothing with a cookie.
+   */
+  readonly nested?: true;
 }
 
 export interface StorageConfig {

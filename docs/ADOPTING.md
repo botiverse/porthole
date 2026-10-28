@@ -375,6 +375,12 @@ focusField(composer.textarea); // Firefox ignores a plain focus() while a fighti
   the limits (THREAT_MODEL §7 "The keyboard": on Firefox, which shows your page no press
   in a frame, a page keeps the keyboard if the pointer came over its frame after the person last
   typed and after the field got focus; moves between two frames aren't judged).
+- **Served pages in full Chromium:** nest them ("Nested pages" below, P111). A served page's
+  frame there is out of process: your page sees no press in it, so a person's click into the
+  page's field is taken back. A nested page's shell sees it: a move into the frame is the
+  person's if the shell's activation turned on within the last second and you saw no press or key
+  of your own since. A second press in the page within 5 s of the last turns nothing on: after the
+  person went back to your composer, their next move in is taken back until then, or a Tab.
 
 ## 4. Served pages: the host kit
 
@@ -527,6 +533,45 @@ entry: {
 - **The agent's side:** `lintFiles` and `admitFiles` before you take a version, `checkPage({ files
   })` to run it, and the manual's Files section where a kind serves files. Show a set served: an
   opaque frame has no origin to serve its files from.
+
+### Nested pages: the page below Porthole's shell
+
+`nested: true` (P111) on an artifact kind served by the host kit puts the page in a frame of its
+own below Porthole's shell, on the same origin, with an opaque origin of its own. Do it where people
+type beside your displays: in full Chromium (a person's browser, not Playwright's headless shell) a
+served page's frame is out of process, and your page can't see a press in it, so without nesting a
+real click into the page's field is taken back and `comments.open` from a real click is refused
+within 5 s of any input on your page (porthole#53). The page's shell sees it, and tells your page.
+
+```ts
+const displays = defineDisplays({
+  page: {
+    preset: "artifact",
+    // No `served.storage`: a nested page keeps no storage of its own (localStorage lasts the load).
+    options: { runtime: "1", capabilities: { annotate: {}, comments: {} }, nested: true },
+  },
+});
+```
+
+Nothing else changes on your page: the same `createHost` (or `PortholeFrame`), the same handlers
+and events, the same `frame-src`. The display has one more event, `storage` (`{ used }`, once per
+run: whether the page touched `localStorage` or `sessionStorage`, never what it kept), for you to
+count the pages that would need storage. Not yet with a nested page: the asset library (`assets`)
+and Porthole's libraries (`egress.libraries`); the config refuses them.
+
+What a content origin serves for a nested page (`/server` does all of it; a content Worker of your
+own answers the same, with the helpers `/server` exports: `nestedShellResponse`,
+`NESTED_FILE_HEADERS`, `nestedAncestors`). `<origin>` is the artifact's own,
+`https://<label>.<content domain>`; `<token>` is the access in the path (Porthole's sealed
+session, or a signed token of your own: the shell only needs addresses under the prefix).
+
+| Request | Answer |
+| --- | --- |
+| The framed address (a ticket's, a cookie's reload, an entered clean address), a navigation | 200, `text/html`: Porthole's shell, `nestedShellResponse(compiled, { origin, origins: hostOrigins, page: "<origin>/__porthole/f/<token>/<entry>", renew: { url: "<origin>/__porthole/f/<token>/__porthole/renew", expires } })`. Headers: `Content-Security-Policy: default-src 'none'; script-src 'sha256-<its script>'; frame-src <origin>/__porthole/f/; connect-src <origin>/__porthole/f/; base-uri 'none'; form-action 'none'; frame-ancestors <host origins>`; `Cache-Control: no-store`; `Referrer-Policy: no-referrer`; `X-Content-Type-Options: nosniff`; the served `Permissions-Policy`. No content in it. Any other request there: 404. |
+| `<origin>/__porthole/f/<token>/<page>` (the shell's child, or a tab) | The page as served before (the shell's runtime and the page), its plan's `origins` the content origin alone (`[<origin>]`) and its storage `memory`. `Content-Security-Policy: <the page's directives, its files' prefix opened>; sandbox allow-scripts; frame-ancestors <origin> <host origins>` (never `allow-same-origin`). Access from `<token>` alone: no cookie is sent (the page's origin is opaque), and never decide by `Origin` (it is `null`) or `Sec-Fetch-Site` (`cross-site`). |
+| `<origin>/__porthole/f/<token>/<file>` (the page's loads) | As served files are, plus `Cross-Origin-Resource-Policy: cross-origin` and `Access-Control-Allow-Origin: *` (`NESTED_FILE_HEADERS`): the opaque page's images, scripts, modules, fonts and fetches are cross-origin. |
+| `<origin>/__porthole/f/<token>/__porthole/renew` | Only the shell's own fetch (`Sec-Fetch-Site: same-origin`, not a navigation): `{ "base": "<origin>/__porthole/f/<new token>/", "expires": <epoch ms> }`, `no-store`; anything else 403. The shell renews 5 minutes before `expires` and moves the page to the new base. |
+| A token that ended, under the prefix | Porthole's status page (`401`, reason `session`), `frame-ancestors <origin> <host origins>`: it tells the shell, which tells your page (`outcome` blocked). |
 
 ### The capability runtime: pages that are apps
 

@@ -196,7 +196,7 @@ export function manualLimits(config: PortholeConfig, network: string): ManualLim
   );
   add(
     "storage",
-    config.isolation === "opaque"
+    config.isolation === "opaque" || config.nested === true
       ? `State isn't saved: localStorage works but lasts only while the ${it} is on screen, and a reload or another device starts fresh. Keep what matters in the ${it}'s code.`
       : config.storage?.scope !== undefined
         ? `localStorage is kept for ${config.storage.scope}, in this browser; another browser or device starts fresh. Reads and writes can throw (private windows, strict settings): wrap them in try/catch and keep only what can be lost.`

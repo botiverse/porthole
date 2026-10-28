@@ -70,6 +70,16 @@ export {
   type D1StatementLike,
 } from "./tickets.ts";
 export { FRAME_STATUS_METHOD } from "../isolation/types.ts";
+// A nested page (P111): Porthole's shell at the framed address, the page and its files below the
+// sealed prefix. `/server` serves them for a config with `nested`; a content Worker of its own
+// answers the same (docs/ADOPTING.md, "Nested pages").
+export {
+  NESTED_FILE_HEADERS,
+  NESTED_FILES_PREFIX,
+  nestedAncestors,
+  nestedShellCsp,
+  nestedShellResponse,
+} from "./nested.ts";
 export { isHostLabel, prefixedName, type Naming } from "./naming.ts";
 // The page an app serves in conformance test mode (P071).
 export { conformancePage } from "../conformance/page.ts";

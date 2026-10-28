@@ -1,7 +1,12 @@
 import type { ColorScheme } from "../config/schema.ts";
-import { FRAME_STATUS_METHOD } from "../isolation/types.ts";
+import {
+  FRAME_STATUS_METHOD,
+  SHELL_METHOD_PREFIX,
+  SHELL_STATE_METHOD,
+} from "../isolation/types.ts";
 import { postMessageTransport } from "../transport/post-message.ts";
-import { focusGuard, type FocusTake } from "./focus-guard.ts";
+import { focusGuard, type FocusGuard, type FocusTake } from "./focus-guard.ts";
+import type { Transport } from "../transport/types.ts";
 import type { PlatformHost, Surface, SurfaceSpec } from "./types.ts";
 
 /** A frame-status message (`porthole/notifications/frame-status`), by its method alone. */
@@ -10,6 +15,53 @@ const isFrameStatus = (data: unknown): boolean =>
   typeof data === "object" &&
   (data as { jsonrpc?: unknown }).jsonrpc === "2.0" &&
   (data as { method?: unknown }).method === FRAME_STATUS_METHOD;
+
+/** A shell's own message (P111), by its namespace. */
+const isShellWord = (data: unknown): data is { method: string; params?: unknown } =>
+  data !== null &&
+  typeof data === "object" &&
+  typeof (data as { method?: unknown }).method === "string" &&
+  (data as { method: string }).method.startsWith(SHELL_METHOD_PREFIX);
+
+/**
+ * A nested page's transport (P111): the shell's state, checked, to the focus guard; the rest of
+ * the shell's namespace dropped; everything else as it came.
+ */
+function shellWords(opened: Transport, frame: HTMLIFrameElement, guard: FocusGuard): Transport {
+  const listeners = new Set<(message: unknown) => void>();
+  opened.listen((message) => {
+    if (!isShellWord(message)) {
+      for (const listener of listeners) {
+        listener(message);
+      }
+      return;
+    }
+    const params = message.params;
+    if (message.method !== SHELL_STATE_METHOD || params === null || typeof params !== "object") {
+      return;
+    }
+    const { supported, ago, focused } = params as Record<string, unknown>;
+    if (
+      typeof supported !== "boolean" ||
+      typeof focused !== "boolean" ||
+      !(ago === null || (typeof ago === "number" && Number.isFinite(ago) && ago >= 0))
+    ) {
+      return;
+    }
+    guard.shell(frame, { supported, ago, focused });
+  });
+  return {
+    send: (message) => opened.send(message),
+    listen(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    close() {
+      listeners.clear();
+      opened.close();
+    },
+  };
+}
 
 /**
  * The web platform: an `<iframe>` whose policy attributes are set before its document is given,
@@ -67,15 +119,20 @@ export const webPlatform: PlatformHost = {
     // fields that the person didn't make is undone.
     const guard = focusGuard(view);
     const taken = new Set<(take: FocusTake) => void>();
-    const unguard = guard.add(frame, (take) => {
-      for (const listener of taken) {
-        listener(take);
-      }
-    });
+    const nested = spec.nested === true && spec.source.kind === "url";
+    const unguard = guard.add(
+      frame,
+      (take) => {
+        for (const listener of taken) {
+          listener(take);
+        }
+      },
+      { nested },
+    );
     // A served frame may pass through the host's own pages (a redirect entry's, P068): what they
     // say of the frame's status is heard too, and nothing else from there.
     const own = view.origin;
-    const transport = postMessageTransport(
+    const opened = postMessageTransport(
       () => frame.contentWindow,
       origin,
       view,
@@ -83,6 +140,10 @@ export const webPlatform: PlatformHost = {
         ? undefined
         : { origin: own, accept: isFrameStatus },
     );
+    // A nested page's shell (P111): its own words go to the guard, by the frame's window and the
+    // content origin (the transport's checks); the page's pass on. The shell drops any page
+    // message in its namespace, so there none is the page's.
+    const transport = nested ? shellWords(opened, frame, guard) : opened;
     return {
       transport,
       element: frame,
@@ -111,7 +172,7 @@ export const webPlatform: PlatformHost = {
         return activation === undefined ? undefined : activation.isActive;
       },
       focused() {
-        return guard.focused(frame);
+        return guard.focused(frame) || (nested && guard.gesture(frame));
       },
       onFocusTaken(listener) {
         taken.add(listener);

@@ -71,6 +71,7 @@ export const UNWEAKENED: Readonly<Record<string, string>> = {
 
 const LEAK = "leak/leak.spec.ts";
 const RUNTIME = "leak/served/runtime.spec.ts";
+const NESTED = "leak/served/nested.spec.ts";
 const FILES = "leak/served/files.spec.ts";
 const SERVED = "leak/served/served.spec.ts";
 const TAB = "leak/served/tab.spec.ts";
@@ -542,6 +543,22 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     specs: [RUNTIME],
     fails: all(
       "comments.open while the person types in the host's composer reaches no handler, by the page's own call or the shell's; from a press in the frame it does",
+    ),
+  },
+  // A nested page's shell keeps its own namespace (P111): a page that says the shell's words, just
+  // before a call of its own, has its comments.open believed.
+  "shell-namespace": {
+    specs: [NESTED],
+    fails: all(
+      "the shell's words are the shell's alone: a page that says them, to its parent or to the host's window, moves nothing",
+    ),
+  },
+  // A nested page's gesture needs a quiet host (P111): a page that takes the keyboard within a
+  // second of the person's press in it keeps it though they went back to the host's composer.
+  "shell-host-input": {
+    specs: [NESTED],
+    fails: all(
+      "a page's focus() just after the person pressed it and went back to the host's composer is taken back",
     ),
   },
   "comment-draft": {

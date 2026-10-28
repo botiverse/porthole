@@ -13,7 +13,9 @@ import { randomBytes } from "./crypto.ts";
 import { isHostLabel, reservedLabels } from "./naming.ts";
 import { enterPage, pageScript, SESSION_PATH, statusPage } from "./pages.ts";
 import { libraryFile } from "./libraries.ts";
-import { ownLoad, serveAsset, serveFile } from "./files.ts";
+import { isNavigation, ownLoad, serveAsset, serveFile } from "./files.ts";
+import { nestedAncestors, nestedShellResponse } from "./nested.ts";
+import { DEFAULT_ENTRY } from "../files/paths.ts";
 import { isPortholeCookie, setsPortholeCookie } from "./proxy.ts";
 import {
   assetCodeRuns,
@@ -520,6 +522,8 @@ export function createServer(options: ServerOptions): PortholeServer {
   async function documentOf(instance: InstanceRef): Promise<
     | {
         readonly html: string;
+        /** An artifact's own page, before the shell (a nested page's is made apart, P111). */
+        readonly document?: string;
         readonly compiled: CompiledConfig;
         /** Whether its CSP opens its artifact's asset library (P089): an artifact's page. */
         readonly assets: boolean;
@@ -554,6 +558,7 @@ export function createServer(options: ServerOptions): PortholeServer {
         }
         return {
           html: config.shellDocument({ origins, document: stored.html, cspMeta: false }),
+          document: stored.html,
           compiled: config,
           assets: true,
         };
@@ -807,10 +812,14 @@ export function createServer(options: ServerOptions): PortholeServer {
     }
   }
 
-  function documentHeaders(csp: string, permissions: string | null): Headers {
+  function documentHeaders(
+    csp: string,
+    permissions: string | null,
+    ancestors: string = frameAncestors,
+  ): Headers {
     return new Headers({
       "content-type": "text/html; charset=utf-8",
-      "content-security-policy": `${csp}; frame-ancestors ${frameAncestors}`,
+      "content-security-policy": `${csp}; frame-ancestors ${ancestors}`,
       // What the frame's `allow` doesn't grant, denied on a tab of its own too (P099).
       ...(permissions === null ? {} : { "permissions-policy": permissions }),
       "cache-control": "no-store",
@@ -905,12 +914,16 @@ export function createServer(options: ServerOptions): PortholeServer {
     }
     const access = await sealedAccess(request, label, token);
     if (access === null) {
-      return page(
+      // In a nested page's frame (P111) its shell frames it and hears it, on this origin; a
+      // config without nesting never frames this address but at the host.
+      return statusPage(
         401,
         "This has ended",
         "Content here opens for a while. Open it again from the app that showed it.",
+        nestedAncestors(origin, frameAncestors),
         method,
         "session",
+        [...options.hostOrigins, origin],
       );
     }
     // An asset of this artifact's library, at the frame's own sealed address (P091): every engine
@@ -1021,6 +1034,43 @@ export function createServer(options: ServerOptions): PortholeServer {
     if (served === null) {
       return page(404, "Not found", "This page, or this version of it, doesn't exist.", method);
     }
+    // A nested page (P111): the address the host frames (a ticket's, a cookie's, an entered
+    // one's) answers Porthole's shell, which frames the page at its sealed files' address; only
+    // that address, below the sealed prefix, answers the page and its files, without a cookie.
+    const nested = served.compiled.config.nested === true;
+    const sealedAt = at !== undefined && at.base.startsWith(FILES_PREFIX);
+    if (nested && !sealedAt) {
+      if (!isNavigation(request)) {
+        return page(404, "Not found", "This page's files are at its own address.", method);
+      }
+      const sealed = await sealFiles(access);
+      let rest = "";
+      if ("files" in served) {
+        const entry = served.files.entry ?? DEFAULT_ENTRY;
+        rest =
+          at !== undefined && at.rest !== ""
+            ? at.rest
+            : entry.includes("/")
+              ? entry
+                  .split("/")
+                  .map((segment) => encodeURIComponent(segment))
+                  .join("/")
+              : "";
+      }
+      const shell = nestedShellResponse(served.compiled, {
+        origin: access.origin,
+        origins: options.hostOrigins,
+        page: `${access.origin}${sealed.base}${rest}`,
+        renew: { url: `${access.origin}${sealed.base}__porthole/renew`, expires: sealed.expires },
+        method,
+      });
+      if (cookie !== null) {
+        shell.headers.set("set-cookie", cookie);
+      }
+      return shell;
+    }
+    // Below the sealed prefix, a nested page and its files are framed by its shell too.
+    const ancestors = nested ? nestedAncestors(access.origin, frameAncestors) : frameAncestors;
     if ("files" in served) {
       if (at !== undefined) {
         return serveFile({
@@ -1034,7 +1084,7 @@ export function createServer(options: ServerOptions): PortholeServer {
           source: at.source,
           compiled: served.compiled,
           hostOrigins: options.hostOrigins,
-          frameAncestors,
+          frameAncestors: ancestors,
           ...versionOf(access.instance),
         });
       }
@@ -1071,11 +1121,20 @@ export function createServer(options: ServerOptions): PortholeServer {
         served.assets ? assetCspDirectives(config, cspDirectives, access.origin) : cspDirectives,
       ),
       servedPermissionsPolicy(config),
+      ancestors,
     );
     if (cookie !== null) {
       headers.set("set-cookie", cookie);
     }
-    return new Response(method === "HEAD" ? null : served.html, { status: 200, headers });
+    // A nested page's document takes messages from its shell, on its own origin (P111).
+    const html = nested
+      ? served.compiled.shellDocument({
+          origins: [access.origin],
+          document: served.document ?? "",
+          cspMeta: false,
+        })
+      : served.html;
+    return new Response(method === "HEAD" ? null : html, { status: 200, headers });
   }
 
   /**

@@ -210,6 +210,13 @@ export interface DisplayEvents {
    */
   readonly focusTaken: { readonly typing: boolean };
   /**
+   * Whether the page touched `localStorage` or `sessionStorage` (the in-memory stand-in of a frame
+   * without storage of its own: opaque, or a nested page, P111): once per run, `used: true` when
+   * the page first did, else `used: false` as the run ends. Never what it kept: for a host to count
+   * the pages that would need storage.
+   */
+  readonly storage: { readonly used: boolean };
+  /**
    * What the frame reported about annotations (`annotate`, P053), checked and taken only while
    * the host asked for it: a selection, its clearing, a cancelled pick, where marks are. The
    * content's word: UI hints, never permissions.

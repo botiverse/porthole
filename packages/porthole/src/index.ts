@@ -50,7 +50,9 @@ export {
   type UrlSandboxExtra,
 } from "./config/schema.ts";
 export { hostOriginProblem, isHostOrigin } from "./isolation/served.ts";
-export { FRAME_STATUS_METHOD } from "./isolation/types.ts";
+export { FRAME_STATUS_METHOD, SHELL_STATE_METHOD, STORAGE_USED_METHOD } from "./isolation/types.ts";
+export { PAGE_SANDBOX_TOKENS } from "./compile/policy.ts";
+export { SHELL_GESTURE_MS } from "./platform/focus-guard.ts";
 
 // The capability runtime (P085-P090): its contract, levels, a page's declaration, its services'
 // shapes. Hosts implement the services; Porthole carries, checks and gates the calls.

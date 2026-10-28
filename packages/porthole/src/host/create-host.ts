@@ -27,7 +27,7 @@ import { capabilitySpec } from "../config/capabilities.ts";
 import type { ColorScheme, PortholeConfig } from "../config/schema.ts";
 import { locateServed } from "./locate.ts";
 import { watchOutcome, type OutcomeWatch } from "./outcome.ts";
-import type { FrameSource } from "../isolation/types.ts";
+import { STORAGE_USED_METHOD, type FrameSource } from "../isolation/types.ts";
 import { webPlatform } from "../platform/web.ts";
 import { TAKES } from "../platform/focus-guard.ts";
 import type { Surface } from "../platform/types.ts";
@@ -185,6 +185,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       let marks: AnnotationMark[] = [];
       let activeMark: string | null = null;
       let handshaken = false;
+      let storageTold = false;
       const toFrame = (method: string, params: Record<string, unknown>) => {
         if (handshaken && surface !== null) {
           surface.transport.send({ jsonrpc: "2.0", method, params });
@@ -436,6 +437,11 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       };
 
       const stop = () => {
+        // A run that ran a page with storage of its own making and never heard it used: no (P111).
+        if (bridge !== null && handshaken && !storageTold && compiled.shell?.storage === "memory") {
+          emit("storage", { used: false });
+        }
+        storageTold = false;
         // The run's bridge refuses what still waits for a confirmation: a yes to it runs nothing
         // (P095, after the review), and the next run's bridge starts its count again.
         bridge?.close();
@@ -469,6 +475,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           allow: compiled.allow,
           referrerPolicy: compiled.referrerPolicy,
           colorScheme: scheme,
+          // A nested page's shell (P111): the config's word, never the frame's.
+          ...(config.nested === true ? { nested: true } : {}),
           // An app reports no size: its frame fills the host's container, at least the minimum;
           // so does any display the host mounts to fill, or whose layout fills (P065): its
           // content scrolls itself.
@@ -563,6 +571,19 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         if (annotates) {
           created.transport.listen((raw) => onAnnotation(raw, opening));
         }
+        // Whether the page used storage (P111): once per run, the page's word (a count, no more).
+        created.transport.listen((raw) => {
+          if (
+            !storageTold &&
+            isRecord(raw) &&
+            raw.jsonrpc === "2.0" &&
+            raw.method === STORAGE_USED_METHOD &&
+            !("id" in raw)
+          ) {
+            storageTold = true;
+            emit("storage", { used: true });
+          }
+        });
         bridge = opening;
         const opened = adapter.connect({
           display: { id: mount.displayId, title: mount.title },

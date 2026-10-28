@@ -4,6 +4,32 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+A nested page (P111): the address a served artifact's frame loads is Porthole's shell alone, and the
+page runs in its child frame with an opaque origin, so the person's press in the page is seen in
+full Chromium too, where a cross-site frame is out of process and the host's page sees nothing of
+it. Fixes porthole#53.
+
+- **New:** `nested: true` on an artifact config with domain isolation (`presets.artifact`,
+  `defineDisplays` options). The host kit serves the shell at the framed address and the page at
+  its sealed files' address, `sandbox allow-scripts` in its frame and its CSP, fetched without a
+  cookie; its files carry `Cross-Origin-Resource-Policy: cross-origin` and
+  `Access-Control-Allow-Origin: *`. A content Worker of your own answers the same (ADOPTING.md
+  "Nested pages", with `nestedShellResponse`, `NESTED_FILE_HEADERS`, `nestedAncestors` from
+  `/server`). Not with `storage`, `assets` or `egress.libraries` (refused).
+- **The keyboard and `comments.open` in a nested page:** the focus guard takes a move into the
+  frame for the person's if the page's shell saw its own activation turn on within the last second
+  and the host's page had no trusted press or key since (or a Tab, the host's own move, a press the
+  engine shows); `comments.open` opens on the same signal, so a click on the page's button a moment
+  after typing in the host's composer opens it (porthole#53). Limit: a press in the page within 5 s
+  of the last one turns no activation on (THREAT_MODEL §7 "The keyboard").
+- **New event** `storage` (`{ used }`, once per run) for displays whose storage is the in-memory
+  stand-in (opaque, nested): whether the page touched `localStorage` or `sessionStorage`.
+- **Tests:** `leak/served/nested.spec.ts` runs on full Chromium (`chromium-oopif`, a new CI leg),
+  the headless shell, WebKit and Firefox; negative controls `shell-namespace`, `shell-host-input`.
+  `PORTHOLE_WEBKIT_PATH` runs the leak suite on a WebKit build of the machine's own.
+
 ## 0.13.0
 
 After the review of 0.12.0's drafts (P109): a display no longer keeps the keyboard it takes from

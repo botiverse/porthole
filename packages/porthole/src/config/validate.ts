@@ -324,6 +324,7 @@ export function validateConfig(
       "storage",
       "errors",
       "runtime",
+      "nested",
     ],
     "config",
   );
@@ -684,6 +685,28 @@ export function validateConfig(
       (typeof storage.shared !== "string" || !/^[a-z][a-z -]{0,39}$/u.test(storage.shared))
     ) {
       fail("config.storage.shared", 'must be a short lowercase noun ("conversation")');
+    }
+  }
+
+  if (config.nested !== undefined) {
+    if (config.nested !== true) {
+      fail("config.nested", "must be true, or left out");
+    }
+    if (config.isolation !== "domain" || config.mode !== "artifact") {
+      fail("config.nested", "nests artifact pages served on their own origin (domain isolation)");
+    }
+    // The page's origin is opaque (P111): nothing of the content origin's own is its.
+    if (config.storage !== undefined) {
+      fail("config.nested", "a nested page keeps no storage: drop config.storage");
+    }
+    if (capabilities.assets !== undefined) {
+      fail(
+        "config.nested",
+        "a nested page can't load its asset library (/_blob/) yet: drop assets",
+      );
+    }
+    if (isObject(config.egress) && config.egress.libraries === true) {
+      fail("config.nested", "a nested page can't load Porthole's libraries from its origin yet");
     }
   }
 

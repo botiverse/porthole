@@ -5843,3 +5843,99 @@ that throws gives the "wasn't checked" warning; `admitFiles` with `\ffffff` in a
 
 **Revisit when** a page's own document is ever shown outside the shell (then quirks mode is real),
 or an engine starts counting fixed boxes in what the viewport scrolls.
+
+## P111 · 2026-10-28 · A nested page: Porthole's shell at the framed address, the page its opaque child, and the shell's own activation decides the keyboard and `comments.open` · Accepted
+
+**Context.** P109's focus guard and `comments.open`'s gate ask whether the person, not the page,
+moved the keyboard into a frame or clicked in it. In full Chromium a cross-site frame is out of
+process, and the host's page sees nothing of a press in it: measured on Chromium 153 (2026-10-28,
+not the headless shell Playwright runs by default), no `:active`, no `:hover`, no pointer event past
+the frame's edge, only its window blurring with its own activation on, which a page's `focus()`
+after the person typed in the host also gives. So a person's real click into a page's field was
+taken back every time (the display stopped at the third), and `comments.open` from a real click was
+refused within 5 s of any input on the host's page (porthole#53). WebKit keeps these frames in
+process (`:active` holds there) and was right. Nothing in the page's realm can be asked instead:
+in every mode before this one, the shell's runtime and the page share a document (served, opaque,
+the MCP proxy), so whatever the shell would report, the page could post from the same window
+(ARCHITECTURE "Trust boundaries" 4, P053).
+
+**Decision.** A config may nest its artifact pages (`nested: true`: domain isolation, artifact
+mode). The address the host frames (a ticket's answer, a cookie's reload, an entered address)
+answers Porthole's shell alone, a document with no content in it, on the content origin, its script
+the only one its CSP runs (by hash), framing and fetching only the origin's sealed files' prefix.
+The shell frames the page in a child `<iframe sandbox="allow-scripts">` at the page's sealed address
+(P083); the page's answer carries the same sandbox in its CSP, so on a tab of its own it is opaque
+too. The page is the served page as before (the shell's runtime and its document), but its origin
+is opaque, its storage the runtime's in-memory stand-in, and it hears its parent, the shell, on the
+content origin; it never fetches with a cookie. The shell:
+- passes every message between the host and the page unchanged, the page's trusted by
+  `event.source` alone (its origin is "null"), and drops any the page sends in the shell's own
+  namespace (`porthole/shell/`);
+- tells the host its own state (`porthole/shell/state`: its transient activation and how long ago
+  it turned on, and whether focus is in it), read each animation frame, on its focus and blur, and
+  before each message of the page's is passed on. Activation goes up to ancestors, never down: a
+  press or key in the page turns the shell's on, and nothing on the host's page does;
+- renews the page's sealed address (`<base>__porthole/renew`, same-origin, as P083 asks) and gives
+  the page the new one (`porthole/files-renewed`), which the page's own loads can't (an opaque
+  origin's are never same-origin).
+The host knows a frame is nested from its config only, never from the frame. For such a frame the
+focus guard's rule is: the person moved focus in if the shell's activation turned on within the
+last second (`SHELL_GESTURE_MS`) and the host's page had no trusted pointerdown or keydown of its
+own since; or by Tab, or the host's own move, or (where the engine shows it) a press on the frame
+element. No pointer-over or host-wide activation cue counts for it. A move the shell hasn't spoken
+of yet waits for its word (it comes at the shell's next frame, after the host heard the move) at
+most `SHELL_WAIT_MS` (500 ms), then is taken back. The same signal opens `comments.open`: its
+gate's "person in this frame" holds while the shell saw that gesture, or focus is in the frame by
+the person's move. An engine whose shell has no `navigator.userActivation` keeps 0.13's rule. A
+`storage` event tells the host, once per run, whether the page touched `localStorage` or
+`sessionStorage` (the page's word; never a key or a value).
+
+**Threat it re-opens.** (1) A nested page's files are served with
+`Cross-Origin-Resource-Policy: cross-origin` and `Access-Control-Allow-Origin: *`, where P081 had
+`same-origin`: an opaque page's own loads are cross-origin. Whoever holds the sealed address could
+embed or read the files from any page; they could already fetch them with it, and P083 bounds the
+address (one version, one viewer, an hour on its own). (2) The page's sealed address opens past its
+hour only through the shell's renewal: P083's grace for a running page's own loads (same-origin
+only) can't apply, so a module the page loaded keeps an address that ends within the hour (its later
+imports fail), where P083 served them till the session's end. (3) The page loses its origin's
+storage (an in-memory stand-in, as opaque frames have). (4) A press in the page within 5 s of the
+last one turns no activation on: the second move into the frame (after the person went back to the
+host's page) is taken back until the activation lapses, or they Tab in. Accepted by the CTO.
+
+**Why.** The shell is a realm the page can't reach, above its frame: the page is a different origin
+(opaque), so it has nothing of the shell's (DOM, globals, the window the host hears), and it can
+neither navigate it nor post as it. Its activation is the person's gesture in this page and no other.
+
+**Rejected.** A shared shell on one host for every artifact (the per-artifact host stays: decided
+with the CTO); the page's runtime reporting its own gestures (the page's word, in the page's realm);
+the host's own activation edge (refreshed by the person's typing, so a press in the frame within 5 s
+of it is invisible); the pointer's last position on the host's page (it stops at the frame's edge,
+measured); consuming activation to see a new edge (it consumes the whole page's, the host's
+included).
+
+**Residual.** Assets (`/_blob/`) and Porthole's vendored libraries aren't served to a nested page
+yet (the config refuses them). Another page of the set opens in the frame (the shell's `frame-src`
+is the sealed prefix) without the navigate events a served page's guard uses (opaque documents get
+none): the shell's CSP is the wall, as `frame-src` is for opaque frames (P033). The host's page gets
+the keys a person types within the wait for the shell's word on a move it can't judge at once (on a
+slow machine, up to 500 ms; measured well under a frame's time on Chromium). A trace's snapshots in
+Playwright are evaluations in each frame, as gestures: the browser cases run untraced.
+
+**Tested.** `test/nested.test.ts`: the config's bounds; the page's sandbox (scripts only) and a
+static check that `allow-same-origin` appears in no sandbox Porthole writes or serves but a frame's
+on an origin of its own, and that every sandbox attribute is written from those lists; the shell's
+CSP and document; `/server`: the framed address answers the shell, the page at its sealed address
+without a cookie is sandboxed and hears the shell alone, its files' resource policy and CORS, only
+the shell renews; the host's rule. `leak/served/nested.spec.ts` on full Chromium (out-of-process
+frames), the headless shell, WebKit and Firefox, real input only: the page is an opaque origin at its
+sealed address; a real click into its field keeps the keyboard there; its `focus()` as it loads, on a
+timer while the person types, right after a click on the host's own button, 1.2, 3 and 4.5 s after
+the person paused typing in the host's composer, and 700 ms after the person pressed it and went
+back to the composer, is taken back; a marker's click is heard; `comments.open` from a real click
+within a second of typing in the host is allowed, and without one refused; a page that says the
+shell's words to its parent or to the host's window moves nothing; the host hears storage used.
+Negative controls `shell-namespace` (the shell passes its namespace on) and `shell-host-input` (no
+quiet host needed) each fail their probe on Chromium, WebKit and Firefox.
+
+**Revisit when** an engine shows the host's page a press in an out-of-process frame, or a page needs
+its own storage (then a capability for it, never the content origin's), assets, or libraries.

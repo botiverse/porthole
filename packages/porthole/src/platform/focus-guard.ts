@@ -62,6 +62,39 @@ export const TAKES = {
   any: { most: 5, withinMs: 2_000 },
 } as const;
 
+/**
+ * A nested page's shell (P111) says its own activation turned on: a press or key of the person's
+ * in that page (activation goes up to ancestors, never down, so nothing on the host's page turns
+ * it on). A move of focus into the frame within this long of it, with no press or key on the
+ * host's page since, is the person's; so is a `comments.open` the page sends within it.
+ */
+export const SHELL_GESTURE_MS = 1_000;
+
+/**
+ * How long a move into a nested page's frame waits for its shell's word before it is taken for
+ * the page's: the shell says what it saw at its next animation frame, after the host's page
+ * already heard the move. A shell that says nothing in time (gone, stalled) has its frame's move
+ * taken back, as any page's.
+ */
+export const SHELL_WAIT_MS = 500;
+
+/**
+ * A shell's word that came this long before the host's page heard the move is about that move
+ * (the shell's frame can come first); one from before then is about an earlier one.
+ */
+export const SHELL_EARLY_MS = 150;
+
+/** What a nested page's shell last said (P111), on the host's clock. */
+export interface ShellWord {
+  /** Whether its engine tells activation at all (`navigator.userActivation`). */
+  readonly supported: boolean;
+  /** When its activation last turned on; -Infinity if it hasn't, or is off. */
+  readonly activatedAt: number;
+  /** Whether it last said the page's focus is in it, and when it last said focus came in. */
+  readonly focused: boolean;
+  readonly focusedAt: number;
+}
+
 /** One move of the keyboard the guard undid. */
 export interface FocusTake {
   /** The person pressed a key on the host's page within the last second. */
@@ -96,6 +129,11 @@ export interface FocusMove {
   readonly activation: boolean | undefined;
   /** The host moved focus into the frame itself (`DisplayHandle.focus()`), just now. */
   readonly hostMoved: boolean;
+  /**
+   * A nested page's frame (P111): what its shell said, and when the host's page last had a
+   * trusted press or key of its own. Absent for any other frame.
+   */
+  readonly shell?: { readonly word: ShellWord; readonly hostInputAt: number };
 }
 
 /**
@@ -122,6 +160,14 @@ export function personMoved(move: FocusMove): boolean {
   if (move.lastKey !== null && move.lastKey.key === "Tab" && move.now - move.lastKey.at <= TAB_MS) {
     return true;
   }
+  // A nested page (P111): its shell's activation turned on within the last second, and the host's
+  // page had no press or key of its own since (the person went back to it); or, where the engine
+  // tells it, a press on the frame. Nothing else: no pointer over it, no host-wide activation.
+  if (move.shell !== undefined && move.shell.word.supported) {
+    return (
+      (move.seen && move.pressed) || shellGesture(move.shell.word, move.shell.hostInputAt, move.now)
+    );
+  }
   if (
     move.seen ? move.pressed : move.over && move.overSince > Math.max(move.typedAt, move.focusedAt)
   ) {
@@ -130,6 +176,19 @@ export function personMoved(move: FocusMove): boolean {
   return (
     move.activation === true &&
     move.now - Math.max(move.gestureAt, move.focusedAt) > ACTIVATION_SPAN_MS
+  );
+}
+
+/**
+ * Whether a nested page's shell saw the person's gesture just now (P111): its activation turned on
+ * within `SHELL_GESTURE_MS`, after the host's page's last trusted press or key.
+ */
+export function shellGesture(word: ShellWord, hostInputAt: number, now: number): boolean {
+  return (
+    word.supported &&
+    now - word.activatedAt <= SHELL_GESTURE_MS &&
+    now >= word.activatedAt &&
+    hostInputAt < word.activatedAt
   );
 }
 
@@ -169,8 +228,22 @@ function deepActive(document: Document): Element | null {
 
 /** One page's guard, shared by every display's frame on it. */
 export interface FocusGuard {
-  /** Guards `frame`: `taken` hears each move into it that was undone. */
-  add(frame: HTMLIFrameElement, taken: (take: FocusTake) => void): () => void;
+  /**
+   * Guards `frame`: `taken` hears each move into it that was undone. `nested`: it holds a nested
+   * page's shell (P111), whose word (`shell`) decides the moves into it.
+   */
+  add(
+    frame: HTMLIFrameElement,
+    taken: (take: FocusTake) => void,
+    options?: { readonly nested?: boolean },
+  ): () => void;
+  /** What a nested page's shell said (P111): its activation, its focus. */
+  shell(
+    frame: HTMLIFrameElement,
+    said: { readonly supported: boolean; readonly ago: number | null; readonly focused: boolean },
+  ): void;
+  /** Whether a nested page's shell saw the person's gesture just now (`shellGesture`). */
+  gesture(frame: HTMLIFrameElement): boolean;
   /** The host moves focus into `frame` itself. */
   focus(frame: HTMLIFrameElement): void;
   /**
@@ -185,6 +258,8 @@ export interface FocusGuard {
 interface Guarded {
   readonly taken: Set<(take: FocusTake) => void>;
   overSince: number;
+  /** A nested page's shell's word (P111); null for any other frame. */
+  word: ShellWord | null;
 }
 
 const guards = new WeakMap<Window, FocusGuard>();
@@ -204,6 +279,20 @@ export function focusGuard(view: Window): FocusGuard {
   let typedAt = -Infinity;
   let gestureAt = -Infinity;
   let pressAt = -Infinity;
+  /** The host's page's last trusted press or key (P111: a nested page's gesture must be later). */
+  let inputAt = -Infinity;
+  /**
+   * A move into a nested page's frame waiting for its shell's word (P111): from a text field
+   * (`field`: taken back unless the shell says the person's), or from anything else (null: only
+   * whether the frame is the person's for a gesture gate).
+   */
+  let waiting: {
+    readonly field: HTMLElement | null;
+    readonly frame: HTMLIFrameElement;
+    readonly guarded: Guarded;
+    readonly since: number;
+    readonly failed: boolean;
+  } | null = null;
   /** When focus last went into a guarded frame, and whether the person moved it there. */
   let enteredAt = -Infinity;
   let earned = false;
@@ -238,13 +327,17 @@ export function focusGuard(view: Window): FocusGuard {
     }
   };
 
-  /** What the person's move would need, read now: see `personMoved`. */
+  /**
+   * What the person's move would need, read now: see `personMoved`. Into a nested page's frame
+   * whose shell hasn't spoken of this move yet, `wait` (P111).
+   */
   const judge = (
     frame: HTMLIFrameElement,
     guarded: Guarded,
     seen: boolean,
     at: number,
-  ): boolean => {
+  ): boolean | "wait" => {
+    const word = guarded.word;
     const moved = personMoved({
       now: at,
       seen,
@@ -257,9 +350,64 @@ export function focusGuard(view: Window): FocusGuard {
       gestureAt,
       activation: activation(),
       hostMoved: hostMove !== null && hostMove.frame === frame && at - hostMove.at <= TAB_MS,
+      ...(word === null ? {} : { shell: { word, hostInputAt: inputAt } }),
     });
     hostMove = null;
+    // The shell tells a move at its next frame, the host's page hears it first: until the shell
+    // said focus came in (around now), its activation may be on its way.
+    if (!moved && word !== null && word.supported && word.focusedAt < at - SHELL_EARLY_MS) {
+      return "wait";
+    }
     return moved;
+  };
+
+  /** Waits for a nested page's shell's word on a move (P111): decided by `settle`. */
+  const wait = (
+    field: HTMLElement | null,
+    frame: HTMLIFrameElement,
+    guarded: Guarded,
+    at: number,
+    failed: boolean,
+  ) => {
+    waiting = { field, frame, guarded, since: at, failed };
+    known = frame;
+    enteredAt = at;
+    earned = false;
+    schedule();
+  };
+
+  /**
+   * A waiting move, once its shell spoke or the wait is over: the person's (the frame keeps
+   * focus), or the page's (from a text field, taken back). A move elsewhere since ends it.
+   */
+  const settle = (at: number) => {
+    const held = waiting;
+    if (held === null) {
+      return;
+    }
+    const { field, frame, guarded } = held;
+    if (deepActive(document) !== frame || !frames.has(frame)) {
+      // Moved on since: from the frame, as the next look judges it.
+      waiting = null;
+      known = frame;
+      return;
+    }
+    const word = guarded.word;
+    const theirs = word !== null && shellGesture(word, inputAt, at);
+    const spoke = word !== null && word.focusedAt >= held.since - SHELL_EARLY_MS;
+    if (theirs) {
+      waiting = null;
+      known = frame;
+      earned = true;
+      return;
+    }
+    if (!spoke && at - held.since < SHELL_WAIT_MS) {
+      return;
+    }
+    waiting = null;
+    if (field !== null && field.isConnected) {
+      takeBack(field, frame, guarded, at, held.failed);
+    }
   };
 
   /**
@@ -339,12 +487,23 @@ export function focusGuard(view: Window): FocusGuard {
       contest = null;
       return false;
     }
-    if (active === frame && judge(frame, guarded, seen, at)) {
-      contest = null;
-      known = frame;
-      enteredAt = at;
-      earned = true;
-      return true;
+    if (active === frame) {
+      const verdict = judge(frame, guarded, seen, at);
+      if (verdict === true) {
+        contest = null;
+        known = frame;
+        enteredAt = at;
+        earned = true;
+        return true;
+      }
+      if (verdict === "wait") {
+        // A nested page's frame took it again (P111): its shell decides, as it would at first.
+        if (watched.heldSince !== null || at - watched.gaveAt >= GIVE_BACK_MS) {
+          contest = null;
+          wait(field, frame, guarded, at, true);
+        }
+        return true;
+      }
     }
     // Taken again once it was back (within `HELD_MS`), or not back yet after `GIVE_BACK_MS`: a
     // take-back that failed, given again and counted.
@@ -358,6 +517,10 @@ export function focusGuard(view: Window): FocusGuard {
   const look = (seen: boolean) => {
     const active = deepActive(document);
     const at = now();
+    if (waiting !== null) {
+      settle(at);
+      return;
+    }
     if (watch(seen, active, at)) {
       return;
     }
@@ -393,7 +556,13 @@ export function focusGuard(view: Window): FocusGuard {
       // From a text field it is judged below; from anything else it is let be, but only the
       // person's own move makes the frame theirs for a gesture gate (`focused`).
       enteredAt = at;
-      earned = takesText(was) || judge(active as HTMLIFrameElement, entered, seen, at);
+      const verdict = takesText(was) || judge(active as HTMLIFrameElement, entered, seen, at);
+      if (verdict === "wait") {
+        // A nested page's (P111): theirs once its shell says so; nothing to take back.
+        wait(null, active as HTMLIFrameElement, entered, at, false);
+        return;
+      }
+      earned = verdict;
     }
     // Into a text field from a display's frame (the person pressed the composer while the frame
     // had focus): watched as a take-back is, since a page that takes focus back on its own blur
@@ -414,7 +583,12 @@ export function focusGuard(view: Window): FocusGuard {
       return;
     }
     const frame = active as HTMLIFrameElement;
-    if (judge(frame, guarded, seen, at)) {
+    const verdict = judge(frame, guarded, seen, at);
+    if (verdict === true) {
+      return;
+    }
+    if (verdict === "wait") {
+      wait(was, frame, guarded, at, false);
       return;
     }
     takeBack(was, frame, guarded, at, false);
@@ -431,7 +605,7 @@ export function focusGuard(view: Window): FocusGuard {
     schedule();
   };
   const schedule = () => {
-    if (polling === 0 && (frames.size > 0 || contest !== null)) {
+    if (polling === 0 && (frames.size > 0 || contest !== null || waiting !== null)) {
       polling = view.requestAnimationFrame(poll);
     }
   };
@@ -441,6 +615,9 @@ export function focusGuard(view: Window): FocusGuard {
   };
   const press = (event: Event) => {
     pressAt = now();
+    if (event.isTrusted) {
+      inputAt = pressAt;
+    }
     gestureAt = pressAt;
     const target = event.composedPath()[0];
     pressed =
@@ -454,6 +631,9 @@ export function focusGuard(view: Window): FocusGuard {
       const at = now();
       gestureAt = at;
       lastKey = { key: event.key, at };
+      if (event.isTrusted) {
+        inputAt = at;
+      }
       if (event.key !== "Tab" && !MODIFIERS.has(event.key)) {
         typedAt = at;
       }
@@ -502,10 +682,17 @@ export function focusGuard(view: Window): FocusGuard {
   );
 
   const guard: FocusGuard = {
-    add(frame, taken) {
+    add(frame, taken, options) {
       let guarded = frames.get(frame);
       if (guarded === undefined) {
-        const entry: Guarded = { taken: new Set(), overSince: -Infinity };
+        const entry: Guarded = {
+          taken: new Set(),
+          overSince: -Infinity,
+          word:
+            options?.nested === true
+              ? { supported: true, activatedAt: -Infinity, focused: false, focusedAt: -Infinity }
+              : null,
+        };
         frame.addEventListener("pointerover", () => {
           entry.overSince = now();
         });
@@ -521,6 +708,27 @@ export function focusGuard(view: Window): FocusGuard {
           frames.delete(frame);
         }
       };
+    },
+    shell(frame, said) {
+      const guarded = frames.get(frame);
+      const before = guarded?.word ?? null;
+      if (guarded === undefined || before === null) {
+        return;
+      }
+      const at = now();
+      guarded.word = {
+        supported: said.supported,
+        activatedAt: said.ago === null ? -Infinity : at - said.ago,
+        focused: said.focused,
+        focusedAt: said.focused && !before.focused ? at : before.focusedAt,
+      };
+      if (waiting?.frame === frame) {
+        settle(at);
+      }
+    },
+    gesture(frame) {
+      const word = frames.get(frame)?.word ?? null;
+      return word !== null && shellGesture(word, inputAt, now());
     },
     focus(frame) {
       hostMove = { frame, at: now() };

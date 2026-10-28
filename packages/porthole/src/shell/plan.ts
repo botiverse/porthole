@@ -97,7 +97,8 @@ export function shellPlan(config: PortholeConfig): ShellPlan | null {
     themeVariables: Object.keys(config.theme.variables),
     themeEvent: config.theme.event,
     themeDocuments: config.theme.documents ?? "declared",
-    storage: config.isolation === "opaque" ? "memory" : "native",
+    // An opaque origin has no storage: an opaque frame's, and a nested page's (P111).
+    storage: config.isolation === "opaque" || config.nested === true ? "memory" : "native",
     maxErrorReports: config.limits.maxErrorReports,
     maxPromptChars: config.limits.maxPromptChars,
     maxCopyChars: MAX_COPY_CHARS,

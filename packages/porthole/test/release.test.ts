@@ -214,6 +214,8 @@ describe("V03: a release waits for ci.yml on the same commit", () => {
         expect(requiredCiJobs).toContain(`controls (${engine}, ${shard}/4)`);
       }
     }
+    // Full Chromium, its frames out of process (P111).
+    expect(requiredCiJobs).toContain("loopback (chromium-oopif)");
     expect(requiredCiJobs).toContain("controls");
     expect(requiredCiJobs).toContain("prod-shape");
     expect(requiredCiJobs).toContain("examples");
