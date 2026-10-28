@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.14.1
 
 - **Security (P114, porthole#56's P1):** a nested page's shell, its page and the page's files are
   served on a label of their own, `porthole-<24 base32>.<content domain>` (`nestedLabelOf(label)`,
