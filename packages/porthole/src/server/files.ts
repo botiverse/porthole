@@ -245,12 +245,18 @@ export async function serveFile(serving: FileServing): Promise<Response> {
   // A page and a script (a worker's policy is its script's) get the page's CSP, a page with its
   // frame's sandbox, on a tab of its own too (P099); anything else runs nothing when opened on
   // its own.
+  // A nested page's files are on its shell's origin (P111, after the review): every one carries a
+  // sandbox, so none opened as a document on its own (a tab, "open image in new tab") runs on that
+  // origin. Pages run their scripts, opaque; anything else runs nothing (a file's is inert already,
+  // a script's gets one too).
   const csp =
     role === "file"
       ? INERT_FILE_CSP
       : role === "page"
         ? servedDocumentCsp(serving.compiled.config, directives)
-        : serializeCsp(directives);
+        : nested
+          ? `${serializeCsp(directives)}; sandbox`
+          : serializeCsp(directives);
   const headers = new Headers({
     "content-type": type,
     "x-content-type-options": "nosniff",

@@ -344,7 +344,10 @@ encrypted into the path, since WebKit keeps no cookie in a frame (P083).
   of the shell's realm: messages between them go by `postMessage`, the page's trusted by
   `event.source`, and the shell drops what the page says in the shell's own namespace. Only the
   shell (same-origin) renews the page's address; a module the page loaded keeps one that ends
-  within the hour. Assets and Porthole's libraries aren't served to a nested page yet.
+  within the hour. Every answer below the sealed prefix carries a CSP sandbox, never
+  `allow-same-origin` (a page's `allow-scripts`, every other file's runs nothing): a file opened on
+  a tab of its own (an SVG or XML file with a script) is opaque, never the shell's origin (negative
+  control `file-sandbox`). Assets and Porthole's libraries aren't served to a nested page yet.
 
 **The host must**
 

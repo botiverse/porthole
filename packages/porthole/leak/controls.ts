@@ -584,6 +584,13 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "the shell's words are the shell's alone: a page that says them, to its parent or to the host's window, moves nothing",
     ),
   },
+  // Every file below a nested page's sealed prefix is sandboxed (P111, after its review).
+  "file-sandbox": {
+    specs: [NESTED],
+    fails: all(
+      "a page's SVG or XML file opened on a tab of its own is an opaque origin, and its script touches nothing of the shell's (P111, after its review)",
+    ),
+  },
   // A stalled shell's activation is uncertain (P111, after its review).
   "shell-stall": {
     specs: [NESTED],

@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { runtimeCalls } from "./porthole-host.ts";
+import { storedFiles } from "./files.ts";
+import { harness } from "./harness.ts";
 import {
   STOPPED,
   button,
@@ -60,6 +62,51 @@ test.describe("a nested page (P111)", () => {
       /sandbox allow-scripts(;|$)/u,
     );
     expect(csp, "probe: never allow-same-origin").not.toContain("allow-same-origin");
+  });
+
+  test("a page's SVG or XML file opened on a tab of its own is an opaque origin, and its script touches nothing of the shell's (P111, after its review)", async ({
+    page,
+    context,
+  }) => {
+    const served = await harness();
+    const id = `files-${process.pid}-${Date.now()}`;
+    const ran = `try { localStorage.setItem("pwned", "yes"); } catch (_) {} document.documentElement.setAttribute("data-ran", "yes");`;
+    served.fileSets.set(
+      `${id}@1`,
+      storedFiles({
+        "index.html": "<!doctype html><p>page</p>",
+        "pic.svg": `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><script>${ran}</script></svg>`,
+        "data.xml": `<?xml version="1.0"?><root xmlns:h="http://www.w3.org/1999/xhtml"><h:script>${ran}</h:script></root>`,
+      }),
+    );
+    const location = await served.porthole.issue(
+      { scope: id, document: { kind: "artifact", id, version: "1", preset: "artifactNested" } },
+      { viewer: "probe" },
+    );
+    // The shell's answer, as the frame asks for it: it names the page's sealed address.
+    const shell = await page.request.get(location.url, {
+      headers: { "sec-fetch-dest": "iframe", "sec-fetch-mode": "navigate" },
+    });
+    const pageUrl = /"page":"([^"]+)"/u.exec(await shell.text())?.[1] ?? "";
+    expect(pageUrl).toContain("/__porthole/f/");
+    const tab = await context.newPage();
+    for (const name of ["pic.svg", "data.xml"]) {
+      await tab.goto(new URL(name, pageUrl).href);
+      expect(
+        await tab.evaluate(() => self.origin),
+        `probe: ${name} on its own tab is an opaque origin`,
+      ).toBe("null");
+      expect(
+        await tab.locator(":root").getAttribute("data-ran"),
+        `${name}'s script ran nothing`,
+      ).toBeNull();
+    }
+    // The shell's origin's storage, read on a page of that origin (Porthole's own status page).
+    await tab.goto(`${location.origin}/__porthole/f/${"a".repeat(40)}/`);
+    expect(
+      await tab.evaluate(() => localStorage.getItem("pwned")),
+      "probe: nothing written on the shell's origin",
+    ).toBeNull();
   });
 
   test("a real click into the page's field keeps the keyboard there, and the typed words land in it", async ({

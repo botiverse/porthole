@@ -319,6 +319,64 @@ describe("/server for a nested page (P111)", () => {
     expect(script?.headers.get("access-control-allow-origin")).toBe("*");
   });
 
+  test("every file below the sealed prefix carries a sandbox, never allow-same-origin: none opened on its own runs on the shell's origin", async () => {
+    const kinds: Record<string, string> = {
+      "index.html": "<!doctype html><p>page</p>",
+      "about.htm": "<!doctype html><p>about</p>",
+      "app.js": "1;",
+      "mod.mjs": "export {};",
+      "style.css": "p{}",
+      "pic.svg": '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+      "data.xml": '<x xmlns:h="http://www.w3.org/1999/xhtml"><h:script>alert(1)</h:script></x>',
+      "data.json": "{}",
+      "notes.txt": "hi",
+      "doc.pdf": "%PDF-1.4",
+      "blob.bin": "?",
+    };
+    const porthole = createServer({
+      content: { domain: SITE, scheme: "https" },
+      secret: new Uint8Array(32).fill(7),
+      hostOrigins: [HOST],
+      configs: { artifact: nested() },
+      artifacts: {
+        get: () =>
+          Promise.resolve({
+            files: Object.fromEntries(
+              Object.entries(kinds).map(([name, body]) => [
+                name,
+                { size: encode(body).byteLength, sha256: "", type: "text/plain" },
+              ]),
+            ),
+            read: (name: string) =>
+              Promise.resolve(kinds[name] === undefined ? null : encode(kinds[name] ?? "")),
+          }),
+      },
+    });
+    const location = await porthole.issue(
+      { scope: "all", document: { kind: "artifact", id: "all", version: "1" } },
+      { viewer: "ada" },
+    );
+    const html =
+      (await (await porthole.handle(ask(location.url, "iframe", "cross-site")))?.text()) ?? "";
+    const page = /"page":"([^"]+)"/u.exec(html)?.[1] ?? "";
+    for (const name of Object.keys(kinds)) {
+      // As a tab opens it: a navigation, top-level.
+      const answer = await porthole.handle(
+        new Request(new URL(name, page).href, {
+          headers: {
+            "sec-fetch-dest": "document",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-site": "none",
+          },
+        }),
+      );
+      expect(answer?.status, name).toBe(200);
+      const csp = answer?.headers.get("content-security-policy") ?? "";
+      expect(csp, `${name}: a sandbox`).toMatch(/(^|; )sandbox( allow-scripts)?(;|$)/u);
+      expect(csp, `${name}: never allow-same-origin`).not.toContain("allow-same-origin");
+    }
+  });
+
   test("only the shell renews the page's sealed address: same-origin, not the opaque page", async () => {
     const porthole = server();
     const location = await porthole.issue(

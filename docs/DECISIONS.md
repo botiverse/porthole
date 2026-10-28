@@ -5961,6 +5961,17 @@ the thread 1.5 s while the person goes back to the composer; on the headless she
 without the check, measured; elsewhere Playwright's input waits the stall out, so that case is no
 control's probe); negative control `shell-stall` (the gap ignored).
 
+**Amended after the CTO's review (porthole#54): every file sandboxed.** A nested page's files are on
+its shell's origin, so a file a browser can run as a document, opened on a tab of its own (an SVG
+or an XML file with a script, "open image in new tab"), must not run there. Every answer below the
+sealed prefix carries a CSP sandbox, never `allow-same-origin`: a page's `sandbox allow-scripts`
+(opaque); every other file's `default-src 'none'; sandbox` (opaque, nothing runs: P081's inert CSP);
+and now a script's too (`sandbox`, where a served script had none). **Tested:**
+`test/nested.test.ts` (every type in Porthole's table, opened as a tab opens it: a sandbox, never
+`allow-same-origin`), and `leak/served/nested.spec.ts` "a page's SVG or XML file opened on a tab of
+its own is an opaque origin…" (each opaque; its script wrote nothing to the shell's origin's
+storage); negative control `file-sandbox` (a file without its sandbox).
+
 ## P112 · 2026-10-28 · 0.14's comment UX: what annotations add for a host's comment modes · Accepted
 
 **Context.** Raft's comment design (its modes A–C, a card that follows its mark, a list in document

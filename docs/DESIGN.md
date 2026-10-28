@@ -1472,6 +1472,7 @@ control the tables above name to the registry):
 | `order-check` | `annotate.spec.ts` | `every found mark's place in the document comes with its box, offscreen ones too; a place that isn't one is no report (P112)` | — | — |
 | `hold-click` | `annotate.spec.ts` | `holding a block 500 ms selects it and its release's click never reaches the page; a tap, a moving finger and a mouse are the page's (P112)` | — | — |
 | `shell-namespace` | `served/nested.spec.ts` | `the shell's words are the shell's alone: a page that says them, to its parent or to the host's window, moves nothing` | — | — |
+| `file-sandbox` | `served/nested.spec.ts` | `a page's SVG or XML file opened on a tab of its own is an opaque origin, and its script touches nothing of the shell's (P111, after its review)` | — | — |
 | `shell-stall` | `served/nested.spec.ts` | `a shell's activation seen after a stall is no one's gesture until it goes off (P111, after its review)` | — | — |
 | `shell-host-input` | `served/nested.spec.ts` | `a page's focus() just after the person pressed it and went back to the host's composer is taken back` | — | — |
 | `comment-draft` | `served/runtime.spec.ts` | `a comment's draft is the host's to check: past the limit, holding what a person can't see, or not text, it opens no composer (P108)` | — | — |

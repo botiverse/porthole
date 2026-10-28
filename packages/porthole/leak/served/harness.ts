@@ -39,6 +39,7 @@ import {
 import {
   asServiceWorkerAllowed,
   withoutDocumentSandbox,
+  withoutFileSandbox,
   withoutPermissionsPolicy,
   withoutResourcePolicy,
   withSelfForFiles,
@@ -557,6 +558,9 @@ async function start(): Promise<Harness> {
       }
       if (weakened.includes("tab-sandbox")) {
         answer = withoutDocumentSandbox(answer);
+      }
+      if (weakened.includes("file-sandbox")) {
+        answer = withoutFileSandbox(answer);
       }
       if (weakened.includes("permissions-policy")) {
         answer = withoutPermissionsPolicy(answer);
