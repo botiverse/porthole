@@ -71,6 +71,9 @@ export const UNWEAKENED: Readonly<Record<string, string>> = {
 
 const LEAK = "leak/leak.spec.ts";
 const RUNTIME = "leak/served/runtime.spec.ts";
+const NESTED = "leak/served/nested.spec.ts";
+const STALL_RULE =
+  "a shell's activation seen after a stall is no one's gesture until it goes off (P111, after its review)";
 const FILES = "leak/served/files.spec.ts";
 const SERVED = "leak/served/served.spec.ts";
 const TAB = "leak/served/tab.spec.ts";
@@ -542,6 +545,63 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     specs: [RUNTIME],
     fails: all(
       "comments.open while the person types in the host's composer reaches no handler, by the page's own call or the shell's; from a press in the frame it does",
+    ),
+  },
+  // A cancel only while the host asked for a pick or for text (P112).
+  "cancel-any-mode": {
+    specs: [ANNOTATE],
+    fails: all(
+      "Escape while selecting text is cancelled, and stays the page's key; with no mode on, a page's own cancel isn't heard (P112)",
+      "a hostile page fakes reports: the host takes none it didn't ask for, nothing malformed, and not a flood",
+    ),
+  },
+  // A followed mark's box only for that mark, at most 60 a second (P112).
+  "track-checks": {
+    specs: [ANNOTATE],
+    fails: all(
+      "a followed mark's box comes as it moves, for that mark only, at most 60 a second, clamped to the frame, until the host stops (P112)",
+    ),
+  },
+  // A mark's place is a whole number below the most marks (P112).
+  "order-check": {
+    specs: [ANNOTATE],
+    fails: all(
+      "every found mark's place in the document comes with its box, offscreen ones too; a place that isn't one is no report (P112)",
+    ),
+  },
+  // Holding a block selects it, and its release's click is the shell's (P112).
+  "hold-click": {
+    specs: [ANNOTATE],
+    fails: all(
+      "holding a block 500 ms selects it and its release's click never reaches the page; a tap, a moving finger and a mouse are the page's (P112)",
+    ),
+  },
+  // A nested page's shell keeps its own namespace (P111): a page that says the shell's words, just
+  // before a call of its own, has its comments.open believed.
+  "shell-namespace": {
+    specs: [NESTED],
+    fails: all(
+      "the shell's words are the shell's alone: a page that says them, to its parent or to the host's window, moves nothing",
+    ),
+  },
+  // Every file below a nested page's sealed prefix is sandboxed (P111, after its review).
+  "file-sandbox": {
+    specs: [NESTED],
+    fails: all(
+      "a page's SVG or XML file opened on a tab of its own is an opaque origin, and its script touches nothing of the shell's (P111, after its review)",
+    ),
+  },
+  // A stalled shell's activation is uncertain (P111, after its review).
+  "shell-stall": {
+    specs: [NESTED],
+    fails: all(STALL_RULE),
+  },
+  // A nested page's gesture needs a quiet host (P111): a page that takes the keyboard within a
+  // second of the person's press in it keeps it though they went back to the host's composer.
+  "shell-host-input": {
+    specs: [NESTED],
+    fails: all(
+      "a page's focus() just after the person pressed it and went back to the host's composer is taken back",
     ),
   },
   "comment-draft": {

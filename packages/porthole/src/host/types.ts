@@ -210,6 +210,13 @@ export interface DisplayEvents {
    */
   readonly focusTaken: { readonly typing: boolean };
   /**
+   * Whether the page touched `localStorage` or `sessionStorage` (the in-memory stand-in of a frame
+   * without storage of its own: opaque, or a nested page, P111): once per run, `used: true` when
+   * the page first did, else `used: false` as the run ends. Never what it kept: for a host to count
+   * the pages that would need storage.
+   */
+  readonly storage: { readonly used: boolean };
+  /**
    * What the frame reported about annotations (`annotate`, P053), checked and taken only while
    * the host asked for it: a selection, its clearing, a cancelled pick, where marks are. The
    * content's word: UI hints, never permissions.
@@ -229,6 +236,13 @@ export interface AnnotationControls {
   show(marks: readonly AnnotationMark[]): void;
   /** Brings a mark into view in the frame and makes it the active one. */
   focus(id: string): void;
+  /**
+   * Follows one shown mark (P112): while it moves (a scroll, a layout change) the display reports
+   * `{ type: "tracked", id, rect }` at most once per animation frame (60 a second), its box clamped
+   * to the frame, for that mark only; `null` stops. One at a time: a new id replaces the last.
+   * Throws for an id no shown mark has; a `show` without it, or `clear`, stops it.
+   */
+  track(id: string | null): void;
   /** Removes every mark. */
   clear(): void;
 }
@@ -270,4 +284,10 @@ export interface PortholeHost<C extends AdapterConnection = ShellConnection> {
    * none (here or in the host's options), so a manual never teaches a function nobody serves.
    */
   mount(container: HTMLElement, options: MountOptions): DisplayHandle<C>;
+  /**
+   * Whether a page with `declaration` may pass on what it is given (`mayPassOn`, P112): true where
+   * it can store what others read (`db` and `user`) or reaches the network beyond the library CDNs.
+   * A host shows such a page none of a person's drafts.
+   */
+  mayPassOn(declaration: PageDeclaration | null): boolean;
 }

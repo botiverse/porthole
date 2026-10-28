@@ -56,6 +56,8 @@ export interface PresetOptions {
    * be offered the runtime's own (`user`, `comments`, `artifact`, `assets`, `db`).
    */
   readonly runtime?: RuntimeVersion;
+  /** Domain isolation, artifact pages: the page in an opaque child of Porthole's shell (P111). */
+  readonly nested?: true;
 }
 
 /** What a live widget may say about a capability (P103): anything but origins of its own. */
@@ -241,6 +243,7 @@ function build(
     ...(options.storage === undefined ? {} : { storage: options.storage }),
     ...(options.errors === undefined ? {} : { errors: options.errors }),
     ...(options.runtime === undefined ? {} : { runtime: options.runtime }),
+    ...(options.nested === undefined ? {} : { nested: options.nested }),
   });
 }
 

@@ -68,6 +68,9 @@ export const SHELL_RUNTIME = String.raw`(() => {
     }
   };
 
+  // Whether the page touched storage, told to the host once (P111): yes, never what it keeps.
+  let storageTouched = false;
+  let tellStorage = () => {};
   if (plan.storage === "memory") {
     // An opaque origin has no storage: a map stands in, for as long as the frame lives.
     const store = () => {
@@ -84,8 +87,18 @@ export const SHELL_RUNTIME = String.raw`(() => {
       };
     };
     for (const name of ["localStorage", "sessionStorage"]) {
+      const kept = store();
       try {
-        Object.defineProperty(window, name, { configurable: true, value: store() });
+        Object.defineProperty(window, name, {
+          configurable: true,
+          get() {
+            if (!storageTouched) {
+              storageTouched = true;
+              tellStorage();
+            }
+            return kept;
+          },
+        });
       } catch (_) {}
     }
   }
@@ -115,6 +128,8 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // takes the next load for that page, not for content that left). Anything else stays stopped:
   // another path of the origin, a file that isn't a page, another origin.
   let navigating = (_url) => {};
+  // A nested page's files' address renewed by its shell (P111), which the shell's message gives.
+  let adoptFiles = (_base) => false;
   let filesBase = plan.files && typeof plan.files.base === "string" ? plan.files.base : null;
   // Every address the page's files had (P083: a sealed one is renewed): what reports say as "./".
   const filesBases = filesBase === null ? [] : [filesBase];
@@ -880,6 +895,11 @@ export const SHELL_RUNTIME = String.raw`(() => {
   const filesSet = plan.files && plan.files.set && typeof plan.files.set === "object" ? { id: String(plan.files.set.id), version: String(plan.files.set.version) } : null;
   const notice = (url, more) => post({ method: "porthole/navigating", params: Object.assign({ url: ownAddresses(url).slice(0, 4096) }, filesSet === null ? {} : { set: filesSet }, more) });
   navigating = (url) => notice(url, {});
+  // The page used storage (P111): said once, as soon as the shell can speak; never keys or values.
+  tellStorage = () => post({ method: "porthole/storage-used", params: {} });
+  if (storageTouched) {
+    tellStorage();
+  }
   if (arrived) {
     notice(location.href, { arrived: true });
   }
@@ -887,28 +907,38 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // it ends, the page moved to the new one in place (the same page, the same history entry). Its
   // modules keep the address they loaded from; the server serves their own loads till the session
   // ends.
+  const replace = History.prototype.replaceState;
+  // The files' origin, read from the address itself: a nested page's own origin is opaque (P111).
+  const filesOrigin = filesBase === null ? null : new NativeURL(filesBase).origin;
+  // A renewed sealed address (P083): one segment under the same origin's sealed prefix, checked
+  // through the platform's own functions (content may have replaced a prototype's, and the base
+  // decides where this page may go, ownPage); the page moves there in place.
+  const adopt = (base) => {
+    const prefix = filesOrigin + "/__porthole/f/";
+    if (filesBase === null || typeof base !== "string" || callOf(indexIn, base, [prefix]) !== 0 || callOf(indexIn, callOf(sliceOf, base, [prefix.length, -1]), ["/"]) !== -1 || callOf(sliceOf, base, [-1]) !== "/") {
+      return false;
+    }
+    const here = location.href;
+    if (here.indexOf(filesBase) === 0) {
+      try {
+        applyOf(replace, history, [history.state, "", base + here.slice(filesBase.length)]);
+      } catch (_) {}
+    }
+    filesBase = base;
+    filesBases.push(base);
+    return true;
+  };
+  adoptFiles = adopt;
   if (filesBase !== null && typeof plan.files.expires === "number") {
     const nativeFetch = window.fetch.bind(window);
-    const replace = History.prototype.replaceState;
     const renewIn = (expires) => Math.max(30000, expires - Date.now() - 300000);
     const renew = () => {
       nativeFetch(filesBase + "__porthole/renew", { credentials: "omit", cache: "no-store" })
         .then((answer) => (answer.ok ? answer.json() : null))
         .then((renewed) => {
-          // Checked through the platform's own functions: content may have replaced a prototype's,
-          // and the base decides where this page may go (ownPage).
-          const prefix = location.origin + "/__porthole/f/";
-          if (!renewed || typeof renewed.base !== "string" || typeof renewed.expires !== "number" || callOf(indexIn, renewed.base, [prefix]) !== 0 || callOf(indexIn, callOf(sliceOf, renewed.base, [prefix.length, -1]), ["/"]) !== -1 || callOf(sliceOf, renewed.base, [-1]) !== "/") {
+          if (!renewed || typeof renewed.expires !== "number" || !adopt(renewed.base)) {
             return;
           }
-          const here = location.href;
-          if (here.indexOf(filesBase) === 0) {
-            try {
-              applyOf(replace, history, [history.state, "", renewed.base + here.slice(filesBase.length)]);
-            } catch (_) {}
-          }
-          filesBase = renewed.base;
-          filesBases.push(renewed.base);
           setTimeout(renew, renewIn(renewed.expires));
         })
         .catch(() => setTimeout(renew, 60000));
@@ -1464,6 +1494,11 @@ export const SHELL_RUNTIME = String.raw`(() => {
         break;
       case "ui/notifications/tool-input":
         void render(params.arguments);
+        break;
+      case "porthole/files-renewed":
+        // From the page's parent only (the listener's check): a nested page's shell renewed its
+        // files' sealed address, which this page can't (its loads aren't its origin's own, P111).
+        adoptFiles(params.base);
         break;
       case "ui/notifications/host-context-changed":
         applyTheme(params);

@@ -155,7 +155,20 @@ function results(value: unknown): AnchorResult[] | null {
     if (rect === null) {
       return null;
     }
-    out.push({ id: each.id, state: "attached", ...(rect === undefined ? {} : { rect }) });
+    // A place among the marks (P112): a whole number below the most marks a show carries.
+    const order = each.order;
+    if (
+      order !== undefined &&
+      !(typeof order === "number" && Number.isInteger(order) && order >= 0 && order < LIMITS.marks)
+    ) {
+      return null;
+    }
+    out.push({
+      id: each.id,
+      state: "attached",
+      ...(rect === undefined ? {} : { rect }),
+      ...(order === undefined ? {} : { order }),
+    });
   }
   return out;
 }
@@ -183,6 +196,10 @@ export function parseReport(value: unknown): AnnotationReport | null {
       const rect = parseRect(value.rect);
       return !markId(value.id) || rect === null ? null : { type: "activated", id: value.id, rect };
     }
+    case "tracked": {
+      const rect = parseRect(value.rect);
+      return !markId(value.id) || rect === null ? null : { type: "tracked", id: value.id, rect };
+    }
     default:
       return null;
   }
@@ -192,7 +209,11 @@ export function parseReport(value: unknown): AnnotationReport | null {
 export function annotateMode(mode: AnnotateMode | undefined): Required<AnnotateMode> {
   const elements = mode?.elements ?? true;
   const words = mode?.text ?? true;
-  if (typeof elements !== "boolean" || typeof words !== "boolean" || (!elements && !words)) {
+  if (
+    (typeof elements !== "boolean" && elements !== "hold") ||
+    typeof words !== "boolean" ||
+    (elements === false && !words)
+  ) {
     throw new TypeError("annotations.start: elements, text, or both");
   }
   return { elements, text: words };

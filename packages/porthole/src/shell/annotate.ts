@@ -8,7 +8,7 @@
  * (`porthole/annotate.selected|unselected|cancelled|anchored|activated`):
  * - picking an element: the element under the pointer (or finger) is outlined with its name; a
  *   click or tap picks it, and the content's own handlers never see that click (unless the content
- *   patched the DOM's built-ins, P105); Escape cancels;
+ *   patched the DOM's built-ins, P105); Escape cancels (while selecting text too, P112);
  * - selecting text: each selection that settles is reported, with where it is, and its clearing;
  * - marks: each anchor is found in the content as it is now (its CSS selector, its text where it
  *   was, its text anywhere, its words with any spacing) and drawn over it, in a layer of the
@@ -39,6 +39,8 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         cancelled: "porthole/annotate.cancelled",
         anchored: "porthole/annotate.anchored",
         activated: "porthole/annotate.activated",
+        track: "porthole/annotate.track",
+        tracked: "porthole/annotate.tracked",
       };
       // The DOM's own functions, taken before content runs.
       const elementFromPoint = Document.prototype.elementFromPoint;
@@ -51,6 +53,9 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const elementRect = Element.prototype.getBoundingClientRect;
       const rangeRect = Range.prototype.getBoundingClientRect;
       const rangeRects = Range.prototype.getClientRects;
+      const setStart = Range.prototype.setStart;
+      const setStartBefore = Range.prototype.setStartBefore;
+      const compareBoundaryPoints = Range.prototype.compareBoundaryPoints;
       const attachShadow = Element.prototype.attachShadow;
       const getAttribute = Element.prototype.getAttribute;
       const listenOn = EventTarget.prototype.addEventListener;
@@ -389,7 +394,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         return shadow;
       };
 
-      let mode = { elements: false, text: false };
+      let mode = { elements: false, text: false, hold: false };
       let hover = null;
       let marks = [];
       // The markers as last drawn, for a click to find: { id, element }. Each mark keeps its
@@ -817,7 +822,76 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
       };
 
-      const resultOf = (mark) => (mark.found === null ? { id: mark.id, state: "orphaned" } : { id: mark.id, state: "attached", rect: box(rectOf(mark.found)) });
+      // The mark the host follows (P112): its box at each animation frame where it moved, at most
+      // one every 16 ms, read through the platform's own frame clock (taken before content runs).
+      const nextFrame = window.requestAnimationFrame.bind(window);
+      let tracking = null;
+      let trackedBox = null;
+      let trackedAt = 0;
+      let trackFrame = 0;
+      const trackTick = () => {
+        trackFrame = 0;
+        if (tracking === null) {
+          return;
+        }
+        const mark = marks.find((each) => each.id === tracking);
+        if (mark !== undefined && mark.found !== null) {
+          const rect = box(rectOf(mark.found));
+          const now = performance.now();
+          if (apart(trackedBox, rect) && now - trackedAt >= 16) {
+            trackedBox = rect;
+            trackedAt = now;
+            tell(M.tracked, { id: tracking, rect });
+          }
+        }
+        trackFrame = nextFrame(trackTick);
+      };
+      const track = (id) => {
+        tracking = typeof id === "string" ? id : null;
+        trackedBox = null;
+        if (tracking !== null && trackFrame === 0) {
+          trackFrame = nextFrame(trackTick);
+        }
+      };
+
+      // Where each found mark starts in the document, in order (P112): its place in a list the host
+      // sorts, offscreen ones too. Read now, every time results are told.
+      const startOf = (found) => {
+        const range = createRange.call(document);
+        if (found.range) {
+          setStart.call(range, found.range.startContainer, found.range.startOffset);
+        } else {
+          setStartBefore.call(range, found.element);
+        }
+        return range;
+      };
+      const ordersOf = () => {
+        const placed = [];
+        for (const mark of marks) {
+          if (mark.found !== null) {
+            try {
+              placed.push({ mark, start: startOf(mark.found) });
+            } catch (_) {}
+          }
+        }
+        placed.sort((a, b) => {
+          try {
+            return compareBoundaryPoints.call(a.start, Range.START_TO_START, b.start);
+          } catch (_) {
+            return 0;
+          }
+        });
+        const orders = new Map();
+        placed.forEach((each, at) => orders.set(each.mark, at));
+        return orders;
+      };
+      const resultOf = (mark, orders) => {
+        if (mark.found === null) {
+          return { id: mark.id, state: "orphaned" };
+        }
+        const order = (orders || ordersOf()).get(mark);
+        return Object.assign({ id: mark.id, state: "attached", rect: box(rectOf(mark.found)) }, order === undefined ? {} : { order });
+      };
       // Two boxes more than 0.5 px apart on any side (or one of them unknown).
       const apart = (a, b) => !a || !b || Math.abs(a.x - b.x) > 0.5 || Math.abs(a.y - b.y) > 0.5 || Math.abs(a.width - b.width) > 0.5 || Math.abs(a.height - b.height) > 0.5;
       // What the host was last told of each mark (mark.told), so a settle tells only what moved.
@@ -826,7 +900,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         if (!told || told.state !== result.state) {
           return true;
         }
-        return result.state === "attached" && apart(told.rect, result.rect);
+        return result.state === "attached" && (apart(told.rect, result.rect) || told.order !== result.order);
       };
       const report = (pairs) => {
         if (pairs.length > 0) {
@@ -836,7 +910,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           tell(M.anchored, { results: pairs.map((pair) => pair.result) });
         }
       };
-      const resultsOf = (only) => marks.map((mark) => ({ mark, result: resultOf(mark) })).filter((pair) => !only || moved(pair.mark, pair.result));
+      const resultsOf = (only) => {
+        const orders = ordersOf();
+        return marks.map((mark) => ({ mark, result: resultOf(mark, orders) })).filter((pair) => !only || moved(pair.mark, pair.result));
+      };
       // Finds every mark again; tells the host every result (after show, or when a state changed),
       // only the marks that moved (once the content is quiet), or nothing.
       const anchorAll = (all, quiet) => {
@@ -1142,6 +1219,66 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           redraw();
         }
       }, true);
+
+      // Holding a block (P112, hold mode): a finger held still for 500 ms selects the block under
+      // it, and the click its release makes is the shell's; every other tap is the page's, as is
+      // any mouse. On the platform's own timer (taken before content runs).
+      const later = window.setTimeout.bind(window);
+      const cancelLater = window.clearTimeout.bind(window);
+      const HOLD_MS = 500;
+      const HOLD_SLOP = 10;
+      let holding = null;
+      let swallowUntil = 0;
+      const endHold = () => {
+        if (holding !== null) {
+          cancelLater(holding.timer);
+          holding = null;
+        }
+      };
+      window.addEventListener("pointerdown", (event) => {
+        if (!mode.hold || mode.elements || event.pointerType !== "touch" || !event.isPrimary) {
+          return;
+        }
+        endHold();
+        const x = event.clientX;
+        const y = event.clientY;
+        holding = {
+          x,
+          y,
+          timer: later(() => {
+            holding = null;
+            if (!mode.hold) {
+              return;
+            }
+            const element = under(x, y);
+            const anchor = element === null ? null : elementAnchor(element, textIndex());
+            if (anchor === null) {
+              return;
+            }
+            swallowUntil = performance.now() + 2000;
+            tell(M.selected, { anchor, rect: box(elementRect.call(element)) });
+          }, HOLD_MS),
+        };
+      }, true);
+      window.addEventListener("pointermove", (event) => {
+        if (holding !== null && event.pointerType === "touch" && Math.abs(event.clientX - holding.x) + Math.abs(event.clientY - holding.y) > HOLD_SLOP) {
+          endHold();
+        }
+      }, true);
+      for (const type of ["pointerup", "pointercancel"]) {
+        window.addEventListener(type, endHold, true);
+      }
+      for (const type of ["click", "contextmenu"]) {
+        window.addEventListener(type, (event) => {
+          if (swallowUntil > performance.now()) {
+            if (type === "click") {
+              swallowUntil = 0;
+            }
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }
+        }, true);
+      }
       window.addEventListener("click", (event) => {
         if (!mode.elements) {
           return;
@@ -1170,13 +1307,22 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         tell(M.selected, { anchor, rect: box(elementRect.call(element)) });
       }, true);
       window.addEventListener("keydown", (event) => {
-        if (mode.elements && event.key === "Escape") {
+        if (event.key !== "Escape") {
+          return;
+        }
+        if (mode.elements) {
           event.preventDefault();
           event.stopImmediatePropagation();
           mode = { elements: false, text: mode.text };
           hover = null;
           setCursor(false);
           draw();
+          tell(M.cancelled, {});
+          return;
+        }
+        // Selecting text (P112): the person wants out too. The key stays the page's (a page that
+        // closes its own dialog on Escape still does); the host decides what ends.
+        if (mode.text) {
           tell(M.cancelled, {});
         }
       }, true);
@@ -1244,7 +1390,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         const params = data.params !== null && typeof data.params === "object" ? data.params : {};
         switch (data.method) {
           case M.start:
-            mode = { elements: params.elements === true, text: params.text === true };
+            mode = { elements: params.elements === true, text: params.text === true, hold: params.elements === "hold" };
             hover = null;
             reported = null;
             reportedBox = null;
@@ -1276,7 +1422,11 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           case M.focus:
             focus(String(params.id));
             break;
+          case M.track:
+            track(params.id);
+            break;
           case M.clear:
+            track(null);
             pendingFocus = null;
             marks = [];
             active = null;

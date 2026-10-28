@@ -63,8 +63,13 @@ export interface AnnotationRect {
 
 /** What the person may point at while the host is asking. */
 export interface AnnotateMode {
-  /** Elements, picked with a click or tap (the one under the pointer is outlined); one pick. */
-  readonly elements?: boolean;
+  /**
+   * Elements, picked with a click or tap (the one under the pointer is outlined); one pick. Or
+   * `"hold"` (P112): a finger held still on a block for 500 ms selects it (reported as `selected`,
+   * and the click its release makes never reaches the page); every other tap, and any mouse, is the
+   * page's; it lasts until the host stops it.
+   */
+  readonly elements?: boolean | "hold";
   /** Text, by selecting it: each settled selection is reported, and its clearing. */
   readonly text?: boolean;
 }
@@ -106,6 +111,12 @@ export interface AnchorResult {
   readonly state: AnchorState;
   /** Where it is now, when attached. */
   readonly rect?: AnnotationRect;
+  /**
+   * Its place in the document among the found marks, from 0 (P112): where it starts, offscreen
+   * marks included, for a host that lists marks in reading order. The content's word: an order to
+   * sort by, never a fact.
+   */
+  readonly order?: number;
 }
 
 /** What the frame reports, once the host has checked it. */
@@ -118,7 +129,11 @@ export type AnnotationReport =
     }
   /** The text selection went away. */
   | { readonly type: "unselected" }
-  /** The person pressed Escape while picking an element. */
+  /**
+   * The person pressed Escape while picking an element (the pick ends), or while selecting text
+   * (P112: the page keeps the key; the host decides what ends). The page's word too: a page can
+   * send it, and the host takes it only while it asked for a pick or for text.
+   */
   | { readonly type: "cancelled" }
   /**
    * Where the marked anchors are now: every mark after `show`, the focused one after `focus`,
@@ -128,6 +143,12 @@ export type AnnotationReport =
    * host was last told, at most once a second (P104).
    */
   | { readonly type: "anchored"; readonly results: readonly AnchorResult[] }
+  /**
+   * The box of the mark the host follows (`annotations.track`, P112), in the frame's viewport, at
+   * an animation frame where it moved: at most 60 a second, for that mark only, clamped to the
+   * frame. The content's word: where to put a card beside it, nothing more.
+   */
+  | { readonly type: "tracked"; readonly id: string; readonly rect: AnnotationRect }
   /**
    * The person clicked the marker of a mark the host shows with a `count` (P104), or of a draft
    * (P107); `rect` is the marker's box, to open the host's own UI beside it. The content can fake
@@ -155,6 +176,10 @@ export const ANNOTATE_METHODS = {
   anchored: "porthole/annotate.anchored",
   /** Frame → host: a mark's marker was clicked (P104). */
   activated: "porthole/annotate.activated",
+  /** Host → frame: follow one mark's box (`{ id }`), or none (`{ id: null }`) (P112). */
+  track: "porthole/annotate.track",
+  /** Frame → host: the followed mark's box, as it moves (P112). */
+  tracked: "porthole/annotate.tracked",
 } as const;
 
 /** The most of each part of an anchor or report the host takes. */

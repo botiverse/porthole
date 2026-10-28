@@ -25,7 +25,7 @@ interface Reference {
 }
 
 /** The annotation controls the reference host exposes (`DisplayHandle.annotations`). */
-export type AnnotateOperation = "start" | "stop" | "show" | "focus" | "clear";
+export type AnnotateOperation = "start" | "stop" | "show" | "focus" | "track" | "clear";
 
 /** A reference display, with its annotations (`annotate`) to drive. */
 export interface ReferenceDisplay extends LaunchedDisplay {

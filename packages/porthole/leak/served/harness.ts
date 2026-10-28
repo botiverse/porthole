@@ -39,6 +39,7 @@ import {
 import {
   asServiceWorkerAllowed,
   withoutDocumentSandbox,
+  withoutFileSandbox,
   withoutPermissionsPolicy,
   withoutResourcePolicy,
   withSelfForFiles,
@@ -473,6 +474,15 @@ async function start(): Promise<Harness> {
       capabilities: { copyText: {}, readData: {}, subscribeData: {} },
     }),
     url: presets.url({ contentOrigins: [contentSource] }),
+    // A nested page (P111): Porthole's shell at the framed address, the page its opaque child.
+    artifactNested: presets.artifact({
+      isolation: "domain",
+      contentOrigins: [contentSource],
+      nested: true,
+      runtime: "1",
+      capabilities: { annotate: {}, comments: {}, copyText: {}, openLink: {} },
+      layout: { kind: "fill" },
+    }),
   };
   const porthole = createServer({
     content: { domain: "localhost", scheme: "http", port },
@@ -549,6 +559,9 @@ async function start(): Promise<Harness> {
       if (weakened.includes("tab-sandbox")) {
         answer = withoutDocumentSandbox(answer);
       }
+      if (weakened.includes("file-sandbox")) {
+        answer = withoutFileSandbox(answer);
+      }
       if (weakened.includes("permissions-policy")) {
         answer = withoutPermissionsPolicy(answer);
       }
@@ -558,10 +571,19 @@ async function start(): Promise<Harness> {
         servedShellWeakened() &&
         (answer.headers.get("content-type") ?? "").startsWith("text/html")
       ) {
-        answer = new Response(weakenServed(await answer.text()), {
-          status: answer.status,
-          headers: answer.headers,
-        });
+        const body = weakenServed(await answer.text());
+        const headers = new Headers(answer.headers);
+        // A nested page's shell runs by its script's hash (P111): the weakened script's, then.
+        const script = /<script>([\s\S]*?)<\/script>/u.exec(body)?.[1];
+        const csp = headers.get("content-security-policy");
+        if (script !== undefined && csp !== null && csp.includes("'sha256-")) {
+          const hash = createHash("sha256").update(script).digest("base64");
+          headers.set(
+            "content-security-policy",
+            csp.replace(/'sha256-[^']+'/u, `'sha256-${hash}'`),
+          );
+        }
+        answer = new Response(body, { status: answer.status, headers });
       }
       return answer;
     }

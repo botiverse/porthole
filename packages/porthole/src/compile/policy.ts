@@ -217,6 +217,8 @@ export function sandboxTokens(config: PortholeConfig): string[] {
     case "opaque":
       return ["allow-scripts"];
     case "domain":
+      // Nested (P111), this frame holds Porthole's shell, on the content origin, and the page is
+      // the shell's child (`PAGE_SANDBOX_TOKENS`).
       return ["allow-scripts", "allow-same-origin"];
     case "external":
       // The host may add a documented few (popups, modals, downloads), never top navigation.
@@ -235,8 +237,19 @@ export function sandboxTokens(config: PortholeConfig): string[] {
  * own documents, and opaque content is never served. Never in a `<meta>` (browsers ignore it there).
  */
 export function servedSandboxDirective(config: PortholeConfig): CspDirective | null {
-  return config.isolation === "domain" ? ["sandbox", ...sandboxTokens(config)] : null;
+  if (config.isolation !== "domain") {
+    return null;
+  }
+  return ["sandbox", ...(config.nested === true ? PAGE_SANDBOX_TOKENS : sandboxTokens(config))];
 }
+
+/**
+ * A nested page's sandbox (P111): its frame's attribute, set by Porthole's shell, and its own CSP
+ * header's, so it is an opaque origin in the shell's child frame and on a tab of its own. Scripts
+ * only: never `allow-same-origin`, which would give the page its served origin, the shell's, and
+ * so the shell's realm (a test holds every sandbox Porthole writes to this).
+ */
+export const PAGE_SANDBOX_TOKENS: readonly string[] = ["allow-scripts"];
 
 /** A served page's CSP header: the page's directives, then its sandbox (P099). */
 export function servedDocumentCsp(

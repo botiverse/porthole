@@ -119,6 +119,93 @@ test("picking an element: the one under the pointer is outlined, a click picks i
   await expect(frame.locator("body")).toHaveAttribute("data-clicked", "yes");
 });
 
+test("Escape while selecting text is cancelled, and stays the page's key; with no mode on, a page's own cancel isn't heard (P112)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: annotated(),
+    content: `${WIDGET}<script>addEventListener("keydown", (event) => { if (event.key === "Escape") document.body.dataset.escape = "yes"; });</script>`,
+  });
+  const frame = await display.frame();
+  await display.annotate("start", { elements: false, text: true });
+  await frame.locator("#more").focus();
+  await page.keyboard.press("Escape");
+  await next(display, "cancelled");
+  await expect(frame.locator("body"), "the page still hears its Escape").toHaveAttribute(
+    "data-escape",
+    "yes",
+  );
+  // Stopped: neither the person's Escape nor the page's own word is a cancel the host hears.
+  await display.annotate("stop", {});
+  const before = (await reports(display)).length;
+  await page.keyboard.press("Escape");
+  await frame.evaluate(() =>
+    parent.postMessage({ jsonrpc: "2.0", method: "porthole/annotate.cancelled", params: {} }, "*"),
+  );
+  await page.waitForTimeout(500);
+  expect((await reports(display)).slice(before), "probe: no cancel heard with no mode on").toEqual(
+    [],
+  );
+});
+
+test("holding a block 500 ms selects it and its release's click never reaches the page; a tap, a moving finger and a mouse are the page's (P112)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, { config: annotated(), content: WIDGET });
+  const frame = await display.frame();
+  await expect(frame.locator("#more")).toBeVisible();
+  expect(await display.annotate("start", { elements: "hold", text: true })).toBeNull();
+  // A finger on the button: down, held (or moved), up, and the click its release makes. The
+  // shell reads the events as the browser dispatches them; the page's realm could send these too,
+  // and what comes of them is a report, the page's word as ever.
+  const press = (pointerType: string, holdMs: number, moveBy = 0) =>
+    frame.evaluate(
+      async ([kind, ms, by]) => {
+        const target = document.getElementById("more") as HTMLElement;
+        const box = target.getBoundingClientRect();
+        const at = { clientX: box.left + 10, clientY: box.top + 10 };
+        const fire = (type: string, extra = {}) =>
+          target.dispatchEvent(
+            new PointerEvent(type, {
+              pointerType: kind,
+              isPrimary: true,
+              bubbles: true,
+              ...at,
+              ...extra,
+            }),
+          );
+        delete document.body.dataset.clicked;
+        fire("pointerdown");
+        if (by > 0) {
+          fire("pointermove", { clientX: at.clientX + by, clientY: at.clientY });
+        }
+        await new Promise((done) => setTimeout(done, ms));
+        fire("pointerup");
+        target.click();
+        return document.body.dataset.clicked ?? null;
+      },
+      [pointerType, holdMs, moveBy] as const,
+    );
+  const before = (await reports(display)).length;
+  expect(await press("touch", 700), "probe: the release's click never reached the page").toBeNull();
+  const held = await next(display, "selected", before);
+  expect(held.anchor.kind).toBe("element");
+  expect(held.anchor.label).toBe("button#more.primary.wide Read more");
+  // Still holding mode: a tap, a finger that moved, and a mouse held long are the page's.
+  const after = (await reports(display)).length;
+  expect(await press("touch", 100), "a tap is the page's").toBe("yes");
+  expect(await press("touch", 700, 30), "a finger that moved is the page's").toBe("yes");
+  expect(await press("mouse", 700), "a mouse is the page's").toBe("yes");
+  await page.waitForTimeout(300);
+  expect(
+    (await reports(display)).slice(after).filter((each) => each.type === "selected"),
+    "none of them selects anything",
+  ).toEqual([]);
+  // And once more: holding mode lasts until the host stops it.
+  expect(await press("touch", 700), "probe: the second hold's click is the shell's too").toBeNull();
+  await next(display, "selected", after);
+});
+
 test("an element without an id is anchored by its path; Escape cancels a pick", async ({
   page,
 }) => {
@@ -1822,6 +1909,130 @@ ${GUARD}
   await page.focus("#plain");
   await page.keyboard.press("Enter");
   expect(await fired(), "a key on the view after 500 ms").toEqual(["plain"]);
+});
+
+test("every found mark's place in the document comes with its box, offscreen ones too; a place that isn't one is no report (P112)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    content: SCROLLING,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#far")).toBeAttached();
+  // Shown last first: the places are the document's, not the show's.
+  await display.annotate("show", [
+    textMark("far", "far paragraph says", 1),
+    textMark("near", "The near paragraph.", 2),
+    textMark("lost", "words nowhere in it"),
+  ]);
+  const anchored = await next(display, "anchored");
+  const placeOf = (id: string) => anchored.results.find((each) => each.id === id)?.order;
+  expect(placeOf("near")).toBe(0);
+  expect(placeOf("far"), "the offscreen mark has its place too").toBe(1);
+  expect(placeOf("lost"), "an orphan has none").toBeUndefined();
+  const before = (await reports(display)).length;
+  for (const order of [-1, 1.5, 500, "0"]) {
+    await frame.evaluate(
+      (place) =>
+        parent.postMessage(
+          {
+            jsonrpc: "2.0",
+            method: "porthole/annotate.anchored",
+            params: {
+              results: [
+                {
+                  id: "near",
+                  state: "attached",
+                  rect: { x: 0, y: 0, width: 1, height: 1 },
+                  order: place,
+                },
+              ],
+            },
+          },
+          "*",
+        ),
+      order,
+    );
+  }
+  await page.waitForTimeout(500);
+  expect(
+    (await reports(display)).slice(before),
+    "probe: a place that isn't a whole number below the most marks is no report",
+  ).toEqual([]);
+});
+
+test("a followed mark's box comes as it moves, for that mark only, at most 60 a second, clamped to the frame, until the host stops (P112)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    content: SCROLLING,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#far")).toBeAttached();
+  await display.annotate("show", [
+    textMark("near", "The near paragraph.", 2),
+    textMark("far", "far paragraph says", 1),
+  ]);
+  await next(display, "anchored");
+  expect(await display.annotate("track", "nobody"), "only a shown mark is followed").toMatch(
+    /no mark/u,
+  );
+  expect(await display.annotate("track", "near")).toBeNull();
+  const tracked = async () =>
+    (await reports(display)).filter(
+      (each): each is Extract<AnnotationReport, { type: "tracked" }> => each.type === "tracked",
+    );
+  const start = (await tracked()).length;
+  const box = await (await frame.frameElement()).boundingBox();
+  if (box === null) {
+    throw new Error("no frame");
+  }
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  for (let i = 0; i < 10; i += 1) {
+    await page.mouse.wheel(0, 40);
+    await page.waitForTimeout(50);
+  }
+  await expect.poll(async () => (await tracked()).length - start).toBeGreaterThan(2);
+  const moving = (await tracked()).slice(start);
+  expect(new Set(moving.map((each) => each.id)), "the followed mark's alone").toEqual(
+    new Set(["near"]),
+  );
+  // A page that claims more: another mark, a box far outside, a flood.
+  await frame.evaluate(() => {
+    const say = (params: unknown) =>
+      parent.postMessage({ jsonrpc: "2.0", method: "porthole/annotate.tracked", params }, "*");
+    say({ id: "far", rect: { x: 0, y: 0, width: 10, height: 10 } });
+    for (let i = 0; i < 300; i += 1) {
+      say({ id: "near", rect: { x: 5_000_000, y: -5_000_000, width: 9_000_000, height: 10 } });
+    }
+  });
+  await page.waitForTimeout(1_200);
+  const all = (await tracked()).slice(start);
+  expect(
+    all.filter((each) => each.id !== "near"),
+    "probe: no other mark's box is taken",
+  ).toEqual([]);
+  expect(
+    all.length,
+    "probe: at most 60 a second (the page's own, and its flood, together)",
+  ).toBeLessThanOrEqual(130);
+  for (const each of all) {
+    expect(each.rect.x + each.rect.width, "clamped to the frame").toBeLessThanOrEqual(
+      box.width + 1,
+    );
+    expect(each.rect.y, "clamped to the frame").toBeGreaterThanOrEqual(0);
+  }
+  // Stopped: no more, however it moves.
+  expect(await display.annotate("track", null)).toBeNull();
+  const stopped = (await tracked()).length;
+  for (let i = 0; i < 5; i += 1) {
+    await page.mouse.wheel(0, -40);
+    await page.waitForTimeout(50);
+  }
+  await page.waitForTimeout(500);
+  expect((await tracked()).length, "nothing after track(null)").toBe(stopped);
 });
 
 test("an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second", async ({

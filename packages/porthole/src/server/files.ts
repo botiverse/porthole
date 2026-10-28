@@ -11,6 +11,7 @@ import { DEFAULT_ENTRY, lookupFile, requestFilePath, type FileLookup } from "../
 import { fileTypeOf } from "../files/types.ts";
 import { isCodeAsset } from "../runtime/requests.ts";
 import { sha256, utf8 } from "./crypto.ts";
+import { NESTED_FILE_HEADERS } from "./nested.ts";
 import type { FileBody, StoredAsset, StoredFiles } from "./types.ts";
 
 /**
@@ -226,6 +227,8 @@ export async function serveFile(serving: FileServing): Promise<Response> {
     return nothing(serving, 404, method);
   }
   const { type, role } = fileTypeOf(found.path);
+  // A nested page (P111): in its shell's child, an opaque origin.
+  const nested = serving.compiled.config.nested === true;
   // In a frame, the version's files are at a sealed address (P083), which their own loads of the
   // artifact's assets carry as their `Referer` (P091): to this origin only, never another.
   const referrer =
@@ -242,12 +245,18 @@ export async function serveFile(serving: FileServing): Promise<Response> {
   // A page and a script (a worker's policy is its script's) get the page's CSP, a page with its
   // frame's sandbox, on a tab of its own too (P099); anything else runs nothing when opened on
   // its own.
+  // A nested page's files are on its shell's origin (P111, after the review): every one carries a
+  // sandbox, so none opened as a document on its own (a tab, "open image in new tab") runs on that
+  // origin. Pages run their scripts, opaque; anything else runs nothing (a file's is inert already,
+  // a script's gets one too).
   const csp =
     role === "file"
       ? INERT_FILE_CSP
       : role === "page"
         ? servedDocumentCsp(serving.compiled.config, directives)
-        : serializeCsp(directives);
+        : nested
+          ? `${serializeCsp(directives)}; sandbox`
+          : serializeCsp(directives);
   const headers = new Headers({
     "content-type": type,
     "x-content-type-options": "nosniff",
@@ -263,7 +272,8 @@ export async function serveFile(serving: FileServing): Promise<Response> {
   if (role === "page") {
     // Every page of the set in the shell (P081): its hardening, its host functions, its theme.
     const html = serving.compiled.shellDocument({
-      origins: serving.hostOrigins,
+      // A nested page hears its shell, on its own origin, never the host (P111).
+      origins: nested ? [serving.origin] : serving.hostOrigins,
       document: await textOf(body),
       cspMeta: false,
       ...(referrer === "same-origin" ? { referrer } : {}),
@@ -303,8 +313,14 @@ export async function serveFile(serving: FileServing): Promise<Response> {
     serving.pinned ? `private, max-age=${YEAR}, immutable` : "private, no-cache",
   );
   // Only this origin's own pages load it: no other content origin (a sibling, same-site without
-  // the public suffix list) can embed it with the viewer's cookie.
+  // the public suffix list) can embed it with the viewer's cookie. A nested page's origin is
+  // opaque, and its files carry their access in their path, never a cookie (P111).
   headers.set("cross-origin-resource-policy", "same-origin");
+  if (nested) {
+    for (const [name, value] of Object.entries(NESTED_FILE_HEADERS)) {
+      headers.set(name, value);
+    }
+  }
   headers.set("accept-ranges", "bytes");
   if (role === "file" && type === "application/octet-stream") {
     headers.set("content-disposition", "attachment");

@@ -24,6 +24,12 @@ export interface SurfaceSpec {
   readonly fill?: boolean;
   /** The height to start at (a remembered height, so a frame mounting again doesn't jump). */
   readonly initialHeightPx: number;
+  /**
+   * The frame holds a nested page's shell (P111): the host's config says so, never the frame. What
+   * the shell says of itself (`porthole/shell/state`) decides moves of focus into it and the
+   * gesture its page's calls need; nothing else in that namespace reaches the transport.
+   */
+  readonly nested?: boolean;
 }
 
 /** One isolated frame. */
@@ -49,7 +55,8 @@ export interface Surface {
   /**
    * Whether the embedding page's focus is in this frame now, once the platform's focus guard
    * judged any move into it (P109); undefined, or absent, where the platform can't tell. A gesture
-   * gate that asks for the person in the calling frame (`comments`) reads it: false refuses.
+   * gate that asks for the person in the calling frame (`comments`) reads it: false refuses. A
+   * nested page's frame (P111) is the person's too while its shell saw their gesture just now.
    */
   focused?(): boolean | undefined;
   /**

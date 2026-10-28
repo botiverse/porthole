@@ -5843,3 +5843,199 @@ that throws gives the "wasn't checked" warning; `admitFiles` with `\ffffff` in a
 
 **Revisit when** a page's own document is ever shown outside the shell (then quirks mode is real),
 or an engine starts counting fixed boxes in what the viewport scrolls.
+
+## P111 · 2026-10-28 · A nested page: Porthole's shell at the framed address, the page its opaque child, and the shell's own activation decides the keyboard and `comments.open` · Accepted
+
+**Context.** P109's focus guard and `comments.open`'s gate ask whether the person, not the page,
+moved the keyboard into a frame or clicked in it. In full Chromium a cross-site frame is out of
+process, and the host's page sees nothing of a press in it: measured on Chromium 153 (2026-10-28,
+not the headless shell Playwright runs by default), no `:active`, no `:hover`, no pointer event past
+the frame's edge, only its window blurring with its own activation on, which a page's `focus()`
+after the person typed in the host also gives. So a person's real click into a page's field was
+taken back every time (the display stopped at the third), and `comments.open` from a real click was
+refused within 5 s of any input on the host's page (porthole#53). WebKit keeps these frames in
+process (`:active` holds there) and was right. Nothing in the page's realm can be asked instead:
+in every mode before this one, the shell's runtime and the page share a document (served, opaque,
+the MCP proxy), so whatever the shell would report, the page could post from the same window
+(ARCHITECTURE "Trust boundaries" 4, P053).
+
+**Decision.** A config may nest its artifact pages (`nested: true`: domain isolation, artifact
+mode). The address the host frames (a ticket's answer, a cookie's reload, an entered address)
+answers Porthole's shell alone, a document with no content in it, on the content origin, its script
+the only one its CSP runs (by hash), framing and fetching only the origin's sealed files' prefix.
+The shell frames the page in a child `<iframe sandbox="allow-scripts">` at the page's sealed address
+(P083); the page's answer carries the same sandbox in its CSP, so on a tab of its own it is opaque
+too. The page is the served page as before (the shell's runtime and its document), but its origin
+is opaque, its storage the runtime's in-memory stand-in, and it hears its parent, the shell, on the
+content origin; it never fetches with a cookie. The shell:
+- passes every message between the host and the page unchanged, the page's trusted by
+  `event.source` alone (its origin is "null"), and drops any the page sends in the shell's own
+  namespace (`porthole/shell/`);
+- tells the host its own state (`porthole/shell/state`: its transient activation and how long ago
+  it turned on, and whether focus is in it), read each animation frame, on its focus and blur, and
+  before each message of the page's is passed on. Activation goes up to ancestors, never down: a
+  press or key in the page turns the shell's on, and nothing on the host's page does;
+- renews the page's sealed address (`<base>__porthole/renew`, same-origin, as P083 asks) and gives
+  the page the new one (`porthole/files-renewed`), which the page's own loads can't (an opaque
+  origin's are never same-origin).
+The host knows a frame is nested from its config only, never from the frame. For such a frame the
+focus guard's rule is: the person moved focus in if the shell's activation turned on within the
+last second (`SHELL_GESTURE_MS`) and the host's page had no trusted pointerdown or keydown of its
+own since; or by Tab, or the host's own move, or (where the engine shows it) a press on the frame
+element. No pointer-over or host-wide activation cue counts for it. A move the shell hasn't spoken
+of yet waits for its word (it comes at the shell's next frame, after the host heard the move) at
+most `SHELL_WAIT_MS` (500 ms), then is taken back. The same signal opens `comments.open`: its
+gate's "person in this frame" holds while the shell saw that gesture, or focus is in the frame by
+the person's move. An engine whose shell has no `navigator.userActivation` keeps 0.13's rule. A
+`storage` event tells the host, once per run, whether the page touched `localStorage` or
+`sessionStorage` (the page's word; never a key or a value).
+
+**Threat it re-opens.** (1) A nested page's files are served with
+`Cross-Origin-Resource-Policy: cross-origin` and `Access-Control-Allow-Origin: *`, where P081 had
+`same-origin`: an opaque page's own loads are cross-origin. Whoever holds the sealed address could
+embed or read the files from any page; they could already fetch them with it, and P083 bounds the
+address (one version, one viewer, an hour on its own). (2) The page's sealed address opens past its
+hour only through the shell's renewal: P083's grace for a running page's own loads (same-origin
+only) can't apply, so a module the page loaded keeps an address that ends within the hour (its later
+imports fail), where P083 served them till the session's end. (3) The page loses its origin's
+storage (an in-memory stand-in, as opaque frames have). (4) A press in the page within 5 s of the
+last one turns no activation on: the second move into the frame (after the person went back to the
+host's page) is taken back until the activation lapses, or they Tab in. Accepted by the CTO.
+
+**Why.** The shell is a realm the page can't reach, above its frame: the page is a different origin
+(opaque), so it has nothing of the shell's (DOM, globals, the window the host hears), and it can
+neither navigate it nor post as it. Its activation is the person's gesture in this page and no other.
+
+**Rejected.** A shared shell on one host for every artifact (the per-artifact host stays: decided
+with the CTO); the page's runtime reporting its own gestures (the page's word, in the page's realm);
+the host's own activation edge (refreshed by the person's typing, so a press in the frame within 5 s
+of it is invisible); the pointer's last position on the host's page (it stops at the frame's edge,
+measured); consuming activation to see a new edge (it consumes the whole page's, the host's
+included).
+
+**Residual.** Assets (`/_blob/`) and Porthole's vendored libraries aren't served to a nested page
+yet (the config refuses them). Another page of the set opens in the frame (the shell's `frame-src`
+is the sealed prefix) without the navigate events a served page's guard uses (opaque documents get
+none): the shell's CSP is the wall, as `frame-src` is for opaque frames (P033). The host's page gets
+the keys a person types within the wait for the shell's word on a move it can't judge at once (on a
+slow machine, up to 500 ms; measured well under a frame's time on Chromium). A trace's snapshots in
+Playwright are evaluations in each frame, as gestures: the browser cases run untraced.
+
+**Tested.** `test/nested.test.ts`: the config's bounds; the page's sandbox (scripts only) and a
+static check that `allow-same-origin` appears in no sandbox Porthole writes or serves but a frame's
+on an origin of its own, and that every sandbox attribute is written from those lists; the shell's
+CSP and document; `/server`: the framed address answers the shell, the page at its sealed address
+without a cookie is sandboxed and hears the shell alone, its files' resource policy and CORS, only
+the shell renews; the host's rule. `leak/served/nested.spec.ts` on full Chromium (out-of-process
+frames), the headless shell, WebKit and Firefox, real input only: the page is an opaque origin at its
+sealed address; a real click into its field keeps the keyboard there; its `focus()` as it loads, on a
+timer while the person types, right after a click on the host's own button, 1.2, 3 and 4.5 s after
+the person paused typing in the host's composer, and 700 ms after the person pressed it and went
+back to the composer, is taken back; a marker's click is heard; `comments.open` from a real click
+within a second of typing in the host is allowed, and without one refused; a page that says the
+shell's words to its parent or to the host's window moves nothing; the host hears storage used.
+Negative controls `shell-namespace` (the shell passes its namespace on) and `shell-host-input` (no
+quiet host needed) each fail their probe on Chromium, WebKit and Firefox.
+
+**Revisit when** an engine shows the host's page a press in an out-of-process frame, or a page needs
+its own storage (then a capability for it, never the content origin's), assets, or libraries.
+
+**Amended after the CTO's review (porthole#54): a stalled shell.** The shell's "since" is when it
+saw its activation turn on, not when the press was. Where the page shares the shell's thread
+(WebKit; Firefox and Chromium where the frames share a process), a page that holds the thread from
+its own click handler pushes that moment past the person's next press and keys on the host's page,
+which then pass the "no host input since" check: the page could take the keyboard, or open the
+composer, after the person went back to the host. Now the shell looks every 50 ms (an interval as
+well as each animation frame), beats to the host as often (`porthole/shell/beat`), and says in each
+report how long it went without a look (`gap`). An activation that turns on in a report after the
+shell went more than `SHELL_STALL_MS` (100 ms) without a look, or the host heard nothing from it
+for longer, is uncertain: no one's gesture (the focus guard takes the move back, `comments.open` is
+refused) until it goes off. **Cost:** a page that keeps its thread busy (or a machine that is), in
+an engine where it shares the thread with the shell, has a person's real click taken for
+uncertain; their next press once the page is idle, or a Tab, gets in (measured on a machine at load
+45: Firefox took back one of two rounds of a real click). Two messages a 50 ms per display. **Tested:**
+`leak/served/nested.spec.ts` "a shell's activation seen after a stall is no one's gesture until it
+goes off" (the host's rule, in the browser's own event loop, on every engine), and
+`leak/served/nested-stall.spec.ts` (the race end to end with real input: the page's handler holds
+the thread 1.5 s while the person goes back to the composer; on the headless shell it got through
+without the check, measured; elsewhere Playwright's input waits the stall out, so that case is no
+control's probe); negative control `shell-stall` (the gap ignored).
+
+**Amended after the CTO's review (porthole#54): every file sandboxed.** A nested page's files are on
+its shell's origin, so a file a browser can run as a document, opened on a tab of its own (an SVG
+or an XML file with a script, "open image in new tab"), must not run there. Every answer below the
+sealed prefix carries a CSP sandbox, never `allow-same-origin`: a page's `sandbox allow-scripts`
+(opaque); every other file's `default-src 'none'; sandbox` (opaque, nothing runs: P081's inert CSP);
+and now a script's too (`sandbox`, where a served script had none). **Tested:**
+`test/nested.test.ts` (every type in Porthole's table, opened as a tab opens it: a sandbox, never
+`allow-same-origin`), and `leak/served/nested.spec.ts` "a page's SVG or XML file opened on a tab of
+its own is an opaque origin…" (each opaque; its script wrote nothing to the shell's origin's
+storage); negative control `file-sandbox` (a file without its sandbox).
+
+## P112 · 2026-10-28 · 0.14's comment UX: what annotations add for a host's comment modes · Accepted
+
+**Context.** Raft's comment design (its modes A–C, a card that follows its mark, a list in document
+order, block selection on touch) needs more from `annotate` than 0.13 has. Each addition is the
+content's word, as every report is (P053): the host uses it as a hint, never as a permission, and
+takes it only while it asked for it. Each item below landed on its own, with its negative control.
+
+- **Escape while selecting text** (P4). In text selection mode an Escape is reported as
+  `cancelled`, as it is while picking an element; the key stays the page's (a page that closes its
+  own dialog on Escape still does), and the host decides what ends (a pick ends with it, as
+  before). The host takes `cancelled` only while it asked for a pick or for text: a page can send
+  it, and then only gets the host out of a mode the person can enter again (Raft: mode B ends, its
+  drafts kept). Tested: `leak/annotate.spec.ts` "Escape while selecting text is cancelled…";
+  negative control `cancel-any-mode` (a cancel with no mode on is heard).
+- **Following a mark** (P1). `annotations.track(id | null)`: while the followed mark moves (a
+  scroll, a layout change), the frame reports `{ type: "tracked", id, rect }` at most once per
+  animation frame. One mark at a time, and only a shown one (`track` throws for another; a `show`
+  without it, or `clear`, stops it). The host takes a `tracked` only for the mark it follows, at
+  most 60 a second, its box clamped to the frame, outside the bridge's 120 reports a minute (which
+  a card that follows its mark would spend in two seconds). It costs a message and a box read per
+  frame, only while the host follows a mark. The box is where to put a card, nothing more: a page
+  can move it within its frame, as it can draw anything there. Tested: `leak/annotate.spec.ts` "a
+  followed mark's box comes as it moves…"; negative control `track-checks` (any mark, any rate).
+- **A mark's place** (P2). Each attached result in `anchored` carries `order`: its place among the
+  found marks by where it starts in the document, from 0, offscreen marks included (orphans have
+  none); a change of place is reported as a move is. The host takes a whole number below the most
+  marks a show carries, or drops the report. The page knows where its anchors are anyway; the host
+  sorts by it and takes it as nothing more. Tested: `leak/annotate.spec.ts` "every found mark's
+  place in the document…"; negative control `order-check` (any number taken).
+- **Holding a block** (P3). `start({ text: true, elements: "hold" })`: a finger held still (within
+  10 px) for 500 ms on a block selects it, reported as `selected` with an element anchor, as a pick
+  is; the click its release makes (and a context menu) never reaches the page. Every other tap, a
+  finger that moved, and any mouse are the page's, so the page stays usable while comments are on;
+  the mode lasts until the host stops it (a pick ends after one). It makes nothing but `selected`,
+  as `elements: true` does; a page can tell a long press happened, as it can tell a selection.
+  Tested: `leak/annotate.spec.ts` "holding a block 500 ms selects it…" (the events as the browser
+  dispatches them, sent in the frame: a page's realm can send them too, and what comes of them is a
+  report, the page's word); negative control `hold-click` (the release's click reaches the page).
+- **Whether a page may pass a draft on** (P8). `mayPassOn(config, declaration)`, and
+  `host.mayPassOn(declaration)`: true where the page can keep what it is given where others read
+  it, knowing whose it is (`db` and `user`, both declared and offered), or reaches the network
+  beyond the library CDNs (`anyHttps`, or any origin the config or a capability opens for any kind
+  that isn't one of `LIBRARY_CDNS`'s for that kind: a CDN serves published packages by their path,
+  and its logs are its operator's, not the page author's). ADOPTING's "no drafts to a page that can
+  pass them on" as a function a host calls instead of reading the declaration itself. A pure
+  function of the host's own records: `test/pass-on.test.ts` holds each channel alone, and none;
+  there is no browser probe for it to fail.
+- **A draft-only composer may take focus** (P6). THREAT_MODEL §6 said every view a report opens
+  takes no focus; ADOPTING's keyboard section opened a composer focused on `selected`. Now one
+  rule in both: in a comment mode the person started themselves (the host's own control), a
+  composer their selection opens may take focus with `focusField` if all it can do is save a draft
+  (nothing posts, submits or sends from it), the rest of §6's guard holding; any other view a
+  report opens takes none. What the page gains by choosing that moment is the person's next keys in
+  a draft they see and can discard. As Raft's comment design proposes it (its mode B); Tenny's to
+  confirm.
+  *Amended after the CTO's review (porthole#54):* `db` alone was missed (a page can store the draft
+  where its other readers see it, whoever wrote it), and so were `openLink` (the draft in a URL the
+  person opens) and `artifact` (the draft in a new version). The whole vocabulary now: what carries
+  what the page puts in it to someone other than the person viewing it counts, wherever the page
+  can reach it (the config declares it, and under the runtime with a declaration through a built-in
+  family or one the page declared): `db`, `artifact`, `assets`, `openLink`, `sendPrompt`,
+  `setModelContext`, `callTool`, `readData`, `subscribeData` (their arguments go to the host's data
+  services, which may be someone else's), and `reportError` where errors go to the agent. Not:
+  `copyText` and `downloadFile` (the person's own clipboard and disk), `annotate`, `resize` and
+  `comments` (the host's own UI; the composer is the person's, under the host's duties), and `user`
+  (it only reads). Tested: `test/pass-on.test.ts`, each channel alone.
+

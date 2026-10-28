@@ -93,9 +93,11 @@ export function defineDisplays<N extends string>(
       return presets.url({ ...kind.options, contentOrigins: [source] });
     }
     const options = kind.options ?? {};
+    // Nesting (P111) is a served page's: an opaque frame has nothing to nest.
+    const { nested: _nested, ...opaque } = options;
     return presets[kind.preset](
       source === null
-        ? options
+        ? opaque
         : { ...options, ...kind.served, isolation: "domain", contentOrigins: [source] },
     );
   };

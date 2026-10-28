@@ -66,6 +66,7 @@ jobs:
           REQUIRED_CI_JOBS: |
             check
             loopback (chromium)
+            loopback (chromium-oopif)
             loopback (webkit)
             loopback (firefox)
             controls (chromium, 1/4)

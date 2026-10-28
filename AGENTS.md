@@ -65,6 +65,8 @@ pnpm check            # typecheck + lint + format check + unit tests (run before
 pnpm test             # unit tests (vitest; packages/porthole/test), with /server in workerd (Miniflare)
 pnpm test:leak        # every Playwright suite (leak, served, MCP examples, React) on Chromium, WebKit, Firefox
 PORTHOLE_LEAK_ENGINES=chromium pnpm test:leak   # a subset, where an engine can't run
+PORTHOLE_LEAK_ENGINES=chromium-oopif pnpm test:leak   # full Chromium, frames out of process (P111)
+PORTHOLE_WEBKIT_PATH=<wrapper> pnpm test:leak   # WebKit through a launcher that supplies its libraries
 PORTHOLE_LEAK_WEAKEN=sync-guard pnpm test:leak  # a negative control: its probes must fail (P032)
 pnpm --filter @botiverse/porthole test:controls # every control fails exactly its probes (leak/controls.ts, P096)
 ops/prod-shape/run.sh # the prod-shape profile in docker compose (TLS edge, DNS, siblings; three engines)

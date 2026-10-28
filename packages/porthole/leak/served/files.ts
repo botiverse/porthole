@@ -128,6 +128,26 @@ export function withoutDocumentSandbox(response: Response): Response {
   return new Response(response.body, { status: response.status, headers });
 }
 
+/**
+ * The `file-sandbox` control (P111, after its review): a file that isn't a page goes out without
+ * its sandbox, so one opened on its own tab (an SVG, an XML file) has the content origin's.
+ */
+export function withoutFileSandbox(response: Response): Response {
+  const csp = response.headers.get("content-security-policy");
+  if (csp === null || (response.headers.get("content-type") ?? "").startsWith("text/html")) {
+    return response;
+  }
+  const headers = new Headers(response.headers);
+  headers.set(
+    "content-security-policy",
+    csp
+      .split(";")
+      .filter((directive) => directive.trim().split(/\s+/u)[0] !== "sandbox")
+      .join(";"),
+  );
+  return new Response(response.body, { status: response.status, headers });
+}
+
 /** The `permissions-policy` control (P099): a served page without its `Permissions-Policy`. */
 export function withoutPermissionsPolicy(response: Response): Response {
   if (!response.headers.has("permissions-policy")) {

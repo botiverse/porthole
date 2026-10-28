@@ -217,6 +217,9 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "url-origin": "harness",
   // A served page without its CSP's sandbox (P099): on a tab of its own nothing else sandboxes it.
   "tab-sandbox": "harness",
+  // A nested page's files (P111, after its review) without their sandbox: one opened on its own
+  // tab has the shell's origin.
+  "file-sandbox": "harness",
   // A served page without its Permissions-Policy header (P099): on a tab nothing else denies it
   // devices, location or full screen, but the shell's locks (`device-locks`, the only wall on
   // WebKit and Firefox, which don't apply the header to them).
@@ -466,8 +469,8 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "focus-guard": [
     {
       file: "src/platform/focus-guard.ts",
-      find: "    hostMove = null;\n    return moved;",
-      replace: "    hostMove = null;\n    return moved || true;",
+      find: "    const moved = personMoved({",
+      replace: "    const moved = true || personMoved({",
     },
   ],
   // What the guard does after a take-back (P109, after GK-1): no watch that focus stays back, a
@@ -482,13 +485,76 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
     },
     {
       file: "src/platform/focus-guard.ts",
-      find: "    if (polling === 0 && (frames.size > 0 || contest !== null)) {",
+      find: "    if (polling === 0 && (frames.size > 0 || contest !== null || waiting !== null)) {",
       replace: "    if (polling === 0 && frames.size > 0 && takesText(known)) {",
     },
     {
       file: "src/platform/focus-guard.ts",
       find: "      press !== null &&\n",
       replace: "      false &&\n      press !== null &&\n",
+    },
+  ],
+  // A cancel (P112) taken with no mode on: a page that says it is heard whenever it likes.
+  "cancel-any-mode": [
+    {
+      file: "src/host/create-host.ts",
+      find: "            if (annotating === null) {\n              return;\n            }\n            if (annotating.elements === true) {",
+      replace: "            if (annotating?.elements === true) {",
+    },
+  ],
+  // A followed mark's box (P112) taken for any mark, at any rate.
+  "track-checks": [
+    {
+      file: "src/host/create-host.ts",
+      find: "          if (id !== tracking || !marks.some((mark) => mark.id === id)) {\n            return;\n          }\n",
+      replace: "",
+    },
+    {
+      file: "src/host/create-host.ts",
+      find: "          if (trackedTimes.length >= TRACKED_PER_SECOND) {",
+      replace: "          if (false) {",
+    },
+  ],
+  // A mark's place in the document (P112) taken as the page gives it: any number at all.
+  "order-check": [
+    {
+      file: "src/annotate/validate.ts",
+      find: '      !(typeof order === "number" && Number.isInteger(order) && order >= 0 && order < LIMITS.marks)',
+      replace: "      false",
+    },
+  ],
+  // Holding a block (P112): the click the release makes goes on to the page.
+  "hold-click": [
+    {
+      file: "src/shell/annotate.ts",
+      find: "            swallowUntil = performance.now() + 2000;\n",
+      replace: "",
+    },
+  ],
+  // A nested page's shell (P111) passes on what its page says in the shell's own namespace: a page
+  // that says its shell's activation turned on is believed.
+  "shell-namespace": [
+    {
+      file: "src/shell/frame.ts",
+      find: 'typeof data.method === "string" && data.method.indexOf(PREFIX) === 0) {',
+      replace: "false) {",
+    },
+  ],
+  // A shell's stall (P111, after its review) not seen: an activation it saw late is fresh.
+  "shell-stall": [
+    {
+      file: "src/platform/focus-guard.ts",
+      find: "      const stalled = said.gap > SHELL_STALL_MS || at - guarded.heardAt > SHELL_STALL_MS;",
+      replace: "      const stalled = false;",
+    },
+  ],
+  // A nested page's gesture (P111) needs no quiet host: the person's press in the page counts for
+  // a second even after they pressed or typed on the host's page.
+  "shell-host-input": [
+    {
+      file: "src/platform/focus-guard.ts",
+      find: "    hostInputAt < word.activatedAt\n",
+      replace: "    true\n",
     },
   ],
   // comments.open's gesture in the calling frame (P109): any gesture on the host's page will do,
@@ -577,7 +643,15 @@ export function weaken(relative: string, text: string): string {
  * navigation guard (P079), whose wall in a served frame is the shell alone for another content
  * origin, and the shell's window.open and device locks on a tab (P099).
  */
-const SERVED = ["navigate-guard", "navigate-ask", "link-rule", "window-open", "device-locks"];
+const SERVED = [
+  "navigate-guard",
+  "navigate-ask",
+  "link-rule",
+  "window-open",
+  "device-locks",
+  // A nested page's shell (P111), made in the harness's process like the documents' shells.
+  "shell-namespace",
+];
 
 /** Whether a control asked for edits the served documents' shell (`weakenServed`). */
 export const servedShellWeakened = (): boolean => weakened.some((each) => SERVED.includes(each));
