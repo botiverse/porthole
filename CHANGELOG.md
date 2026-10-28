@@ -6,6 +6,10 @@ P-numbers below.
 
 ## 0.14.0
 
+**Withdrawn: do not use; stay on 0.13.0.** It was published by mistake on 2026-10-28, while
+porthole#56's Firefox P0 (a nested page can read what the person types into the host's fields) and
+its P1 were still open. The fixes ship as 0.14.1.
+
 A nested page (P111): the address a served artifact's frame loads is Porthole's shell alone, and the
 page runs in its child frame with an opaque origin, so the person's press in the page is seen in
 full Chromium too, where a cross-site frame is out of process and the host's page sees nothing of
