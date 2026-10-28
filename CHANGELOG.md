@@ -14,6 +14,10 @@ P-numbers below.
   only (`porthole/annotate.clearSelection`); an older shell ignores it.
 - **Tests:** `leak/annotate.spec.ts` "clearSelection takes the page's selection away…", and through
   a nested page's shell (`leak/served/nested.spec.ts`); negative control `clear-selection`.
+- **Fixed:** `annotations.show` clamps a mark's `count` above `ANNOTATION_LIMITS.count` (999) to
+  it, where it threw and refused every mark (P116; porthole#40: a thread of 1,000 comments broke a
+  host's page). The marker reads "99+" either way. A count that isn't a whole number from 0 still
+  throws.
 
 ## 0.14.0
 

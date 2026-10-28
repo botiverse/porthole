@@ -1035,7 +1035,7 @@ chooses), and the annotation runtime is in the shell only then.
 |-----------|---------|--------|
 | host → frame | `porthole/annotate.start` | `{ elements, text }`: picking elements (the one under the pointer or finger outlined with its name; a click or tap picks it, never reaching the content; Escape cancels; one pick), selecting text (each settled selection), or both (a click picks, a drag selects) |
 | host → frame | `porthole/annotate.stop` | — |
-| host → frame | `porthole/annotate.show` | `{ marks: [{ id, anchor, count?, kind? }], active? }`: drawn over the content in the shell's own layer (a closed shadow root), found again whenever the content changes; a mark with a `count` (0 to 999) also gets a marker (P104); `kind: "draft"` (absent: posted) is drawn apart, with a marker and never a count (P107) |
+| host → frame | `porthole/annotate.show` | `{ marks: [{ id, anchor, count?, kind? }], active? }`: drawn over the content in the shell's own layer (a closed shadow root), found again whenever the content changes; a mark with a `count` (0 to 999; the host clamps a larger one, P116) also gets a marker (P104); `kind: "draft"` (absent: posted) is drawn apart, with a marker and never a count (P107) |
 | host → frame | `porthole/annotate.focus` | `{ id }`: scrolled into view inside the frame, made the active mark, flashed |
 | host → frame | `porthole/annotate.clear` | — |
 | host → frame | `porthole/annotate.clearSelection` | —: the page's text selection is taken away (the DOM's own `removeAllRanges`, taken before content runs) with what the shell held of it, and nothing is reported back; marks, drafts and the mode stay (P115) |

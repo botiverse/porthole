@@ -227,7 +227,8 @@ export const hasMarker = (mark: AnnotationMark): boolean =>
   mark.count !== undefined || mark.kind === "draft";
 
 /**
- * The host's marks, checked before they go to the frame; throws on the first bad one. Each is
+ * The host's marks, checked before they go to the frame; throws on the first bad one (a count above
+ * `ANNOTATION_LIMITS.count` isn't bad: it is clamped to it, P116). Each is
  * rebuilt as the frame gets it: a posted mark as 0.10.0 sent it (no `kind`), a draft with
  * `kind: "draft"` and without its count (P107: a draft's marker shows no number, so the page isn't
  * told one).
@@ -244,10 +245,10 @@ export function checkMarks(marks: readonly AnnotationMark[]): AnnotationMark[] {
         `annotations.show: mark ${index} needs a unique id (1 to ${LIMITS.id} characters) and a valid anchor`,
       );
     }
-    if (mark.count !== undefined && !count(mark.count, LIMITS.count)) {
-      throw new TypeError(
-        `annotations.show: mark ${index}'s count is a whole number from 0 to ${LIMITS.count}`,
-      );
+    // A count above the limit is clamped to it (P116): the marker reads "99+" either way, and a
+    // count is data anyone can grow (a thread's replies), so it mustn't reject the whole list.
+    if (mark.count !== undefined && !count(mark.count, Infinity)) {
+      throw new TypeError(`annotations.show: mark ${index}'s count is a whole number, 0 or more`);
     }
     const kind: unknown = mark.kind;
     if (kind !== undefined && kind !== "posted" && kind !== "draft") {
@@ -257,6 +258,10 @@ export function checkMarks(marks: readonly AnnotationMark[]): AnnotationMark[] {
     if (kind === "draft") {
       return { id: mark.id, anchor, kind };
     }
-    return { id: mark.id, anchor, ...(mark.count === undefined ? {} : { count: mark.count }) };
+    return {
+      id: mark.id,
+      anchor,
+      ...(mark.count === undefined ? {} : { count: Math.min(mark.count, LIMITS.count) }),
+    };
   });
 }

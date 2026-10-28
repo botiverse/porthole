@@ -4595,7 +4595,7 @@ second wall on a tab); a host needs a served page to open windows from a tab (th
 `'self'` default (it joins `FRAME_DENIED_FEATURES`); or WebKit and Firefox apply
 `Permissions-Policy` to these features (the shell's device locks become the second wall there too).
 
-## P104 · 2026-10-20 · Annotation markers: a number at an anchor, a click the host hears, marks that follow a scroll · Accepted; amended by P105, P107
+## P104 · 2026-10-20 · Annotation markers: a number at an anchor, a click the host hears, marks that follow a scroll · Accepted; amended by P105, P107, P116
 
 A host that shows its comments beside an artifact page wants, at each comment's anchor in the page,
 a small marker (a bubble and how many comments are there) that scrolls with the content; a click on
@@ -6109,3 +6109,21 @@ told selection kept: each alone fails the probe, measured on Chromium).
 
 **Revisit when** a host needs the element picked (`elements: true`) or a held block cleared too
 (they leave no highlight now), or the MCP Apps spec gains a host-to-view way to clear a selection.
+
+## P116 · 2026-10-28 · A mark's count above the limit is clamped, not refused · Accepted
+
+**Context.** P104 had `checkMarks` throw on a `count` above `ANNOTATION_LIMITS.count` (999), as on
+a bad anchor, so one mark refused the whole `show`. The count is a host's data that anyone can
+grow: in Ferry, one comment with 999 replies made `annotations.show` throw, the host got
+`onHostError({ kind: "annotations" })`, and treated it as fatal (porthole#40).
+
+**Decision.** A whole number above the limit is clamped to it before the mark goes to the frame.
+The marker reads "99+" above 99 either way, so nothing a person sees changes, and the page is told
+no more than 999, as before. Anything that isn't a whole number from 0 (negative, a fraction,
+NaN, Infinity, not a number) still throws: that is a host's bug, not data that grew.
+
+**Rejected (for now).** Dropping only a bad mark rather than refusing the list, and running
+`focus`/`start` after a refused `show` (porthole#40's other suggestions): they change what a host
+hears about its own bugs; left for their own decision.
+
+Tested: `test/annotate.test.ts` (counts above the limit clamped, the rest refused as before).

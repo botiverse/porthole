@@ -293,7 +293,19 @@ describe("the host's checks on what a frame reports", () => {
       "id",
       "anchor",
     ]);
-    for (const count of [-1, 1.5, ANNOTATION_LIMITS.count + 1, Number.NaN, Infinity, "3", null]) {
+    // Above the limit, clamped to it (P116): one thread's thousand replies don't refuse the list.
+    expect(
+      checkMarks([
+        { id: "c1", anchor: text, count: ANNOTATION_LIMITS.count + 1 },
+        { id: "c2", anchor: element, count: 1_000_000 },
+        { id: "c3", anchor: element, count: 3 },
+      ]),
+    ).toEqual([
+      { id: "c1", anchor: text, count: ANNOTATION_LIMITS.count },
+      { id: "c2", anchor: element, count: ANNOTATION_LIMITS.count },
+      { id: "c3", anchor: element, count: 3 },
+    ]);
+    for (const count of [-1, 1.5, ANNOTATION_LIMITS.count + 0.5, Number.NaN, Infinity, "3", null]) {
       expect(
         () => checkMarks([{ id: "c1", anchor: text, count: count as number }]),
         String(count),
