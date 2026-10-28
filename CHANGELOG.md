@@ -4,12 +4,14 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.14.0
 
 A nested page (P111): the address a served artifact's frame loads is Porthole's shell alone, and the
 page runs in its child frame with an opaque origin, so the person's press in the page is seen in
 full Chromium too, where a cross-site frame is out of process and the host's page sees nothing of
-it. Fixes porthole#53.
+it. Fixes porthole#53. And what annotations add for a host's comment modes (P112): Escape while
+selecting text, a mark followed as it moves, marks' places in the document, holding a block on
+touch, and `mayPassOn`.
 
 - **New:** `nested: true` on an artifact config with domain isolation (`presets.artifact`,
   `defineDisplays` options). The host kit serves the shell at the framed address and the page at
