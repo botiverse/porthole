@@ -13,6 +13,7 @@ const manifest = JSON.parse(
   dependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   peerDependenciesMeta?: Record<string, { optional?: boolean }>;
+  files: string[];
 };
 
 describe("the package a host installs", () => {
@@ -20,6 +21,13 @@ describe("the package a host installs", () => {
     expect(manifest.dependencies ?? {}).toEqual({});
     expect(Object.keys(manifest.peerDependencies ?? {})).toEqual(["react"]);
     expect(manifest.peerDependenciesMeta?.react?.optional).toBe(true);
+  });
+
+  test("ships the CHANGELOG, copied from the repository's at build (porthole#32)", () => {
+    expect(manifest.files).toContain("CHANGELOG.md");
+    const copy = readFileSync(path.resolve(import.meta.dirname, "../scripts/copy-docs.ts"), "utf8");
+    expect(copy).toContain('new URL("../../../CHANGELOG.md", import.meta.url)');
+    expect(copy).toContain('new URL("../CHANGELOG.md", import.meta.url)');
   });
 });
 

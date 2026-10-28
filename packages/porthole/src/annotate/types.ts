@@ -84,7 +84,8 @@ export interface AnnotationMark {
   readonly anchor: AnnotationAnchor;
   /**
    * A marker (P104): with a count, the shell also draws a small bubble with this number (0 to
-   * `ANNOTATION_LIMITS.count`; above 99 it reads "99+", 0 draws the bubble alone) at the end of a
+   * `ANNOTATION_LIMITS.count`, a larger one clamped to it (P116); above 99 it reads "99+", 0 draws
+   * the bubble alone) at the end of a
    * text anchor and the top right of an element. The person can click it: the frame reports
    * `activated`. The content can read the number; give one only where the page may know it. A
    * draft's is dropped (P107): its marker has no number.

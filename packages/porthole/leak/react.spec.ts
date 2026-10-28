@@ -104,6 +104,20 @@ test("content streams through props: drafts inert in the same frame, the whole r
   await page
     .locator('[data-porthole-display="s"] iframe')
     .evaluate((element) => element.setAttribute("data-mark", "draft"));
+  // A draft cut right after "<" or "</" draws no stray "<" (P117, porthole#16).
+  await open(page, {
+    provider: "default",
+    frames: [
+      frame({ displayId: "s", content: `${partial}<div class="row" id="r2">two</`, partial: true }),
+    ],
+  });
+  await expect(inside.locator("#r2")).toHaveText("two");
+  await open(page, {
+    provider: "default",
+    frames: [frame({ displayId: "s", content: `${partial}<`, partial: true })],
+  });
+  await expect(inside.locator("#r2")).toHaveCount(0);
+  await expect(inside.locator("body")).not.toContainText("<", { useInnerText: true });
   const more = `${partial}<div class="row" id="r2">two</div>`;
   await open(page, {
     provider: "default",

@@ -500,10 +500,11 @@ export interface PortholeFrameProps {
   readonly instance?: InstanceRef;
   /**
    * What the page declared (P086), as the host stored it with the artifact: the capabilities it
-   * reaches through `porthole.use`, and its pinned runtime. By value: a change makes the display
-   * again.
+   * reaches through `porthole.use`, and its pinned runtime. Under `config.runtime`, `null` says
+   * the page was published before 0.7 and has 0.6's surface (`MountOptions.declaration`). By
+   * value: a change makes the display again.
    */
-  readonly declaration?: PageDeclaration;
+  readonly declaration?: PageDeclaration | null;
   /**
    * Who is viewing (P087), for an opaque frame or one whose issue gave none. By value: a change
    * makes the display again.
