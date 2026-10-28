@@ -28,6 +28,8 @@ it. Fixes porthole#53.
   stand-in (opaque, nested): whether the page touched `localStorage` or `sessionStorage`.
 - **Annotations (P112):** Escape while selecting text reports `cancelled` too (the page keeps
   the key); the host takes it only while it asked for a pick or for text.
+  `annotations.track(id | null)` follows one shown mark: `{ type: "tracked", id, rect }` as it
+  moves, at most 60 a second, clamped to the frame.
 - **Tests:** `leak/served/nested.spec.ts` runs on full Chromium (`chromium-oopif`, a new CI leg),
   the headless shell, WebKit and Firefox; negative controls `shell-namespace`, `shell-host-input`.
   `PORTHOLE_WEBKIT_PATH` runs the leak suite on a WebKit build of the machine's own.

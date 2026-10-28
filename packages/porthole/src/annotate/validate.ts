@@ -183,6 +183,10 @@ export function parseReport(value: unknown): AnnotationReport | null {
       const rect = parseRect(value.rect);
       return !markId(value.id) || rect === null ? null : { type: "activated", id: value.id, rect };
     }
+    case "tracked": {
+      const rect = parseRect(value.rect);
+      return !markId(value.id) || rect === null ? null : { type: "tracked", id: value.id, rect };
+    }
     default:
       return null;
   }

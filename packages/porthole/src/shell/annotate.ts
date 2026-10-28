@@ -39,6 +39,8 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         cancelled: "porthole/annotate.cancelled",
         anchored: "porthole/annotate.anchored",
         activated: "porthole/annotate.activated",
+        track: "porthole/annotate.track",
+        tracked: "porthole/annotate.tracked",
       };
       // The DOM's own functions, taken before content runs.
       const elementFromPoint = Document.prototype.elementFromPoint;
@@ -817,6 +819,38 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
       };
 
+      // The mark the host follows (P112): its box at each animation frame where it moved, at most
+      // one every 16 ms, read through the platform's own frame clock (taken before content runs).
+      const nextFrame = window.requestAnimationFrame.bind(window);
+      let tracking = null;
+      let trackedBox = null;
+      let trackedAt = 0;
+      let trackFrame = 0;
+      const trackTick = () => {
+        trackFrame = 0;
+        if (tracking === null) {
+          return;
+        }
+        const mark = marks.find((each) => each.id === tracking);
+        if (mark !== undefined && mark.found !== null) {
+          const rect = box(rectOf(mark.found));
+          const now = performance.now();
+          if (apart(trackedBox, rect) && now - trackedAt >= 16) {
+            trackedBox = rect;
+            trackedAt = now;
+            tell(M.tracked, { id: tracking, rect });
+          }
+        }
+        trackFrame = nextFrame(trackTick);
+      };
+      const track = (id) => {
+        tracking = typeof id === "string" ? id : null;
+        trackedBox = null;
+        if (tracking !== null && trackFrame === 0) {
+          trackFrame = nextFrame(trackTick);
+        }
+      };
+
       const resultOf = (mark) => (mark.found === null ? { id: mark.id, state: "orphaned" } : { id: mark.id, state: "attached", rect: box(rectOf(mark.found)) });
       // Two boxes more than 0.5 px apart on any side (or one of them unknown).
       const apart = (a, b) => !a || !b || Math.abs(a.x - b.x) > 0.5 || Math.abs(a.y - b.y) > 0.5 || Math.abs(a.width - b.width) > 0.5 || Math.abs(a.height - b.height) > 0.5;
@@ -1285,7 +1319,11 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           case M.focus:
             focus(String(params.id));
             break;
+          case M.track:
+            track(params.id);
+            break;
           case M.clear:
+            track(null);
             pendingFocus = null;
             marks = [];
             active = null;

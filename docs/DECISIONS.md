@@ -5954,3 +5954,12 @@ takes it only while it asked for it. Each item below landed on its own, with its
   it, and then only gets the host out of a mode the person can enter again (Raft: mode B ends, its
   drafts kept). Tested: `leak/annotate.spec.ts` "Escape while selecting text is cancelled…";
   negative control `cancel-any-mode` (a cancel with no mode on is heard).
+- **Following a mark** (P1). `annotations.track(id | null)`: while the followed mark moves (a
+  scroll, a layout change), the frame reports `{ type: "tracked", id, rect }` at most once per
+  animation frame. One mark at a time, and only a shown one (`track` throws for another; a `show`
+  without it, or `clear`, stops it). The host takes a `tracked` only for the mark it follows, at
+  most 60 a second, its box clamped to the frame, outside the bridge's 120 reports a minute (which
+  a card that follows its mark would spend in two seconds). It costs a message and a box read per
+  frame, only while the host follows a mark. The box is where to put a card, nothing more: a page
+  can move it within its frame, as it can draw anything there. Tested: `leak/annotate.spec.ts` "a
+  followed mark's box comes as it moves…"; negative control `track-checks` (any mark, any rate).

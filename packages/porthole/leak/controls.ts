@@ -553,6 +553,13 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "a hostile page fakes reports: the host takes none it didn't ask for, nothing malformed, and not a flood",
     ),
   },
+  // A followed mark's box only for that mark, at most 60 a second (P112).
+  "track-checks": {
+    specs: [ANNOTATE],
+    fails: all(
+      "a followed mark's box comes as it moves, for that mark only, at most 60 a second, clamped to the frame, until the host stops (P112)",
+    ),
+  },
   // A nested page's shell keeps its own namespace (P111): a page that says the shell's words, just
   // before a call of its own, has its comments.open believed.
   "shell-namespace": {

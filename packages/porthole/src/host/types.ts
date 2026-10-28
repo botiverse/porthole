@@ -236,6 +236,13 @@ export interface AnnotationControls {
   show(marks: readonly AnnotationMark[]): void;
   /** Brings a mark into view in the frame and makes it the active one. */
   focus(id: string): void;
+  /**
+   * Follows one shown mark (P112): while it moves (a scroll, a layout change) the display reports
+   * `{ type: "tracked", id, rect }` at most once per animation frame (60 a second), its box clamped
+   * to the frame, for that mark only; `null` stops. One at a time: a new id replaces the last.
+   * Throws for an id no shown mark has; a `show` without it, or `clear`, stops it.
+   */
+  track(id: string | null): void;
   /** Removes every mark. */
   clear(): void;
 }

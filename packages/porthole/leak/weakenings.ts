@@ -499,6 +499,19 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "            if (annotating?.elements === true) {",
     },
   ],
+  // A followed mark's box (P112) taken for any mark, at any rate.
+  "track-checks": [
+    {
+      file: "src/host/create-host.ts",
+      find: "          if (id !== tracking || !marks.some((mark) => mark.id === id)) {\n            return;\n          }\n",
+      replace: "",
+    },
+    {
+      file: "src/host/create-host.ts",
+      find: "          if (trackedTimes.length >= TRACKED_PER_SECOND) {",
+      replace: "          if (false) {",
+    },
+  ],
   // A nested page's shell (P111) passes on what its page says in the shell's own namespace: a page
   // that says its shell's activation turned on is believed.
   "shell-namespace": [

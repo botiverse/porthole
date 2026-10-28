@@ -1853,6 +1853,79 @@ ${GUARD}
   expect(await fired(), "a key on the view after 500 ms").toEqual(["plain"]);
 });
 
+test("a followed mark's box comes as it moves, for that mark only, at most 60 a second, clamped to the frame, until the host stops (P112)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    content: SCROLLING,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#far")).toBeAttached();
+  await display.annotate("show", [
+    textMark("near", "The near paragraph.", 2),
+    textMark("far", "far paragraph says", 1),
+  ]);
+  await next(display, "anchored");
+  expect(await display.annotate("track", "nobody"), "only a shown mark is followed").toMatch(
+    /no mark/u,
+  );
+  expect(await display.annotate("track", "near")).toBeNull();
+  const tracked = async () =>
+    (await reports(display)).filter(
+      (each): each is Extract<AnnotationReport, { type: "tracked" }> => each.type === "tracked",
+    );
+  const start = (await tracked()).length;
+  const box = await (await frame.frameElement()).boundingBox();
+  if (box === null) {
+    throw new Error("no frame");
+  }
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  for (let i = 0; i < 10; i += 1) {
+    await page.mouse.wheel(0, 40);
+    await page.waitForTimeout(50);
+  }
+  await expect.poll(async () => (await tracked()).length - start).toBeGreaterThan(2);
+  const moving = (await tracked()).slice(start);
+  expect(new Set(moving.map((each) => each.id)), "the followed mark's alone").toEqual(
+    new Set(["near"]),
+  );
+  // A page that claims more: another mark, a box far outside, a flood.
+  await frame.evaluate(() => {
+    const say = (params: unknown) =>
+      parent.postMessage({ jsonrpc: "2.0", method: "porthole/annotate.tracked", params }, "*");
+    say({ id: "far", rect: { x: 0, y: 0, width: 10, height: 10 } });
+    for (let i = 0; i < 300; i += 1) {
+      say({ id: "near", rect: { x: 5_000_000, y: -5_000_000, width: 9_000_000, height: 10 } });
+    }
+  });
+  await page.waitForTimeout(1_200);
+  const all = (await tracked()).slice(start);
+  expect(
+    all.filter((each) => each.id !== "near"),
+    "probe: no other mark's box is taken",
+  ).toEqual([]);
+  expect(
+    all.length,
+    "probe: at most 60 a second (the page's own, and its flood, together)",
+  ).toBeLessThanOrEqual(130);
+  for (const each of all) {
+    expect(each.rect.x + each.rect.width, "clamped to the frame").toBeLessThanOrEqual(
+      box.width + 1,
+    );
+    expect(each.rect.y, "clamped to the frame").toBeGreaterThanOrEqual(0);
+  }
+  // Stopped: no more, however it moves.
+  expect(await display.annotate("track", null)).toBeNull();
+  const stopped = (await tracked()).length;
+  for (let i = 0; i < 5; i += 1) {
+    await page.mouse.wheel(0, -40);
+    await page.waitForTimeout(50);
+  }
+  await page.waitForTimeout(500);
+  expect((await tracked()).length, "nothing after track(null)").toBe(stopped);
+});
+
 test("an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second", async ({
   page,
 }) => {

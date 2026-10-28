@@ -133,6 +133,12 @@ export type AnnotationReport =
    */
   | { readonly type: "anchored"; readonly results: readonly AnchorResult[] }
   /**
+   * The box of the mark the host follows (`annotations.track`, P112), in the frame's viewport, at
+   * an animation frame where it moved: at most 60 a second, for that mark only, clamped to the
+   * frame. The content's word: where to put a card beside it, nothing more.
+   */
+  | { readonly type: "tracked"; readonly id: string; readonly rect: AnnotationRect }
+  /**
    * The person clicked the marker of a mark the host shows with a `count` (P104), or of a draft
    * (P107); `rect` is the marker's box, to open the host's own UI beside it. The content can fake
    * it for any mark the host shows with a marker, and can tell a real one happened: open the
@@ -159,6 +165,10 @@ export const ANNOTATE_METHODS = {
   anchored: "porthole/annotate.anchored",
   /** Frame → host: a mark's marker was clicked (P104). */
   activated: "porthole/annotate.activated",
+  /** Host → frame: follow one mark's box (`{ id }`), or none (`{ id: null }`) (P112). */
+  track: "porthole/annotate.track",
+  /** Frame → host: the followed mark's box, as it moves (P112). */
+  tracked: "porthole/annotate.tracked",
 } as const;
 
 /** The most of each part of an anchor or report the host takes. */

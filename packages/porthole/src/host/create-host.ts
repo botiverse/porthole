@@ -66,7 +66,11 @@ const REPORTS: Readonly<Record<string, AnnotationReport["type"]>> = {
   [ANNOTATE_METHODS.cancelled]: "cancelled",
   [ANNOTATE_METHODS.anchored]: "anchored",
   [ANNOTATE_METHODS.activated]: "activated",
+  [ANNOTATE_METHODS.tracked]: "tracked",
 };
+
+/** The most `tracked` reports a second the host takes (P112): one per animation frame at 60 Hz. */
+export const TRACKED_PER_SECOND = 60;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -184,6 +188,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       let annotating: Required<AnnotateMode> | null = null;
       let marks: AnnotationMark[] = [];
       let activeMark: string | null = null;
+      // The mark the host follows (P112), and when it took each `tracked` in the last second.
+      let tracking: string | null = null;
+      const trackedTimes: number[] = [];
       let handshaken = false;
       let storageTold = false;
       const toFrame = (method: string, params: Record<string, unknown>) => {
@@ -200,6 +207,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         }
         if (annotating !== null) {
           toFrame(ANNOTATE_METHODS.start, { ...annotating });
+        }
+        if (tracking !== null) {
+          toFrame(ANNOTATE_METHODS.track, { id: tracking });
         }
       };
       /**
@@ -244,6 +254,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         switch (report.type) {
           case "selected":
           case "activated":
+          case "tracked":
             return { ...report, rect: clampRect(report.rect, viewport) };
           case "anchored":
             return {
@@ -280,6 +291,25 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         let report = parseReport({ ...(isRecord(raw.params) ? raw.params : {}), type });
         if (report === null) {
           void through.call("annotate", null);
+          return;
+        }
+        // The followed mark's box (P112): the mark the host follows and no other, while it is
+        // shown, at most 60 a second; past the bridge's rate for reports, which a card that follows
+        // its mark at every frame would spend at once.
+        if (report.type === "tracked") {
+          const { id } = report;
+          if (id !== tracking || !marks.some((mark) => mark.id === id)) {
+            return;
+          }
+          const at = Date.now();
+          while (trackedTimes.length > 0 && at - (trackedTimes[0] as number) >= 1_000) {
+            trackedTimes.shift();
+          }
+          if (trackedTimes.length >= TRACKED_PER_SECOND) {
+            return;
+          }
+          trackedTimes.push(at);
+          emit("annotation", withinFrame(report));
           return;
         }
         switch (report.type) {
@@ -359,6 +389,10 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           if (activeMark !== null && !marks.some((mark) => mark.id === activeMark)) {
             activeMark = null;
           }
+          if (tracking !== null && !marks.some((mark) => mark.id === tracking)) {
+            tracking = null;
+            toFrame(ANNOTATE_METHODS.track, { id: null });
+          }
           toFrame(ANNOTATE_METHODS.show, {
             marks,
             ...(activeMark === null ? {} : { active: activeMark }),
@@ -372,10 +406,20 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           activeMark = id;
           toFrame(ANNOTATE_METHODS.focus, { id });
         },
+        track(id) {
+          needsAnnotate("track");
+          if (id !== null && !marks.some((mark) => mark.id === id)) {
+            throw new TypeError(`annotations.track: no mark ${JSON.stringify(id)} is shown`);
+          }
+          tracking = id;
+          trackedTimes.length = 0;
+          toFrame(ANNOTATE_METHODS.track, { id });
+        },
         clear() {
           needsAnnotate("clear");
           marks = [];
           activeMark = null;
+          tracking = null;
           toFrame(ANNOTATE_METHODS.clear, {});
         },
       };
