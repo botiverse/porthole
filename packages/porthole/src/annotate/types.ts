@@ -180,6 +180,8 @@ export const ANNOTATE_METHODS = {
   track: "porthole/annotate.track",
   /** Frame → host: the followed mark's box, as it moves (P112). */
   tracked: "porthole/annotate.tracked",
+  /** Host → frame: take the page's text selection away, telling nothing back (P115). */
+  clearSelection: "porthole/annotate.clearSelection",
 } as const;
 
 /** The most of each part of an anchor or report the host takes. */

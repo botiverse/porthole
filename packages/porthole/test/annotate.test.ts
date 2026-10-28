@@ -502,6 +502,106 @@ describe("a marker's click (P104), on createHost over a stand-in platform", () =
   });
 });
 
+describe("clearSelection (P115), on createHost over a stand-in platform", () => {
+  const mounted: DisplayHandle[] = [];
+  afterEach(() => {
+    for (const display of mounted.splice(0)) {
+      display.destroy();
+    }
+  });
+  /** A display whose frames' messages from the host are kept, each frame's handshake by hand. */
+  const mount = (annotate: boolean) => {
+    const sent: { method: string; params: unknown }[] = [];
+    let listeners = new Set<(message: unknown) => void>();
+    const platform: PlatformHost = {
+      name: "stand-in",
+      createSurface: () => {
+        listeners = new Set();
+        const own = listeners;
+        return {
+          transport: {
+            send: (message) => {
+              const { method, params } = message as { method?: unknown; params?: unknown };
+              if (typeof method === "string") {
+                sent.push({ method, params });
+              }
+            },
+            listen: (listener) => {
+              own.add(listener);
+              return () => own.delete(listener);
+            },
+            close: () => own.clear(),
+          },
+          element: null,
+          setHeight: () => {},
+          setColorScheme: () => {},
+          userActivation: () => undefined,
+          viewport: () => ({ width: 600, height: 400 }),
+          onNavigated: () => () => {},
+          onLoad: () => () => {},
+          destroy: () => {},
+        };
+      },
+    };
+    const container = {
+      ownerDocument: {
+        defaultView: { location: { origin: "https://app.example" }, navigator: { language: "en" } },
+      },
+      getBoundingClientRect: () => ({ width: 600 }),
+    } as unknown as HTMLElement;
+    const config = annotate
+      ? presets.artifact({ capabilities: { annotate: {} } })
+      : presets.artifact();
+    const display = createHost(config, { platform }).mount(container, {
+      displayId: "d1",
+      title: "Notes",
+      scheme: "light",
+    });
+    mounted.push(display);
+    const handshake = () => {
+      for (const listener of listeners) {
+        listener({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} });
+      }
+    };
+    const annotateSent = () =>
+      sent
+        .filter((each) => each.method.startsWith("porthole/annotate."))
+        .map((each) => each.method);
+    return { display, sent, handshake, annotateSent };
+  };
+
+  test("goes to the frame as it is, with no params, and is kept for no later frame", () => {
+    const t = mount(true);
+    t.handshake();
+    t.display.annotations.show([{ id: "c1", anchor: text, count: 1 }]);
+    t.display.annotations.start({ elements: false, text: true });
+    t.display.annotations.clearSelection();
+    expect(t.sent.at(-1)).toEqual({ method: "porthole/annotate.clearSelection", params: {} });
+    // The host's own state is untouched: marks and the mode go to the next frame, the clear doesn't.
+    const before = t.sent.length;
+    t.display.reload();
+    t.handshake();
+    expect(t.sent.slice(before).map((each) => each.method)).toEqual(
+      expect.arrayContaining(["porthole/annotate.show", "porthole/annotate.start"]),
+    );
+    expect(t.sent.slice(before).map((each) => each.method)).not.toContain(
+      "porthole/annotate.clearSelection",
+    );
+  });
+
+  test("before the frame's handshake it is nothing; without annotate declared it throws", () => {
+    const early = mount(true);
+    expect(() => early.display.annotations.clearSelection()).not.toThrow();
+    expect(early.annotateSent()).toEqual([]);
+    const plain = mount(false);
+    plain.handshake();
+    expect(() => plain.display.annotations.clearSelection()).toThrow(
+      /clearSelection: the config doesn't declare annotate/u,
+    );
+    expect(plain.annotateSent()).toEqual([]);
+  });
+});
+
 describe("a reported box, clamped to the frame's viewport (P104)", () => {
   const viewport = { width: 600, height: 400 };
   test("inside, it is as it was; overlapping, the part inside", () => {
@@ -643,6 +743,20 @@ describe("the shell", () => {
     expect(plain).not.toContain("__ANNOTATE__");
     expect(annotated).toContain('"porthole/annotate.selected"');
     expect(annotated).not.toContain("__ANNOTATE__");
+  });
+
+  test("clears a selection with the DOM's own removeAllRanges, taken before content runs (P115)", () => {
+    expect(ANNOTATE_RUNTIME).toContain('clearSelection: "porthole/annotate.clearSelection"');
+    const taken = ANNOTATE_RUNTIME.indexOf(
+      "const removeAllRanges = Selection.prototype.removeAllRanges;",
+    );
+    expect(taken).toBeGreaterThan(-1);
+    const handled = ANNOTATE_RUNTIME.indexOf("case M.clearSelection:");
+    expect(handled).toBeGreaterThan(taken);
+    const handler = ANNOTATE_RUNTIME.slice(handled, ANNOTATE_RUNTIME.indexOf("break;", handled));
+    expect(handler).toContain("removeAllRanges.call(selection)");
+    // Nothing told back from it.
+    expect(handler).not.toContain("tell(");
   });
 
   test("with the annotation runtime in, is still a plain script", () => {

@@ -1038,6 +1038,7 @@ chooses), and the annotation runtime is in the shell only then.
 | host → frame | `porthole/annotate.show` | `{ marks: [{ id, anchor, count?, kind? }], active? }`: drawn over the content in the shell's own layer (a closed shadow root), found again whenever the content changes; a mark with a `count` (0 to 999) also gets a marker (P104); `kind: "draft"` (absent: posted) is drawn apart, with a marker and never a count (P107) |
 | host → frame | `porthole/annotate.focus` | `{ id }`: scrolled into view inside the frame, made the active mark, flashed |
 | host → frame | `porthole/annotate.clear` | — |
+| host → frame | `porthole/annotate.clearSelection` | —: the page's text selection is taken away (the DOM's own `removeAllRanges`, taken before content runs) with what the shell held of it, and nothing is reported back; marks, drafts and the mode stay (P115) |
 | frame → host | `porthole/annotate.selected` | `{ anchor, rect }`; after a scroll, the same selection again only if its box moved more than 0.5 px, on the follow-ups' clock (P105) |
 | frame → host | `porthole/annotate.unselected` | — (the text selection went away) |
 | frame → host | `porthole/annotate.cancelled` | — (Escape) |
@@ -1117,8 +1118,9 @@ chooses), and the annotation runtime is in the shell only then.
   see or do anything. A view a report opens or moves guards its presses
   (THREAT_MODEL §6).
 - **Host API.** `display.annotations.start(mode?)`, `stop()`, `show(marks)`,
-  `focus(id)`, `clear()`, and the `annotation` event (`AnnotationReport`); the state
-  is given to every frame the display runs. `parseAnchor` checks an anchor a host
+  `focus(id)`, `track(id)`, `clear()`, `clearSelection()` (P115), and the `annotation`
+  event (`AnnotationReport`); the state is given to every frame the display runs (not a
+  `clearSelection`: a new frame has no selection). `parseAnchor` checks an anchor a host
   stores (its server, before saving a comment).
 
 Tests (`leak/annotate.spec.ts`, all three engines): a pick outlines and picks
@@ -1159,7 +1161,10 @@ page reading a draft's kind and never its count (`draft-count`), a raw `show` pa
 an unknown kind (`draft-shell-checks`), and drafts alone followed after a scroll; and ADOPTING.md's `guardPresses`, as written
 there, taking no press within 500 ms of its view opening (a release on a menu item,
 a double click's second press on a button or a trigger, a press held past the
-arming) and the person's own press or key after.
+arming) and the person's own press or key after. The host's `clearSelection` (P115) takes
+a selection away from a page that patched `Selection.prototype.removeAllRanges`, tells
+nothing back, leaves marks and drafts found, and the same words selected again are told
+(`clear-selection`).
 
 ## The shell runtime
 
@@ -1471,6 +1476,7 @@ control the tables above name to the registry):
 | `track-checks` | `annotate.spec.ts` | `a followed mark's box comes as it moves, for that mark only, at most 60 a second, clamped to the frame, until the host stops (P112)` | — | — |
 | `order-check` | `annotate.spec.ts` | `every found mark's place in the document comes with its box, offscreen ones too; a place that isn't one is no report (P112)` | — | — |
 | `hold-click` | `annotate.spec.ts` | `holding a block 500 ms selects it and its release's click never reaches the page; a tap, a moving finger and a mouse are the page's (P112)` | — | — |
+| `clear-selection` | `annotate.spec.ts` | `clearSelection takes the page's selection away and tells nothing back; marks and drafts stay, the next selection is told (P115)` | — | — |
 | `shell-namespace` | `served/nested.spec.ts` | `the shell's words are the shell's alone: a page that says them, to its parent or to the host's window, moves nothing` | — | — |
 | `file-sandbox` | `served/nested.spec.ts` | `a page's SVG or XML file opened on a tab of its own is an opaque origin, and its script touches nothing of the shell's (P111, after its review)` | — | — |
 | `shell-stall` | `served/nested.spec.ts` | `a shell's activation seen after a stall is no one's gesture until it goes off (P111, after its review)` | — | — |

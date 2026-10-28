@@ -576,6 +576,13 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "holding a block 500 ms selects it and its release's click never reaches the page; a tap, a moving finger and a mouse are the page's (P112)",
     ),
   },
+  // The host's clearSelection is the shell's own, and tells nothing back (P115).
+  "clear-selection": {
+    specs: [ANNOTATE],
+    fails: all(
+      "clearSelection takes the page's selection away and tells nothing back; marks and drafts stay, the next selection is told (P115)",
+    ),
+  },
   // A nested page's shell keeps its own namespace (P111): a page that says the shell's words, just
   // before a call of its own, has its comments.open believed.
   "shell-namespace": {
