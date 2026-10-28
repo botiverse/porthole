@@ -72,6 +72,8 @@ export const UNWEAKENED: Readonly<Record<string, string>> = {
 const LEAK = "leak/leak.spec.ts";
 const RUNTIME = "leak/served/runtime.spec.ts";
 const NESTED = "leak/served/nested.spec.ts";
+const STALL_RULE =
+  "a shell's activation seen after a stall is no one's gesture until it goes off (P111, after its review)";
 const FILES = "leak/served/files.spec.ts";
 const SERVED = "leak/served/served.spec.ts";
 const TAB = "leak/served/tab.spec.ts";
@@ -581,6 +583,11 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     fails: all(
       "the shell's words are the shell's alone: a page that says them, to its parent or to the host's window, moves nothing",
     ),
+  },
+  // A stalled shell's activation is uncertain (P111, after its review).
+  "shell-stall": {
+    specs: [NESTED],
+    fails: all(STALL_RULE),
   },
   // A nested page's gesture needs a quiet host (P111): a page that takes the keyboard within a
   // second of the person's press in it keeps it though they went back to the host's composer.

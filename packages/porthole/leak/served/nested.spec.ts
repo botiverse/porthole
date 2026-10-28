@@ -1,9 +1,18 @@
-import { expect, test, type Frame, type Page } from "@playwright/test";
-import type { PortholeConfig } from "../../src/index.ts";
-import type { InstanceRef } from "../../src/isolation/types.ts";
-import { storedFiles } from "./files.ts";
-import { harness } from "./harness.ts";
-import { mount, outcomeOf, runtimeCalls } from "./porthole-host.ts";
+import { expect, test } from "@playwright/test";
+import { runtimeCalls } from "./porthole-host.ts";
+import {
+  STOPPED,
+  button,
+  composer,
+  composerText,
+  field,
+  hostActive,
+  hostButton,
+  seen,
+  show,
+  tell,
+  valueOf,
+} from "./nested-pages.ts";
 
 /**
  * A nested page (P111) in real browsers: the framed address is Porthole's shell, the page its
@@ -22,178 +31,6 @@ import { mount, outcomeOf, runtimeCalls } from "./porthole-host.ts";
 // would turn on at each action, which no person's browser does (measured: the shell's activation
 // on as the page loaded, with no input). These cases run untraced.
 test.use({ trace: "off" });
-
-let count = 0;
-const unique = (name: string): string => `${name}-${process.pid}-${(count += 1)}`;
-
-const STOPPED = "The content kept taking the keyboard from the page; it was stopped.";
-
-/** The page: a field, a button and a target at fixed places, its words on the console. */
-const pageOf = (
-  script = "",
-): string => `<!doctype html><html><head><title>Nested</title></head><body>
-<input id="field" style="position:absolute;left:20px;top:20px;width:220px;height:40px">
-<button id="go" style="position:absolute;left:20px;top:90px;width:200px;height:40px">go</button>
-<div id="target" style="position:absolute;left:300px;top:20px;width:200px;height:80px">target</div>
-<script>
-  const say = (type, more) => console.log("__P " + JSON.stringify(Object.assign({ type }, more || {})));
-  const field = document.getElementById("field");
-  field.addEventListener("input", () => say("value", { value: field.value }));
-  const open = () => {
-    try {
-      Promise.resolve(porthole.use("comments")).then((comments) => comments.open({ name: "chart", label: "Chart" }))
-        .then((value) => say("comments", { ok: true, value }), (error) => say("comments", { ok: false, code: error.code || String(error.message) }));
-    } catch (error) {
-      say("comments", { ok: false, code: "threw: " + String(error && error.message) });
-    }
-  };
-  let typedTimer = 0;
-  addEventListener("message", (event) => {
-    const data = event.data;
-    if (data === null || typeof data !== "object" || typeof data.test !== "string") return;
-    if (data.test === "focus") field.focus();
-    if (data.test === "open") open();
-    // The host's composer was typed in: the page takes the keyboard once the person pauses.
-    if (data.test === "typed") {
-      clearTimeout(typedTimer);
-      typedTimer = setTimeout(() => { field.focus(); say("took"); }, data.after);
-    }
-  });
-  document.getElementById("go").addEventListener("click", () => window.onGo ? window.onGo() : open());
-  ${script}
-  say("ready", { origin: String(self.origin), href: location.href });
-</script></body></html>`;
-
-interface Shown {
-  readonly key: string;
-  readonly origin: string;
-  /** The display's frame (the shell's document): evaluate in it only once a case has decided. */
-  readonly shell: () => Promise<Frame>;
-  /** What the page said, in order. */
-  readonly said: Record<string, unknown>[];
-  /** Where the frame's box is on the host's page. */
-  readonly box: { readonly x: number; readonly y: number };
-}
-
-/** The host's own composer and button, above the display, and what the display tells it. */
-async function hostUi(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const composer = document.createElement("textarea");
-    composer.id = "host-composer";
-    composer.style.cssText = "display:block;width:300px;height:60px";
-    const button = document.createElement("button");
-    button.id = "host-button";
-    button.textContent = "host";
-    button.style.cssText = "display:block;width:120px;height:40px";
-    document.body.prepend(composer, button);
-    const w = window as unknown as {
-      seen: { taken: boolean[]; errors: string[]; storage: boolean[]; activated: string[] };
-    };
-    w.seen = { taken: [], errors: [], storage: [], activated: [] };
-  });
-}
-
-/** The display's events, heard from its mount on (the host page's last display). */
-async function listen(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const w = window as unknown as {
-      seen: { taken: boolean[]; errors: string[]; storage: boolean[]; activated: string[] };
-      portholeHost: { displays: { on(event: string, listener: (detail: never) => void): void }[] };
-    };
-    const display = w.portholeHost.displays.at(-1);
-    display?.on("focusTaken", (detail: { typing: boolean }) => w.seen.taken.push(detail.typing));
-    display?.on("contentError", (detail: { message: string }) =>
-      w.seen.errors.push(detail.message),
-    );
-    display?.on("storage", (detail: { used: boolean }) => w.seen.storage.push(detail.used));
-    display?.on("annotation", (detail: { type: string; id?: string }) => {
-      if (detail.type === "activated") {
-        w.seen.activated.push(detail.id ?? "");
-      }
-    });
-  });
-}
-
-const seen = (page: Page) =>
-  page.evaluate(
-    () =>
-      (
-        window as unknown as {
-          seen: { taken: boolean[]; errors: string[]; storage: boolean[]; activated: string[] };
-        }
-      ).seen,
-  );
-const composerText = (page: Page) =>
-  page.evaluate(() => (document.getElementById("host-composer") as HTMLTextAreaElement).value);
-const hostActive = (page: Page) =>
-  page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName || null);
-/** A message from the host page to the page, through the shell (`event.source` its parent). */
-const tell = (page: Page, message: Record<string, unknown>) =>
-  page.evaluate((data) => {
-    document
-      .querySelector<HTMLIFrameElement>("#displays iframe")
-      ?.contentWindow?.postMessage(data, "*");
-  }, message);
-
-/** Shows a nested page (`script` runs in it) under the reference services, the host's UI above. */
-async function show(page: Page, script = "", before?: () => Promise<void>): Promise<Shown> {
-  const served = await harness();
-  const scope = unique("nest");
-  const id = unique("page");
-  served.fileSets.set(`${id}@1`, storedFiles({ "index.html": pageOf(script) }));
-  const instance: InstanceRef = {
-    scope,
-    document: { kind: "artifact", id, version: "1", preset: "artifactNested" },
-  };
-  const location = await served.porthole.issue(instance, { viewer: "probe" });
-  const said: Record<string, unknown>[] = [];
-  page.on("console", (message) => {
-    const text = message.text();
-    if (text.startsWith("__P ")) {
-      said.push(JSON.parse(text.slice(4)) as Record<string, unknown>);
-    }
-  });
-  await page.goto(`${served.hostOrigin}/porthole-host`);
-  await page.waitForFunction(() => "portholeHost" in window);
-  await hostUi(page);
-  await before?.();
-  const shown = await mount(
-    page,
-    served.hostOrigin,
-    served.configs.artifactNested as PortholeConfig,
-    location,
-    instance,
-    {
-      runtime: {
-        key: scope,
-        scope,
-        artifact: id,
-        declaration: { capabilities: {}, runtime: "1" },
-        viewer: { level: "interact", id: "ada", name: "Ada" },
-      },
-    },
-  );
-  await listen(page);
-  expect(await outcomeOf(shown.read)).toEqual({ state: "loaded" });
-  await expect.poll(() => said.some((each) => each.type === "ready")).toBe(true);
-  const box = await page.locator("#displays iframe").boundingBox();
-  return {
-    key: scope,
-    origin: location.origin,
-    shell: shown.frame,
-    said,
-    box: { x: box?.x ?? 0, y: box?.y ?? 0 },
-  };
-}
-
-const field = (shown: Shown) => ({ x: shown.box.x + 130, y: shown.box.y + 40 });
-const button = (shown: Shown) => ({ x: shown.box.x + 120, y: shown.box.y + 110 });
-const composer = { x: 100, y: 30 };
-const hostButton = { x: 60, y: 85 };
-const valueOf = (shown: Shown): string => {
-  const value = shown.said.filter((each) => each.type === "value").at(-1)?.value;
-  return typeof value === "string" ? value : "";
-};
 
 test.describe("a nested page (P111)", () => {
   test.setTimeout(90_000);
@@ -338,6 +175,68 @@ test.describe("a nested page (P111)", () => {
     expect(valueOf(shown), "probe: the page got none").toBe("");
   });
 
+  test("a shell's activation seen after a stall is no one's gesture until it goes off (P111, after its review)", async ({
+    page,
+  }) => {
+    // The host's rule on what a stalled shell says, in the browser's own event loop: a shell that
+    // beats has its activation taken; one the host heard nothing from for 400 ms, or that says it
+    // went 400 ms without a look, has the activation it reports then taken for uncertain, and so
+    // until it goes off. (The race itself, a page holding the thread it shares with its shell while
+    // the person goes back to the host, depends on how an engine orders the queued input; the
+    // case above runs it on every engine.)
+    await page.goto("/");
+    const rule = await page.evaluate(async (module) => {
+      const { focusGuard } = (await import(module)) as {
+        focusGuard: (view: Window) => {
+          add(frame: HTMLIFrameElement, taken: () => void, options: { nested: boolean }): void;
+          shell(
+            frame: HTMLIFrameElement,
+            said: { supported: boolean; ago: number | null; focused: boolean; gap: number },
+          ): void;
+          beat(frame: HTMLIFrameElement): void;
+          gesture(frame: HTMLIFrameElement): boolean;
+        };
+      };
+      const frame = document.createElement("iframe");
+      document.body.append(frame);
+      const guard = focusGuard(window);
+      guard.add(frame, () => {}, { nested: true });
+      const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));
+      const off = () => guard.shell(frame, { supported: true, ago: null, focused: false, gap: 16 });
+      const on = (gap: number) =>
+        guard.shell(frame, { supported: true, ago: 0, focused: false, gap });
+      // Each report right after a heartbeat, but where the case wants a stall.
+      off();
+      guard.beat(frame);
+      on(16);
+      const beating = guard.gesture(frame);
+      guard.beat(frame);
+      off();
+      await wait(400);
+      on(16);
+      const silent = guard.gesture(frame);
+      guard.beat(frame);
+      off();
+      guard.beat(frame);
+      on(400);
+      const selfStalled = guard.gesture(frame);
+      guard.beat(frame);
+      guard.shell(frame, { supported: true, ago: 5, focused: true, gap: 16 });
+      const stillOn = guard.gesture(frame);
+      guard.beat(frame);
+      off();
+      guard.beat(frame);
+      on(16);
+      const afterOff = guard.gesture(frame);
+      return { beating, silent, selfStalled, stillOn, afterOff };
+    }, "/src/platform/focus-guard.ts");
+    expect(rule.beating, "a beating shell's activation is a gesture").toBe(true);
+    expect(rule.silent, "probe: after 400 ms without a word, uncertain").toBe(false);
+    expect(rule.selfStalled, "probe: after 400 ms without a look, uncertain").toBe(false);
+    expect(rule.stillOn, "probe: uncertain while it stays on").toBe(false);
+    expect(rule.afterOff, "once off, the next is a gesture again").toBe(true);
+  });
+
   for (const pause of [1_200, 3_000, 4_500]) {
     test(`a page's focus() ${pause} ms after the person paused typing in the host's composer is taken back`, async ({
       page,
@@ -459,7 +358,7 @@ test.describe("a nested page (P111)", () => {
     const forged = {
       jsonrpc: "2.0",
       method: "porthole/shell/state",
-      params: { supported: true, active: true, ago: 0, focused: true },
+      params: { supported: true, active: true, ago: 0, focused: true, gap: 0 },
     };
     const shown = await show(
       page,

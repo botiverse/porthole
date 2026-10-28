@@ -84,6 +84,15 @@ export const SHELL_WAIT_MS = 500;
  */
 export const SHELL_EARLY_MS = 150;
 
+/**
+ * A shell that went this long without a look, or without a word to the host (its heartbeat is every
+ * 50 ms), was stalled (P111, after its review): where the page shares the shell's thread (WebKit,
+ * Firefox), a page that holds it from its own click handler pushes the moment the shell sees its
+ * activation turn on past the person's next keys on the host's page. An activation it saw then is
+ * uncertain: it is no one's gesture until it lapses.
+ */
+export const SHELL_STALL_MS = 100;
+
 /** What a nested page's shell last said (P111), on the host's clock. */
 export interface ShellWord {
   /** Whether its engine tells activation at all (`navigator.userActivation`). */
@@ -93,6 +102,8 @@ export interface ShellWord {
   /** Whether it last said the page's focus is in it, and when it last said focus came in. */
   readonly focused: boolean;
   readonly focusedAt: number;
+  /** Its activation turned on while it was stalled: uncertain until it goes off (`SHELL_STALL_MS`). */
+  readonly uncertain?: boolean;
 }
 
 /** One move of the keyboard the guard undid. */
@@ -240,8 +251,16 @@ export interface FocusGuard {
   /** What a nested page's shell said (P111): its activation, its focus. */
   shell(
     frame: HTMLIFrameElement,
-    said: { readonly supported: boolean; readonly ago: number | null; readonly focused: boolean },
+    said: {
+      readonly supported: boolean;
+      readonly ago: number | null;
+      readonly focused: boolean;
+      /** How long the shell went without a look before this one (its own clock). */
+      readonly gap: number;
+    },
   ): void;
+  /** A nested page's shell's heartbeat (P111): it is looking. */
+  beat(frame: HTMLIFrameElement): void;
   /** Whether a nested page's shell saw the person's gesture just now (`shellGesture`). */
   gesture(frame: HTMLIFrameElement): boolean;
   /** The host moves focus into `frame` itself. */
@@ -260,6 +279,8 @@ interface Guarded {
   overSince: number;
   /** A nested page's shell's word (P111); null for any other frame. */
   word: ShellWord | null;
+  /** When the host last heard the shell (a report or a heartbeat). */
+  heardAt: number;
 }
 
 const guards = new WeakMap<Window, FocusGuard>();
@@ -688,6 +709,7 @@ export function focusGuard(view: Window): FocusGuard {
         const entry: Guarded = {
           taken: new Set(),
           overSince: -Infinity,
+          heardAt: -Infinity,
           word:
             options?.nested === true
               ? { supported: true, activatedAt: -Infinity, focused: false, focusedAt: -Infinity }
@@ -716,14 +738,27 @@ export function focusGuard(view: Window): FocusGuard {
         return;
       }
       const at = now();
+      // Off to on after a stall, the shell's or the host's (no word for longer than its beat
+      // allows): uncertain, and so until it goes off (P111, after its review).
+      const turnedOn = said.ago !== null && before.activatedAt === -Infinity && !before.uncertain;
+      const stalled = said.gap > SHELL_STALL_MS || at - guarded.heardAt > SHELL_STALL_MS;
+      const uncertain = said.ago !== null && (before.uncertain === true || (turnedOn && stalled));
+      guarded.heardAt = at;
       guarded.word = {
         supported: said.supported,
-        activatedAt: said.ago === null ? -Infinity : at - said.ago,
+        activatedAt: said.ago === null || uncertain ? -Infinity : at - said.ago,
         focused: said.focused,
         focusedAt: said.focused && !before.focused ? at : before.focusedAt,
+        ...(uncertain ? { uncertain: true } : {}),
       };
       if (waiting?.frame === frame) {
         settle(at);
+      }
+    },
+    beat(frame) {
+      const guarded = frames.get(frame);
+      if (guarded !== undefined && guarded.word !== null) {
+        guarded.heardAt = now();
       }
     },
     gesture(frame) {

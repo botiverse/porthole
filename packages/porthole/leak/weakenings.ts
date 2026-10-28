@@ -537,6 +537,14 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "false) {",
     },
   ],
+  // A shell's stall (P111, after its review) not seen: an activation it saw late is fresh.
+  "shell-stall": [
+    {
+      file: "src/platform/focus-guard.ts",
+      find: "      const stalled = said.gap > SHELL_STALL_MS || at - guarded.heardAt > SHELL_STALL_MS;",
+      replace: "      const stalled = false;",
+    },
+  ],
   // A nested page's gesture (P111) needs no quiet host: the person's press in the page counts for
   // a second even after they pressed or typed on the host's page.
   "shell-host-input": [

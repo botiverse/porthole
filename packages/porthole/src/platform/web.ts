@@ -1,6 +1,7 @@
 import type { ColorScheme } from "../config/schema.ts";
 import {
   FRAME_STATUS_METHOD,
+  SHELL_BEAT_METHOD,
   SHELL_METHOD_PREFIX,
   SHELL_STATE_METHOD,
 } from "../isolation/types.ts";
@@ -37,18 +38,28 @@ function shellWords(opened: Transport, frame: HTMLIFrameElement, guard: FocusGua
       return;
     }
     const params = message.params;
-    if (message.method !== SHELL_STATE_METHOD || params === null || typeof params !== "object") {
+    if (params === null || typeof params !== "object") {
       return;
     }
-    const { supported, ago, focused } = params as Record<string, unknown>;
+    const { supported, ago, focused, gap } = params as Record<string, unknown>;
+    const span = (value: unknown) =>
+      typeof value === "number" && Number.isFinite(value) && value >= 0;
+    if (message.method === SHELL_BEAT_METHOD) {
+      if (span(gap)) {
+        guard.beat(frame);
+      }
+      return;
+    }
     if (
+      message.method !== SHELL_STATE_METHOD ||
       typeof supported !== "boolean" ||
       typeof focused !== "boolean" ||
-      !(ago === null || (typeof ago === "number" && Number.isFinite(ago) && ago >= 0))
+      !(ago === null || span(ago)) ||
+      !span(gap)
     ) {
       return;
     }
-    guard.shell(frame, { supported, ago, focused });
+    guard.shell(frame, { supported, ago: ago as number | null, focused, gap: gap as number });
   });
   return {
     send: (message) => opened.send(message),

@@ -86,11 +86,18 @@ export const FRAME_SHELL_RUNTIME = String.raw`(() => {
   };
 
   // The shell's own state: its transient activation (and when it turned on), the page's focus.
+  // "since" is when the shell saw activation turn on, which a page that holds the thread the shell
+  // shares with it (WebKit, Firefox) can push later than the press: so the shell looks every 50 ms
+  // and beats as often, and each report says how long it went without a look before (gap). The
+  // host takes an activation the shell saw after a stall for uncertain (P111, after its review).
   const activation = navigator.userActivation;
   let active = false;
   let since = 0;
   let focused = false;
-  const tell = () => {
+  let lookedAt = performance.now();
+  let toldAt = 0;
+  const tell = (gap) => {
+    toldAt = performance.now();
     toHost({
       jsonrpc: "2.0",
       method: PREFIX + "state",
@@ -99,10 +106,14 @@ export const FRAME_SHELL_RUNTIME = String.raw`(() => {
         active,
         ago: active ? Math.max(0, Math.round(performance.now() - since)) : null,
         focused,
+        gap: Math.max(0, Math.round(gap)),
       },
     });
   };
   const look = () => {
+    const now = performance.now();
+    const gap = now - lookedAt;
+    lookedAt = now;
     const on = activation !== undefined && activation.isActive === true;
     const inside = document.hasFocus();
     let changed = false;
@@ -118,7 +129,11 @@ export const FRAME_SHELL_RUNTIME = String.raw`(() => {
       changed = true;
     }
     if (changed) {
-      tell();
+      tell(gap);
+    } else if (now - toldAt >= 50) {
+      // The heartbeat: the host knows the shell was looking, every 50 ms.
+      toldAt = now;
+      toHost({ jsonrpc: "2.0", method: PREFIX + "beat", params: { gap: Math.max(0, Math.round(gap)) } });
     }
   };
   const tick = () => {
@@ -126,6 +141,7 @@ export const FRAME_SHELL_RUNTIME = String.raw`(() => {
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
+  setInterval(look, 50);
   addEventListener("blur", look);
   addEventListener("focus", (event) => {
     // The host's move into the frame (or a Tab) lands here: on to the page.
@@ -135,7 +151,7 @@ export const FRAME_SHELL_RUNTIME = String.raw`(() => {
     look();
   });
   document.addEventListener("visibilitychange", look);
-  tell();
+  tell(0);
 
   addEventListener("message", (event) => {
     const source = event.source;

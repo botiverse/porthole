@@ -5940,6 +5940,27 @@ quiet host needed) each fail their probe on Chromium, WebKit and Firefox.
 **Revisit when** an engine shows the host's page a press in an out-of-process frame, or a page needs
 its own storage (then a capability for it, never the content origin's), assets, or libraries.
 
+**Amended after the CTO's review (porthole#54): a stalled shell.** The shell's "since" is when it
+saw its activation turn on, not when the press was. Where the page shares the shell's thread
+(WebKit; Firefox and Chromium where the frames share a process), a page that holds the thread from
+its own click handler pushes that moment past the person's next press and keys on the host's page,
+which then pass the "no host input since" check: the page could take the keyboard, or open the
+composer, after the person went back to the host. Now the shell looks every 50 ms (an interval as
+well as each animation frame), beats to the host as often (`porthole/shell/beat`), and says in each
+report how long it went without a look (`gap`). An activation that turns on in a report after the
+shell went more than `SHELL_STALL_MS` (100 ms) without a look, or the host heard nothing from it
+for longer, is uncertain: no one's gesture (the focus guard takes the move back, `comments.open` is
+refused) until it goes off. **Cost:** a page that keeps its thread busy (or a machine that is), in
+an engine where it shares the thread with the shell, has a person's real click taken for
+uncertain; their next press once the page is idle, or a Tab, gets in (measured on a machine at load
+45: Firefox took back one of two rounds of a real click). Two messages a 50 ms per display. **Tested:**
+`leak/served/nested.spec.ts` "a shell's activation seen after a stall is no one's gesture until it
+goes off" (the host's rule, in the browser's own event loop, on every engine), and
+`leak/served/nested-stall.spec.ts` (the race end to end with real input: the page's handler holds
+the thread 1.5 s while the person goes back to the composer; on the headless shell it got through
+without the check, measured; elsewhere Playwright's input waits the stall out, so that case is no
+control's probe); negative control `shell-stall` (the gap ignored).
+
 ## P112 · 2026-10-28 · 0.14's comment UX: what annotations add for a host's comment modes · Accepted
 
 **Context.** Raft's comment design (its modes A–C, a card that follows its mark, a list in document

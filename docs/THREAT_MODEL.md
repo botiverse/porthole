@@ -738,7 +738,13 @@ unposted words beside the frame and tell the page when.
   activation on, so a second move into it after the person went back to the host's page is taken
   back until 5 s after their last press or key in the page, or they Tab in; the page gets the keys
   typed while a move waits for the shell's word; a shell without `navigator.userActivation` leaves
-  0.13's rule.
+  0.13's rule. A page that holds the thread it shares with its shell (WebKit; Firefox and Chromium
+  where the frames share a process) from its own click handler would push the moment the shell sees
+  its activation past the person's next keys on the host's page: so the shell looks and beats every
+  50 ms and says how long it went without a look, and an activation it reports after a stall of over
+  100 ms (its own, or no word heard) is no one's gesture until it lapses (P111, after its review;
+  negative control `shell-stall`). The cost: in those engines a page that keeps its thread busy has
+  the person's real click taken for uncertain until it is idle.
 
 ### The app runtime
 

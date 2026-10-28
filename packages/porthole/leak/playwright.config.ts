@@ -23,7 +23,7 @@ const all = [
   // events), as in a person's browser. The cases that hold the keyboard rule to that.
   {
     name: "chromium-oopif",
-    testMatch: "**/nested.spec.ts",
+    testMatch: "**/nested*.spec.ts",
     use: { ...devices["Desktop Chrome"], channel: "chromium" },
   },
   {

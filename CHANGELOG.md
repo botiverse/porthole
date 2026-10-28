@@ -24,6 +24,8 @@ it. Fixes porthole#53.
   engine shows); `comments.open` opens on the same signal, so a click on the page's button a moment
   after typing in the host's composer opens it (porthole#53). Limit: a press in the page within 5 s
   of the last one turns no activation on (THREAT_MODEL §7 "The keyboard").
+- **A stalled shell** (after the review, porthole#54): the shell looks and beats every 50 ms; an
+  activation it reports after a stall of over 100 ms is uncertain, no one's gesture, until it lapses.
 - **New event** `storage` (`{ used }`, once per run) for displays whose storage is the in-memory
   stand-in (opaque, nested): whether the page touched `localStorage` or `sessionStorage`.
 - **Annotations (P112):** Escape while selecting text reports `cancelled` too (the page keeps
