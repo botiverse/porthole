@@ -4,6 +4,18 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **New (React, P118):** `PortholeFrame` and `PortholeView` take `trackedAnnotation` (a shown
+  mark's id, or `null`): by value, it follows that mark (`annotations.track`), its `tracked` boxes
+  reaching `onAnnotation`; `null` stops. And a `ref` (React 19's `ref` prop) holding a
+  `PortholeFrameHandle`, `{ clearSelection() }`: takes the frame's text selection away
+  (`annotations.clearSelection()`) where a display runs, nothing otherwise. Neither throws: an
+  unshown id, or a config without `annotate`, is `onHostError` (kind `"annotations"`). New export
+  from `/react`: `PortholeFrameHandle`.
+- **Tests (P118):** `test/react-ssr.test.ts` (types, server render); `leak/react.spec.ts` (a mark
+  followed through the prop and stopped by `null`; the ref clearing a selection in the frame).
+
 ## 0.14.1
 
 - **Security (P114, porthole#56's P1):** a nested page's shell, its page and the page's files are

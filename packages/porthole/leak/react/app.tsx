@@ -10,7 +10,12 @@ import {
   type AnnotationMark,
   type PortholeConfig,
 } from "../../src/index.ts";
-import { PortholeFrame, PortholeProvider, PortholeView } from "../../src/react/index.ts";
+import {
+  PortholeFrame,
+  PortholeProvider,
+  PortholeView,
+  type PortholeFrameHandle,
+} from "../../src/react/index.ts";
 
 /**
  * A host app on the React binding, driven by the test through `window.app`: which frames it shows
@@ -63,6 +68,7 @@ export interface FrameSpec {
   readonly inline?: boolean;
   readonly annotations?: readonly AnnotationMark[];
   readonly focusedAnnotation?: string | null;
+  readonly trackedAnnotation?: string | null;
   /** The frame's consent: a Refused, new on every render (P080). */
   readonly consent?: "refused";
 }
@@ -83,6 +89,14 @@ type LogEntry = { readonly display: string; readonly event: string; readonly det
 const log: LogEntry[] = [];
 let pendingCustom: ((accepted: boolean) => void) | null = null;
 const root = createRoot(document.getElementById("root") as HTMLElement);
+
+/** Each display's `ref` (P118), one object per display id for the page's life. */
+const handles = new Map<string, { current: PortholeFrameHandle | null }>();
+const handleOf = (displayId: string) => {
+  const found = handles.get(displayId) ?? { current: null };
+  handles.set(displayId, found);
+  return found;
+};
 
 const record = (display: string, event: string, detail?: unknown) =>
   log.push({ display, event, ...(detail === undefined ? {} : { detail }) });
@@ -125,6 +139,10 @@ function render(state: AppState): void {
         ...(frame.focusedAnnotation === undefined
           ? {}
           : { focusedAnnotation: frame.focusedAnnotation }),
+        ...(frame.trackedAnnotation === undefined
+          ? {}
+          : { trackedAnnotation: frame.trackedAnnotation }),
+        ref: handleOf(frame.displayId),
         onAnnotation: (report) => record(frame.displayId, "annotation", report),
         ...(frame.consent === "refused" ? { consent: refusedHere() } : {}),
         onNavigationBlocked: ({ url }) => record(frame.displayId, "navigation-blocked", url),
@@ -324,6 +342,12 @@ const app = {
   render,
   renderViews,
   log: () => log,
+  /** Calls the display's handle (its `ref`): false where the frame holds none. */
+  clearSelection(displayId: string): boolean {
+    const handle = handles.get(displayId)?.current ?? null;
+    handle?.clearSelection();
+    return handle !== null;
+  },
   answerCustom(accepted: boolean) {
     pendingCustom?.(accepted);
     pendingCustom = null;

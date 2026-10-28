@@ -7,6 +7,7 @@ import {
   useEffect,
   useEffectEvent,
   useId,
+  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -15,6 +16,7 @@ import {
   type CSSProperties,
   type ReactElement,
   type ReactNode,
+  type Ref,
 } from "react";
 import type { AnnotateMode, AnnotationMark, AnnotationReport } from "../annotate/types.ts";
 import type {
@@ -480,6 +482,21 @@ export interface PlaceholderProps {
   readonly run: () => void;
 }
 
+/**
+ * What a `ref` on `PortholeFrame` or `PortholeView` holds (P118): the display's few imperative
+ * calls, never the display itself. The same handle for the frame's whole life: its calls do
+ * nothing while no display runs (waiting to near the screen, stopped, a fallback drawn).
+ */
+export interface PortholeFrameHandle {
+  /**
+   * Takes the page's text selection away, and its highlight (`annotations.clearSelection()`,
+   * P115), once the host has used it (a comment posted, a draft added). No `unselected` follows.
+   * Nothing runs: nothing happens. A config without `annotate`: `onHostError`, kind
+   * `"annotations"` (the core's call throws; this never does).
+   */
+  clearSelection(): void;
+}
+
 export interface PortholeFrameProps {
   /** A preset's config. Keep it stable (module scope or memoized): a new one remounts the frame. */
   readonly config: PortholeConfig;
@@ -607,6 +624,17 @@ export interface PortholeFrameProps {
     | { readonly id: string; readonly key: string | number }
     | null;
   /**
+   * The mark to follow (`annotations.track`, P112, P118): while it moves, `onAnnotation` gets
+   * `{ type: "tracked", id, rect }` at most once per animation frame, for it alone. `null` (or
+   * leaving it out once set) stops. By value: given when it changes, and when the display is made.
+   * Only a shown mark (`annotations`) is followed: another id, or a config without `annotate`, is
+   * `onHostError` (kind `"annotations"`), as the core's call throws. `annotations` without it
+   * stop the following, as the core's `show` does; it starts again once they have it back.
+   */
+  readonly trackedAnnotation?: string | null;
+  /** The display's imperative calls (`PortholeFrameHandle`, P118): React 19's `ref` prop. */
+  readonly ref?: Ref<PortholeFrameHandle>;
+  /**
    * What the frame reported: a selection (an anchor and where it is), its clearing, a cancelled
    * pick, where marks are (again once a scroll settles: those that moved), a marker clicked
    * (`activated`). The content's word: UI hints, never permissions.
@@ -674,7 +702,29 @@ export function PortholeFrame(props: PortholeFrameProps): ReactElement {
     () => live.state(key),
     (): FrameState => "waiting",
   );
-  const { eager } = props;
+  const { eager, ref: handleRef } = props;
+  // The running display (the Mount's), for the handle's calls; null while none runs.
+  const display = useRef<DisplayHandle | null>(null);
+  const running = useCallback((each: DisplayHandle | null) => {
+    display.current = each;
+  }, []);
+  // The props as of the last render, read when the handle is called (never during render).
+  const own = useRef(props);
+  useLayoutEffect(() => {
+    own.current = props;
+  });
+  useImperativeHandle(
+    handleRef,
+    (): PortholeFrameHandle => ({
+      clearSelection() {
+        const now = display.current;
+        if (now !== null) {
+          attempt(() => now.annotations.clearSelection(), own.current);
+        }
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     const element = box.current;
@@ -743,6 +793,7 @@ export function PortholeFrame(props: PortholeFrameProps): ReactElement {
           key={String(props.generation ?? 0)}
           frame={props}
           page={page}
+          running={running}
           initialHeightPx={height}
           placeholder={placeholder}
           run={run}
@@ -757,6 +808,8 @@ export function PortholeFrame(props: PortholeFrameProps): ReactElement {
 interface MountProps {
   readonly frame: PortholeFrameProps;
   readonly page: PageState;
+  /** Tells the frame which display runs now (null: none), for its handle. */
+  readonly running: (display: DisplayHandle | null) => void;
   readonly initialHeightPx: number;
   readonly placeholder: (props: PlaceholderProps) => ReactNode;
   readonly run: () => void;
@@ -765,9 +818,19 @@ interface MountProps {
 type AnyHandler = (args: unknown, context: CallContext) => unknown;
 
 /** One running display: created when mounted, torn down when unmounted, fed as props change. */
-function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): ReactElement {
+function Mount({
+  frame,
+  page,
+  running,
+  initialHeightPx,
+  placeholder,
+  run,
+}: MountProps): ReactElement {
   const holder = useRef<HTMLDivElement>(null);
   const handle = useRef<DisplayHandle | null>(null);
+  // The mark the display follows now, as the core keeps it (P118), and the prop as last seen.
+  const following = useRef<string | null>(null);
+  const asked = useRef<string | null>(null);
   const [ready, setReady] = useState(false);
   // The height this display started at: later reports don't make it start again.
   const [startHeight] = useState(initialHeightPx);
@@ -969,6 +1032,7 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
       return;
     }
     handle.current = display;
+    running(display);
     const events: (keyof DisplayEvents)[] = [
       "initialized",
       "resize",
@@ -989,12 +1053,24 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
     if (config.capabilities.annotate !== undefined) {
       applyAnnotations(display, first);
     }
+    // The followed mark, once the marks are shown; without `annotate`, the core's error.
+    following.current = null;
+    const wanted = first.trackedAnnotation ?? null;
+    asked.current = wanted;
+    if (wanted !== null) {
+      attempt(() => {
+        display.annotations.track(wanted);
+        following.current = wanted;
+      }, first);
+    }
     if (first.content !== undefined) {
       display.setContent(first.content, { partial: first.partial === true });
     }
     return () => {
       display.destroy();
       handle.current = null;
+      running(null);
+      following.current = null;
     };
     // A new display only for a new config, document or instance, or what the provider makes
     // displays with (its nonce, hostInfo by value, whether it locates or confirms; generation, by
@@ -1017,6 +1093,7 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
     hostInfo,
     locate,
     nonce,
+    running,
   ]);
 
   useEffect(() => {
@@ -1057,9 +1134,34 @@ function Mount({ frame, page, initialHeightPx, placeholder, run }: MountProps): 
   useEffect(() => {
     const display = handle.current;
     if (annotates && display !== null) {
-      attempt(() => display.annotations.show(annotations ?? []), latest());
+      attempt(() => {
+        display.annotations.show(annotations ?? []);
+        // A show without the followed mark stops the following (the core's own).
+        if (following.current !== null && !shown(annotations, following.current)) {
+          following.current = null;
+        }
+      }, latest());
     }
   }, [annotates, annotations]);
+  // The followed mark follows its prop (after the marks above, so the two can change together).
+  const trackedAnnotation = frame.trackedAnnotation ?? null;
+  useEffect(() => {
+    const display = handle.current;
+    const changed = trackedAnnotation !== asked.current;
+    asked.current = trackedAnnotation;
+    if (display === null || trackedAnnotation === following.current) {
+      return;
+    }
+    // Its mark was taken off (the error, if any, was told when the prop said it): followed again
+    // once the marks have it back.
+    if (!changed && trackedAnnotation !== null && !shown(annotations, trackedAnnotation)) {
+      return;
+    }
+    attempt(() => {
+      display.annotations.track(trackedAnnotation);
+      following.current = trackedAnnotation;
+    }, latest());
+  }, [trackedAnnotation, annotations]);
   useEffect(() => {
     const display = handle.current;
     const id = focusOf(latest().focusedAnnotation);
@@ -1159,6 +1261,11 @@ function applyAnnotations(display: DisplayHandle, frame: PortholeFrameProps): vo
 function useByValue<T>(value: T): T {
   const key = value === undefined ? "" : JSON.stringify(value);
   return useMemo(() => (key === "" ? undefined : JSON.parse(key)) as T, [key]);
+}
+
+/** Whether `marks` has a mark `id`. */
+function shown(marks: readonly AnnotationMark[] | undefined, id: string): boolean {
+  return (marks ?? []).some((mark) => mark.id === id);
 }
 
 /** The id `focusedAnnotation` names, if any. */

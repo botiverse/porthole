@@ -741,7 +741,8 @@ binding is mounting and lifecycle (P034).
     onContentError onHostError onResize onNavigated onNavigationBlocked onRefused onMuted
     onInitialized onOutcome
     fill?                            // fill the box and scroll inside, not grow with the content
-    annotating? annotations? focusedAnnotation? onAnnotation?   // where annotate is declared
+    annotating? annotations? focusedAnnotation? trackedAnnotation? onAnnotation?   // where annotate is declared
+    ref?                             // a PortholeFrameHandle: clearSelection() (P118)
     aliases? themeKey? renderPlaceholder? eager? confirm? document? instance?
     className? style? />
 </PortholeProvider>
@@ -775,8 +776,10 @@ binding is mounting and lifecycle (P034).
   overwrites a remembered height (the first host's frame jumped there).
 - **Annotations** follow props: `annotating` (what the person may point at now, or
   null), `annotations` (the marks), `focusedAnnotation` (each new id is brought into
-  view; `{ id, key }` with a new key focuses the same one again); `onAnnotation` gets
-  what the frame reported. A frame that mounts again gets them all.
+  view; `{ id, key }` with a new key focuses the same one again), `trackedAnnotation`
+  (the mark followed, or null, P118); `onAnnotation` gets what the frame reported, `tracked`
+  boxes too. A frame that mounts again gets them all. A `ref` holds `clearSelection()` alone
+  (`PortholeFrameHandle`), a no-op while no display runs.
 - **Errors** (P055): `onContentError` gets what the content did wrong (what it
   threw, what the sandbox blocked, a navigation the shell stopped, that it kept
   navigating away): the agent's to hear. `onNavigationBlocked` gets a stopped
