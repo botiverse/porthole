@@ -1,4 +1,14 @@
 /**
+ * What a draft holds back (P117), spliced into the runtime: a tag start the content was cut in
+ * (a trailing `<`, `</`, or `<` and a tag's name or attributes, with no `>` yet) is left out until
+ * more comes. Parsed as it is, a cut right after `<` or `</` draws them as text.
+ */
+export const HELD_BACK = String.raw`(html) => {
+    const at = html.lastIndexOf("<");
+    return at !== -1 && /^\/?(?:[A-Za-z][^>]*)?$/.test(html.slice(at + 1)) ? html.slice(0, at) : html;
+  }`;
+
+/**
  * The shell's runtime: the code that runs first in the frame, before any content. Plain ES2020,
  * no imports and no build step, so every engine (a browser frame now, a native web view later)
  * runs it as it is. `__PLAN__` is replaced with the frame's plan (`ShellPlan` plus the origins it
@@ -1423,11 +1433,12 @@ export const SHELL_RUNTIME = String.raw`(() => {
     }
   };
   let drafted = false;
+  const heldBack = ${HELD_BACK};
   const draft = (input) => {
     if (rendered || root === null || input === null || typeof input !== "object" || plan.content === "document") {
       return;
     }
-    morph(root, inert(parseInert(input.html || "")));
+    morph(root, inert(parseInert(heldBack(String(input.html || "")))));
     drafted = true;
     drawn = true;
     schedule();

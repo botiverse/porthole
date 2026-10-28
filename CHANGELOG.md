@@ -21,6 +21,9 @@ P-numbers below.
 - **Fixed:** `PortholeFrame` and `PortholeView` take `declaration: null` (porthole#17), the
   host's word under `config.runtime` for a page published before 0.7, as `MountOptions.declaration`
   does. It already worked at run time; only the type refused it.
+- **Fixed:** a streamed draft no longer shows a stray `<` when the content so far ends in `<` or
+  `</` (P117, porthole#16): the shell holds back a tag start it was cut in until more comes. The
+  whole content is drawn as it is.
 
 ## 0.14.0
 

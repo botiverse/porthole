@@ -1,7 +1,7 @@
-import { Script } from "node:vm";
+import { runInNewContext, Script } from "node:vm";
 import { describe, expect, test } from "vitest";
 import { compile, MCP_APPS_METHODS, presets, resolveTheme, DEFAULT_THEME } from "../src/index.ts";
-import { SHELL_RUNTIME } from "../src/shell/runtime.ts";
+import { HELD_BACK, SHELL_RUNTIME } from "../src/shell/runtime.ts";
 
 const ORIGIN = "https://host.example.com";
 
@@ -26,6 +26,33 @@ describe("the shell runtime", () => {
     )) {
       expect(methods, method).toContain(method);
     }
+  });
+
+  test("a draft holds back a tag start it was cut in, and draws everything else (P117)", () => {
+    const heldBack = runInNewContext(HELD_BACK) as (html: string) => string;
+    const rows = '<div class="row">one</div>';
+    // Cut right after "<" or "</": the tokenizer would draw them as text (porthole#16).
+    expect(heldBack(`${rows}<`)).toBe(rows);
+    expect(heldBack(`${rows}<div class="row">two</`)).toBe(`${rows}<div class="row">two`);
+    // Cut in a tag's name or attributes: held back too (the tokenizer drops it anyway).
+    expect(heldBack(`${rows}<div class="row">two</di`)).toBe(`${rows}<div class="row">two`);
+    expect(heldBack(`${rows}<scr`)).toBe(rows);
+    expect(heldBack(`${rows}<div title="a<b`)).toBe(`${rows}<div title="a`);
+    // Whole content, text with a "<" that starts no tag, and no content: drawn as they are.
+    for (const html of [
+      rows,
+      `${rows}<p>1 < 2</p>`,
+      "1 < 2",
+      "<!-- a",
+      '<a title="x>y">z</a>',
+      "",
+    ]) {
+      expect(heldBack(html), html).toBe(html);
+    }
+    // The draft uses it; the whole content (render) never does.
+    expect(SHELL_RUNTIME).toContain(`const heldBack = ${HELD_BACK};`);
+    expect(SHELL_RUNTIME.match(/heldBack\(/gu)).toHaveLength(1);
+    expect(SHELL_RUNTIME).toContain('parseInert(heldBack(String(input.html || "")))');
   });
 });
 

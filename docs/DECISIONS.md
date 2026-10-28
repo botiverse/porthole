@@ -6127,3 +6127,20 @@ NaN, Infinity, not a number) still throws: that is a host's bug, not data that g
 hears about its own bugs; left for their own decision.
 
 Tested: `test/annotate.test.ts` (counts above the limit clamped, the rest refused as before).
+
+## P117 · 2026-10-28 · A draft holds back a tag start it was cut in · Accepted
+
+**Context.** While content streams, the shell draws each partial (`tool-input-partial`) inert as
+it has come so far. Cut right after `<` or `</`, the HTML tokenizer emits them as text, so the
+draft shows a stray `<` until the next fragment (porthole#16: Ferry's screenshot, a lone `<` under
+eight drawn rows, cut just before `<script>`). Agents cut their arguments at arbitrary points.
+
+**Decision.** Before parsing a draft, the shell leaves out a trailing tag start: from the last
+`<`, if what follows is empty, `/`, or a letter and no `>` (a tag's name or attributes, which the
+tokenizer drops anyway). A `<` that starts no tag (`1 < 2`), a comment, and a `<` with a `>` after
+it are drawn as they are. The whole content (`tool-input`) is never trimmed; nothing runs
+differently, since a draft runs nothing.
+
+Tested: `test/shell.test.ts` (`<`, `</`, `</di`, inside an attribute, and whole content
+unchanged); `leak/react.spec.ts` "content streams through props…" (a draft cut after `</` and
+after `<` draws neither).
