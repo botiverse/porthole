@@ -164,6 +164,13 @@ Whatever the use:
   nothing one click away that posts, submits, resolves, deletes or discards (a draft's view, P107,
   included: no "Post" or "Submit review" in it). Its menus and popovers are part of it, portaled
   ones too (P105; ADOPTING.md § Annotations has the code: the view `inert` while it arms).
+  One exception to "takes no focus" (P112): in a comment mode the person started themselves (the
+  host's own control, never a report), a composer their selection opens (`selected`) may take
+  focus, with `focusField`, if all it can do is save a draft: nothing in it posts, submits or sends,
+  and the rest of this guard holds (no press for 500 ms, beside the frame). The page still chooses
+  when `selected` comes, so what it can do with that moment is put the person's next keys into a
+  draft they see and can discard, never send one; outside such a mode, or for a composer that can
+  send, it takes no focus.
 - Know that a display can take the keyboard: a page calls `focus()` on its own input whenever it
   likes (on Chromium and WebKit with no gesture), and what the person goes on typing goes to it.
   `createHost` (every `PortholeView` too) gives focus back when it leaves one of the page's text

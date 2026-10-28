@@ -5987,4 +5987,12 @@ takes it only while it asked for it. Each item below landed on its own, with its
   pass them on" as a function a host calls instead of reading the declaration itself. A pure
   function of the host's own records: `test/pass-on.test.ts` holds each channel alone, and none;
   there is no browser probe for it to fail.
+- **A draft-only composer may take focus** (P6). THREAT_MODEL §6 said every view a report opens
+  takes no focus; ADOPTING's keyboard section opened a composer focused on `selected`. Now one
+  rule in both: in a comment mode the person started themselves (the host's own control), a
+  composer their selection opens may take focus with `focusField` if all it can do is save a draft
+  (nothing posts, submits or sends from it), the rest of §6's guard holding; any other view a
+  report opens takes none. What the page gains by choosing that moment is the person's next keys in
+  a draft they see and can discard. As Raft's comment design proposes it (its mode B); Tenny's to
+  confirm.
 

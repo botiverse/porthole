@@ -35,6 +35,9 @@ it. Fixes porthole#53.
   release's click is the shell's); other taps stay the page's.
   `mayPassOn(config, declaration)` / `host.mayPassOn(declaration)`: whether a page can pass a draft
   on (`db` and `user`, or egress beyond the library CDNs), so a host can show it none.
+- **Docs (P112):** THREAT_MODEL §6 and ADOPTING's keyboard section agree: a composer the person's
+  selection opens may take focus (`focusField`) only in a comment mode they started and only if it
+  can do nothing but save a draft.
 - **Tests:** `leak/served/nested.spec.ts` runs on full Chromium (`chromium-oopif`, a new CI leg),
   the headless shell, WebKit and Firefox; negative controls `shell-namespace`, `shell-host-input`.
   `PORTHOLE_WEBKIT_PATH` runs the leak suite on a WebKit build of the machine's own.
