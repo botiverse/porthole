@@ -4,6 +4,9 @@ name: ci
 # unit tests with /server in workerd), the browser suites on loopback on each engine Porthole
 # supports, the negative controls, and the prod-shape profile (P066): the host kit behind a TLS
 # edge with real DNS, on same-site sibling origins, in docker compose.
+# Every job runs on Blacksmith's runners (as botiverse/slock's CI does), which are faster than
+# GitHub's for the browser suites. release.yml stays on GitHub's: npm trusted publishing (OIDC)
+# takes a GitHub-hosted runner only.
 # release.yml publishes a commit only once this passed on it on main, every job below by name (its
 # REQUIRED_CI_JOBS; test/release.test.ts holds the two together). A run that flaked, or a commit
 # without one, is run again by hand: `stamp workflow run ci.yml --repo botiverse/porthole`. Every
@@ -26,7 +29,7 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -49,7 +52,7 @@ jobs:
   # of process, as in a person's browser, and the nested page's cases (leak/served/nested.spec.ts)
   # hold the keyboard rule there.
   loopback:
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -86,7 +89,7 @@ jobs:
   # the install fails on its own past 25, naming the slow step instead of a cancelled run.
   controls-shard:
     name: controls (${{ matrix.engine }}, ${{ matrix.shard }}/4)
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -117,7 +120,7 @@ jobs:
 
   controls:
     needs: controls-shard
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -133,7 +136,7 @@ jobs:
       - run: node packages/porthole/scripts/controls.ts --summary .dev/shards
 
   examples:
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -154,7 +157,7 @@ jobs:
           PORTHOLE_EXAMPLE_RESULTS: ${{ github.workspace }}/.dev/example-results
 
   prod-shape:
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
