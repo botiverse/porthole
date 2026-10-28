@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { runtimeCalls } from "./porthole-host.ts";
+import type { PortholeConfig } from "../../src/index.ts";
+import type { InstanceRef } from "../../src/isolation/types.ts";
+import { mount, outcomeOf, runtimeCalls } from "./porthole-host.ts";
 import { storedFiles } from "./files.ts";
 import { harness } from "./harness.ts";
 import {
@@ -13,6 +15,7 @@ import {
   seen,
   show,
   tell,
+  unique,
   valueOf,
 } from "./nested-pages.ts";
 
@@ -40,7 +43,21 @@ test.describe("a nested page (P111)", () => {
   test("is the shell's child, an opaque origin, sandboxed to scripts alone, at its sealed address", async ({
     page,
   }) => {
-    const shown = await show(page);
+    // Beside a display of its own scope (P114): every case before had a scope of its own, which
+    // hid that the shell shared its scope's origin (porthole#56).
+    const scope = unique("nest-shared");
+    const shown = await show(page, "", undefined, {}, scope);
+    const served = await harness();
+    const widget: InstanceRef = { scope, document: { kind: "shell", preset: "inlineWidget" } };
+    const sibling = await mount(
+      page,
+      served.hostOrigin,
+      served.configs.inlineWidget as PortholeConfig,
+      await served.porthole.issue(widget, { viewer: "probe" }),
+      widget,
+      { content: "<p>sibling</p>" },
+    );
+    expect(await outcomeOf(sibling.read)).toEqual({ state: "loaded" });
     const ready = shown.said.find((each) => each.type === "ready") ?? {};
     expect(ready.origin, "probe: the page's origin is opaque").toBe("null");
     expect(String(ready.href), "probe: the page is at its sealed files' address").toContain(
@@ -49,8 +66,12 @@ test.describe("a nested page (P111)", () => {
     const shell = await shown.shell();
     expect(
       new URL(shell.url()).origin,
-      "the display's frame is the shell, on the content origin",
+      "the display's frame is the shell, on the shell's own origin",
     ).toBe(shown.origin);
+    expect(
+      new URL((await sibling.frame()).url()).origin,
+      "the scope's other display is on the scope's origin, not the shell's (P114)",
+    ).not.toBe(shown.origin);
     const sandbox = await shell.evaluate(
       () => document.querySelector("iframe")?.getAttribute("sandbox") ?? null,
     );

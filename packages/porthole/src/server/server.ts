@@ -14,7 +14,13 @@ import { isHostLabel, reservedLabels } from "./naming.ts";
 import { enterPage, pageScript, SESSION_PATH, statusPage } from "./pages.ts";
 import { libraryFile } from "./libraries.ts";
 import { isNavigation, ownLoad, serveAsset, serveFile } from "./files.ts";
-import { nestedAncestors, nestedShellResponse } from "./nested.ts";
+import {
+  isNestedLabel,
+  nestedAncestors,
+  nestedLabelOf,
+  nestedShellResponse,
+  PORTHOLE_LABEL_PREFIX,
+} from "./nested.ts";
 import { DEFAULT_ENTRY } from "../files/paths.ts";
 import { isPortholeCookie, setsPortholeCookie } from "./proxy.ts";
 import {
@@ -70,6 +76,23 @@ const BASE = /^\/(?:(?!\.{1,2}\/)[A-Za-z0-9._:~-]{1,200}\/){0,16}$/u;
 const ENTER_PATH = "/__porthole/enter";
 /** Where a redirect entry's code is redeemed, before its clean address (P068). */
 const ENTRY_PATH = "/__porthole/entry";
+/** How long a nested page's ticket from its clean address to its shell's label lasts (P114). */
+const HOP_SECONDS = 60;
+/**
+ * A path below a file set's base, as a hop's ticket carries it (P114): a relative path of URL path
+ * characters, no empty segment but a last one, no dot segment (encoded or not), no query.
+ */
+const isPageRest = (rest: unknown): rest is string =>
+  typeof rest === "string" &&
+  rest.length > 0 &&
+  rest.length <= MAX_PATH &&
+  /^[A-Za-z0-9._~!$&'()*+,;=:@%/-]+$/u.test(rest) &&
+  rest
+    .split("/")
+    .every(
+      (segment, index, all) =>
+        (segment !== "" || index === all.length - 1) && !/^(?:\.|%2e){1,2}$/iu.test(segment),
+    );
 /** How long a redirect entry may take (the person may sign in on the way), and its code. */
 const ENTRY_STATE_MS = 5 * 60_000;
 const ENTRY_CODE_SECONDS = 60;
@@ -311,16 +334,39 @@ export function createServer(options: ServerOptions): PortholeServer {
       return keys.label(scope);
     }
     const label = content.name(scope);
-    if (!isHostLabel(label) || isReserved(label)) {
+    if (!isHostLabel(label) || isReserved(label) || label.startsWith(PORTHOLE_LABEL_PREFIX)) {
       throw new TypeError(
-        `content.name gave ${JSON.stringify(label)} for a scope: it must be one lowercase DNS label (a-z 0-9 -, at most 63, not xn--), not reserved`,
+        `content.name gave ${JSON.stringify(label)} for a scope: it must be one lowercase DNS label (a-z 0-9 -, at most 63, not xn--), not reserved, not Porthole's own (${PORTHOLE_LABEL_PREFIX}…)`,
       );
     }
     return label;
   };
-  /** Whether a request's label may be one this server named. */
+  /**
+   * The label an instance is served on: its scope's, or a nested page's shell's own (P114), on
+   * which nothing but nested pages' shells, their pages and those pages' files is ever served.
+   * Every other display of the scope runs agent-made content on the scope's origin with
+   * `allow-same-origin`: on that origin, the shell's realm (its word to the host, the page's
+   * sealed address) would be theirs.
+   */
+  const labelFor = (instance: InstanceRef): string => {
+    const label = nameOf(instance.scope);
+    if (instance.document.kind !== "artifact" || compiledFor(instance)?.config.nested !== true) {
+      return label;
+    }
+    const own = nestedLabelOf(label);
+    if (isReserved(own)) {
+      throw new TypeError(
+        `content.reserved holds ${own}, a nested page's shell's label: reserve no ${PORTHOLE_LABEL_PREFIX} label`,
+      );
+    }
+    return own;
+  };
+  /** Whether a request's label may be one this server named (a nested page's shell's, P114). */
   const ours = (label: string): boolean =>
-    !isReserved(label) && (content.name === undefined ? LABEL.test(label) : isHostLabel(label));
+    !isReserved(label) &&
+    (isNestedLabel(label) ||
+      (!label.startsWith(PORTHOLE_LABEL_PREFIX) &&
+        (content.name === undefined ? LABEL.test(label) : isHostLabel(label))));
   const secure = content.scheme === "https";
   const defaultPort = secure ? 443 : 80;
   const portPart =
@@ -330,6 +376,7 @@ export function createServer(options: ServerOptions): PortholeServer {
   const contentSource = `${content.scheme}://*.${domain}${portPart}`;
   const sampleHost = `${keys.label("")}.${domain}`;
   const sampleOrigin = originOfLabel(keys.label(""));
+  const sampleNestedOrigin = originOfLabel(nestedLabelOf(keys.label("")));
   const authorize = options.authorize;
   const authorizeTtl = authorize?.ttlSeconds ?? 0;
   if (!Number.isInteger(authorizeTtl) || authorizeTtl < 0 || authorizeTtl > 300) {
@@ -471,7 +518,13 @@ export function createServer(options: ServerOptions): PortholeServer {
         `The config ${JSON.stringify(name)} (${config.mode}, ${config.isolation}) can't serve a ${kind}: it needs ${MODES[kind].join(" or ")} mode with domain isolation`,
       );
     }
-    if (!config.contentOrigins.some((source) => originMatchesSource(sampleOrigin, source))) {
+    // A nested page's shell is on a label of its own (P114): its frame source is the same.
+    const samples = config.nested === true ? [sampleOrigin, sampleNestedOrigin] : [sampleOrigin];
+    if (
+      !samples.every((sample) =>
+        config.contentOrigins.some((source) => originMatchesSource(sample, source)),
+      )
+    ) {
       throw new TypeError(
         `The config ${JSON.stringify(name)}'s contentOrigins don't include this server's (${contentSource})`,
       );
@@ -687,7 +740,7 @@ export function createServer(options: ServerOptions): PortholeServer {
       }
       let named: string;
       try {
-        named = nameOf(instance.scope);
+        named = labelFor(instance);
       } catch {
         continue;
       }
@@ -795,8 +848,15 @@ export function createServer(options: ServerOptions): PortholeServer {
     return best;
   }
 
-  /** A taken ticket, if it is good for `label`'s origin. */
-  async function take(ticket: string | null, label: string): Promise<TicketRecord | null> {
+  /**
+   * A taken ticket, if it is good for `label`'s origin: its instance's own (a nested page's shell's,
+   * P114), or for an entry code (`entry`) its scope's, where a clean address is.
+   */
+  async function take(
+    ticket: string | null,
+    label: string,
+    entry = false,
+  ): Promise<TicketRecord | null> {
     if (ticket === null || ticket.length === 0 || ticket.length > 128) {
       return null;
     }
@@ -806,7 +866,9 @@ export function createServer(options: ServerOptions): PortholeServer {
     }
     try {
       const instance = cleanInstance(record.instance);
-      return nameOf(instance.scope) === label ? { ...record, instance } : null;
+      return (entry ? nameOf(instance.scope) : labelFor(instance)) === label
+        ? { ...record, instance }
+        : null;
     } catch {
       return null;
     }
@@ -856,7 +918,13 @@ export function createServer(options: ServerOptions): PortholeServer {
     } catch {
       return null;
     }
-    if (!open || instance.document.kind !== "artifact" || nameOf(instance.scope) !== label) {
+    let named: string;
+    try {
+      named = labelFor(instance);
+    } catch {
+      return null;
+    }
+    if (!open || instance.document.kind !== "artifact" || named !== label) {
       return null;
     }
     return {
@@ -930,7 +998,8 @@ export function createServer(options: ServerOptions): PortholeServer {
     // sends a frame's path, where some send no Referer that names it.
     const blob = SEALED_ASSET.exec(rest)?.[1];
     if (blob !== undefined) {
-      if (options.assets === undefined) {
+      // A nested page loads no assets (its config refuses them): none on its shell's label (P114).
+      if (options.assets === undefined || isNestedLabel(label)) {
         return page(404, "Not found", "This address names no content.", method);
       }
       return (
@@ -987,8 +1056,10 @@ export function createServer(options: ServerOptions): PortholeServer {
     // The ticket's own answer carries the document: an engine that keeps no cookie in a frame
     // still shows it. The cookie serves what follows (a reload), where the engine keeps it.
     const record = method === "GET" ? await take(url.searchParams.get("ticket"), label) : null;
+    // An entry code opens its clean address alone, through its own browser's nonce (P068, P114).
     if (
       record !== null &&
+      record.entry === undefined &&
       record.instance.document.kind !== "external" &&
       keys.instanceKey(record.instance) === key
     ) {
@@ -1012,7 +1083,10 @@ export function createServer(options: ServerOptions): PortholeServer {
         "session",
       );
     }
-    return serveAccess(request, access, cookie);
+    // A nested page's hop from its clean address (P114): the page below its base it was entered at.
+    const asked = cookie === null ? undefined : record?.page;
+    const rest = isPageRest(asked) ? asked : undefined;
+    return serveAccess(request, access, cookie, undefined, rest);
   }
 
   /**
@@ -1024,6 +1098,8 @@ export function createServer(options: ServerOptions): PortholeServer {
     access: Access,
     cookie: string | null,
     at?: FilesAt,
+    /** A nested page's path below its files' base, from its hop's ticket (P114). */
+    pageAt?: string,
   ): Promise<Response> {
     const method = request.method.toUpperCase();
     const refusal = await denied(request, access);
@@ -1043,19 +1119,27 @@ export function createServer(options: ServerOptions): PortholeServer {
       if (!isNavigation(request)) {
         return page(404, "Not found", "This page's files are at its own address.", method);
       }
+      // Its shell is served on its own label alone (P114): a clean address, entered on the scope's
+      // label (P068), goes there with a one-time ticket of its own, for what is left of its session.
+      const own = originOfLabel(labelFor(access.instance));
+      if (access.origin !== own) {
+        return hop(access, own, "files" in served && at !== undefined ? at.rest : "");
+      }
       const sealed = await sealFiles(access);
       let rest = "";
       if ("files" in served) {
         const entry = served.files.entry ?? DEFAULT_ENTRY;
         rest =
-          at !== undefined && at.rest !== ""
-            ? at.rest
-            : entry.includes("/")
-              ? entry
-                  .split("/")
-                  .map((segment) => encodeURIComponent(segment))
-                  .join("/")
-              : "";
+          pageAt !== undefined
+            ? pageAt
+            : at !== undefined && at.rest !== ""
+              ? at.rest
+              : entry.includes("/")
+                ? entry
+                    .split("/")
+                    .map((segment) => encodeURIComponent(segment))
+                    .join("/")
+                : "";
       }
       const shell = nestedShellResponse(served.compiled, {
         origin: access.origin,
@@ -1135,6 +1219,39 @@ export function createServer(options: ServerOptions): PortholeServer {
         })
       : served.html;
     return new Response(method === "HEAD" ? null : html, { status: 200, headers });
+  }
+
+  /**
+   * A nested page entered at its clean address (P114), whose shell is never served there: on to the
+   * shell's own label, with a one-time ticket for the same access (its viewer, its subject, what is
+   * left of its session) and the path below its base it was entered at. Only this server's own
+   * answer carries the ticket, as `issue`'s frame address does; the host's check already let the
+   * request in.
+   */
+  async function hop(access: Access, own: string, rest: string): Promise<Response> {
+    const now = Date.now();
+    const ticket = newTicket();
+    await tickets.put(ticketId(ticket), {
+      instance: access.instance,
+      viewer: access.viewer,
+      expiresAt: now + HOP_SECONDS * 1_000,
+      sessionSeconds: Math.min(
+        MAX_SESSION_SECONDS,
+        Math.max(1, Math.floor((access.expiresAt - now) / 1_000)),
+      ),
+      ...(access.anonymous === true ? { anonymous: true } : {}),
+      ...(access.subject === undefined ? {} : { subject: access.subject }),
+      ...(isPageRest(rest) ? { page: rest } : {}),
+    });
+    return new Response(null, {
+      status: 303,
+      headers: {
+        location: `${own}${PREFIX}d/${keys.instanceKey(access.instance)}?ticket=${ticket}`,
+        "cache-control": "no-store",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+      },
+    });
   }
 
   /**
@@ -1275,7 +1392,7 @@ export function createServer(options: ServerOptions): PortholeServer {
       let instance: InstanceRef;
       try {
         instance = cleanInstance(session.i);
-        if (instance.document.kind !== "artifact" || nameOf(instance.scope) !== label) {
+        if (instance.document.kind !== "artifact" || labelFor(instance) !== label) {
           continue;
         }
       } catch {
@@ -1389,7 +1506,7 @@ export function createServer(options: ServerOptions): PortholeServer {
     if (method !== "GET") {
       return page(405, "Not allowed", "Open this link in a browser.", method);
     }
-    const record = await take(url.searchParams.get("code"), label);
+    const record = await take(url.searchParams.get("code"), label, true);
     if (record?.entry === undefined) {
       return page(
         403,
@@ -1574,6 +1691,29 @@ export function createServer(options: ServerOptions): PortholeServer {
     }
   }
 
+  /**
+   * A nested page's shell's own label (P114): Porthole's shell at a frame's address, its page and
+   * that page's files below the sealed prefix, and Porthole's status pages (and their script).
+   * Nothing else: no clean address, entry, asset, library or app, so no agent-made content ever
+   * runs on this origin with it (every file below the prefix carries a sandbox without it).
+   */
+  async function serveShellLabel(request: Request, url: URL, label: string): Promise<Response> {
+    const method = request.method.toUpperCase();
+    const script = pageScript(url.pathname);
+    if (script !== null) {
+      return script;
+    }
+    const document = DOCUMENT_PATH.exec(url.pathname);
+    if (document?.[1] !== undefined) {
+      return serveDocument(request, url, label, document[1]);
+    }
+    const sealed = FILES_PATH.exec(url.pathname);
+    if (sealed?.[1] !== undefined) {
+      return serveSealed(request, url, label, sealed[1], sealed[2]);
+    }
+    return page(404, "Nothing here", "This address names no content.", method);
+  }
+
   /** A one-time ticket (or entry code) for an instance the host decided a viewer may see. */
   async function mint(
     instance: InstanceRef,
@@ -1693,7 +1833,8 @@ export function createServer(options: ServerOptions): PortholeServer {
 
     async issue(instance, grant): Promise<FrameLocation> {
       const { clean, key, ticket } = await mint(instance, grant);
-      const origin = originOfLabel(nameOf(clean.scope));
+      // A nested page's frame is its shell, on the shell's own label (P114).
+      const origin = originOfLabel(labelFor(clean));
       const path =
         clean.document.kind === "external"
           ? `${ENTER_PATH}?ticket=${ticket}`
@@ -1831,6 +1972,9 @@ export function createServer(options: ServerOptions): PortholeServer {
       try {
         if (!ours(label)) {
           return page(404, "Nothing here", "This address names no content.", method);
+        }
+        if (isNestedLabel(label)) {
+          return await serveShellLabel(request, url, label);
         }
         if (url.pathname === ENTER_PATH) {
           return await enter(request, url, label);

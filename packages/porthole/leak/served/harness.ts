@@ -512,6 +512,7 @@ async function start(): Promise<Harness> {
           },
         }),
   });
+  const shared = sharedShellLabel(porthole);
   const hostCsp = embedderCsp(Object.values(configs));
   hostCspOf = () => hostCsp;
   handle = async (request) => {
@@ -520,13 +521,15 @@ async function start(): Promise<Harness> {
     if (new URL(request.url).pathname === "/__hang") {
       return new Promise<Response>(() => {});
     }
-    const served = await porthole.handle(
-      weakened.includes("service-worker")
-        ? asServiceWorkerAllowed(request)
-        : weakened.includes("url-origin")
-          ? withoutOriginOfApps(request)
-          : request,
-    );
+    const served =
+      (await shared?.handle(request)) ??
+      (await porthole.handle(
+        weakened.includes("service-worker")
+          ? asServiceWorkerAllowed(request)
+          : weakened.includes("url-origin")
+            ? withoutOriginOfApps(request)
+            : request,
+      ));
     if (served !== null) {
       // The harness's controls, each applied in turn, so several combine (after the review).
       let answer = served;
@@ -628,7 +631,7 @@ async function start(): Promise<Harness> {
     hostOrigin,
     contentSource,
     foreignOrigin: `http://127.0.0.1:${foreignPort}`,
-    porthole,
+    porthole: shared?.porthole ?? porthole,
     configs,
     hits,
     pages,
@@ -636,6 +639,79 @@ async function start(): Promise<Harness> {
     revoked,
     requests,
     assets,
+  };
+}
+
+/**
+ * The `shell-label` control (P114's negative control): a nested page's shell served on its scope's
+ * own label, as it was before P114 (porthole#56). Its frame's address is issued on the scope's
+ * origin, and that origin's requests for it (its document, its sealed files) are answered by the
+ * shell's own label, every mention of that origin in the answer made the scope's (the shell's
+ * script hash with it). Null without the control.
+ */
+function sharedShellLabel(
+  porthole: PortholeServer,
+): { porthole: PortholeServer; handle(request: Request): Promise<Response | null> } | null {
+  if (!weakened.includes("shell-label")) {
+    return null;
+  }
+  // The scope's origin → its nested pages' shell's origin, and those pages' instance keys.
+  const shellOf = new Map<string, string>();
+  const keys = new Set<string>();
+  const issue: PortholeServer["issue"] = async (instance, grant) => {
+    const location = await porthole.issue(instance, grant);
+    const scope = porthole.originFor(instance.scope);
+    if (location.origin === scope) {
+      return location;
+    }
+    shellOf.set(scope, location.origin);
+    const url = new URL(location.url);
+    keys.add(url.pathname.split("/").at(-1) ?? "");
+    return { ...location, url: `${scope}${url.pathname}${url.search}`, origin: scope };
+  };
+  const rewrite = async (answer: Response, from: string, to: string): Promise<Response> => {
+    const headers = new Headers();
+    for (const [name, value] of answer.headers) {
+      if (name !== "set-cookie") {
+        headers.set(name, value.replaceAll(from, to));
+      }
+    }
+    for (const cookie of answer.headers.getSetCookie()) {
+      headers.append("set-cookie", cookie);
+    }
+    const type = answer.headers.get("content-type") ?? "";
+    if (!/^(text\/|application\/json)/u.test(type) || answer.body === null) {
+      return new Response(answer.body, { status: answer.status, headers });
+    }
+    const body = (await answer.text()).replaceAll(from, to);
+    const script = /<script>([\s\S]*?)<\/script>/u.exec(body)?.[1];
+    const csp = headers.get("content-security-policy");
+    if (script !== undefined && csp !== null && csp.includes("'sha256-")) {
+      const hash = createHash("sha256").update(script).digest("base64");
+      headers.set("content-security-policy", csp.replace(/'sha256-[^']+'/u, `'sha256-${hash}'`));
+    }
+    return new Response(body, { status: answer.status, headers });
+  };
+  return {
+    porthole: { ...porthole, issue },
+    async handle(request) {
+      const url = new URL(request.url);
+      const shell = shellOf.get(url.origin);
+      const key = /^\/__porthole\/d\/([a-z2-7]{16})$/u.exec(url.pathname)?.[1];
+      const files = url.pathname.startsWith("/__porthole/f/");
+      if (shell === undefined || !((key !== undefined && keys.has(key)) || files)) {
+        return null;
+      }
+      const moved = new URL(`${url.pathname}${url.search}`, shell);
+      const headers = new Headers(request.headers);
+      headers.set("host", moved.host);
+      const answer = await porthole.handle(new Request(moved, { method: request.method, headers }));
+      // A sealed address the shell's label doesn't know is one of the scope's own pages'.
+      if (answer === null || (files && answer.status === 401)) {
+        return null;
+      }
+      return rewrite(answer, shell, url.origin);
+    },
   };
 }
 

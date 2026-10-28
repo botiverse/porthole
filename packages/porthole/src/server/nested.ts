@@ -2,13 +2,43 @@ import type { CompiledConfig } from "../compile/compile.ts";
 import { servedPermissionsPolicy, serializeCsp, type CspDirective } from "../compile/policy.ts";
 import { frameShellDocument, frameShellScript, type FrameShellOptions } from "../shell/frame.ts";
 import { sha256, utf8 } from "./crypto.ts";
+import { base32 } from "./keys.ts";
 
 /**
  * A nested page's serving (P111): what the address the host frames answers (Porthole's shell,
  * `nestedShellResponse`), and what changes on the page and its files below the sealed prefix
  * (`nestedAncestors`, `NESTED_FILE_HEADERS`). `/server` serves both for a config with `nested`;
  * a host serving its own content origin (its own Worker) answers the same.
+ *
+ * All of it is served on the shell's own label (P114, `nestedLabelOf`), never on the scope's: every
+ * other display of the scope runs agent-made content on the scope's origin with
+ * `allow-same-origin`, which would be same-origin with the shell, its realm and the page's sealed
+ * address.
  */
+
+/**
+ * The start of every label Porthole serves for itself on a content domain (P114): no host's naming
+ * may make one (`content.name` is refused one, and `prefixedName` won't take the prefix).
+ */
+export const PORTHOLE_LABEL_PREFIX = "porthole-";
+
+const NESTED_LABEL = /^porthole-[a-z2-7]{24}$/u;
+
+/**
+ * The label a nested page's shell is served on (P114), for its scope's label: `porthole-` and 24
+ * base32 characters of the label's SHA-256, one per scope, the same for every nested page of it. No
+ * content label is ever one (a keyed label has no hyphen, a host's is refused the prefix), so
+ * nothing but a nested page's shell, its opaque page, that page's files and Porthole's status pages
+ * is ever served on it: no other display's content runs there with `allow-same-origin`. Not a
+ * secret: anyone who knows the scope's label may work it out. A content Worker of a host's own
+ * serves its nested pages on it too.
+ */
+export function nestedLabelOf(label: string): string {
+  return `${PORTHOLE_LABEL_PREFIX}${base32(sha256(utf8(`porthole/nested/${label}`)).subarray(0, 15))}`;
+}
+
+/** Whether a label is a nested page's shell's own (`nestedLabelOf`'s form). */
+export const isNestedLabel = (label: string): boolean => NESTED_LABEL.test(label);
 
 /** Where every page and file of a nested page is, on its origin: its sealed files' prefix. */
 export const NESTED_FILES_PREFIX = "/__porthole/f/";
@@ -68,8 +98,8 @@ export function nestedShellResponse(
 }
 
 /**
- * Who may frame a nested page and its files' answers: its shell (the content origin) and, above
- * it, the host origins (`frame-ancestors` names every ancestor).
+ * Who may frame a nested page and its files' answers: its shell (the shell's own origin, P114) and,
+ * above it, the host origins (`frame-ancestors` names every ancestor).
  */
 export const nestedAncestors = (origin: string, frameAncestors: string): string =>
   `${origin} ${frameAncestors}`;

@@ -80,3 +80,40 @@ test("P0.3 / S6: a url-mode app's WebSocket opens from its own page, never a sib
   await expect(page.locator("html")).toHaveAttribute("data-app", "ready");
   expect(await socketFrom(page, socket), "a sibling app's socket to it").toBe("error");
 });
+
+test("a nested page's shell is on a label of its own through nodeHost: framed, and from its clean address (P114)", async ({
+  page,
+}) => {
+  const shellLabel = new RegExp(
+    `^http://porthole-[a-z2-7]{24}\\.kitcontent\\.localhost:${port}$`,
+    "u",
+  );
+  await page.goto(`${app}/login?as=probe`);
+  const asked = await page.context().request.post(`${app}/api/frames`, {
+    data: {
+      instance: {
+        scope: "nest-a",
+        document: { kind: "artifact", id: "page", version: "1", preset: "artifactNested" },
+      },
+    },
+    headers: { origin: app },
+  });
+  expect(asked.status()).toBe(201);
+  const location = (await asked.json()) as { url: string; origin: string };
+  expect(location.origin).toMatch(shellLabel);
+  await page.evaluate((url) => {
+    const frame = document.createElement("iframe");
+    frame.src = url;
+    document.body.append(frame);
+  }, location.url);
+  await expect
+    .poll(() => page.frames().some((frame) => frame.url().startsWith(`${location.origin}/`)))
+    .toBe(true);
+  await expect(page.frameLocator("iframe").frameLocator("iframe").locator("#artifact")).toHaveText(
+    "version 1",
+  );
+  // The clean address is on the scope's label, which sends a tab on to the shell's.
+  await page.goto(`http://k-nest-b.kitcontent.localhost:${port}/n`);
+  await expect.poll(() => new URL(page.url()).origin, { timeout: 15_000 }).toMatch(shellLabel);
+  await expect(page.frameLocator("iframe").locator("#artifact")).toHaveText("version 1");
+});

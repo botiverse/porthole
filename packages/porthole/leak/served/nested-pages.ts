@@ -130,9 +130,13 @@ export async function show(
   before?: () => Promise<void>,
   /** More files of the page's set, beside its `index.html`. */
   files: Readonly<Record<string, string>> = {},
+  /**
+   * The page's scope; default a new one. A case that mounts other displays of the same scope beside
+   * it names one (P114: the gap a fresh scope per case hid, porthole#56).
+   */
+  scope: string = unique("nest"),
 ): Promise<Shown> {
   const served = await harness();
-  const scope = unique("nest");
   const id = unique("page");
   served.fileSets.set(`${id}@1`, storedFiles({ ...files, "index.html": pageOf(script) }));
   const instance: InstanceRef = {

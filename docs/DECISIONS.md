@@ -6110,6 +6110,120 @@ told selection kept: each alone fails the probe, measured on Chromium).
 **Revisit when** a host needs the element picked (`elements: true`) or a held block cleared too
 (they leave no highlight now), or the MCP Apps spec gains a host-to-view way to clear a selection.
 
+## P114 · 2026-10-28 · A nested page's shell on a label of its own, where nothing else is ever served · Accepted
+
+**Context.** porthole#56 (Ferry's audit of what merged after 0.13.0). P111 rests on the shell
+being a realm content can't reach (ARCHITECTURE "Trust boundaries" 4): the host trusts the shell's
+word (`porthole/shell/state`: the keyboard rule, `comments.open`), and the shell holds the page's
+sealed files' address, a bearer credential (P083). The opaque page can't reach it. But the shell
+was served on its scope's content origin, where every other domain-mode display of the scope (an
+inline widget, a live widget, an MCP app, an artifact that isn't nested) runs agent-made content
+with `allow-same-origin`. Such a display on the host's page is same-origin with the shell: from a
+plain artifact or an inline widget of the same scope, `parent.frames[0].document` was the shell,
+its page's frame inside it (measured by Ferry on the headless shell, full Chromium and Firefox). So
+it could make the shell's word say "the person pressed" (P109's threat back for nested pages) and
+take the sealed address. P0 for a host that maps several artifacts to one scope. Nothing refused
+the mix: `nested` can't have `storage`, `assets` or `egress.libraries`, so a nested kind beside
+other kinds of one scope is the expected layout. The nested suite missed it because each of its
+cases had a scope of its own.
+
+**Decision.** The shell's origin hosts nothing but nested pages' shells, their opaque pages, those
+pages' files and Porthole's status pages. `/server` holds the rule; it isn't left to how a host
+lays out `defineDisplays` or names its scopes.
+
+- **The label.** A nested page is served on `nestedLabelOf(label)`: `porthole-` and 24 base32
+  characters (120 bits) of the SHA-256 of `porthole/nested/<the scope's label>`. One per scope:
+  every nested page of the scope shares it, as they shared the scope's origin before (only
+  Porthole's shell runs there with that origin, and each page is opaque and opens only with its
+  own sealed address). Not keyed and not secret: it says nothing the scope's label doesn't, and a
+  content Worker of a host's own works it out from the label alone. It is one label under the
+  content domain, so its wildcard DNS name, its wildcard certificate and the hosts'
+  `frame-src https://*.<domain>` already cover it.
+- **What it answers.** The frame's address (`/__porthole/d/<key>`: the shell), the sealed
+  prefix (`/__porthole/f/<token>/…`: the page, its files, the renewal, each with a CSP sandbox
+  without `allow-same-origin`, P111), and Porthole's status pages and their script. Anything else
+  is a 404 there: no clean address, entry, asset (`/_blob/`), library, session check or url-mode
+  app. A ticket, cookie or sealed address is good there only for a nested page whose shell's label
+  it is; and on the scope's label never for a nested page (its ticket, cookie or sealed address is
+  refused there: a 401).
+- **No content label is ever one.** The keyed default has no hyphen; every `porthole-` label is
+  Porthole's own: `content.name` giving one throws (as a reserved label does), and
+  `prefixedName("porthole-")` throws. A shell's label the host reserved (`content.reserved`)
+  makes `issue` throw: the request would go to the host's routes.
+- **Where the frame is.** `issue` answers the shell's origin for a nested page
+  (`FrameLocation.origin`, and its `url`); the host page's checks take it as they take any served
+  origin (it matches the content source, it isn't the host's site). `originFor(scope)` and
+  `urlOf(scope, path)` stay the scope's: they are where its other displays and its clean addresses
+  are.
+- **A clean address** (P068) stays on the scope's label: the entry, its code and its session are
+  there, as before. Opened for a nested page, the scope's label answers it with a `303` to the
+  shell's label (`/__porthole/d/<key>?ticket=<one-time>`): a ticket of its own for the same access
+  (viewer, subject, anonymous), good for 60 s, buying what is left of the session, with the path
+  below the file set's base the address asked for (`TicketRecord.page`, checked: a relative path,
+  no dot segment, no query). The shell's label sets its own session there, so a reload rides on
+  it; the scope's label never answers the shell.
+- **An entry code is no ticket.** A document's address takes a ticket from `issue` (or a hop)
+  only, never an entry code (`TicketRecord.entry`), which opens its entry alone with its own
+  browser's nonce. Before, a code could stand in for a ticket at the scope's label's
+  `/__porthole/d/`; at the shell's it would have skipped the nonce (an attacker's session planted
+  in a victim's frame).
+- `configFor` checks that a nested config's `contentOrigins` match a shell's sample origin too.
+
+**Threat it closes.** A same-scope display reading or driving the shell: the shell's word to the
+host, its focus and activation, the page's sealed address. A content display is now never
+same-origin with any shell (its label is never a `porthole-` one), whatever the host's scopes.
+
+**Limits.** On a tab, a nested page's clean address ends at the shell's document address (with its
+spent ticket), not the clean one; a reload rides the shell's session, and after it ends that
+address says "This link has been used" where the clean one would sign in again. The hop's ticket is
+in a `Location`, as exposed as `issue`'s frame address (P020): one use, a minute. A host that frames
+a clean address itself (not `issue`'s location) gets the shell's origin after the hop; with
+`createHost` the frame's origin is the location's, so such a host frames `issue`'s location.
+
+**Rejected.**
+- A label in the form IDNA reserves (`??--`), which no host's naming can make today (P047): ACME
+  CAs (Let's Encrypt) refuse certificates for such names, so a host with a certificate per name
+  couldn't serve it. The `porthole-` prefix narrows what a host may name instead (the kit's health
+  gate already reserved `porthole-health`).
+- A deeper name (`<x>.n.<domain>`): a second wildcard certificate and DNS name for every host.
+- A keyed label: a host's own content Worker couldn't work it out without the server's secret, and
+  it would hide nothing the scope's label shows.
+- A label per page instead of per scope: nothing runs on the shell's origin but the shell, so
+  per scope is enough, and its sessions stay per scope as before.
+- Refusing other kinds of a nested kind's scope (in `defineDisplays`, or at `issue`): the layout is
+  the expected one, and scopes are the host's, not the registry's.
+- The shell on the scope's label on a tab only (a clean address): a same-scope page could open it
+  in a window it names and reach its realm.
+
+**Adopters.** Every host on `/server` or the host kit: the shell's label is under the content
+domain's wildcard, so wildcard DNS and a wildcard certificate need nothing; an edge, a route or a
+firewall that matches labels by pattern (`a-*.<domain>`) must let `porthole-*` through to the
+content server too. A host whose naming makes `porthole-` labels must change it. A content Worker
+of a host's own (Raft's, on 0.13 today) that adopts nested pages serves the shell, the page and
+its files on `nestedLabelOf(label)` (`nestedAncestors(<that origin>, <host origins>)`, the shell's
+`origin` that origin), answers the frame location with it, serves nothing else there, and never
+answers a nested page on the scope's label (ADOPTING "Nested pages").
+
+**Tested.** `test/nested.test.ts` "a nested page's shell on a label of its own (P114)" (the
+label, one per scope, under host naming and the keyed default; the scope's label answers no
+nested page; the shell's answers nothing else, another display's ticket or sealed address
+included; naming and reserved labels); `test/entry.test.ts` "a nested page's clean address
+(P114)" (the hop, the page it was entered at, the shell's own session; an attacker's entry code
+at the shell's document address opens nothing); `leak/served/nested-siblings.spec.ts`
+`[nested-siblings]`: a nested page beside an inline widget and a plain artifact of its scope, which
+read each other (the positive control) and nothing of the shell (not its document, no sealed
+address, not its page's address); `leak/served/nested.spec.ts`'s first case beside a widget of its
+scope; `leak/kit.spec.ts` (through `nodeHost`) and the prod-shape profile (through Caddy's TLS and
+CoreDNS): framed by `issue`'s location, and from a clean address. Negative control `shell-label`:
+the harness answers the shell's frame address and sealed files on the scope's label (from the
+shell's, every mention of its origin made the scope's), and `[nested-siblings]` fails, nothing
+else. Measured on the headless shell, full Chromium, WebKit and Firefox (the last two in the
+prod-shape profile's browser image).
+
+**Revisit when** a nested page gets storage, assets or libraries (they would be served on the
+shell's label: the rule must say what may run there), or a host needs a nested page's shell per
+page.
+
 ## P116 · 2026-10-28 · A mark's count above the limit is clamped, not refused · Accepted
 
 **Context.** P104 had `checkMarks` throw on a `count` above `ANNOTATION_LIMITS.count` (999), as on

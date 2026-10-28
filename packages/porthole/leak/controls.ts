@@ -72,6 +72,7 @@ export const UNWEAKENED: Readonly<Record<string, string>> = {
 const LEAK = "leak/leak.spec.ts";
 const RUNTIME = "leak/served/runtime.spec.ts";
 const NESTED = "leak/served/nested.spec.ts";
+const NESTED_SIBLINGS = "leak/served/nested-siblings.spec.ts";
 const STALL_RULE =
   "a shell's activation seen after a stall is no one's gesture until it goes off (P111, after its review)";
 const FILES = "leak/served/files.spec.ts";
@@ -590,6 +591,12 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     fails: all(
       "the shell's words are the shell's alone: a page that says them, to its parent or to the host's window, moves nothing",
     ),
+  },
+  // A nested page's shell on a label of its own (P114, porthole#56): on its scope's, a same-scope
+  // inline widget or artifact reads the shell's document, and in it the page's sealed address.
+  "shell-label": {
+    specs: [NESTED_SIBLINGS],
+    fails: all("[nested-siblings]"),
   },
   // Every file below a nested page's sealed prefix is sandboxed (P111, after its review).
   "file-sandbox": {

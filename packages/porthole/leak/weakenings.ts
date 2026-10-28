@@ -220,6 +220,9 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   // A nested page's files (P111, after its review) without their sandbox: one opened on its own
   // tab has the shell's origin.
   "file-sandbox": "harness",
+  // A nested page's shell on its scope's own label, as before P114 (porthole#56): its frame's
+  // address and its sealed files answered on the scope's origin, beside the scope's other displays.
+  "shell-label": "harness",
   // A served page without its Permissions-Policy header (P099): on a tab nothing else denies it
   // devices, location or full screen, but the shell's locks (`device-locks`, the only wall on
   // WebKit and Firefox, which don't apply the header to them).
