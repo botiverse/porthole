@@ -209,7 +209,11 @@ export function parseReport(value: unknown): AnnotationReport | null {
 export function annotateMode(mode: AnnotateMode | undefined): Required<AnnotateMode> {
   const elements = mode?.elements ?? true;
   const words = mode?.text ?? true;
-  if (typeof elements !== "boolean" || typeof words !== "boolean" || (!elements && !words)) {
+  if (
+    (typeof elements !== "boolean" && elements !== "hold") ||
+    typeof words !== "boolean" ||
+    (elements === false && !words)
+  ) {
     throw new TypeError("annotations.start: elements, text, or both");
   }
   return { elements, text: words };

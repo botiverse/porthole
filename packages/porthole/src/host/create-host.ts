@@ -321,7 +321,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             ) {
               return;
             }
-            if (kind === "element") {
+            // A pick ends with it; holding a block (P112) lasts until the host stops it.
+            if (kind === "element" && annotating.elements === true) {
               annotating = annotating.text ? { elements: false, text: true } : null;
             }
             break;
@@ -337,7 +338,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             if (annotating === null) {
               return;
             }
-            if (annotating.elements) {
+            if (annotating.elements === true) {
               annotating = annotating.text ? { elements: false, text: true } : null;
             }
             break;

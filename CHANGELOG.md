@@ -31,6 +31,8 @@ it. Fixes porthole#53.
   `annotations.track(id | null)` follows one shown mark: `{ type: "tracked", id, rect }` as it
   moves, at most 60 a second, clamped to the frame. Each attached `anchored` result carries
   `order`, its place in the document among the found marks (offscreen ones too).
+  `start({ text: true, elements: "hold" })`: on touch, holding a block 500 ms selects it (its
+  release's click is the shell's); other taps stay the page's.
 - **Tests:** `leak/served/nested.spec.ts` runs on full Chromium (`chromium-oopif`, a new CI leg),
   the headless shell, WebKit and Firefox; negative controls `shell-namespace`, `shell-host-input`.
   `PORTHOLE_WEBKIT_PATH` runs the leak suite on a WebKit build of the machine's own.

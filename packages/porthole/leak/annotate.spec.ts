@@ -148,6 +148,64 @@ test("Escape while selecting text is cancelled, and stays the page's key; with n
   );
 });
 
+test("holding a block 500 ms selects it and its release's click never reaches the page; a tap, a moving finger and a mouse are the page's (P112)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, { config: annotated(), content: WIDGET });
+  const frame = await display.frame();
+  await expect(frame.locator("#more")).toBeVisible();
+  expect(await display.annotate("start", { elements: "hold", text: true })).toBeNull();
+  // A finger on the button: down, held (or moved), up, and the click its release makes. The
+  // shell reads the events as the browser dispatches them; the page's realm could send these too,
+  // and what comes of them is a report, the page's word as ever.
+  const press = (pointerType: string, holdMs: number, moveBy = 0) =>
+    frame.evaluate(
+      async ([kind, ms, by]) => {
+        const target = document.getElementById("more") as HTMLElement;
+        const box = target.getBoundingClientRect();
+        const at = { clientX: box.left + 10, clientY: box.top + 10 };
+        const fire = (type: string, extra = {}) =>
+          target.dispatchEvent(
+            new PointerEvent(type, {
+              pointerType: kind,
+              isPrimary: true,
+              bubbles: true,
+              ...at,
+              ...extra,
+            }),
+          );
+        delete document.body.dataset.clicked;
+        fire("pointerdown");
+        if (by > 0) {
+          fire("pointermove", { clientX: at.clientX + by, clientY: at.clientY });
+        }
+        await new Promise((done) => setTimeout(done, ms));
+        fire("pointerup");
+        target.click();
+        return document.body.dataset.clicked ?? null;
+      },
+      [pointerType, holdMs, moveBy] as const,
+    );
+  const before = (await reports(display)).length;
+  expect(await press("touch", 700), "probe: the release's click never reached the page").toBeNull();
+  const held = await next(display, "selected", before);
+  expect(held.anchor.kind).toBe("element");
+  expect(held.anchor.label).toBe("button#more.primary.wide Read more");
+  // Still holding mode: a tap, a finger that moved, and a mouse held long are the page's.
+  const after = (await reports(display)).length;
+  expect(await press("touch", 100), "a tap is the page's").toBe("yes");
+  expect(await press("touch", 700, 30), "a finger that moved is the page's").toBe("yes");
+  expect(await press("mouse", 700), "a mouse is the page's").toBe("yes");
+  await page.waitForTimeout(300);
+  expect(
+    (await reports(display)).slice(after).filter((each) => each.type === "selected"),
+    "none of them selects anything",
+  ).toEqual([]);
+  // And once more: holding mode lasts until the host stops it.
+  expect(await press("touch", 700), "probe: the second hold's click is the shell's too").toBeNull();
+  await next(display, "selected", after);
+});
+
 test("an element without an id is anchored by its path; Escape cancels a pick", async ({
   page,
 }) => {

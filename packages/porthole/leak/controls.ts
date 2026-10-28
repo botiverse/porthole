@@ -567,6 +567,13 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "every found mark's place in the document comes with its box, offscreen ones too; a place that isn't one is no report (P112)",
     ),
   },
+  // Holding a block selects it, and its release's click is the shell's (P112).
+  "hold-click": {
+    specs: [ANNOTATE],
+    fails: all(
+      "holding a block 500 ms selects it and its release's click never reaches the page; a tap, a moving finger and a mouse are the page's (P112)",
+    ),
+  },
   // A nested page's shell keeps its own namespace (P111): a page that says the shell's words, just
   // before a call of its own, has its comments.open believed.
   "shell-namespace": {

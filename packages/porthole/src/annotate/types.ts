@@ -63,8 +63,13 @@ export interface AnnotationRect {
 
 /** What the person may point at while the host is asking. */
 export interface AnnotateMode {
-  /** Elements, picked with a click or tap (the one under the pointer is outlined); one pick. */
-  readonly elements?: boolean;
+  /**
+   * Elements, picked with a click or tap (the one under the pointer is outlined); one pick. Or
+   * `"hold"` (P112): a finger held still on a block for 500 ms selects it (reported as `selected`,
+   * and the click its release makes never reaches the page); every other tap, and any mouse, is the
+   * page's; it lasts until the host stops it.
+   */
+  readonly elements?: boolean | "hold";
   /** Text, by selecting it: each settled selection is reported, and its clearing. */
   readonly text?: boolean;
 }

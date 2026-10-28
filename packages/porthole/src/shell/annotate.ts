@@ -394,7 +394,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         return shadow;
       };
 
-      let mode = { elements: false, text: false };
+      let mode = { elements: false, text: false, hold: false };
       let hover = null;
       let marks = [];
       // The markers as last drawn, for a click to find: { id, element }. Each mark keeps its
@@ -1219,6 +1219,66 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           redraw();
         }
       }, true);
+
+      // Holding a block (P112, hold mode): a finger held still for 500 ms selects the block under
+      // it, and the click its release makes is the shell's; every other tap is the page's, as is
+      // any mouse. On the platform's own timer (taken before content runs).
+      const later = window.setTimeout.bind(window);
+      const cancelLater = window.clearTimeout.bind(window);
+      const HOLD_MS = 500;
+      const HOLD_SLOP = 10;
+      let holding = null;
+      let swallowUntil = 0;
+      const endHold = () => {
+        if (holding !== null) {
+          cancelLater(holding.timer);
+          holding = null;
+        }
+      };
+      window.addEventListener("pointerdown", (event) => {
+        if (!mode.hold || mode.elements || event.pointerType !== "touch" || !event.isPrimary) {
+          return;
+        }
+        endHold();
+        const x = event.clientX;
+        const y = event.clientY;
+        holding = {
+          x,
+          y,
+          timer: later(() => {
+            holding = null;
+            if (!mode.hold) {
+              return;
+            }
+            const element = under(x, y);
+            const anchor = element === null ? null : elementAnchor(element, textIndex());
+            if (anchor === null) {
+              return;
+            }
+            swallowUntil = performance.now() + 2000;
+            tell(M.selected, { anchor, rect: box(elementRect.call(element)) });
+          }, HOLD_MS),
+        };
+      }, true);
+      window.addEventListener("pointermove", (event) => {
+        if (holding !== null && event.pointerType === "touch" && Math.abs(event.clientX - holding.x) + Math.abs(event.clientY - holding.y) > HOLD_SLOP) {
+          endHold();
+        }
+      }, true);
+      for (const type of ["pointerup", "pointercancel"]) {
+        window.addEventListener(type, endHold, true);
+      }
+      for (const type of ["click", "contextmenu"]) {
+        window.addEventListener(type, (event) => {
+          if (swallowUntil > performance.now()) {
+            if (type === "click") {
+              swallowUntil = 0;
+            }
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }
+        }, true);
+      }
       window.addEventListener("click", (event) => {
         if (!mode.elements) {
           return;
@@ -1330,7 +1390,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         const params = data.params !== null && typeof data.params === "object" ? data.params : {};
         switch (data.method) {
           case M.start:
-            mode = { elements: params.elements === true, text: params.text === true };
+            mode = { elements: params.elements === true, text: params.text === true, hold: params.elements === "hold" };
             hover = null;
             reported = null;
             reportedBox = null;

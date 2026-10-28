@@ -5969,3 +5969,12 @@ takes it only while it asked for it. Each item below landed on its own, with its
   marks a show carries, or drops the report. The page knows where its anchors are anyway; the host
   sorts by it and takes it as nothing more. Tested: `leak/annotate.spec.ts` "every found mark's
   place in the document…"; negative control `order-check` (any number taken).
+- **Holding a block** (P3). `start({ text: true, elements: "hold" })`: a finger held still (within
+  10 px) for 500 ms on a block selects it, reported as `selected` with an element anchor, as a pick
+  is; the click its release makes (and a context menu) never reaches the page. Every other tap, a
+  finger that moved, and any mouse are the page's, so the page stays usable while comments are on;
+  the mode lasts until the host stops it (a pick ends after one). It makes nothing but `selected`,
+  as `elements: true` does; a page can tell a long press happened, as it can tell a selection.
+  Tested: `leak/annotate.spec.ts` "holding a block 500 ms selects it…" (the events as the browser
+  dispatches them, sent in the frame: a page's realm can send them too, and what comes of them is a
+  report, the page's word); negative control `hold-click` (the release's click reaches the page).

@@ -1470,6 +1470,7 @@ control the tables above name to the registry):
 | `cancel-any-mode` | `annotate.spec.ts` | `Escape while selecting text is cancelled, and stays the page's key; with no mode on, a page's own cancel isn't heard (P112)`, `a hostile page fakes reports: the host takes none it didn't ask for, nothing malformed, and not a flood` | — | — |
 | `track-checks` | `annotate.spec.ts` | `a followed mark's box comes as it moves, for that mark only, at most 60 a second, clamped to the frame, until the host stops (P112)` | — | — |
 | `order-check` | `annotate.spec.ts` | `every found mark's place in the document comes with its box, offscreen ones too; a place that isn't one is no report (P112)` | — | — |
+| `hold-click` | `annotate.spec.ts` | `holding a block 500 ms selects it and its release's click never reaches the page; a tap, a moving finger and a mouse are the page's (P112)` | — | — |
 | `shell-namespace` | `served/nested.spec.ts` | `the shell's words are the shell's alone: a page that says them, to its parent or to the host's window, moves nothing` | — | — |
 | `shell-host-input` | `served/nested.spec.ts` | `a page's focus() just after the person pressed it and went back to the host's composer is taken back` | — | — |
 | `comment-draft` | `served/runtime.spec.ts` | `a comment's draft is the host's to check: past the limit, holding what a person can't see, or not text, it opens no composer (P108)` | — | — |

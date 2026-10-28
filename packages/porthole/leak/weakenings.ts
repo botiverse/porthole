@@ -495,7 +495,7 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "cancel-any-mode": [
     {
       file: "src/host/create-host.ts",
-      find: "            if (annotating === null) {\n              return;\n            }\n            if (annotating.elements) {",
+      find: "            if (annotating === null) {\n              return;\n            }\n            if (annotating.elements === true) {",
       replace: "            if (annotating?.elements === true) {",
     },
   ],
@@ -518,6 +518,14 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       file: "src/annotate/validate.ts",
       find: '      !(typeof order === "number" && Number.isInteger(order) && order >= 0 && order < LIMITS.marks)',
       replace: "      false",
+    },
+  ],
+  // Holding a block (P112): the click the release makes goes on to the page.
+  "hold-click": [
+    {
+      file: "src/shell/annotate.ts",
+      find: "            swallowUntil = performance.now() + 2000;\n",
+      replace: "",
     },
   ],
   // A nested page's shell (P111) passes on what its page says in the shell's own namespace: a page
