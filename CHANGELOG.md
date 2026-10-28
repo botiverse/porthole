@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.14.2
 
 - **New (React, P118):** `PortholeFrame` and `PortholeView` take `trackedAnnotation` (a shown
   mark's id, or `null`): by value, it follows that mark (`annotations.track`), its `tracked` boxes
