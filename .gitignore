@@ -8,3 +8,4 @@ coverage/
 test-results/
 playwright-report/
 packages/porthole/docs/
+packages/porthole/CHANGELOG.md

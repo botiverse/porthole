@@ -24,6 +24,10 @@ P-numbers below.
 - **Fixed:** a streamed draft no longer shows a stray `<` when the content so far ends in `<` or
   `</` (P117, porthole#16): the shell holds back a tag start it was cut in until more comes. The
   whole content is drawn as it is.
+- **Package:** the npm package ships `CHANGELOG.md` (copied from the repository's by `pnpm build`,
+  as `docs/` is), so the upgrade notes are in `node_modules` (porthole#32). 0.8.0's "Act on these
+  when upgrading" now says that `declareCapabilities`' declarations have no prototype either, and
+  what an ORM needs.
 
 ## 0.14.0
 
@@ -347,6 +351,10 @@ Most of it refuses more than 0.7 did. What a host must act on when it upgrades c
     `onError` on `nodeHost`, `nodeServer` and `nodeListener` (P092); `tryIntersectDeclarations`,
     which answers its problems instead of throwing (P093). The objects `intersectDeclarations`
     returns have no prototype (P093).
+  - The declarations `declareCapabilities` and `intersectDeclarations` return hold objects with
+    no prototype (P093): an ORM or serializer that checks `constructor` (drizzle-orm does) refuses
+    them. Store a plain copy: `structuredClone` keeps every rule (a capability named `__proto__`
+    too). (Added after the release: porthole#32.)
 - **The fixes:**
   - **P092**: no request ends the Node process (a method fetch can't carry is a 405, anything
     else it can't take a 400, a handler's failure a 500); the issue endpoint reads at most 64 KiB
