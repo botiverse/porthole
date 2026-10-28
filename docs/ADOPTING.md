@@ -287,9 +287,10 @@ display.on("annotation", (report) => {
   `egress` you opened) can carry the same out. Send
   drafts only to pages without such a channel (annotations, `copyText`, `openLink` and the like),
   or accept that the page's author and other viewers can learn of them (THREAT_MODEL §7). Ask
-  `host.mayPassOn(declaration)` (or `mayPassOn(config, declaration)`, P112): true for a page with
-  `db` and `user`, or with egress beyond the library CDNs (whose paths only their operators read);
-  show such a page no draft marks.
+  `host.mayPassOn(declaration)` (or `mayPassOn(config, declaration)`, P112): true for a page that
+  can reach `db`, `artifact`, `assets`, `openLink`, `sendPrompt`, `setModelContext`, `callTool`,
+  `readData` or `subscribeData` (or `reportError` with errors to the agent), or egress beyond the
+  library CDNs (whose paths only their operators read); show such a page no draft marks.
 - **The content chooses when your view opens and where** (it can post `activated` for a mark you
   show on the person's own press in the content, under their pointer, P105), so a view that a
   report opens or moves takes no press of any kind for 500 ms after it appears or moves (no

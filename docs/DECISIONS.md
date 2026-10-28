@@ -6016,4 +6016,15 @@ takes it only while it asked for it. Each item below landed on its own, with its
   report opens takes none. What the page gains by choosing that moment is the person's next keys in
   a draft they see and can discard. As Raft's comment design proposes it (its mode B); Tenny's to
   confirm.
+  *Amended after the CTO's review (porthole#54):* `db` alone was missed (a page can store the draft
+  where its other readers see it, whoever wrote it), and so were `openLink` (the draft in a URL the
+  person opens) and `artifact` (the draft in a new version). The whole vocabulary now: what carries
+  what the page puts in it to someone other than the person viewing it counts, wherever the page
+  can reach it (the config declares it, and under the runtime with a declaration through a built-in
+  family or one the page declared): `db`, `artifact`, `assets`, `openLink`, `sendPrompt`,
+  `setModelContext`, `callTool`, `readData`, `subscribeData` (their arguments go to the host's data
+  services, which may be someone else's), and `reportError` where errors go to the agent. Not:
+  `copyText` and `downloadFile` (the person's own clipboard and disk), `annotate`, `resize` and
+  `comments` (the host's own UI; the composer is the person's, under the host's duties), and `user`
+  (it only reads). Tested: `test/pass-on.test.ts`, each channel alone.
 

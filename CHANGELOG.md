@@ -36,7 +36,8 @@ it. Fixes porthole#53.
   `start({ text: true, elements: "hold" })`: on touch, holding a block 500 ms selects it (its
   release's click is the shell's); other taps stay the page's.
   `mayPassOn(config, declaration)` / `host.mayPassOn(declaration)`: whether a page can pass a draft
-  on (`db` and `user`, or egress beyond the library CDNs), so a host can show it none.
+  on (any store others read, `openLink`, the agent, the host's data services, or egress beyond the
+  library CDNs), so a host can show it none.
 - **Docs (P112):** THREAT_MODEL §6 and ADOPTING's keyboard section agree: a composer the person's
   selection opens may take focus (`focusField`) only in a comment mode they started and only if it
   can do nothing but save a draft.
