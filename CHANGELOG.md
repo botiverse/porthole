@@ -18,6 +18,9 @@ P-numbers below.
   it, where it threw and refused every mark (P116; porthole#40: a thread of 1,000 comments broke a
   host's page). The marker reads "99+" either way. A count that isn't a whole number from 0 still
   throws.
+- **Fixed:** `PortholeFrame` and `PortholeView` take `declaration: null` (porthole#17), the
+  host's word under `config.runtime` for a page published before 0.7, as `MountOptions.declaration`
+  does. It already worked at run time; only the type refused it.
 
 ## 0.14.0
 

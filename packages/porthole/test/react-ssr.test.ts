@@ -2,7 +2,12 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { defineDisplays, portholeClient } from "../src/index.ts";
-import { PortholeProvider, PortholeView } from "../src/react/index.ts";
+import {
+  PortholeProvider,
+  PortholeView,
+  type PortholeFrameProps,
+  type PortholeViewProps,
+} from "../src/react/index.ts";
 
 /** PortholeView rendered on a server (P074): what an SSR'd page, and its tests, see. */
 
@@ -56,5 +61,18 @@ describe("PortholeView on the server", () => {
     const html = render(undefined, { instance, pending: createElement("p", null, "Loading") });
     expect(html).toMatch(/^<p>Loading<\/p>/u);
     expect(html).not.toContain("data-porthole-display");
+  });
+});
+
+describe("a page published before 0.7", () => {
+  it("is mounted with `declaration: null`, as MountOptions takes it (porthole#17)", () => {
+    // The types: null is the host's word for a page with no declaration (P091 §10), no cast.
+    const view = { displayId: "abc", title: "A page", display: "artifact", declaration: null };
+    view satisfies PortholeViewProps;
+    const legacy: PortholeFrameProps["declaration"] = null;
+    const served = { served: true, contentSource: SOURCE, frameSources: [SOURCE], health: null };
+    expect(render(served, { instance, declaration: legacy })).toContain(
+      'data-porthole-display="abc"',
+    );
   });
 });
