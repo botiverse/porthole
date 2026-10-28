@@ -13,6 +13,7 @@ export {
   PortholeFrame,
   PortholeProvider,
   type PlaceholderProps,
+  type PortholeFrameHandle,
   type PortholeFrameProps,
   type ConfirmActions,
   type PortholeProviderProps,

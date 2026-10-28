@@ -6258,3 +6258,44 @@ differently, since a draft runs nothing.
 Tested: `test/shell.test.ts` (`<`, `</`, `</di`, inside an attribute, and whole content
 unchanged); `leak/react.spec.ts` "content streams through props…" (a draft cut after `</` and
 after `<` draws neither).
+
+## P118 · 2026-10-28 · React: `trackedAnnotation` and a handle with `clearSelection` · Accepted
+
+**Context.** Raft's web app (Kirby) shows displays through `PortholeFrame` and `PortholeView`,
+which hold the display handle inside: it could not follow a mark (`annotations.track`, P112) or
+clear a used selection (`annotations.clearSelection()`, P115), both added to the core in 0.14.
+
+**Decision.** Two additions to both components, the core's calls and nothing more:
+
+- **`trackedAnnotation?: string | null`**, by value, as `annotations` and `focusedAnnotation`
+  are: the binding calls `display.annotations.track(id)` when the prop changes and when a display
+  is made with it set (a new generation, config or instance), after the marks are shown, so a
+  mark and its following can arrive in one render. `null`, or leaving the prop out once it was
+  set, calls `track(null)`. The core's semantics hold: an id no shown mark has, or a config
+  without `annotate`, is the core's `TypeError`, told to `onHostError` (kind `"annotations"`) and
+  never thrown during render; `annotations` without the followed mark stop the following, as the
+  core's `show` does, and the binding follows it again when the marks have it back (the prop says
+  to follow it; no second error is told while it is off). The `tracked` reports reach the existing
+  `onAnnotation`, as every annotation report does (no new callback).
+- **A `ref`** holding a `PortholeFrameHandle`, exactly `{ clearSelection(): void }`, through
+  React 19's `ref` prop and `useImperativeHandle` (the binding's peer is React 19.2+; no
+  `forwardRef`). `clearSelection()` calls `display.annotations.clearSelection()` on the display
+  running now; with none (waiting to near the screen, stopped for others, a view's fallback) it
+  does nothing. As with the prop, a config without `annotate` is `onHostError`, not a throw. The
+  handle is the same object for the component's life; a `PortholeView`'s is its own and reaches
+  the frame it draws.
+
+**Rejected.** Exposing the whole `DisplayHandle` through the ref: the binding owns the display's
+lifecycle (it is made and destroyed as frames near the screen, stop and run again), and a host
+holding it would call into a destroyed display or fight the props (`show`, `start`) the binding
+feeds it. `clearSelection` as a prop (a counter to bump): it is an event, not a state, and a ref
+says so. A `track` method on the handle: following is state the host keeps (which comment's card
+is open), so it is a prop, by value, like the marks.
+
+Tested: `test/react-ssr.test.ts` (the prop's and the handle's types, exactly `clearSelection`;
+both render on the server, the ref unset there); `leak/react.spec.ts` "trackedAnnotation follows
+its mark through onAnnotation's `tracked`, and null stops it (P118)" (followed on mount, reports
+as the frame scrolls, none after `null`, again when set again, an unshown id told as a host error)
+and "a ref's clearSelection takes the frame's selection away; nothing without a display (P118)"
+(a text selection cleared, a frame not yet running and a config without `annotate`, the ref let
+go on unmount).

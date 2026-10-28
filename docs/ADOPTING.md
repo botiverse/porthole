@@ -280,6 +280,25 @@ composer.onDone(() => display.annotations.clearSelection());
   to clear). Like `start` and `show`, only where the config declares `annotate`. The shell is your
   content server's: an older one ignores it.
 
+- **React** (P118): `PortholeFrame` and `PortholeView` take the same as props: `annotating`,
+  `annotations`, `focusedAnnotation` and `trackedAnnotation` (the mark to follow, by value; `null`
+  stops), every report through `onAnnotation` (`tracked` too). The selection is cleared through a
+  ref, which holds `clearSelection()` only (a `PortholeFrameHandle`; never the display, whose life
+  is the binding's); with no display running it does nothing. Errors the core's calls throw (an id
+  no shown mark has, a config without `annotate`) reach `onHostError`, kind `"annotations"`.
+
+  ```tsx
+  const frame = useRef<PortholeFrameHandle>(null);
+  <PortholeView ref={frame} display="page" instance={instance} displayId={id} title={title}
+    annotating={commenting ? { elements: false, text: true } : null}
+    annotations={marks} trackedAnnotation={openCard?.markId ?? null}
+    onAnnotation={(report) => {
+      if (report.type === "tracked") card.moveBeside(report.rect);
+      if (report.type === "selected") composer.openBeside(report.rect, report.anchor);
+    }} />
+  composer.onDone(() => frame.current?.clearSelection());
+  ```
+
 - **Ids say nothing, and a count only where the page may know it**: the content reads every
   `show`. Who wrote what stays in your view, outside the frame.
 - **Drafts only to their author's frame**: the page reads which marks are drafts (that its viewer

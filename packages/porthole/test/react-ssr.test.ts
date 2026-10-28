@@ -1,10 +1,12 @@
-import { createElement } from "react";
+import { createElement, createRef } from "react";
 import { renderToString } from "react-dom/server";
-import { describe, expect, it } from "vitest";
-import { defineDisplays, portholeClient } from "../src/index.ts";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import { defineDisplays, portholeClient, presets } from "../src/index.ts";
 import {
+  PortholeFrame,
   PortholeProvider,
   PortholeView,
+  type PortholeFrameHandle,
   type PortholeFrameProps,
   type PortholeViewProps,
 } from "../src/react/index.ts";
@@ -74,5 +76,45 @@ describe("a page published before 0.7", () => {
     expect(render(served, { instance, declaration: legacy })).toContain(
       'data-porthole-display="abc"',
     );
+  });
+});
+
+describe("trackedAnnotation and the handle (P118)", () => {
+  const served = { served: true, contentSource: SOURCE, frameSources: [SOURCE], health: null };
+
+  it("types: a mark's id or null, and a ref to exactly `clearSelection`", () => {
+    expectTypeOf<PortholeFrameProps["trackedAnnotation"]>().toEqualTypeOf<
+      string | null | undefined
+    >();
+    expectTypeOf<PortholeViewProps["trackedAnnotation"]>().toEqualTypeOf<
+      string | null | undefined
+    >();
+    // The display's calls, never the display: one method, nothing more.
+    expectTypeOf<keyof PortholeFrameHandle>().toEqualTypeOf<"clearSelection">();
+    expectTypeOf<PortholeFrameHandle["clearSelection"]>().toEqualTypeOf<() => void>();
+    const ref = createRef<PortholeFrameHandle>();
+    ({ displayId: "a", title: "A", display: "artifact", ref }) satisfies PortholeViewProps;
+    ({ config: presets.artifact(), displayId: "a", title: "A", ref }) satisfies PortholeFrameProps;
+  });
+
+  it("renders on the server with both, calling nothing (no display runs there)", () => {
+    const ref = createRef<PortholeFrameHandle>();
+    const html = render(served, { instance, trackedAnnotation: "c1", ref });
+    expect(html).toContain('data-porthole-display="abc"');
+    expect(html).toContain('data-porthole-state="waiting"');
+    // No effects on the server: the handle is given only once the view is mounted in a browser.
+    expect(ref.current).toBeNull();
+    const frameRef = createRef<PortholeFrameHandle>();
+    const frame = renderToString(
+      createElement(PortholeFrame, {
+        config: presets.artifact({ capabilities: { annotate: {} } }),
+        displayId: "f",
+        title: "F",
+        trackedAnnotation: null,
+        ref: frameRef,
+      }),
+    );
+    expect(frame).toContain('data-porthole-display="f"');
+    expect(frameRef.current).toBeNull();
   });
 });

@@ -14,6 +14,7 @@ interface App {
   render(state: AppState): void;
   log(): { display: string; event: string; detail?: unknown }[];
   answerCustom(accepted: boolean): void;
+  clearSelection(displayId: string): boolean;
   restyle(value: string): void;
   restyleLater(value: string): void;
 }
@@ -818,6 +819,129 @@ test("annotations through props: picking reports to onAnnotation; marks and focu
       ),
     )
     .toBe(true);
+});
+
+const LONG = `<!doctype html><html><head><title>Long</title></head><body style="margin: 0">
+<div style="height: 120px">spacer</div>
+<p id="near" style="margin: 8px">The near paragraph.</p>
+<div style="height: 1500px">spacer</div></body></html>`;
+
+const quoteMark = (id: string, exact: string): AnnotationMark => ({
+  id,
+  anchor: { kind: "text", selectors: [{ type: "TextQuoteSelector", exact }], label: exact },
+});
+
+test("trackedAnnotation follows its mark through onAnnotation's `tracked`, and null stops it (P118)", async ({
+  page,
+}) => {
+  const notes = (trackedAnnotation: string | null) =>
+    frame({
+      displayId: "notes",
+      title: "Notes",
+      config: "notes",
+      content: LONG,
+      fill: true,
+      annotations: [quoteMark("c1", "The near paragraph.")],
+      trackedAnnotation,
+    });
+  await open(page, { provider: "default", frames: [notes("c1")] });
+  const inside = frameOf(page, "notes");
+  await expect(inside.locator("#near")).toBeVisible();
+  const tracked = async () =>
+    (await events(page, "notes", "annotation"))
+      .map((entry) => entry.detail as { type: string; id?: string })
+      .filter((detail) => detail.type === "tracked");
+  // Told where it is once followed (on mount), then as it moves.
+  await expect.poll(async () => (await tracked()).length).toBeGreaterThan(0);
+  const scroll = async (by: number) => {
+    for (let i = 0; i < 5; i += 1) {
+      await inside.locator("body").evaluate((_, dy) => window.scrollBy(0, dy), by);
+      await page.waitForTimeout(50);
+    }
+  };
+  const start = (await tracked()).length;
+  await scroll(20);
+  await expect.poll(async () => (await tracked()).length).toBeGreaterThan(start);
+  expect(new Set((await tracked()).map((each) => each.id))).toEqual(new Set(["c1"]));
+
+  // null: no more, however it moves.
+  await open(page, { provider: "default", frames: [notes(null)] });
+  await page.waitForTimeout(300);
+  const stopped = (await tracked()).length;
+  await scroll(-20);
+  await page.waitForTimeout(500);
+  expect((await tracked()).length, "nothing after trackedAnnotation: null").toBe(stopped);
+
+  // Given again: followed again.
+  await open(page, { provider: "default", frames: [notes("c1")] });
+  await expect.poll(async () => (await tracked()).length).toBeGreaterThan(stopped);
+  expect(await events(page, "notes", "host-error")).toEqual([]);
+
+  // An id no shown mark has: the host's error, as the core's call throws; nothing thrown in render.
+  await open(page, { provider: "default", frames: [notes("nobody")] });
+  await expect
+    .poll(async () => (await events(page, "notes", "host-error")).map((entry) => entry.detail))
+    .toEqual([{ kind: "annotations", message: expect.stringMatching(/no mark/u) as unknown }]);
+  await expect(inside.locator("#near")).toBeVisible();
+});
+
+const PARAGRAPHS = `<!doctype html><html><head><title>Notes</title></head><body>
+<h2 id="title">Quarterly notes</h2><p id="p1">Costs fell by 3%.</p></body></html>`;
+
+test("a ref's clearSelection takes the frame's selection away; nothing without a display (P118)", async ({
+  page,
+}) => {
+  await open(page, {
+    provider: "default",
+    frames: [
+      frame({
+        displayId: "notes",
+        title: "Notes",
+        config: "notes",
+        content: PARAGRAPHS,
+        annotating: { elements: false, text: true },
+      }),
+      // Far below the screen, not eager: its handle is there, no display runs.
+      frame({
+        displayId: "later",
+        config: "notes",
+        content: PARAGRAPHS,
+        eager: false,
+        gapPx: 20_000,
+      }),
+      // A config without annotate.
+      frame({ displayId: "plain", content: "<p>plain</p>" }),
+    ],
+  });
+  const inside = frameOf(page, "notes");
+  await expect(inside.locator("#p1")).toBeVisible();
+  const selectedText = () => inside.locator("body").evaluate(() => String(getSelection()));
+  await expect
+    .poll(async () => {
+      await inside.locator("#p1").click({ clickCount: 3 });
+      return (await events(page, "notes", "annotation")).some(
+        (entry) => (entry.detail as { type: string }).type === "selected",
+      );
+    })
+    .toBe(true);
+  expect((await selectedText()).trim()).toBe("Costs fell by 3%.");
+
+  const call = (id: string) =>
+    page.evaluate((each) => (window as unknown as { app: App }).app.clearSelection(each), id);
+  expect(await call("notes")).toBe(true);
+  await expect.poll(selectedText).toBe("");
+  await expect(wrapper(page, "later")).toHaveAttribute("data-porthole-state", "waiting");
+  expect(await call("later"), "a handle, doing nothing").toBe(true);
+  expect(await call("plain")).toBe(true);
+  await expect
+    .poll(async () => (await events(page, "plain", "host-error")).map((entry) => entry.detail))
+    .toEqual([{ kind: "annotations", message: expect.stringMatching(/annotate/u) as unknown }]);
+  expect(await events(page, "notes", "host-error")).toEqual([]);
+  expect(await events(page, "later", "host-error")).toEqual([]);
+
+  // Unmounted: the ref is let go.
+  await open(page, { provider: "default", frames: [] });
+  expect(await call("notes")).toBe(false);
 });
 
 test("a host's inline objects (config, instance, hostInfo, locator) don't start a running frame again", async ({

@@ -2,6 +2,8 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useImperativeHandle,
+  useRef,
   useState,
   useSyncExternalStore,
   type ReactElement,
@@ -11,7 +13,12 @@ import type { ColorScheme } from "../config/schema.ts";
 import { frameFallback, type FrameFallback, type PortholeClient } from "../host/client.ts";
 import type { FrameOutcome } from "../host/types.ts";
 import type { InstanceRef } from "../isolation/types.ts";
-import { PortholeFrame, PortholeContext, type PortholeFrameProps } from "./frame.tsx";
+import {
+  PortholeFrame,
+  PortholeContext,
+  type PortholeFrameHandle,
+  type PortholeFrameProps,
+} from "./frame.tsx";
 
 /**
  * The host kit's React side (P072): a display by its kind, served or opaque as the server says
@@ -91,7 +98,17 @@ function DefaultFallback({ title, message, link }: PortholeFallbackProps): React
 export function PortholeView(props: PortholeViewProps): ReactElement | null {
   const client = useClient();
   const meta = useMeta(client);
-  const { display, instance, content, fallback, pending, onOutcome, ...frame } = props;
+  const { display, instance, content, fallback, pending, onOutcome, ref, ...frame } = props;
+  // The view's handle (P118) is there while the view is, a fallback drawn or not: its calls reach
+  // the frame's display when one runs, and do nothing otherwise.
+  const shown = useRef<PortholeFrameHandle>(null);
+  useImperativeHandle(
+    ref,
+    (): PortholeFrameHandle => ({
+      clearSelection: () => shown.current?.clearSelection(),
+    }),
+    [],
+  );
   const [failed, setFailed] = useState<FrameFallback | null>(null);
   const [generation, setGeneration] = useState(0);
   const [link, setLink] = useState<string | null>(null);
@@ -145,6 +162,7 @@ export function PortholeView(props: PortholeViewProps): ReactElement | null {
   return (
     <PortholeFrame
       {...frame}
+      ref={shown}
       config={config}
       generation={(frame.generation ?? 0) + generation}
       {...(instance === undefined ? {} : { instance })}
