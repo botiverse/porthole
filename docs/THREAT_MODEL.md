@@ -340,7 +340,13 @@ encrypted into the path, since WebKit keeps no cookie in a frame (P083).
   opaque origin in its frame and on a tab; it is loaded, and loads its files, at its sealed address
   without a cookie, and its files then carry `Cross-Origin-Resource-Policy: cross-origin` and
   `Access-Control-Allow-Origin: *` (an opaque page's own loads are cross-origin: the address is
-  the access, never the request's origin). The page has none of the origin's storage, and nothing
+  the access, never the request's origin). So whoever holds a page's sealed address can read its
+  files from any origin, a page of their own included, until the address ends (an hour on its own,
+  P083): it is a bearer credential, as safe as it is unleaked. Porthole keeps it out of what it
+  says: no referrer goes with any load (`Referrer-Policy: no-referrer`, the shell's frame
+  `referrerpolicy="no-referrer"`), the host's reports name it as `./` (P083), and the shell's own
+  answer is `no-store`. The page itself can read it (its address) and so pass it on by any channel
+  it has, as it can pass on its files' bytes. The page has none of the origin's storage, and nothing
   of the shell's realm: messages between them go by `postMessage`, the page's trusted by
   `event.source`, and the shell drops what the page says in the shell's own namespace. Only the
   shell (same-origin) renews the page's address; a module the page loaded keeps one that ends
