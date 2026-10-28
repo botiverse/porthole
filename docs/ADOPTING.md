@@ -286,7 +286,10 @@ display.on("annotation", (report) => {
   to its author after; origins its config declares for egress (an MCP App's `connectDomains`, an
   `egress` you opened) can carry the same out. Send
   drafts only to pages without such a channel (annotations, `copyText`, `openLink` and the like),
-  or accept that the page's author and other viewers can learn of them (THREAT_MODEL §7).
+  or accept that the page's author and other viewers can learn of them (THREAT_MODEL §7). Ask
+  `host.mayPassOn(declaration)` (or `mayPassOn(config, declaration)`, P112): true for a page with
+  `db` and `user`, or with egress beyond the library CDNs (whose paths only their operators read);
+  show such a page no draft marks.
 - **The content chooses when your view opens and where** (it can post `activated` for a mark you
   show on the person's own press in the content, under their pointer, P105), so a view that a
   report opens or moves takes no press of any kind for 500 ms after it appears or moves (no

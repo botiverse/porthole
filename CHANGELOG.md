@@ -33,6 +33,8 @@ it. Fixes porthole#53.
   `order`, its place in the document among the found marks (offscreen ones too).
   `start({ text: true, elements: "hold" })`: on touch, holding a block 500 ms selects it (its
   release's click is the shell's); other taps stay the page's.
+  `mayPassOn(config, declaration)` / `host.mayPassOn(declaration)`: whether a page can pass a draft
+  on (`db` and `user`, or egress beyond the library CDNs), so a host can show it none.
 - **Tests:** `leak/served/nested.spec.ts` runs on full Chromium (`chromium-oopif`, a new CI leg),
   the headless shell, WebKit and Firefox; negative controls `shell-namespace`, `shell-host-input`.
   `PORTHOLE_WEBKIT_PATH` runs the leak suite on a WebKit build of the machine's own.

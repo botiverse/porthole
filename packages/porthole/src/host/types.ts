@@ -284,4 +284,10 @@ export interface PortholeHost<C extends AdapterConnection = ShellConnection> {
    * none (here or in the host's options), so a manual never teaches a function nobody serves.
    */
   mount(container: HTMLElement, options: MountOptions): DisplayHandle<C>;
+  /**
+   * Whether a page with `declaration` may pass on what it is given (`mayPassOn`, P112): true where
+   * it can store what others read (`db` and `user`) or reaches the network beyond the library CDNs.
+   * A host shows such a page none of a person's drafts.
+   */
+  mayPassOn(declaration: PageDeclaration | null): boolean;
 }

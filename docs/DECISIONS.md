@@ -5978,3 +5978,13 @@ takes it only while it asked for it. Each item below landed on its own, with its
   Tested: `leak/annotate.spec.ts` "holding a block 500 ms selects it…" (the events as the browser
   dispatches them, sent in the frame: a page's realm can send them too, and what comes of them is a
   report, the page's word); negative control `hold-click` (the release's click reaches the page).
+- **Whether a page may pass a draft on** (P8). `mayPassOn(config, declaration)`, and
+  `host.mayPassOn(declaration)`: true where the page can keep what it is given where others read
+  it, knowing whose it is (`db` and `user`, both declared and offered), or reaches the network
+  beyond the library CDNs (`anyHttps`, or any origin the config or a capability opens for any kind
+  that isn't one of `LIBRARY_CDNS`'s for that kind: a CDN serves published packages by their path,
+  and its logs are its operator's, not the page author's). ADOPTING's "no drafts to a page that can
+  pass them on" as a function a host calls instead of reading the declaration itself. A pure
+  function of the host's own records: `test/pass-on.test.ts` holds each channel alone, and none;
+  there is no browser probe for it to fail.
+

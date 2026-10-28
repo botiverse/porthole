@@ -26,6 +26,7 @@ import { isRefused } from "../bridge/refusal.ts";
 import { capabilitySpec } from "../config/capabilities.ts";
 import type { ColorScheme, PortholeConfig } from "../config/schema.ts";
 import { locateServed } from "./locate.ts";
+import { mayPassOn } from "./pass-on.ts";
 import { watchOutcome, type OutcomeWatch } from "./outcome.ts";
 import { STORAGE_USED_METHOD, type FrameSource } from "../isolation/types.ts";
 import { webPlatform } from "../platform/web.ts";
@@ -99,6 +100,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
 
   return {
     compiled,
+    mayPassOn: (declaration) => mayPassOn(config, declaration),
     mount(container: HTMLElement, mount: MountOptions): DisplayHandle<C> {
       const handlers = { ...options.handlers, ...mount.handlers };
       // A host whose consent is a Refused refuses every consent-gated call before its handler:
