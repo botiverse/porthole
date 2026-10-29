@@ -6299,3 +6299,76 @@ as the frame scrolls, none after `null`, again when set again, an unshown id tol
 and "a ref's clearSelection takes the frame's selection away; nothing without a display (P118)"
 (a text selection cleared, a frame not yet running and a config without `annotate`, the ref let
 go on unmount).
+
+## P119 · 2026-10-29 · On touch, a marker's hit area is at least 44 by 44 px · Accepted
+
+**Context.** A marker is a bubble about 34 by 18 CSS px (18 by 18 without a number), and the shell
+took a press only on that box: a finger a few px off landed on the paragraph under it. Raft's QA
+found that on phones a tap on a comment's marker often opened nothing. 44 px is the usual touch
+target. This is the hit-area half of porthole#42; checking taps on a real iOS Safari (the hover
+redraw) stays open there.
+
+**Decision.** While touch is in use, each marker also takes the pointer in a box of at least 44 by
+44 CSS px centred on its bubble (its own size where the bubble is larger). The bubble looks the same.
+
+- **Where.** In the shell's own layer, as an invisible `::before` on each marker (`.touch>.marker`,
+  `max(100% + 2px, 44px)` square, centred). The browser's own hit test then gives the press to the
+  layer, so it follows the path a press on the bubble takes today, unchanged: stopped in the shell's
+  first window listener, read through the platform's getters, and reported `activated` only for a
+  trusted click with the main button whose target is the layer, with the bubble's own box as
+  `rect`. Nothing the page draws or sends can make a box like this, and the host's gate (transient
+  activation, its own shown ids) is unchanged.
+- **When.** While the last trusted `pointerdown` or `pointermove` was a finger or a pen
+  (`pointerType`, read through `PointerEvent.prototype`'s getter kept before content runs). Before
+  any pointer is seen, while `(any-pointer: coarse)` matches (a phone, a tablet, a laptop with a touch
+  screen). A mouse moves before it presses, so its first move takes the boxes away, and a mouse
+  press is hit-tested on the bubbles alone, as before, even on a touch laptop. That is why
+  `(pointer: coarse)` alone was not used: it describes the main pointer, so a touch laptop would
+  never get the boxes. `(any-pointer: coarse)` alone was not used either: on that laptop a mouse
+  would get them too. On Chromium, WebKit and Firefox under Playwright's `hasTouch`, both queries
+  match (measured), so even the first tap gets the boxes.
+- **Which marker.** A point on a bubble is that bubble's (the topmost, as before). Otherwise, among
+  the markers whose 44 px box holds the point, it is the one whose bubble's centre is nearest
+  (`MARKER_HIT`, spliced into the runtime and unit-tested on its own). The CSS only decides whether
+  the layer gets the press; the shell's own geometry decides which marker it is.
+
+**Trade-off.** On touch, a tap within 13 px above or below a bubble (5 px beside a "1" bubble,
+13 px beside an empty one) is the marker's, not the page's. A marker in a line's gutter lies beside
+the line's end, so its box can cover a few px of the words on the lines above and below. A tap
+there opens the marker rather than reaching the paragraph. That is the point of a touch target.
+The page still gets every tap past the box (tested). A touch laptop's first finger after a mouse is
+hit-tested as the mouse left it (the boxes come with that finger's `pointerdown`, after the browser
+has already picked its target), so that one tap gets today's small target. A mouse resting
+unmoved over a box after a finger can click it: the boxes go with the mouse's next move.
+
+**Rejected.** Taking the page's own events for a press near a marker (claiming a `pointerdown` on
+the paragraph, then its `click`). WebKit makes no click of a tap on an element without a click
+listener (P105), so the shell would have to report on `touchend` instead, a different path from a
+click's, and the page would already have heard the press begin. Enlarging the bubble itself: it
+would cover more of the words for everyone, mouse users included.
+
+**No negative control.** This opens nothing and closes nothing: the press is still the trusted
+click on the shell's own layer that P105's controls (`marker-click`, `marker-prevent`,
+`marker-originals`) already hold. A weakening "no 44 px box" would be a missing feature, not a
+broken defense, and the probes below fail without the boxes (checked by turning them off).
+
+**Investigated with it (Raft QA, porthole#42).** (1) After the page scrolls itself
+(`window.scrollBy`) and settles, under Chromium's iPhone 13 and Pixel 5: a tap or a mouse click at
+the bubble's centre does report `activated`. A hover redraw replaces no marker's node (P105 keeps
+them across draws), and the marker's node is under its bubble. `document.elementFromPoint` in the
+frame answers the layer, not the marker, by design: the layer's shadow root is closed. (2) An
+element's marker pinned at the frame's top once the element's start has scrolled above it takes a
+mouse click and a tap at its drawn pixels, on all three engines and on main before this change.
+Neither reproduced in Porthole's reference host. What QA saw is to be looked for in the viewer: a
+host element over the frame's top edge, a tap's point not in the page's own coordinates, a
+nested page's offset, or the host's guard on its view.
+
+Tested: `test/annotate.test.ts` (the hit rule: on a bubble, 44 by 44 on touch only, the edges, a
+bubble wider than 44, the nearest of two, a bubble over a nearer centre); `leak/annotate.spec.ts`
+on Chromium, WebKit and Firefox (a touch screen, and Pixel 5 or iPhone 13): "on touch, a marker
+takes a tap a few px off its bubble (44 by 44), after the page scrolled itself…" (11 px below and
+above, 4 px beside, after a `scrollBy`, nothing heard by the content, 30 px off the page's own
+tap); "…two markers' 44 px boxes overlap, a tap is the nearest bubble's"; "a paragraph's marker
+pinned at the frame's top… takes a mouse click and a tap where it is drawn" (at its drawn
+pixels); "a mouse is as before…" (a click 11 px below or 4 px beside the bubble is the page's,
+with no touch and on a touch screen after a finger).

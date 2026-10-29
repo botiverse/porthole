@@ -1085,7 +1085,14 @@ chooses), and the annotation runtime is in the shell only then.
   moves over it, are stopped in the shell's first window listener, read through the
   platform's own functions kept before content runs (P105), and a trusted click is
   reported `activated`; a tap too, on WebKit as well, since each marker has a click
-  listener of its own (WebKit makes a tap a click only on such an element, P105). Against content that patches none of the built-ins, none of
+  listener of its own (WebKit makes a tap a click only on such an element, P105). On
+  touch (P119), while the last pointer down or moved was a finger or a pen (before any,
+  where `(any-pointer: coarse)` matches), each marker also takes the pointer in a box of
+  at least 44 by 44 px centred on its bubble (an invisible `::before` in the layer), the
+  bubble itself unchanged; a press there is a press on the marker, and where two such
+  boxes overlap it is the marker whose bubble's centre is nearest (on a bubble, that
+  bubble). A mouse's move takes the boxes away, so a mouse is hit-tested on bubbles
+  alone. Against content that patches none of the built-ins, none of
   its handlers, nor what is under the marker, gets them; content that patches others
   can reach the layer's nodes (P105). Either way the content can tell a press
   happened, by `:active`, `relatedTarget` and user activation. Markers step aside

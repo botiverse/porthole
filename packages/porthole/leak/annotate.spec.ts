@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { devices, expect, test, type Frame, type Page } from "@playwright/test";
+import { devices, expect, test, type Browser, type Frame, type Page } from "@playwright/test";
 import {
   presets,
   type AnchorResult,
@@ -1752,6 +1752,369 @@ test("a tap on a marker is reported on every engine, and the content hears none 
       expect(
         await frame.evaluate(() => (window as unknown as { heard: string[] }).heard),
         `probe: no handler of the content's heard the tap (${kind})`,
+      ).toEqual([]);
+    } finally {
+      await context.close();
+    }
+  }
+});
+
+/** A touch screen on each engine, and the phone each mobile engine emulates (Firefox has none). */
+const touchContexts = (browserName: string): [string, Parameters<Browser["newContext"]>[0]][] => {
+  const phones: Record<string, (typeof devices)[string]> = {
+    webkit: devices["iPhone 13"],
+    chromium: devices["Pixel 5"],
+  };
+  const kinds: [string, Parameters<Browser["newContext"]>[0]][] = [["touch", { hasTouch: true }]];
+  const phone = phones[browserName];
+  if (phone !== undefined) {
+    const { defaultBrowserType: _engine, ...options } = phone;
+    kinds.push([browserName === "webkit" ? "iPhone 13" : "Pixel 5", options]);
+  }
+  return kinds;
+};
+
+/** The frame's own presses and clicks: on the shell's layer, and the page's clicks elsewhere. */
+const HEARING = `<script>
+  window.heard = [];
+  window.clicks = [];
+  const layer = () => document.querySelector("[data-porthole-annotations]");
+  for (const type of ["touchstart", "touchend", "pointerdown", "pointerup", "mousedown", "mouseup", "click"]) {
+    window.addEventListener(type, (event) => {
+      if (event.target === layer()) {
+        window.heard.push(type);
+      }
+    }, true);
+  }
+  // The page's own clickable area (WebKit makes a tap a click only on an element with a listener).
+  document.getElementById("page").addEventListener("click", (event) => window.clicks.push(Math.round(event.clientY)));
+</script>`;
+
+const heardOf = (frame: Frame) =>
+  frame.evaluate(() => {
+    const own = window as unknown as { heard: string[]; clicks: number[] };
+    return { heard: own.heard, clicks: own.clicks.length };
+  });
+
+/** The `activated` reports after the first `after`, by id. */
+const activatedSince = async (display: ReferenceDisplay, after: number) =>
+  (await reports(display))
+    .slice(after)
+    .flatMap((each) => (each.type === "activated" ? [each.id] : []));
+
+test("on touch, a marker takes a tap a few px off its bubble (44 by 44), after the page scrolled itself; a tap past that is the page's (P119)", async ({
+  browser,
+  browserName,
+}) => {
+  test.setTimeout(120_000);
+  for (const [kind, options] of touchContexts(browserName)) {
+    const context = await browser.newContext(options);
+    try {
+      const page = await context.newPage();
+      const display = await referenceHost.launch(page, {
+        config: presets.artifact({ capabilities: { annotate: {} } }),
+        widthPx: 360,
+        heightPx: 600,
+        content: `<div id="page" style="padding: 900px 20px 1200px"><p id="p1" style="font-size: 18px; margin: 0">Costs <b>fell</b><span id="after"> by three percent.</span></p></div>${HEARING}`,
+      });
+      const frame = await display.frame();
+      await expect(frame.locator("#after")).toBeAttached();
+      await display.annotate("show", [textMark("fell", "fell", 1)]);
+      await next(display, "anchored");
+      // Raft's QA (porthole#42): the page scrolls itself, the markers follow, and settle.
+      await frame.evaluate(() => window.scrollBy(0, 700));
+      await page.waitForTimeout(2_500);
+      const offset = (await (await frame.frameElement()).boundingBox()) ?? { x: 0, y: 0 };
+      const tap = (x: number, y: number) => page.touchscreen.tap(offset.x + x, offset.y + y);
+      // At its middle: its own box comes back with the report.
+      const middle = await textMarkerPoint(frame, "#p1 b");
+      let count = (await reports(display)).length;
+      await page.touchscreen.tap(middle.x, middle.y);
+      await expect
+        .poll(() => activatedSince(display, count), {
+          message: `probe: a tap on the scrolled marker is reported (${kind})`,
+        })
+        .toEqual(["fell"]);
+      const own = (await reports(display))
+        .slice(count)
+        .find((each) => each.type === "activated")?.rect;
+      if (own === undefined) {
+        throw new Error("no box");
+      }
+      expect(own.height, "the bubble is as it was: 18 px").toBe(18);
+      expect(own.width, "the bubble is as it was: narrower than 44 px").toBeLessThan(44);
+      const x = own.x + own.width / 2;
+      // 11 px below its bottom edge, 11 above its top, 4 px left of it (it is in the gutter, at
+      // the frame's edge): inside 44 by 44.
+      for (const [where, px, py] of [
+        ["below", x, own.y + own.height + 11],
+        ["above", x, own.y - 11],
+        ["beside", own.x - 4, own.y + own.height / 2],
+      ] as const) {
+        count = (await reports(display)).length;
+        await tap(px, py);
+        await expect
+          .poll(() => activatedSince(display, count), {
+            message: `probe: a tap ${where} the bubble, within 44 px, is the marker's (${kind})`,
+          })
+          .toEqual(["fell"]);
+      }
+      expect(await heardOf(frame), `probe: the content heard none of it (${kind})`).toEqual({
+        heard: [],
+        clicks: 0,
+      });
+      // Well past it (30 px below the bubble, 8 past the 44 px box): the page's tap, as before.
+      count = (await reports(display)).length;
+      await tap(x, own.y + own.height + 30);
+      await expect
+        .poll(async () => (await heardOf(frame)).clicks, {
+          message: `probe: a tap past the 44 px box is the page's (${kind})`,
+        })
+        .toBe(1);
+      await page.waitForTimeout(300);
+      expect(await activatedSince(display, count), `no marker took it (${kind})`).toEqual([]);
+    } finally {
+      await context.close();
+    }
+  }
+});
+
+test("on touch, where two markers' 44 px boxes overlap, a tap is the nearest bubble's (P119)", async ({
+  browser,
+  browserName,
+}) => {
+  test.setTimeout(90_000);
+  for (const [kind, options] of touchContexts(browserName)) {
+    const context = await browser.newContext(options);
+    try {
+      const page = await context.newPage();
+      // Two blocks 30 px tall, one on the other: their markers, on their top right corners, are
+      // 30 px apart, 12 px between their bubbles, and each one's 44 px box reaches the other's.
+      const display = await referenceHost.launch(page, {
+        config: annotated(),
+        widthPx: 360,
+        content: `<div id="page" style="padding: 60px 20px"><div id="one" style="height: 30px; width: 200px">One</div><div id="two" style="height: 30px; width: 200px">Two</div></div>${HEARING}`,
+      });
+      const frame = await display.frame();
+      await expect(frame.locator("#two")).toBeVisible();
+      await display.annotate("show", [
+        elementMark("one", "#one", 1),
+        elementMark("two", "#two", 1),
+      ]);
+      await next(display, "anchored");
+      const offset = (await (await frame.frameElement()).boundingBox()) ?? { x: 0, y: 0 };
+      const tap = (x: number, y: number) => page.touchscreen.tap(offset.x + x, offset.y + y);
+      // Each bubble's box, from its own tap at its corner's point.
+      const corner = await frame.evaluate(() =>
+        ["one", "two"].map((id) => {
+          const box = (document.getElementById(id) as HTMLElement).getBoundingClientRect();
+          return { x: box.right, y: box.top };
+        }),
+      );
+      const boxes: { x: number; y: number; width: number; height: number }[] = [];
+      for (const [i, id] of ["one", "two"].entries()) {
+        const count = (await reports(display)).length;
+        await tap(corner[i]?.x ?? 0, corner[i]?.y ?? 0);
+        await expect.poll(() => activatedSince(display, count)).toEqual([id]);
+        const rect = (await reports(display))
+          .slice(count)
+          .find((each) => each.type === "activated")?.rect;
+        if (rect === undefined) {
+          throw new Error("no box");
+        }
+        boxes.push(rect);
+      }
+      const [upper, lower] = boxes as [(typeof boxes)[0], (typeof boxes)[0]];
+      expect(lower.y - upper.y, "the bubbles are 30 px apart").toBeCloseTo(30, 0);
+      const x = upper.x + upper.width / 2;
+      const between = (upper.y + upper.height + lower.y) / 2;
+      // 3 px off the middle between them, outside both bubbles, inside both 44 px boxes.
+      for (const [y, id] of [
+        [between - 3, "one"],
+        [between + 3, "two"],
+      ] as const) {
+        const count = (await reports(display)).length;
+        await tap(x, y);
+        await expect
+          .poll(() => activatedSince(display, count), {
+            message: `probe: the tap is the nearest bubble's, ${id} (${kind})`,
+          })
+          .toEqual([id]);
+      }
+      expect(await heardOf(frame), `probe: the content heard none of it (${kind})`).toEqual({
+        heard: [],
+        clicks: 0,
+      });
+    } finally {
+      await context.close();
+    }
+  }
+});
+
+/**
+ * Where a posted marker's bubble is drawn inside `clip` (page px): the middle of the pixels of its
+ * fill (#fde68a), read from a screenshot on a blank page of the same context, or null.
+ */
+async function drawnBubble(
+  page: Page,
+  clip: { x: number; y: number; width: number; height: number },
+): Promise<{ x: number; y: number } | null> {
+  const png = await page.screenshot({ clip, scale: "css", animations: "disabled" });
+  const blank = await page.context().newPage();
+  try {
+    return await blank.evaluate(async (data) => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${data}`;
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext("2d") as CanvasRenderingContext2D;
+      context.drawImage(image, 0, 0);
+      const { data: pixels } = context.getImageData(0, 0, image.width, image.height);
+      let left = Infinity;
+      let right = -Infinity;
+      let top = Infinity;
+      let bottom = -Infinity;
+      for (let y = 0; y < image.height; y += 1) {
+        for (let x = 0; x < image.width; x += 1) {
+          const i = (y * image.width + x) * 4;
+          const near =
+            Math.abs((pixels[i] ?? 0) - 253) +
+            Math.abs((pixels[i + 1] ?? 0) - 230) +
+            Math.abs((pixels[i + 2] ?? 0) - 138);
+          if (near < 24) {
+            left = Math.min(left, x);
+            right = Math.max(right, x);
+            top = Math.min(top, y);
+            bottom = Math.max(bottom, y);
+          }
+        }
+      }
+      return left > right ? null : { x: (left + right + 1) / 2, y: (top + bottom + 1) / 2 };
+    }, png.toString("base64"));
+  } finally {
+    await blank.close();
+  }
+}
+
+test("a paragraph's marker pinned at the frame's top once its start scrolled away takes a mouse click and a tap where it is drawn (P119, porthole#42)", async ({
+  browser,
+  browserName,
+}) => {
+  test.setTimeout(120_000);
+  for (const [kind, options] of [
+    ["mouse", {}] as [string, Parameters<typeof browser.newContext>[0]],
+    ...touchContexts(browserName),
+  ]) {
+    const context = await browser.newContext(options);
+    try {
+      const page = await context.newPage();
+      const words =
+        "The roadmap for next year is short: ship the mobile app, finish the billing rewrite. ";
+      const display = await referenceHost.launch(page, {
+        config: presets.artifact({ capabilities: { annotate: {} } }),
+        widthPx: 360,
+        heightPx: 600,
+        content: `<div id="page" style="padding: 300px 20px 1200px"><p id="long" style="font-size: 16px; margin: 0">${words.repeat(12)}</p></div>${HEARING}`,
+      });
+      const frame = await display.frame();
+      await expect(frame.locator("#long")).toBeAttached();
+      await display.annotate("show", [elementMark("long", "#long", 1)]);
+      await next(display, "anchored");
+      // The page scrolls itself: the paragraph's start 150 px above the frame's top.
+      await frame.evaluate(() => {
+        const top = (document.getElementById("long") as HTMLElement).getBoundingClientRect().top;
+        window.scrollBy(0, top + 150);
+      });
+      await page.waitForTimeout(2_500);
+      expect(
+        await frame.evaluate(() =>
+          Math.round((document.getElementById("long") as HTMLElement).getBoundingClientRect().top),
+        ),
+        "the paragraph starts above the frame",
+      ).toBeLessThan(-100);
+      // Where the bubble is drawn, as the person sees it: its fill's pixels in the frame's top
+      // 40 px (no pointer has been over it yet). Not where the layer takes the pointer.
+      const offset = (await (await frame.frameElement()).boundingBox()) ?? { x: 0, y: 0 };
+      const drawn = await drawnBubble(page, { x: offset.x, y: offset.y, width: 360, height: 40 });
+      expect(drawn, `a bubble is drawn at the frame's top (${kind})`).not.toBeNull();
+      const at = { x: offset.x + (drawn?.x ?? 0), y: offset.y + (drawn?.y ?? 0) };
+      const count = (await reports(display)).length;
+      if (kind === "mouse") {
+        await page.mouse.click(at.x, at.y);
+      } else {
+        await page.touchscreen.tap(at.x, at.y);
+      }
+      await expect
+        .poll(() => activatedSince(display, count), {
+          message: `probe: the pinned marker's ${kind === "mouse" ? "click" : "tap"} is reported (${kind})`,
+        })
+        .toEqual(["long"]);
+      const rect = (await reports(display))
+        .slice(count)
+        .find((each) => each.type === "activated")?.rect;
+      expect(rect?.y, `the reported bubble is the one drawn at the top (${kind})`).toBeLessThan(4);
+      expect(await heardOf(frame), `probe: the content heard none of it (${kind})`).toEqual({
+        heard: [],
+        clicks: 0,
+      });
+    } finally {
+      await context.close();
+    }
+  }
+});
+
+test("a mouse is as before: a click just off a marker's bubble is the page's, also on a touch screen after a finger (P119)", async ({
+  browser,
+}) => {
+  test.setTimeout(60_000);
+  for (const [kind, options] of [
+    ["mouse", {}],
+    ["touch screen", { hasTouch: true }],
+  ] as const) {
+    const context = await browser.newContext(options);
+    try {
+      const page = await context.newPage();
+      const display = await referenceHost.launch(page, {
+        config: annotated(),
+        widthPx: 360,
+        content: `<div id="page" style="padding: 80px 20px"><p id="p1" style="font-size: 18px; margin: 0">Costs <b>fell</b><span id="after"> by three percent.</span></p></div>${HEARING}`,
+      });
+      const frame = await display.frame();
+      await expect(frame.locator("#after")).toBeVisible();
+      await display.annotate("show", [textMark("fell", "fell", 1)]);
+      await next(display, "anchored");
+      const offset = (await (await frame.frameElement()).boundingBox()) ?? { x: 0, y: 0 };
+      if (kind === "touch screen") {
+        // A finger first, on the page: the markers take 44 px boxes, until the mouse moves.
+        await page.touchscreen.tap(offset.x + 10, offset.y + 10);
+        await expect.poll(async () => (await heardOf(frame)).clicks).toBe(1);
+      }
+      const middle = await textMarkerPoint(frame, "#p1 b");
+      let count = (await reports(display)).length;
+      await page.mouse.click(middle.x, middle.y);
+      await expect.poll(() => activatedSince(display, count)).toEqual(["fell"]);
+      const own = (await reports(display))
+        .slice(count)
+        .find((each) => each.type === "activated")?.rect;
+      if (own === undefined) {
+        throw new Error("no box");
+      }
+      const clicks = (await heardOf(frame)).clicks;
+      count = (await reports(display)).length;
+      // 11 px below the bubble, and 4 px beside it.
+      await page.mouse.click(offset.x + own.x + own.width / 2, offset.y + own.y + own.height + 11);
+      await page.mouse.click(offset.x + own.x - 4, offset.y + own.y + own.height / 2);
+      await expect
+        .poll(async () => (await heardOf(frame)).clicks, {
+          message: `probe: a mouse click just off the bubble is the page's (${kind})`,
+        })
+        .toBe(clicks + 2);
+      await page.waitForTimeout(300);
+      expect(
+        await activatedSince(display, count),
+        `probe: no marker took a mouse click off its bubble (${kind})`,
       ).toEqual([]);
     } finally {
       await context.close();

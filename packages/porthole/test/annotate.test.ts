@@ -1,4 +1,4 @@
-import { Script } from "node:vm";
+import { runInNewContext, Script } from "node:vm";
 import { afterEach, describe, expect, test } from "vitest";
 import {
   annotateMode,
@@ -20,7 +20,7 @@ import {
   type DisplayHandle,
   type PlatformHost,
 } from "../src/index.ts";
-import { ANNOTATE_RUNTIME } from "../src/shell/annotate.ts";
+import { ANNOTATE_RUNTIME, MARKER_HIT } from "../src/shell/annotate.ts";
 import { SHELL_RUNTIME } from "../src/shell/runtime.ts";
 
 /** Annotations (P053): what the host takes from a frame, and what the shell is given. */
@@ -769,6 +769,48 @@ describe("the shell", () => {
     expect(handler).toContain("removeAllRanges.call(selection)");
     // Nothing told back from it.
     expect(handler).not.toContain("tell(");
+  });
+
+  test("a press is a marker's on its bubble, and on touch within 44 by 44 around it, the nearest (P119)", () => {
+    type Box = { x: number; y: number; width: number; height: number };
+    const rule = runInNewContext(MARKER_HIT) as (
+      count: number,
+      boxAt: (i: number) => Box,
+      x: number,
+      y: number,
+      touch: boolean,
+    ) => number;
+    const hit = (boxes: Box[], x: number, y: number, touch: boolean) =>
+      rule(boxes.length, (i) => boxes[i] as Box, x, y, touch);
+    // A "1" bubble: 34 by 18 at (100, 100), its middle at (117, 109).
+    const one = { x: 100, y: 100, width: 34, height: 18 };
+    expect(hit([one], 117, 109, false)).toBe(0);
+    // 11 px below its edge: a mouse misses it, a finger has it (44 tall: 13 px above and below).
+    expect(hit([one], 117, 129, false)).toBe(-1);
+    expect(hit([one], 117, 129, true)).toBe(0);
+    expect(hit([one], 117, 87, true)).toBe(0);
+    expect(hit([one], 117, 131, true), "22 px from its middle: the edge").toBe(0);
+    expect(hit([one], 117, 132, true), "past 22 px from its middle").toBe(-1);
+    // 5 px either side of 34 (44 wide), not 6.
+    expect(hit([one], 95, 109, true)).toBe(0);
+    expect(hit([one], 94, 109, true)).toBe(-1);
+    // A bubble wider than 44 takes its own width, 13 px above and below.
+    const wide = { x: 0, y: 0, width: 60, height: 18 };
+    expect(hit([wide], 59, 31, true)).toBe(0);
+    expect(hit([wide], 61, 9, true)).toBe(-1);
+    // Two 30 px apart, overlapping 44 px boxes: the nearest middle.
+    const two = { x: 100, y: 130, width: 34, height: 18 };
+    expect(hit([one, two], 117, 121, true)).toBe(0);
+    expect(hit([one, two], 117, 127, true)).toBe(1);
+    expect(hit([one, two], 117, 127, false)).toBe(-1);
+    // On a bubble, that bubble, even nearer another's middle: a wide one beside a small one,
+    // the topmost (last) of two that overlap, as before.
+    const small = { x: 62, y: 0, width: 18, height: 18 };
+    expect(hit([wide, small], 58, 9, true)).toBe(0);
+    expect(hit([wide, { ...wide, x: 10 }], 30, 9, false)).toBe(1);
+    // Spliced as it is.
+    expect(ANNOTATE_RUNTIME).toContain(`const markerHit = ${MARKER_HIT};`);
+    expect(ANNOTATE_RUNTIME).toContain(".touch>.marker::before{");
   });
 
   test("with the annotation runtime in, is still a plain script", () => {
