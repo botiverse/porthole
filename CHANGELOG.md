@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## 0.14.3
+## Unreleased
 
 - **Security (P120, porthole#56, the audit's NG-1):** on Firefox a nested page that focused its
   field as it loaded, and again whenever it lost focus, got everything the person typed in the
@@ -31,6 +31,9 @@ P-numbers below.
   race, no control's probe); the guard driven directly: an activation that came as the person typed,
   the pointer elsewhere, is no gesture (negative control `pointer-rule`). `test/nested.test.ts`:
   the pointer rule, and the shell's answer to the host's ask.
+
+## 0.14.3
+
 - **Changed (P119, part of porthole#42):** on touch, an annotation marker takes a tap anywhere in a
   box of at least 44 by 44 CSS px centred on its bubble, so a finger a few px off still opens it.
   The bubble looks the same. Where two such boxes overlap, the marker whose bubble's centre is
