@@ -28,11 +28,37 @@ export NODE_EXTRA_CA_CERTS="$root"
 cd /repo/packages/porthole
 set -- -c prod-shape/playwright.config.ts
 [ -n "${PORTHOLE_PROD_GREP:-}" ] && set -- "$@" -g "$PORTHOLE_PROD_GREP"
+report=/tmp/prod-shape-results.json
+rm -f "$report"
 status=0
 node node_modules/@playwright/test/cli.js test "$@" || status=$?
+# Success means the whole suite ran: a report, no run-level errors, at least one test passed, and
+# every test that was meant to run did (an interrupted run leaves tests skipped that weren't
+# meant to be). run.sh requires the line this prints.
+if [ "$status" -eq 0 ]; then
+  node -e '
+const report = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+let ran = 0, missed = 0;
+const walk = (suite) => {
+  for (const each of suite.suites ?? []) walk(each);
+  for (const spec of suite.specs ?? [])
+    for (const test of spec.tests) {
+      if (test.expectedStatus === "skipped") continue;
+      if (test.status === "expected" || test.status === "flaky") ran++;
+      else missed++;
+    }
+};
+for (const suite of report.suites) walk(suite);
+if (report.errors.length || missed || !ran) {
+  console.error(`prod-shape: the suite did not run to completion (${ran} ran, ${missed} did not, ${report.errors.length} run errors)`);
+  process.exit(1);
+}
+console.log(`prod-shape: the suite ran to completion (${ran} tests)`);
+' "$report" || status=1
+fi
 # What the suite measured (engine differences, same-site facts), for the record.
 node -e '
-const report = JSON.parse(require("node:fs").readFileSync("/tmp/prod-shape-results.json", "utf8"));
+const report = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
 const walk = (suite) => {
   for (const each of suite.suites ?? []) walk(each);
   for (const spec of suite.specs ?? [])
@@ -42,5 +68,5 @@ const walk = (suite) => {
           if (note.type === "measured") console.log(`measured [${test.projectName}] ${spec.title.split(":")[0]}: ${note.description}`);
 };
 for (const suite of report.suites) walk(suite);
-' 2>/dev/null | sort -u || true
+' "$report" 2>/dev/null | sort -u || true
 exit "$status"
