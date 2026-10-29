@@ -12,6 +12,7 @@ import {
 } from "../src/compile/policy.ts";
 import { ConfigError } from "../src/config/validate.ts";
 import {
+  KEY_PRESS_MS,
   TYPING_MS,
   personMoved,
   pressPossible,
@@ -343,6 +344,13 @@ describe("the host's rule on the shell's word (P111)", () => {
   test("the shell's activation within the second, after the host's last press or key: the person's", () => {
     expect(personMoved(move)).toBe(true);
     expect(shellGesture(word, 9_500, 10_000)).toBe(true);
+  });
+
+  test("a move within KEY_PRESS_MS of the person's last key on the host's page: the page's (P122)", () => {
+    expect(personMoved({ ...move, typedAt: 10_000 - KEY_PRESS_MS + 1 })).toBe(false);
+    expect(personMoved({ ...move, typedAt: 10_000 - KEY_PRESS_MS })).toBe(true);
+    // A press the engine shows still counts.
+    expect(personMoved({ ...move, typedAt: 9_990, pressed: true })).toBe(true);
   });
 
   test("a press or key on the host's page since: the page's", () => {

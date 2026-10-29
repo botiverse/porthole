@@ -42,6 +42,17 @@ export const ACTIVATION_SPAN_MS = 5_000;
 export const TYPING_MS = 1_000;
 
 /**
+ * No press of the person's lands on a frame this soon after a key they typed on the host's page
+ * (P122): a hand on the keys doesn't reach the pointer and press that fast (the Keystroke-Level
+ * Model gives 400 ms to the hand's move from the keys to the mouse alone; Card, Moran and Newell,
+ * 1980). A move into a nested page's frame, or its shell's activation turning on, within this long
+ * is the person's next key landing in the page, which turns its activation on as a press does.
+ * Where neither the host's page nor the shell sees the pointer (full Chromium), it holds a page that
+ * takes the keyboard while the person types even when their key outruns the shell's answer.
+ */
+export const KEY_PRESS_MS = 250;
+
+/**
  * After a take-back, the guard keeps watching (each animation frame) until focus has stayed in the
  * text field this long: a page that takes it again at once (on its own blur, which the take-back
  * fires) is caught as it does, on Firefox too (P109, after the review of the guard: GK-1).
@@ -193,12 +204,14 @@ export function personMoved(move: FocusMove): boolean {
   }
   // A nested page (P111): its shell's activation turned on within the last second, and the host's
   // page had no press or key of its own since (the person went back to it), where it may have been
-  // a press (P120); or, where the engine tells it, a press on the frame. Nothing else: no pointer
-  // over it, no host-wide activation.
+  // a press (P120) and not within `KEY_PRESS_MS` of the person's last key (P122); or, where the
+  // engine tells it, a press on the frame. Nothing else: no pointer over it, no host-wide
+  // activation.
   if (move.shell !== undefined && move.shell.word.supported) {
     return (
       (move.seen && move.pressed) ||
-      (shellGesture(move.shell.word, move.shell.hostInputAt, move.now) &&
+      (move.now - move.typedAt >= KEY_PRESS_MS &&
+        shellGesture(move.shell.word, move.shell.hostInputAt, move.now) &&
         !(move.shell.pointerShown === true && move.shell.word.keyed === true))
     );
   }
@@ -349,6 +362,25 @@ export function focusGuard(view: Window): FocusGuard {
   let focusedAt = now();
   let lastKey: { key: string; at: number } | null = null;
   let typedAt = -Infinity;
+  /** When the person typed on the host's page, the last two seconds of it (P122). */
+  const typings: number[] = [];
+  const typed = (at: number) => {
+    typedAt = at;
+    typings.push(at);
+    while (typings.length > 0 && at - (typings[0] as number) > 2 * TYPING_MS) {
+      typings.shift();
+    }
+  };
+  /** The person's last typing on the host's page at or before `at` (-Infinity: none known). */
+  const typedBefore = (at: number): number => {
+    for (let index = typings.length - 1; index >= 0; index -= 1) {
+      const each = typings[index] as number;
+      if (each <= at) {
+        return each;
+      }
+    }
+    return -Infinity;
+  };
   let gestureAt = -Infinity;
   let pressAt = -Infinity;
   /** The host's page's last trusted press or key (P111: a nested page's gesture must be later). */
@@ -447,6 +479,7 @@ export function focusGuard(view: Window): FocusGuard {
       word !== null &&
       word.supported &&
       word.focusedAt < at - SHELL_EARLY_MS &&
+      at - typedAt >= KEY_PRESS_MS &&
       pressPossible(pointerShown, over, guarded.overSince, typedAt, at)
     ) {
       return "wait";
@@ -766,7 +799,7 @@ export function focusGuard(view: Window): FocusGuard {
         inputAt = at;
       }
       if (event.key !== "Tab" && !MODIFIERS.has(event.key)) {
-        typedAt = at;
+        typed(at);
       }
     },
     true,
@@ -782,7 +815,7 @@ export function focusGuard(view: Window): FocusGuard {
   view.addEventListener(
     "input",
     () => {
-      typedAt = now();
+      typed(now());
       gestureAt = typedAt;
     },
     true,
@@ -856,11 +889,18 @@ export function focusGuard(view: Window): FocusGuard {
       // allows): uncertain, and so until it goes off (P111, after its review). So is one that
       // turned on while the guard fights this frame for a text field (P120): the person's keys,
       // meant for the field, landing in the page.
+      // So is one that turned on within `KEY_PRESS_MS` of a key the person typed on the host's page
+      // before it (P122): that key's successor, landing in the page.
       const turnedOn = said.ago !== null && before.activatedAt === -Infinity && !before.uncertain;
       const stalled = said.gap > SHELL_STALL_MS || at - guarded.heardAt > SHELL_STALL_MS;
       const fought = contest !== null && contest.fight && contest.frame === frame;
+      // The typing before it, never after: a key the person typed on the host's page after they
+      // pressed the page, before the shell's word came, says nothing of that press (P122, after CI).
+      const typing = said.ago === null ? -Infinity : typedBefore(at - said.ago);
+      const soon = said.ago !== null && at - said.ago - typing < KEY_PRESS_MS;
       const uncertain =
-        said.ago !== null && (before.uncertain === true || (turnedOn && (stalled || fought)));
+        said.ago !== null &&
+        (before.uncertain === true || (turnedOn && (stalled || fought || soon)));
       guarded.heardAt = at;
       if (said.asked !== undefined && said.asked === guarded.asked) {
         guarded.answered = true;
@@ -872,7 +912,7 @@ export function focusGuard(view: Window): FocusGuard {
         activatedAt === -Infinity
           ? false
           : turnedOn
-            ? !pressPossible(true, frame.matches(":hover"), guarded.overSince, typedAt, activatedAt)
+            ? !pressPossible(true, frame.matches(":hover"), guarded.overSince, typing, activatedAt)
             : before.keyed === true;
       guarded.word = {
         supported: said.supported,

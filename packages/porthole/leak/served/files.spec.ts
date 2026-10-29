@@ -97,6 +97,22 @@ async function expectAllLoaded(frame: Frame): Promise<void> {
     .toBeGreaterThan(0);
 }
 
+/**
+ * A click in the frame that is part of a probe's verdict: where a control lets the frame navigate
+ * away unannounced, the display starts again and the frame the click was for is gone ("Frame was
+ * detached"), which is the wall seen to fail, not the case failing to run.
+ */
+async function clickIn(frame: Frame, selector: string, what: string): Promise<void> {
+  const error = await frame
+    .locator(selector)
+    .click()
+    .then(
+      () => null,
+      (problem: unknown) => String(problem),
+    );
+  expect(error, `probe: ${what}`).toBeNull();
+}
+
 test.describe("in a frame", () => {
   test("a page of many files loads its stylesheet, scripts, module, image, data and worker by relative path", async ({
     page,
@@ -156,13 +172,17 @@ document.getElementById("go").addEventListener("click", async () => {
     await publish(id, "1", MANY);
     const { frame, shown } = await showFiles(page, id, "1");
     const base = frame.url();
-    await frame.locator("#next").click();
+    await clickIn(frame, "#next", "the link to the about page was there to follow");
     await expect(
       frame.locator("#about"),
       "probe: the link opened the about page in the frame",
     ).toHaveText("the about page");
     expect(frame.url(), "probe: the frame is on the about page").toBe(`${base}about`);
-    await frame.locator("#back").click();
+    await clickIn(
+      frame,
+      "#back",
+      "the about page was still the frame's, its link back there to follow",
+    );
     await expect(
       frame.locator("#title"),
       "probe: the link back opened the first page in the frame",
@@ -218,13 +238,17 @@ document.getElementById("go").addEventListener("click", async () => {
         });
       }, lost);
       const base = frame.url();
-      await frame.locator("#next").click();
+      await clickIn(frame, "#next", "the link to the about page was there to follow");
       await expect(
         frame.locator("#about"),
         "probe: the link opened the about page in the frame",
       ).toHaveText("the about page");
       expect(frame.url(), "probe: the frame is on the about page").toBe(`${base}about`);
-      await frame.locator("#back").click();
+      await clickIn(
+        frame,
+        "#back",
+        "the about page was still the frame's, its link back there to follow",
+      );
       await expect(
         frame.locator("#title"),
         "probe: the link back opened the first page in the frame",

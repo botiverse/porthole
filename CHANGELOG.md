@@ -4,6 +4,20 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **Security (P122, after 0.14.4's CI):** full Chromium let a nested page that took the keyboard
+  while the person typed keep it (its first key reached the page before the shell answered the
+  host's ask, and passed for a press). No press of the person's comes within 250 ms of a key they
+  typed on the host's page: a move into a nested page's frame, or its shell's activation turning
+  on, that soon is taken back as the page's, on every engine. And P120's pointer rule now reads the
+  person's typing before the activation, never after (a key typed after a real press, before the
+  shell's word came, made it look like a key). Cost: a real press into a nested page within 250 ms
+  of typing on the host's page is taken back (no person's hand is that fast).
+- **Tests (P122):** `leak/served/nested-key.spec.ts` (negative control `key-press`); the honest
+  cases that type and then press the page pause 400 ms between, as a hand does; the in-set link
+  cases (`navigate-guard`'s probes) fail by their verdict when the display restarts under it.
+
 ## 0.14.4
 
 - **Changed (P121, after the audit of 0.14.2):** a nested page's shell runs on a `porthole-` label

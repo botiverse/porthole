@@ -664,6 +664,14 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   },
   // Where the host's page sees the pointer, an activation that turned on as the person typed, the
   // pointer elsewhere, is their key landing in the page, judged as it turned on (P120).
+  // No press comes within 250 ms of the person's key on the host's page (P122): an activation that
+  // turns on then is their key landing in the page, where the pointer is never seen too.
+  "key-press": {
+    specs: ["leak/served/nested-key.spec.ts"],
+    fails: all(
+      "an activation that turned on within 250 ms of the person's key on the host's page is no gesture, where the pointer is never seen too (P122)",
+    ),
+  },
   "pointer-rule": {
     specs: [NESTED],
     fails: all(
