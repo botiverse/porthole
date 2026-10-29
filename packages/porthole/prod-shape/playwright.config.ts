@@ -36,6 +36,8 @@ export default defineConfig({
   testMatch: "**/*.spec.ts",
   // The repository is mounted read-only: results go to the container's own disk.
   outputDir: "/tmp/prod-shape-results",
+  // A gate: a stray `.only` would run part of the suite and still pass.
+  forbidOnly: true,
   fullyParallel: true,
   workers: Number(process.env.PORTHOLE_PROD_WORKERS ?? 4),
   reporter: [["list"], ["json", { outputFile: "/tmp/prod-shape-results.json" }]],
