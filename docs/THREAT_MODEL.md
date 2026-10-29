@@ -121,6 +121,14 @@ Porthole does not protect against these.
 - **Deceptive content.** Content may draw anything in its frame, a fake sign-in form included.
   Porthole limits where what is typed into it can go and keeps the host's approvals outside the
   frame; it doesn't judge what content shows.
+- **A display taking the keyboard** (accepted risk, P123). Content can move focus into its frame
+  (`focus()` and the like) while the person types in the host's page, and receive the keys typed
+  after it. Porthole's guard takes the keyboard back and stops a display that keeps taking it, but
+  only as best effort (§7 "The keyboard"): on a nested page it doesn't cover typing slower than one
+  key per 250 ms, which is most people, phones included. Browsers give a host no way to prevent it,
+  and the person sees their text stop appearing. The walls that hold regardless: content can't read
+  the host's page, its storage or another display, and a nested page's sealed address stays in a
+  shell no content shares.
 - **Wrong results.** A chart can plot the wrong numbers, and a report can say false things.
 - **Malicious prompts.** A gated `sendPrompt` hands the host's confirm function the whole text (the
   default dialog shows all of it); whether that text is hostile is not Porthole's call. Nor is text

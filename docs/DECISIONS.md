@@ -6614,6 +6614,11 @@ restarted under the control, instead of failing by its verdict.
    typed after. The shell sees its activation at a look, up to a look's gap (`gap`, at most
    `SHELL_STALL_MS`) after it turned on: only a key before the look before counts (CI's runner
    typed in the host's composer within that gap after its press in the page).
+   *What this loosens* (added after the maintainer's review, porthole#81): P120's follow-up judged
+   an activation by the latest key the host's page had seen; this judges it by the last key before
+   it. A key the host's page sees after an activation turned on no longer counts toward calling
+   that activation a keystroke, so fewer activations are marked as one. It has no control of its
+   own; P123 accepts the keyboard as a risk instead of bounding it further.
 3. **In-set link probes fail by their verdict**: their clicks in the frame are part of the verdict
    (`clickIn`), so a display that restarts under `navigate-guard` fails them as the wall seen to
    fail, not as an error.
@@ -6642,3 +6647,38 @@ pass on full Chromium, the headless shell and Firefox; `navigate-guard`, `pointe
 
 **Revisit when** an engine tells a frame's parent what turned activation on, or as focus comes into
 it (then the press itself can be told from a key, and the window can go).
+
+
+## P123 · 2026-10-29 · A page taking the keyboard is an accepted risk; the guard stays best effort · Accepted
+
+**Context.** P109, P120 and P122 built a guard that gives the keyboard back when a display moves
+focus into its frame while the person types in the host's page. P122's review (porthole#81) showed
+what it can't do on a nested page: a person typing slower than one key per 250 ms (most people,
+phones included) isn't covered, and the page chooses when to take focus, so it can wait out any
+window. The owner (xxchan) and the maintainer agreed on 2026-10-29 that this class isn't worth more
+work.
+
+**Decision.** A display taking the keyboard (`focus()` and the like) is an accepted risk, listed in
+THREAT_MODEL §5 "Out of scope". The existing guard stays, as best effort: it takes the keyboard back
+and stops a display that keeps taking it, where it can tell. No new rule is added to cover more
+typists or timings.
+
+**Why.**
+- **Browsers don't let a host prevent it.** Any frame the person can type into can take focus. Other
+  hosts of untrusted pages live with the same property; on Chrome, a claude.ai Artifact that calls
+  `focus()` in a loop takes the keyboard from the message box (Raft's test, porthole#56).
+- **The person sees it.** Their text stops appearing where they type.
+- **The walls that matter hold without it.** A page can't reach the host's origin, its storage or
+  another display, and a nested page's sealed address stays in a shell no content shares (P114,
+  P121). Those stay airtight requirements.
+- **More rules cost real use.** A wider window takes back real clicks: P122's 250 ms rule already
+  takes back a press within 250 ms of a key and leaves `comments.open` refused until the person
+  pauses. Enter and Escape count as keys there too.
+
+**Known and not fixed** (porthole#81): typists slower than 250 ms per key on a nested page; the
+probe types at 70 ms per key, so CI doesn't measure them; the usability costs above; P122's
+looser reading of the typing before an activation.
+
+**Revisit when** a browser gives a frame's parent a way to keep focus or to know what turned
+activation on, or a host reports a real loss the person didn't notice.
+
