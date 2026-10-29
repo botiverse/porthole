@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.14.3
 
 - **Changed (P119, part of porthole#42):** on touch, an annotation marker takes a tap anywhere in a
   box of at least 44 by 44 CSS px centred on its bubble, so a finger a few px off still opens it.
