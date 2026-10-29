@@ -536,6 +536,15 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "  return true;",
     },
   ],
+  // No time between a key on the host's page and a press (P122): an activation, or a move into a
+  // nested page's frame, right after the person's key may be a press of theirs.
+  "key-press": [
+    {
+      file: "src/platform/focus-guard.ts",
+      find: "export const KEY_PRESS_MS = 250;",
+      replace: "export const KEY_PRESS_MS = 0;",
+    },
+  ],
   // A cancel (P112) taken with no mode on: a page that says it is heard whenever it likes.
   "cancel-any-mode": [
     {

@@ -429,8 +429,10 @@ focusField(composer.textarea); // Firefox ignores a plain focus() while a fighti
   of your own since. A second press in the page within 5 s of the last turns nothing on: after the
   person went back to your composer, their next move in is taken back until then, or a Tab. A
   nested page that takes the keyboard back as the guard returns it is fought as any page is, and
-  stopped (P120); on full Chromium a key the person types into the page just as it takes the
-  keyboard can still pass for a press (THREAT_MODEL §7).
+  stopped (P120). A move into the page within 250 ms of the person's key on your page is taken
+  back on every engine (no hand presses that fast after typing, P122); on full Chromium a key the
+  person types into the page just as it takes the keyboard, slower than that, can still pass for a
+  press (THREAT_MODEL §7).
 
 ## 4. Served pages: the host kit
 

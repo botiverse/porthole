@@ -6374,7 +6374,7 @@ pinned at the frame's top… takes a mouse click and a tap where it is drawn" (a
 pixels); "a mouse is as before…" (a click 11 px below or 4 px beside the bubble is the page's,
 with no touch and on a touch screen after a finger).
 
-## P120 · 2026-10-29 · A nested page's keyboard: a fight is judged without the shell, the shell is asked to look, a key is no press where the pointer is seen · Accepted
+## P120 · 2026-10-29 · A nested page's keyboard: a fight is judged without the shell, the shell is asked to look, a key is no press where the pointer is seen · Accepted; amended by P122
 
 Amends P111. **Context.** The audit of P111's guard (2026-10-28, NG-1, P0 on Firefox; porthole#56):
 a nested page that focuses its field as it loads and focuses it again whenever it loses focus read
@@ -6578,3 +6578,67 @@ non-nested address on a shell label (the audit's suggestion): it needs a known s
 second display kind from the app under test, and what it would hold (a Worker's own routes) is the
 host's; left for when a host with its own Worker asks for one. Hiding the clear from the page:
 the `selectionchange` gives it away whatever the message says.
+
+## P122 · 2026-10-29 · After 0.14.4's CI: no press within 250 ms of the person's key, and the pointer rule reads the typing before an activation · Accepted
+
+Amends P120. **Context.** CI on 0.14.4 (run 40822963445, `loopback (chromium-oopif)`): P120's
+case "a page that starts taking the keyboard back on its own blur while the person types…" failed
+on full Chromium with nothing taken back: the page read the whole secret, 35 keys. P120 measured 0
+of 24 on this box. On full Chromium neither the host's page nor the shell sees the pointer over the
+page, so the first move from a text field waits for the shell's word, and the host asks the shell to
+look at once (P120); on CI's runner the person's next key reached the page, and its activation the
+shell, before the ask did, and the guard took the activation for a press. That is the race P120
+named as residual, and the probe's timing (its first key a few ms after the page's move) sits in
+it. P120's bar was a frame in 0.13, which took such a move back.
+
+CI on P120's pull request (run 40820197982) also showed the control `shell-host-input` blind on
+the headless shell and WebKit. P120 (after its review) judged whether the shell's activation could
+be a press as it turned on, from the person's typing then, but read that typing when the shell's
+report arrived: on a fast runner the person's first key in the composer, after their real press in
+the page, came before the report, and the press was taken for a key. And `navigate-guard` failed
+there because one of its probes errored ("Frame was detached") where the display it stood on
+restarted under the control, instead of failing by its verdict.
+
+**Decision.**
+1. **No press within `KEY_PRESS_MS` (250 ms) of the person's key** on the host's page: a move into
+   a nested page's frame that soon after the person's last key is the page's (taken back at once,
+   no wait for the shell), and a shell's activation that turned on that soon after a key typed
+   before it is uncertain (no one's gesture until it lapses, `comments.open` included), on every
+   engine. A hand on the keys doesn't reach the pointer and press that fast: the Keystroke-Level
+   Model gives 400 ms to the hand's move from the keys to the mouse alone (Card, Moran and Newell,
+   1980). A page that takes the keyboard while the person types does it within one of their keys,
+   so the race with the shell's answer no longer decides it.
+2. **The pointer rule reads the typing before the activation.** The guard keeps the last two
+   seconds of the person's typing; whether an activation could be a press (P120's `keyed`), and
+   whether it came within 250 ms of a key, are judged from the last key before it, never one
+   typed after. The shell sees its activation at a look, up to a look's gap (`gap`, at most
+   `SHELL_STALL_MS`) after it turned on: only a key before the look before counts (CI's runner
+   typed in the host's composer within that gap after its press in the page).
+3. **In-set link probes fail by their verdict**: their clicks in the frame are part of the verdict
+   (`clickIn`), so a display that restarts under `navigate-guard` fails them as the wall seen to
+   fail, not as an error.
+
+**Cost.** A real press into a nested page within 250 ms of typing on the host's page is taken back
+(the person's next press gets in). The honest cases that type in the host's composer and then press
+the page now pause 400 ms between, as a hand does: Playwright pressed 45 ms after the last key.
+
+**Residual.** On full Chromium, a person typing slower than one key in 250 ms: a key that lands
+in the page within the time a message takes between the processes after the page's move still
+passes for a press; on Chromium with frames in the host's process, until the pointer has been over
+one of the page's frames, within the time the page's input runs before the ask.
+
+**Tested.** `test/nested.test.ts`: a move within `KEY_PRESS_MS` of the last key is the page's, a
+press the engine shows still counts. `leak/served/nested-key.spec.ts` (the guard driven directly,
+on a page that never saw the pointer, every engine): an activation 30 ms after the person's key is
+no gesture; a key typed after the press, before the shell's look saw it, changes nothing (that
+part failed on the first cut of this decision, as CI's `shell-host-input` showed). Negative control
+`key-press` (the window out) fails it on Chromium and Firefox; its own file, because the cases that
+race the shell's answer stand on the rule by chance and are no control's probes. P120's guard test
+puts its activation 300 ms after the key, so it stays `pointer-rule`'s alone. `shell-host-input`
+fails its probe again with the typing before the activation read (locally on Chromium and Firefox;
+CI's runners are the measure). The nested suites, P109's keyboard cases and the in-set link cases
+pass on full Chromium, the headless shell and Firefox; `navigate-guard`, `pointer-rule`,
+`nested-fight` fail exactly their probes on Chromium and Firefox. WebKit only in CI.
+
+**Revisit when** an engine tells a frame's parent what turned activation on, or as focus comes into
+it (then the press itself can be told from a key, and the window can go).

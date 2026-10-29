@@ -139,6 +139,9 @@ test.describe("a nested page (P111)", () => {
     for (const round of [1, 2]) {
       await page.mouse.click(composer.x, composer.y);
       await page.keyboard.type("ab", { delay: 40 });
+      // A person's hand goes from the keys to the pointer before it presses (P122: no press of
+      // theirs comes within 250 ms of a key they typed on the host's page).
+      await page.waitForTimeout(400);
       await page.mouse.click(field(shown).x, field(shown).y);
       await page.keyboard.type("hello", { delay: 40 });
       await page.waitForTimeout(400);
@@ -389,10 +392,11 @@ test.describe("a nested page (P111)", () => {
       // The person types on the host's page (a key it hears), and goes on for over a second.
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "a" }));
       await wait(1_050);
-      // The shell says its activation turned on 70 ms after that key (950 ms ago): within its
-      // own second still, past the second of typing.
+      // The shell says its activation turned on 300 ms after that key (750 ms ago): within its
+      // own second still, past the second of typing (and past P122's 250 ms, which isn't this
+      // rule's).
       guard.beat(keyed);
-      guard.shell(keyed, { supported: true, ago: 950, focused: true, gap: 16 });
+      guard.shell(keyed, { supported: true, ago: 750, focused: true, gap: 16 });
       const afterTyping = guard.gesture(keyed);
       // An activation that turned on over a second after the person's typing: a gesture, as before.
       const later = frameAt();
@@ -448,6 +452,8 @@ test.describe("a nested page (P111)", () => {
     const shown = await show(page);
     await page.mouse.click(composer.x, composer.y);
     await page.keyboard.type("note", { delay: 40 });
+    // The hand from the keys to the pointer (P122), well within the second.
+    await page.waitForTimeout(400);
     await page.mouse.click(button(shown).x, button(shown).y);
     await expect.poll(() => shown.said.filter((each) => each.type === "comments").length).toBe(1);
     expect(
