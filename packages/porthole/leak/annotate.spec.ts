@@ -1915,7 +1915,11 @@ test("on touch, where two markers' 44 px boxes overlap, a tap is the nearest bub
       for (const [i, id] of ["one", "two"].entries()) {
         const count = (await reports(display)).length;
         await tap(corner[i]?.x ?? 0, corner[i]?.y ?? 0);
-        await expect.poll(() => activatedSince(display, count)).toEqual([id]);
+        await expect
+          .poll(() => activatedSince(display, count), {
+            message: `probe: a tap on marker ${id}'s bubble is reported (${kind})`,
+          })
+          .toEqual([id]);
         const rect = (await reports(display))
           .slice(count)
           .find((each) => each.type === "activated")?.rect;
