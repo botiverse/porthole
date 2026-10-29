@@ -125,7 +125,13 @@ export type HostErrorKind =
   /** A display couldn't be made (the React binding: a bad config, a missing handler). */
   | "mount"
   /** An annotation call was refused (an invalid mark, an unknown id). */
-  | "annotations";
+  | "annotations"
+  /**
+   * A frame status (`porthole/notifications/frame-status`) the host didn't take, since it came
+   * from the frame's content, not from a page of Porthole's server (P124): never shown, never an
+   * outcome. Told once a run.
+   */
+  | "frame-status";
 
 /** What a display reports, by event name. */
 /** Why a display's frame showed nothing of its content (`FrameOutcome`). */
@@ -150,9 +156,11 @@ export type FrameBlock =
 /**
  * How a display's document went: it loaded (a shell or view finished its handshake; a url-mode
  * app's document loaded), it was blocked (and why), or nothing settled in
- * `limits.loadTimeoutMs`. Once per run, plus a later `blocked` if the frame shows a status page
- * after it loaded (access revoked mid-session). A host shows its own fallback ("Open in a new
- * tab") on anything but loaded.
+ * `limits.loadTimeoutMs`. Once per run, plus a later `blocked` if a url-mode app's frame shows a
+ * status page after it loaded (access revoked mid-session). A host shows its own fallback ("Open in
+ * a new tab") on anything but loaded. A `blocked` is the word of a page of Porthole's server (or a
+ * host's gateway, or its own pages), never of a frame's content, except a url-mode app's (P124):
+ * in a frame that speaks, only its run's first document says it; an opaque frame never does.
  */
 export type FrameOutcome =
   | { readonly state: "loaded" }

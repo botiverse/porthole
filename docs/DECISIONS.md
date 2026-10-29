@@ -6682,3 +6682,95 @@ looser reading of the typing before an activation.
 **Revisit when** a browser gives a frame's parent a way to keep focus or to know what turned
 activation on, or a host reports a real loss the person didn't notice.
 
+
+## P124 · 2026-10-29 · A frame status is the word of Porthole's pages: never an opaque frame's, and in a frame that speaks, only its run's first document's · Accepted
+
+Amends P040 and P050. **Context.** The audit raft-security-audit#16 (Cato, medium) found that any
+frame could send `porthole/notifications/frame-status`: an opaque widget, a served page, an MCP
+Apps view, or a nested page through its shell. The host took it as P040's word of Porthole's
+server: the display's `outcome` became `blocked` with the content's reason and code
+(`host/outcome.ts`), and a host drew its own fallback in Porthole's wording (`frameFallback`, the
+default of `PortholeView`: "Open this in a new tab to sign in", "You can't open this anymore") with a
+link out of the page. Content could speak as the host and as Porthole, push the person to a sign-in
+somewhere else, and hand the host's `onOutcome` any code it liked.
+
+**Why the message can't say who sent it.** The pages that say it (`statusPage`, `enterPage`,
+`appStatusPage`, `statusPageOf`, a host's gateway's) are documents of the frame's own window and,
+but for a redirect entry's (P068, the host's own origin), of the content's own origin: the
+transport's checks (the frame's window, its origin) let content's message through as they let
+theirs. A secret for them to echo would have to reach a status page and no content of the same
+origin and window (a fragment, a cookie, the window's name: content reads each), and a channel the
+shell hands the host (a `MessagePort`) is no wall where the shell shares the content's realm
+(ARCHITECTURE, boundary 4), nor is the shell who says it. What content can't change is where a
+frame's documents come from and which word each says first.
+
+**Decision.** The host takes a frame status only where content can't have said it (`watchOutcome`):
+1. **An opaque frame: never.** Its only document is the host's shell, the content inside it: no page
+   of Porthole's server loads in a `srcdoc` frame.
+2. **A frame that speaks** (a served shell, an MCP Apps view through the sandbox proxy, a nested
+   page's shell): **only before anything else was heard from it in the run.** Every document
+   Porthole serves with content in it says Porthole's word first, before any of the content's code
+   runs: the shell's `ui/initialize` (a served shell carries its page as data and runs it once its
+   own document has loaded), the sandbox proxy's `sandbox-proxy-ready` (before its host sends the
+   view), and through a nested page's shell the page's own runtime's hello (the shell's
+   `porthole/shell/` words go to the focus guard, never to the display). A status page says
+   nothing but its status. Messages from one document to one window arrive in order, so a frame
+   status before any other word is the run's first document's, a page of Porthole's (or a
+   gateway's, or the host's own, P068): taken, as before. One after any other word is dropped.
+3. **A url-mode app: as before.** It has no shell to speak first, shares its origin with the entry
+   page and the status pages, and its scripts run before the host sees its load: its frame status
+   is its own word (THREAT_MODEL S6: preview only code you trust).
+
+A frame status the host doesn't take is dropped: no outcome, nothing for a fallback, no code to
+`onOutcome`. The host hears a `hostError` of a new kind, `frame-status`, once a run (a flood is one
+event), never a content error: it is a display trying to speak as Porthole, the host's to log or act
+on, and nothing the agent can fix.
+
+**What it changes.** A frame that speaks no longer tells a later block itself (P050's "even after
+`loaded`" now holds for url mode only):
+- A display without files starts again on any later load (P031), and its new run's first document
+  tells the outcome; P050's framed page case already counted on that ("each mounting tells its own
+  outcome"). The old run may hear the status page's word before its load: dropped, and one
+  `frame-status` host error, a false alarm in that race.
+- A display with files (P084) whose next page of the set is answered by a status page (access
+  revoked mid-session) shows that page in its frame, the server's own words there, and the host
+  isn't told `blocked`: it hears the host error, and the next mount tells.
+
+**Threat it re-opens.** None: it narrows what a frame can make the host show. What stays open:
+- url mode (above), where the app can still make the host show any fallback, with any code.
+- A frame that speaks whose shell never runs: the content can't run either (it is the shell's to
+  run), so nothing speaks and the outcome is `framing` or a timeout, as before.
+
+**The invariant this rests on.** Every document a frame that speaks can hold is one Porthole
+wrote first: a served page, a set's HTML page and a nested page reach the frame only carried inside
+`shellDocument` (as `scriptJson`, rendered after the shell's synchronous `initialize()`), and an MCP
+view only after the proxy's `sandbox-proxy-ready`. A frame status arriving after the shell's hello in
+a run is therefore never a status page's. Whoever changes how `shellDocument` carries a page, or adds
+a path that serves stored HTML as a frame's document by itself, breaks this rule and must revisit it
+(raft-security-audit#16 review of this decision, Cato).
+
+**Tested.** `test/outcome.test.ts` ("who may say how loading went (P124)"): an opaque frame's word
+dropped before and after its handshake, told once; a served frame's first document that is a status
+page still decides `blocked`, with its code; a served shell's content after its hello, before and
+after the handshake, dropped; a nested page's word after its relayed hello, dropped; any other word,
+malformed too, counts as the frame speaking; a url-mode app's word still taken; and through
+`createHost`, an inline widget's `sign-in` is no outcome and one `frame-status` host error, no
+content error. Before the change the first five failed. `leak/served/outcome.spec.ts`, four cases
+(a served shell's content; a served artifact page as it loads; an opaque widget; a nested page,
+through its shell and past it to the host's window), each saying `blocked` (`sign-in`, `denied`,
+a code) and `entering`, at once and again: the outcome stays `loaded`, and the host hears one
+`frame-status` error. Negative control `frame-status` (the rule out: every frame status taken)
+fails exactly those four. The outcome, authorize and files suites and the rest of the leak suite
+pass. Measured here on Chromium only (WebKit's and Firefox's libraries are missing on this box):
+CI runs all three engines.
+
+**Rejected.** A per-run secret for status pages to echo, or a `MessagePort` from the shell (above).
+Having a nested page's shell also drop its page's frame status, as it drops its namespace: the
+host's rule drops it already (the page's hello comes first), and a second wall no probe can see is
+one PRINCIPLE 5 can't prove. Starting a display again on a dropped status, so the new run hears the
+server: content could make a display start again at will (bounded by P031's count, as navigating
+away is), for a block the frame already shows.
+
+**Revisit when** a host needs a later block told in a display with files (then: start it again on a
+dropped status, its next run's first document says it), or url mode gets a shell of Porthole's on
+the app's origin.

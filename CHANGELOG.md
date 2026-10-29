@@ -4,6 +4,24 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **Security (P124, after the audit raft-security-audit#16):** any frame could say
+  `porthole/notifications/frame-status` (an opaque widget, a served page, an MCP Apps view, a
+  nested page through its shell), and the host took it as Porthole's server's word: its `outcome`
+  became `blocked` with the content's reason and code, and a host drew its fallback in Porthole's
+  wording ("Open this in a new tab to sign in") with a link out. Now an opaque frame's frame status
+  is never taken, and a frame that speaks is heard only before anything else it says in the run
+  (its first document, a page of Porthole's; content always runs after Porthole's own first word).
+  One not taken is no outcome and no code: the host hears a `hostError` of the new kind
+  `frame-status`, once a run. A url-mode app's word is taken as before (THREAT_MODEL S6). Changed:
+  a frame that speaks no longer tells a later block itself; a display without files starts again
+  and its next run says it, and in one with files a page answered by a status page (access revoked)
+  shows the server's page in the frame without a `blocked` outcome.
+- **Tests (P124):** `test/outcome.test.ts` ("who may say how loading went"); four forgers in
+  `leak/served/outcome.spec.ts` (a served shell's content, an artifact page, an opaque widget, a
+  nested page), negative control `frame-status`.
+
 ## 0.14.4
 
 - **Docs (P123):** a display taking the keyboard is an accepted risk (THREAT_MODEL §5): the guard

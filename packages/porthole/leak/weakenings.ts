@@ -640,6 +640,15 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "false",
     },
   ],
+  // Who may say how loading went (P124): any frame's frame status is taken, an opaque widget's, a
+  // served page's or a nested page's after its first word, and draws the host's fallback.
+  "frame-status": [
+    {
+      file: "src/host/outcome.ts",
+      find: '  const mayBePorthole = () => source.kind === "url" && (!speaks || !spoke);',
+      replace: "  const mayBePorthole = () => true;",
+    },
+  ],
   // The asset library's CSP (P089), taken out by the served harness: scripts from it run
   // whoever uploaded them; an asset opened on its own runs.
   "blob-script": "harness",
