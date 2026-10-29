@@ -788,28 +788,33 @@ unposted words beside the frame and tell the page when.
   and went back to the composer is taken back; a page that holds the keyboard from its load, or
   takes it while the person types, and takes it back on its own blur gets at most two keys of a
   sentence on Firefox and is stopped (none on Chromium, where a page can't take focus back on its
-  blur), and its `comments.open` on a key it got reaches no handler; what a page says in the
-  shell's name, to its parent or to the host's window, moves nothing (negative controls
-  `shell-namespace`, `shell-host-input,pointer-rule`, `nested-fight`). *What doesn't*: a press in
-  the page within 5 s of the last one turns no activation on, so a second move into it after the
-  person went back to the host's page is taken back until 5 s after their last press or key in the
-  page, or they Tab in; the page gets the keys typed while a move waits for the shell's word, or
-  before focus is back; on full Chromium, where neither the host's page nor the shell sees the
-  pointer over the page, a key the person types into it before the shell answers the host's ask
-  (the time a message takes between processes; 0 of 24 measured) is taken for a press, and the
-  page keeps the keyboard, as on the headless shell until the pointer has been over one of the
-  page's frames (5 of 12 in the probe's timing); a press back into the page within 300 ms of a
-  fight putting focus in the host's field is taken back on full Chromium; where the pointer is
-  seen, an assistive technology's activation in the page within a second of typing on the host's
-  page with the pointer elsewhere is taken back (a Tab, or one a second later, keeps it); a shell
-  without `navigator.userActivation` leaves 0.13's rule. A page that holds the thread it shares
-  with its shell (WebKit; Firefox and Chromium where the frames share a process) from its own
-  click handler would push the moment the shell sees its activation past the person's next keys on
-  the host's page: so the shell looks and beats every 50 ms and says how long it went without a
-  look, and an activation it reports after a stall of over 100 ms (its own, or no word heard) is
-  no one's gesture until it lapses (P111, after its review; negative control `shell-stall`). The
-  cost: in those engines a page that keeps its thread busy has the person's real click taken for
-  uncertain until it is idle.
+  blur), and its `comments.open` on a key it got reaches no handler on Firefox and full Chromium
+  (on Chromium with frames in process it can: below); what a page says in the shell's name, to its
+  parent or to the host's window, moves nothing (negative controls `shell-namespace`,
+  `shell-host-input`, `pointer-rule`, `nested-fight`). *What doesn't*: a press in the page within 5 s
+  of the last one turns no activation on, so a second move into it after the person went back to
+  the host's page is taken back until 5 s after their last press or key in the page, or they Tab
+  in; the page gets the keys typed while a move waits for the shell's word, or before focus is
+  back; on full Chromium, where neither the host's page nor the shell sees the pointer over the
+  page, a key the person types into it before the shell answers the host's ask (the time a message
+  takes between processes; 0 of 24 measured) is taken for a press, and the page keeps the keyboard
+  and its `comments.open` opens; and so, more often, where Chromium keeps the page's frames in the
+  host's process (the headless shell; a person's Chrome without full site isolation, Chrome on
+  Android) until the host's page has seen the pointer over one of the page's frames: there the
+  page's input runs before the host's ask (5 of 12 in the probe's timing; its `comments.open` 990
+  ms after the key reached the handler 2 of 2, in the review of P120). 0.13 took such a move back,
+  so this is weaker than 0.13's guard there, since P111 (P120 narrowed it); a press back into the
+  page within 300 ms of a fight putting focus in the host's field is taken back on full Chromium;
+  where the pointer is seen, an assistive technology's activation in the page within a second of
+  typing on the host's page with the pointer elsewhere is taken back (a Tab, or one a second
+  later, keeps it); a shell without `navigator.userActivation` leaves 0.13's rule. A page that
+  holds the thread it shares with its shell (WebKit; Firefox and Chromium where the frames share a
+  process) from its own click handler would push the moment the shell sees its activation past the
+  person's next keys on the host's page: so the shell looks and beats every 50 ms and says how
+  long it went without a look, and an activation it reports after a stall of over 100 ms (its own,
+  or no word heard) is no one's gesture until it lapses (P111, after its review; negative control
+  `shell-stall`). The cost: in those engines a page that keeps its thread busy has the person's
+  real click taken for uncertain until it is idle.
 
 ### The app runtime
 

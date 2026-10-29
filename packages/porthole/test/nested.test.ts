@@ -318,9 +318,13 @@ describe("the host's rule on the shell's word (P111)", () => {
     // Not typing within the second; or an engine that never shows the pointer over a frame.
     expect(pressPossible(true, false, -Infinity, 10_000 - TYPING_MS - 1, 10_000)).toBe(true);
     expect(pressPossible(false, false, -Infinity, 9_500, 10_000)).toBe(true);
-    const shown = { ...move, shell: { word, hostInputAt: 9_500, pointerShown: true } };
+    // The rule, as the activation turned on (`keyed`, P120 after its review), where the pointer is
+    // seen: a key of the person's, not a press; where it isn't, or not keyed, as before.
+    const keyed = { ...word, keyed: true };
+    const shown = { ...move, shell: { word: keyed, hostInputAt: 9_500, pointerShown: true } };
     expect(personMoved(shown)).toBe(false);
-    expect(personMoved({ ...shown, over: true, overSince: 9_700 })).toBe(true);
+    expect(personMoved({ ...shown, shell: { ...shown.shell, pointerShown: false } })).toBe(true);
+    expect(personMoved({ ...shown, shell: { ...shown.shell, word } })).toBe(true);
     // A press the engine shows still counts.
     expect(personMoved({ ...shown, pressed: true })).toBe(true);
   });

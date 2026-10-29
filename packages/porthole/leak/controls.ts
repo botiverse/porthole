@@ -641,17 +641,16 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   // second of the person's press in it keeps it though they went back to the host's composer.
   "shell-host-input": {
     specs: [NESTED],
-    fails: NOTHING,
-    holds: {
-      why: "the pointer rule (P120) holds the same move where the host's page sees the pointer over its frames (Chromium and WebKit with frames in process, Firefox): the pointer is over the composer and the person just typed; on full Chromium, which isn't a controls engine, the quiet host is the only wall",
-      by: "shell-host-input,pointer-rule",
-    },
-  },
-  // Both walls out: a quiet host not asked, and a press taken wherever the pointer is (P120).
-  "shell-host-input,pointer-rule": {
-    specs: [NESTED],
     fails: all(
       "a page's focus() just after the person pressed it and went back to the host's composer is taken back",
+    ),
+  },
+  // Where the host's page sees the pointer, an activation that turned on as the person typed, the
+  // pointer elsewhere, is their key landing in the page, judged as it turned on (P120).
+  "pointer-rule": {
+    specs: [NESTED],
+    fails: all(
+      "an activation that came as the person typed, the pointer elsewhere, is no gesture a second on either (P120, after its review)",
     ),
   },
   "comment-draft": {

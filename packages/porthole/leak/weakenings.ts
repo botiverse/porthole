@@ -511,7 +511,7 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   ],
   // The pointer rule (P120) out: a nested page's shell's activation may be a press wherever the
   // pointer is, so a key the person meant for the host's composer, landing in the page, counts as
-  // one. Run with `shell-host-input`, which holds the same moves where the pointer isn't seen.
+  // one.
   "pointer-rule": [
     {
       file: "src/platform/focus-guard.ts",

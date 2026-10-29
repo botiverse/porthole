@@ -113,6 +113,12 @@ export interface ShellWord {
   readonly focusedAt: number;
   /** Its activation turned on while it was stalled: uncertain until it goes off (`SHELL_STALL_MS`). */
   readonly uncertain?: boolean;
+  /**
+   * Its activation turned on within `TYPING_MS` of the person's typing on the host's page, the
+   * pointer not come over the frame since (`pressPossible`, judged as it turned on): where the
+   * host's page sees the pointer, their key landing in the page, no press (P120).
+   */
+  readonly keyed?: boolean;
 }
 
 /** One move of the keyboard the guard undid. */
@@ -193,13 +199,7 @@ export function personMoved(move: FocusMove): boolean {
     return (
       (move.seen && move.pressed) ||
       (shellGesture(move.shell.word, move.shell.hostInputAt, move.now) &&
-        pressPossible(
-          move.shell.pointerShown ?? false,
-          move.over,
-          move.overSince,
-          move.typedAt,
-          move.now,
-        ))
+        !(move.shell.pointerShown === true && move.shell.word.keyed === true))
     );
   }
   if (
@@ -511,9 +511,7 @@ export function focusGuard(view: Window): FocusGuard {
     // typing on the host's page with the pointer elsewhere, it is their keys landing in the page
     // (P120). Read as of the move.
     const theirs =
-      word !== null &&
-      shellGesture(word, inputAt, at) &&
-      pressPossible(pointerShown, frame.matches(":hover"), guarded.overSince, typedAt, held.since);
+      word !== null && shellGesture(word, inputAt, at) && !(pointerShown && word.keyed === true);
     // It said focus came in around the move, or answered the ask the move made with focus in it.
     const spoke =
       word !== null &&
@@ -867,12 +865,22 @@ export function focusGuard(view: Window): FocusGuard {
       if (said.asked !== undefined && said.asked === guarded.asked) {
         guarded.answered = true;
       }
+      // Whether a press could have turned it on, judged as it did (P120, after its review): the
+      // person's typing then, and the pointer then, not when a move is later judged.
+      const activatedAt = said.ago === null || uncertain ? -Infinity : at - said.ago;
+      const keyed =
+        activatedAt === -Infinity
+          ? false
+          : turnedOn
+            ? !pressPossible(true, frame.matches(":hover"), guarded.overSince, typedAt, activatedAt)
+            : before.keyed === true;
       guarded.word = {
         supported: said.supported,
-        activatedAt: said.ago === null || uncertain ? -Infinity : at - said.ago,
+        activatedAt,
         focused: said.focused,
         focusedAt: said.focused && !before.focused ? at : before.focusedAt,
         ...(uncertain ? { uncertain: true } : {}),
+        ...(keyed ? { keyed: true } : {}),
       };
       if (waiting?.frame === frame) {
         settle(at);
@@ -894,7 +902,7 @@ export function focusGuard(view: Window): FocusGuard {
         guarded !== undefined &&
         word !== null &&
         shellGesture(word, inputAt, at) &&
-        pressPossible(pointerShown, frame.matches(":hover"), guarded.overSince, typedAt, at)
+        !(pointerShown && word.keyed === true)
       );
     },
     focus(frame) {

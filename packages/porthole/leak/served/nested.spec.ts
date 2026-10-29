@@ -351,6 +351,68 @@ test.describe("a nested page (P111)", () => {
     expect(rule.afterOff, "once off, the next is a gesture again").toBe(true);
   });
 
+  test("an activation that came as the person typed, the pointer elsewhere, is no gesture a second on either (P120, after its review)", async ({
+    page,
+  }) => {
+    // The host's rule, driven directly in the browser's own event loop (as the stall rule above):
+    // where the host's page sees the pointer over its frames, an activation that turned on within
+    // a second of the person's typing on the host's page, the pointer not come over the frame
+    // since, is their key landing in the page. Judged as it turned on: not again once that second
+    // is over, while the activation's own second still runs.
+    await page.goto("/");
+    const rule = await page.evaluate(async (module) => {
+      const { focusGuard } = (await import(module)) as {
+        focusGuard: (view: Window) => {
+          add(frame: HTMLIFrameElement, taken: () => void, options: { nested: boolean }): void;
+          shell(
+            frame: HTMLIFrameElement,
+            said: { supported: boolean; ago: number | null; focused: boolean; gap: number },
+          ): void;
+          beat(frame: HTMLIFrameElement): void;
+          gesture(frame: HTMLIFrameElement): boolean;
+        };
+      };
+      const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));
+      const guard = focusGuard(window);
+      const frameAt = () => {
+        const frame = document.createElement("iframe");
+        document.body.append(frame);
+        guard.add(frame, () => {}, { nested: true });
+        return frame;
+      };
+      const off = (frame: HTMLIFrameElement) =>
+        guard.shell(frame, { supported: true, ago: null, focused: false, gap: 16 });
+      // The pointer has been over a frame (the host's page sees it, P120), then left it.
+      const keyed = frameAt();
+      keyed.dispatchEvent(new PointerEvent("pointerover"));
+      off(keyed);
+      // The person types on the host's page (a key it hears), and goes on for over a second.
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "a" }));
+      await wait(1_050);
+      // The shell says its activation turned on 70 ms after that key (950 ms ago): within its
+      // own second still, past the second of typing.
+      guard.beat(keyed);
+      guard.shell(keyed, { supported: true, ago: 950, focused: true, gap: 16 });
+      const afterTyping = guard.gesture(keyed);
+      // An activation that turned on over a second after the person's typing: a gesture, as before.
+      const later = frameAt();
+      off(later);
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "b" }));
+      await wait(1_100);
+      guard.beat(later);
+      guard.shell(later, { supported: true, ago: 0, focused: true, gap: 16 });
+      const afterPause = guard.gesture(later);
+      return { afterTyping, afterPause };
+    }, "/src/platform/focus-guard.ts");
+    expect(
+      rule.afterTyping,
+      "probe: an activation that came as the person typed, the pointer elsewhere, stays no gesture",
+    ).toBe(false);
+    expect(rule.afterPause, "one that turned on over a second after typing is a gesture").toBe(
+      true,
+    );
+  });
+
   for (const pause of [1_200, 3_000, 4_500]) {
     test(`a page's focus() ${pause} ms after the person paused typing in the host's composer is taken back`, async ({
       page,
