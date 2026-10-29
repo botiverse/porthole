@@ -611,9 +611,26 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   },
   // A nested page's shell on a label of its own (P114, porthole#56): on its scope's, a same-scope
   // inline widget or artifact reads the shell's document, and in it the page's sealed address.
-  "shell-label": {
+  // Alone, the host's mount refuses the scope's label (P121), and the shell wouldn't run there: run
+  // with both taken out too, as a content Worker of a host's own and an old host would be.
+  "shell-label,nested-host-label,nested-shell-origin": {
     specs: [NESTED_SIBLINGS],
-    fails: all("[nested-siblings]"),
+    fails: all("[nested-siblings]", "[nested-label]"),
+  },
+  // The host's mount refuses a nested page located anywhere but a shell's own label (P121).
+  "nested-host-label": {
+    specs: [NESTED_SIBLINGS],
+    fails: all("[nested-label]"),
+  },
+  // The shell runs on a shell's own label alone (P121): the wall behind the host's mount, for a
+  // host whose platform isn't Porthole's.
+  "nested-shell-origin": {
+    specs: [NESTED_SIBLINGS],
+    fails: NOTHING,
+    holds: {
+      why: "the host's mount refuses a shell located on any other label first, and /server serves none there",
+      by: "shell-label,nested-host-label,nested-shell-origin",
+    },
   },
   // Every file below a nested page's sealed prefix is sandboxed (P111, after its review).
   "file-sandbox": {

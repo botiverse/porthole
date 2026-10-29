@@ -27,6 +27,28 @@ export function parseOrigin(origin: string): ParsedOrigin | null {
   return { scheme, host, port: port ?? DEFAULT_PORTS[scheme] ?? "" };
 }
 
+/**
+ * The start of every label Porthole serves for itself on a content domain (P114): no host's naming
+ * may make one (`content.name` is refused one, and `prefixedName` won't take the prefix).
+ */
+export const PORTHOLE_LABEL_PREFIX = "porthole-";
+
+const NESTED_LABEL = /^porthole-[a-z2-7]{24}$/u;
+
+/** Whether a label is a nested page's shell's own (P114, `nestedLabelOf`'s form). */
+export const isNestedLabel = (label: string): boolean => NESTED_LABEL.test(label);
+
+/**
+ * Whether `origin` is on a nested page's shell's own label (P114): its host's first label is one.
+ * The shell runs nowhere else (P121): the host's mount, the shell itself and `/server`'s helpers
+ * each refuse any other origin, so a content Worker of a host's own can't put it beside other
+ * content by mistake.
+ */
+export function onNestedLabel(origin: string): boolean {
+  const parsed = parseOrigin(origin);
+  return parsed !== null && isNestedLabel(parsed.host.split(".")[0] ?? "");
+}
+
 /** Whether `origin` is an exact origin (`https://host[:port]`, lowercase, no path). */
 export function isExactOrigin(origin: unknown): origin is string {
   return typeof origin === "string" && parseOrigin(origin) !== null;
@@ -124,6 +146,8 @@ export function checkFrameLocation(
   location: FrameLocation,
   contentOrigins: readonly string[],
   hostOrigin: string,
+  /** The config nests its pages (P111): the location must be on a shell's own label (P121). */
+  nested = false,
 ): void {
   const origin = parseOrigin(location.origin);
   let url: URL;
@@ -141,6 +165,11 @@ export function checkFrameLocation(
   if (!contentOrigins.some((source) => originMatchesSource(location.origin, source))) {
     throw new TypeError(
       `The located origin ${location.origin} is not one of the config's content origins`,
+    );
+  }
+  if (nested && !onNestedLabel(location.origin)) {
+    throw new TypeError(
+      `The located origin ${location.origin} isn't a nested page's own: its shell is served on a label of its own alone (${PORTHOLE_LABEL_PREFIX}<24 base32>, nestedLabelOf(label), P114), never beside other content`,
     );
   }
   const host = parseOrigin(hostOrigin);

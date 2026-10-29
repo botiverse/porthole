@@ -79,6 +79,7 @@ export {
   NESTED_FILE_HEADERS,
   NESTED_FILES_PREFIX,
   nestedAncestors,
+  nestedFileCsp,
   nestedLabelOf,
   nestedShellCsp,
   nestedShellResponse,

@@ -223,6 +223,23 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   // A nested page's shell on its scope's own label, as before P114 (porthole#56): its frame's
   // address and its sealed files answered on the scope's origin, beside the scope's other displays.
   "shell-label": "harness",
+  // The host's mount takes a nested page's location on any content origin (P121): a shell
+  // located on its scope's label, as a content Worker of a host's own might answer, is framed.
+  "nested-host-label": [
+    {
+      file: "src/isolation/served.ts",
+      find: "  if (nested && !onNestedLabel(location.origin)) {",
+      replace: "  if (false) {",
+    },
+  ],
+  // A nested page's shell runs on any origin (P121), its scope's included.
+  "nested-shell-origin": [
+    {
+      file: "src/shell/frame.ts",
+      find: '  if (!/^porthole-[a-z2-7]{24}\\./.test(location.hostname + ".")) {',
+      replace: "  if (false) {",
+    },
+  ],
   // A served page without its Permissions-Policy header (P099): on a tab nothing else denies it
   // devices, location or full screen, but the shell's locks (`device-locks`, the only wall on
   // WebKit and Firefox, which don't apply the header to them).
@@ -691,6 +708,7 @@ const SERVED = [
   "device-locks",
   // A nested page's shell (P111), made in the harness's process like the documents' shells.
   "shell-namespace",
+  "nested-shell-origin",
 ];
 
 /** Whether a control asked for edits the served documents' shell (`weakenServed`). */

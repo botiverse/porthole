@@ -1,5 +1,5 @@
 import { PAGE_SANDBOX_TOKENS } from "../compile/policy.ts";
-import { hostOriginProblem } from "../isolation/served.ts";
+import { hostOriginProblem, onNestedLabel } from "../isolation/served.ts";
 
 /**
  * Porthole's shell for a nested page (P111): the whole document at the address the host frames,
@@ -35,6 +35,12 @@ export const FRAME_SHELL_RUNTIME = String.raw`(() => {
   const plan = __PLAN__;
   const PREFIX = "porthole/shell/";
   const own = location.origin;
+  // A nested page's shell runs on a label of its own alone (P114, P121): on any other origin (its
+  // scope's, where other displays run content with allow-same-origin) it frames nothing and says
+  // nothing.
+  if (!/^porthole-[a-z2-7]{24}\./.test(location.hostname + ".")) {
+    return;
+  }
   let page = null;
   try {
     page = new URL(plan.page);
@@ -249,6 +255,12 @@ export function frameShellScript(options: FrameShellOptions): string {
   }
   if (!page.pathname.startsWith("/__porthole/f/") || page.hash !== "") {
     throw new TypeError("frameShellScript: page is under /__porthole/f/, with no fragment");
+  }
+  // The shell runs on a nested page's own label alone (P114), and its page is on its origin.
+  if (!onNestedLabel(page.origin)) {
+    throw new TypeError(
+      "frameShellScript: page is on a nested page's own label (porthole-<24 base32>, nestedLabelOf)",
+    );
   }
   return FRAME_SHELL_RUNTIME.replace("__PLAN__", () =>
     scriptJson({

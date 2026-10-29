@@ -11,7 +11,7 @@ import { DEFAULT_ENTRY, lookupFile, requestFilePath, type FileLookup } from "../
 import { fileTypeOf } from "../files/types.ts";
 import { isCodeAsset } from "../runtime/requests.ts";
 import { sha256, utf8 } from "./crypto.ts";
-import { NESTED_FILE_HEADERS } from "./nested.ts";
+import { NESTED_FILE_HEADERS, nestedFileCsp } from "./nested.ts";
 import type { FileBody, StoredAsset, StoredFiles } from "./types.ts";
 
 /**
@@ -249,14 +249,13 @@ export async function serveFile(serving: FileServing): Promise<Response> {
   // sandbox, so none opened as a document on its own (a tab, "open image in new tab") runs on that
   // origin. Pages run their scripts, opaque; anything else runs nothing (a file's is inert already,
   // a script's gets one too).
-  const csp =
-    role === "file"
+  const csp = nested
+    ? nestedFileCsp(role, directives)
+    : role === "file"
       ? INERT_FILE_CSP
       : role === "page"
         ? servedDocumentCsp(serving.compiled.config, directives)
-        : nested
-          ? `${serializeCsp(directives)}; sandbox`
-          : serializeCsp(directives);
+        : serializeCsp(directives);
   const headers = new Headers({
     "content-type": type,
     "x-content-type-options": "nosniff",
