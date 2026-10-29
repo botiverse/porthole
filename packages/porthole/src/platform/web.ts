@@ -2,6 +2,7 @@ import type { ColorScheme } from "../config/schema.ts";
 import {
   FRAME_STATUS_METHOD,
   SHELL_BEAT_METHOD,
+  SHELL_LOOK_METHOD,
   SHELL_METHOD_PREFIX,
   SHELL_STATE_METHOD,
 } from "../isolation/types.ts";
@@ -41,7 +42,7 @@ function shellWords(opened: Transport, frame: HTMLIFrameElement, guard: FocusGua
     if (params === null || typeof params !== "object") {
       return;
     }
-    const { supported, ago, focused, gap } = params as Record<string, unknown>;
+    const { supported, ago, focused, gap, asked } = params as Record<string, unknown>;
     const span = (value: unknown) =>
       typeof value === "number" && Number.isFinite(value) && value >= 0;
     if (message.method === SHELL_BEAT_METHOD) {
@@ -55,11 +56,18 @@ function shellWords(opened: Transport, frame: HTMLIFrameElement, guard: FocusGua
       typeof supported !== "boolean" ||
       typeof focused !== "boolean" ||
       !(ago === null || span(ago)) ||
-      !span(gap)
+      !span(gap) ||
+      !(asked === undefined || (Number.isSafeInteger(asked) && (asked as number) >= 0))
     ) {
       return;
     }
-    guard.shell(frame, { supported, ago: ago as number | null, focused, gap: gap as number });
+    guard.shell(frame, {
+      supported,
+      ago: ago as number | null,
+      focused,
+      gap: gap as number,
+      ...(asked === undefined ? {} : { asked: asked as number }),
+    });
   });
   return {
     send: (message) => opened.send(message),
@@ -131,15 +139,6 @@ export const webPlatform: PlatformHost = {
     const guard = focusGuard(view);
     const taken = new Set<(take: FocusTake) => void>();
     const nested = spec.nested === true && spec.source.kind === "url";
-    const unguard = guard.add(
-      frame,
-      (take) => {
-        for (const listener of taken) {
-          listener(take);
-        }
-      },
-      { nested },
-    );
     // A served frame may pass through the host's own pages (a redirect entry's, P068): what they
     // say of the frame's status is heard too, and nothing else from there.
     const own = view.origin;
@@ -150,6 +149,24 @@ export const webPlatform: PlatformHost = {
       origin === "null" || own === "null" || own === origin
         ? undefined
         : { origin: own, accept: isFrameStatus },
+    );
+    const unguard = guard.add(
+      frame,
+      (take) => {
+        for (const listener of taken) {
+          listener(take);
+        }
+      },
+      {
+        nested,
+        // A nested page's shell is asked to look as the guard hears a move into its frame (P120).
+        ...(nested
+          ? {
+              ask: (n: number) =>
+                opened.send({ jsonrpc: "2.0", method: SHELL_LOOK_METHOD, params: { n } }),
+            }
+          : {}),
+      },
     );
     // A nested page's shell (P111): its own words go to the guard, by the frame's window and the
     // content origin (the transport's checks); the page's pass on. The shell drops any page

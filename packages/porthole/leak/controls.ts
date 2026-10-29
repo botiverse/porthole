@@ -88,6 +88,10 @@ const BLUR_TAKE =
 const FIELD_TAKE =
   "a composer the host focuses with focusField, beside a page with the person's gesture that takes focus back on its blur, gets their words";
 
+/** A nested page's keyboard in a fight over the host's composer (P120). */
+const NESTED_FIGHT =
+  "a page that holds the keyboard from its load and takes it back on its own blur gets none of what the person types in the host's composer, and is stopped (P120)";
+
 /** What the CSP sandbox alone holds on a tab (P099), every engine. */
 const TAB_SANDBOX = [
   "served.domain.tab-escapes",
@@ -618,6 +622,16 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "a page's SVG or XML file opened on a tab of its own is an opaque origin, and its script touches nothing of the shell's (P111, after its review)",
     ),
   },
+  // A nested page's frame that takes focus back in a fight over a text field is judged as any
+  // frame is, its shell not asked (P120): let be, the page keeps the keyboard. Only Firefox lets a
+  // page take focus back on its own blur.
+  "nested-fight": {
+    specs: [NESTED],
+    fails: { chromium: [], webkit: [], firefox: [NESTED_FIGHT] },
+    holds: {
+      why: "no probe can see it on Chromium and WebKit: a page can't take focus back from its own blur there, so no fight has a frame take focus again (measured)",
+    },
+  },
   // A stalled shell's activation is uncertain (P111, after its review).
   "shell-stall": {
     specs: [NESTED],
@@ -626,6 +640,15 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   // A nested page's gesture needs a quiet host (P111): a page that takes the keyboard within a
   // second of the person's press in it keeps it though they went back to the host's composer.
   "shell-host-input": {
+    specs: [NESTED],
+    fails: NOTHING,
+    holds: {
+      why: "the pointer rule (P120) holds the same move where the host's page sees the pointer over its frames (Chromium and WebKit with frames in process, Firefox): the pointer is over the composer and the person just typed; on full Chromium, which isn't a controls engine, the quiet host is the only wall",
+      by: "shell-host-input,pointer-rule",
+    },
+  },
+  // Both walls out: a quiet host not asked, and a press taken wherever the pointer is (P120).
+  "shell-host-input,pointer-rule": {
     specs: [NESTED],
     fails: all(
       "a page's focus() just after the person pressed it and went back to the host's composer is taken back",

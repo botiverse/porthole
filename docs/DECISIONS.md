@@ -6372,3 +6372,108 @@ tap); "…two markers' 44 px boxes overlap, a tap is the nearest bubble's"; "a p
 pinned at the frame's top… takes a mouse click and a tap where it is drawn" (at its drawn
 pixels); "a mouse is as before…" (a click 11 px below or 4 px beside the bubble is the page's,
 with no touch and on a touch screen after a finger).
+
+## P120 · 2026-10-29 · A nested page's keyboard: a fight is judged without the shell, the shell is asked to look, a key is no press where the pointer is seen · Accepted
+
+Amends P111. **Context.** The audit of P111's guard (2026-10-28, NG-1, P0 on Firefox; porthole#56):
+a nested page that focuses its field as it loads and focuses it again whenever it loses focus read
+the person's whole comment as they typed it in the host's composer, and was never stopped. Measured
+again on aedc412 with the probes below (Firefox, the audit's page; the person clicks the composer
+and types a 42-character sentence 70 ms a key): every key to the page, one `focusTaken`, not
+stopped, focus left in the frame, 5 runs of 5. The page started while the person was already
+typing: the rest of the sentence lost in 3 of 5 runs on Firefox, 2 of 5 on the headless shell and 1
+of 5 on full Chromium, where the page's `comments.open`, called on the first key it got, reached the
+handler.
+
+What ended the guard's fight each time (traces of `src/platform/focus-guard.ts`): after a take-back
+the page took focus again, the guard waited for the shell's word (P111), and the person's next key,
+typed into the page, turned the page's and so the shell's activation on. The shell said its
+activation turned on with no press or key on the host's page since, and the guard took the frame
+for the person's. On the headless shell the first move itself ended so: the shell's first word, 11
+ms after the move, said both that focus came in and that its activation was on (the key landed
+before the shell's next frame). The audit's trace, a wait that gave up when focus left the frame
+for a moment and so let the frame be, ends the same way. Measured too: the shell gets no event as
+focus comes into or leaves its child frame (Chromium, Firefox), so it can only look; the host's page
+sees the pointer over a frame on Firefox and the headless shell (`pointerover` on its element,
+`:hover`), and on full Chromium nothing past the frame's edge, and the shell sees nothing of the
+pointer over its child there either. A key and a press look the same in `userActivation`.
+
+**Decision.**
+1. **A fight is judged as 0.13 judges it.** A take-back in progress is a fight when it undoes the
+   page's own move: a take-back, `focusField`, a wait from a text field that moved on, or the person
+   leaving a frame that took focus itself for a text field. In a fight, a nested page's frame that
+   takes focus again is the person's only by a Tab, the host's own move, or a press the engine shows
+   (P109's rules); its shell isn't asked. Otherwise it is taken back at once and counted as a
+   take-back that failed (three within 10 s stop the display, whether or not the host's page saw
+   typing). An activation the shell says turned on during a fight against its frame is uncertain
+   (P111's word for a stall's): no one's gesture until it lapses, for `comments.open` too. The person
+   leaving a nested page they moved into for the host's composer is no fight: going back in within
+   300 ms waits for the shell's word, as at first.
+2. **A wait from a text field doesn't end with the frame let be.** If focus left the frame for
+   nothing or for the field, with no press on the host's page since, it is the page's move still:
+   watched as a take-back is, focus on nothing given back and counted.
+3. **The host asks the shell to look.** As the guard starts waiting on a move into a nested page's
+   frame it sends the shell `porthole/shell/look` (`{ n }`); the shell looks at once and answers
+   with its state naming the ask (`asked: n`). An answer that says focus is in the frame decides the
+   wait: its activation if a press could have made it, else the page's move, taken back. The shell
+   passes no message of the host's in its own namespace to the page.
+4. **A key is no press where the host's page sees the pointer.** Where it shows the pointer over its
+   frames (Firefox; Chromium and WebKit where the frame is in their process, learned from a
+   `pointerover` on one of the page's frames; full Chromium never), the shell's activation counts as
+   a press only if the pointer is over the frame and came over it since the person last typed on
+   the host's page, or that typing was more than a second before (`pressPossible`). Otherwise the
+   move is the page's, taken back without waiting, and `comments.open`'s gesture isn't there.
+
+**Measured** (Firefox 155, Chromium 153 full and headless shell, Playwright 1.63, on a box at load
+15 to 20; the probes below, 6 runs each): the page from its load, Firefox: at most 2 keys of the
+sentence to the page and 2 lost, three take-backs, stopped every time; Chromium and full Chromium,
+no key lost (a page can't take focus back on its own blur there). The page started while the
+person types: at most 1 key to the page on every engine, Firefox stopped every time, no
+`comments.open` reaching the handler. Under load (two cores, four workers, 5 runs each), P109's
+keyboard cases and these: 35 of 35. The ask, measured on its own: full Chromium 24 of 24 with it
+(with or without the pointer over the page before), 3 of 4 without; the headless shell 12 of 12
+where the pointer had been over the page, 7 of 12 where it never was.
+
+**Threat it re-opens.** None: no gate or default loosens; the keyboard rule and `comments.open` are
+stricter.
+
+**Cost.** In a fight, a person who presses back into a nested page within 300 ms of focus landing in
+the host's field has it taken back on full Chromium (elsewhere a press the engine shows counts); a
+Tab, or a press once the fight is over, gets in. Where the pointer is seen, an assistive
+technology's activation in the page within a second of typing on the host's page, with the pointer
+elsewhere, is taken back; a Tab, or one a second later, keeps it. One message each way per wait.
+
+**Residual.** On full Chromium neither the host's page nor the shell sees the pointer over the
+page: a key the person types into it before the shell answers the ask (the time a message takes
+between the processes) is taken for a press, and the page keeps the keyboard (0 of 24 measured). On
+the headless shell, whose frames run on the host's thread, the page's input runs before the ask:
+there the same holds until the pointer has been over one of the page's frames (5 of 12 in the
+probe's timing, its first key 10 ms after the page's move). The guard is best effort on every
+engine (Raft, porthole#56): a page gets the keys typed before focus is back.
+
+**Tested.** `test/nested.test.ts`: `pressPossible` and the rule with it; the shell, run against a
+stand-in of its window, answers an ask at once naming it and passes none of the host's words in its
+namespace to the page. `leak/served/nested.spec.ts` on full Chromium, the headless shell and
+Firefox: "a page that holds the keyboard from its load and takes it back on its own blur gets none
+of what the person types in the host's composer, and is stopped (P120)" (fails on aedc412 on
+Firefox, 5 of 5). `leak/served/nested-keyboard.spec.ts`: "a page that starts taking the keyboard
+back on its own blur while the person types in the host's composer gets none of the rest, opens no
+composer, and is stopped (P120)": a race (whether a key lands before the shell looks), so it is no
+control's probe and runs in a file of its own, as P111's stall race does. The nested suites and
+P109's keyboard cases (`leak/served/runtime.spec.ts`) pass on all three. Negative control
+`nested-fight` (a nested frame that takes focus back in a fight is let be) fails that probe on
+Firefox and nothing on Chromium. `shell-host-input` alone now fails nothing where the pointer is
+seen (the pointer rule holds its probe too); with `pointer-rule` (the rule out) it fails it on
+Chromium and Firefox, as it did alone before. WebKit wasn't run (its libraries are missing on this
+box); it refuses a cross-origin frame's `focus()` without a gesture of its own (P111, measured).
+
+**Rejected.** Waiting for the shell in a fight (what failed). Taking every unjudged move back at
+once and giving focus to the frame if the shell then says it was a press: the page would hear a
+blur and a focus on every real click (a menu that closes on blur closes). The shell telling a press
+from a key: it gets no event as focus comes into its child, and `userActivation` doesn't say
+(measured). The host's pointer as a cue on full Chromium: it stops at the frame's edge, so a
+real click would be taken back.
+
+**Revisit when** an engine shows the host's page or a frame's parent the pointer over an
+out-of-process frame, says what turned activation on, or tells a frame's parent as focus comes
+into it.

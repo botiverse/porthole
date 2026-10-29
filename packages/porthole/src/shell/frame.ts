@@ -18,8 +18,11 @@ import { hostOriginProblem } from "../isolation/served.ts";
  *   shell (activation goes up, never down), so the shell's activation turning on is a press or
  *   key of the person's in this page. It is read at every animation frame, on its window's focus
  *   and blur, and before each message of the page's is passed on (a call made in a click's handler
- *   arrives after the state that says so). What it can't see: a gesture while its activation is
- *   already on (within 5 s of the last one) turns nothing on;
+ *   arrives after the state that says so), and at once when the host asks (`porthole/shell/look`,
+ *   P120: the host heard focus move into the frame, and a key the person types into the page
+ *   before the shell's next frame would turn its activation on as a press does). What it can't
+ *   see: a gesture while its activation is already on (within 5 s of the last one) turns nothing
+ *   on;
  * - renews the page's sealed files' address before it ends, and gives the page the new one
  *   (`porthole/files-renewed`): the page's own loads aren't its origin's (an opaque origin's never
  *   are), so only the shell, on that origin, may renew it (P083);
@@ -96,21 +99,22 @@ export const FRAME_SHELL_RUNTIME = String.raw`(() => {
   let focused = false;
   let lookedAt = performance.now();
   let toldAt = 0;
-  const tell = (gap) => {
+  const tell = (gap, asked) => {
     toldAt = performance.now();
-    toHost({
-      jsonrpc: "2.0",
-      method: PREFIX + "state",
-      params: {
-        supported: activation !== undefined,
-        active,
-        ago: active ? Math.max(0, Math.round(performance.now() - since)) : null,
-        focused,
-        gap: Math.max(0, Math.round(gap)),
-      },
-    });
+    const params = {
+      supported: activation !== undefined,
+      active,
+      ago: active ? Math.max(0, Math.round(performance.now() - since)) : null,
+      focused,
+      gap: Math.max(0, Math.round(gap)),
+    };
+    // The answer to the host's ask (P120), by its number.
+    if (asked !== undefined) {
+      params.asked = asked;
+    }
+    toHost({ jsonrpc: "2.0", method: PREFIX + "state", params });
   };
-  const look = () => {
+  const look = (asked) => {
     const now = performance.now();
     const gap = now - lookedAt;
     lookedAt = now;
@@ -128,8 +132,8 @@ export const FRAME_SHELL_RUNTIME = String.raw`(() => {
       focused = inside;
       changed = true;
     }
-    if (changed) {
-      tell(gap);
+    if (changed || typeof asked === "number") {
+      tell(gap, typeof asked === "number" ? asked : undefined);
     } else if (now - toldAt >= 50) {
       // The heartbeat: the host knows the shell was looking, every 50 ms.
       toldAt = now;
@@ -167,6 +171,15 @@ export const FRAME_SHELL_RUNTIME = String.raw`(() => {
       return;
     }
     if (framed && source === window.parent && plan.origins.indexOf(event.origin) !== -1) {
+      const data = event.data;
+      // The host's words to the shell are never the page's to hear (P120): its ask to look now.
+      if (data !== null && typeof data === "object" && typeof data.method === "string" && data.method.indexOf(PREFIX) === 0) {
+        const n = data.params !== null && typeof data.params === "object" ? data.params.n : undefined;
+        if (data.method === PREFIX + "look" && typeof n === "number" && n >= 0 && Math.floor(n) === n) {
+          look(n);
+        }
+        return;
+      }
       const child = frame.contentWindow;
       if (child !== null) {
         child.postMessage(event.data, "*");

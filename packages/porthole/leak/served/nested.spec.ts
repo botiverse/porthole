@@ -10,6 +10,7 @@ import {
   composer,
   composerText,
   field,
+  fightOver,
   hostActive,
   hostButton,
   seen,
@@ -174,6 +175,51 @@ test.describe("a nested page (P111)", () => {
     await page.waitForTimeout(300);
     expect(await composerText(page), "probe: the composer kept the person's words").toBe("xwords");
     expect(valueOf(shown), "probe: the page got none").toBe("");
+  });
+
+  test("a page that holds the keyboard from its load and takes it back on its own blur gets none of what the person types in the host's composer, and is stopped (P120)", async ({
+    page,
+    browserName,
+  }) => {
+    // The page focuses its field as it loads, and again whenever it loses focus (which a take-back
+    // fires): no timer, no gesture of its own (the audit of P111's guard, NG-1: on Firefox it read
+    // every key, and was never stopped).
+    const shown = await show(
+      page,
+      `field.addEventListener("blur", () => field.focus());
+       addEventListener("blur", () => field.focus());
+       field.focus();`,
+    );
+    // WebKit refuses a cross-origin frame's focus() with no gesture of its own (measured): there
+    // the page never holds the keyboard. Elsewhere it does, from its load, before the person comes.
+    if (browserName !== "webkit") {
+      await expect.poll(() => hostActive(page), { timeout: 5_000 }).toBe("IFRAME");
+    }
+    await page.waitForTimeout(1_000);
+    await page.mouse.click(composer.x, composer.y);
+    const sentence = "the secret is hunter2 and the code is 4815";
+    await page.keyboard.type(sentence, { delay: 70 });
+    await fightOver(page);
+    const typed = await composerText(page);
+    const leaked = valueOf(shown);
+    const { taken, errors } = await seen(page);
+    const outcome = `the page read ${JSON.stringify(leaked)}, the composer has ${JSON.stringify(typed)}, ${taken.length} taken back, stopped: ${errors.includes(STOPPED)}`;
+    expect(
+      leaked.length,
+      `probe: the page read a few keys at most (${outcome})`,
+    ).toBeLessThanOrEqual(3);
+    expect(
+      sentence.length - typed.length,
+      `probe: the composer kept the person's words but a few keys (${outcome})`,
+    ).toBeLessThanOrEqual(3);
+    expect(
+      errors.includes(STOPPED) || (await hostActive(page)) === "host-composer",
+      `probe: the page doesn't keep the keyboard: focus is back in the composer, or the display was stopped (${outcome})`,
+    ).toBe(true);
+    expect(
+      taken.length < 3 || errors.includes(STOPPED),
+      `probe: a page that kept taking the keyboard was stopped (${outcome})`,
+    ).toBe(true);
   });
 
   test("a page's focus() on a timer while the person types is taken back", async ({

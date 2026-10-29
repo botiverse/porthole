@@ -497,6 +497,28 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "      false &&\n      press !== null &&\n",
     },
   ],
+  // A nested page's frame that takes focus back in a fight over a text field (P120) keeps it, as a
+  // wait for its shell's word ended before the audit of P111's guard (NG-1): its activation then
+  // the person's own keys landing in the page. So a page that takes the keyboard back on its own
+  // blur keeps it on Firefox, where a page can.
+  "nested-fight": [
+    {
+      file: "src/platform/focus-guard.ts",
+      find: "      if (verdict === true) {\n        contest = null;\n        known = frame;",
+      replace:
+        "      if (verdict === true || (watched.fight && guarded.word !== null)) {\n        contest = null;\n        known = frame;",
+    },
+  ],
+  // The pointer rule (P120) out: a nested page's shell's activation may be a press wherever the
+  // pointer is, so a key the person meant for the host's composer, landing in the page, counts as
+  // one. Run with `shell-host-input`, which holds the same moves where the pointer isn't seen.
+  "pointer-rule": [
+    {
+      file: "src/platform/focus-guard.ts",
+      find: "  return !shown || at - typedAt > TYPING_MS || (over && overSince > typedAt);",
+      replace: "  return true;",
+    },
+  ],
   // A cancel (P112) taken with no mode on: a page that says it is heard whenever it likes.
   "cancel-any-mode": [
     {

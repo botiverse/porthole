@@ -417,7 +417,10 @@ focusField(composer.textarea); // Firefox ignores a plain focus() while a fighti
   page's field is taken back. A nested page's shell sees it: a move into the frame is the
   person's if the shell's activation turned on within the last second and you saw no press or key
   of your own since. A second press in the page within 5 s of the last turns nothing on: after the
-  person went back to your composer, their next move in is taken back until then, or a Tab.
+  person went back to your composer, their next move in is taken back until then, or a Tab. A
+  nested page that takes the keyboard back as the guard returns it is fought as any page is, and
+  stopped (P120); on full Chromium a key the person types into the page just as it takes the
+  keyboard can still pass for a press (THREAT_MODEL §7).
 
 ## 4. Served pages: the host kit
 
