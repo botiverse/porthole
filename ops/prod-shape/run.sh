@@ -15,9 +15,10 @@ trap cleanup EXIT
 status=$?
 # A zero exit isn't enough: the suite must say it ran to completion (trust-and-test.sh), so a run
 # stopped partway, or one whose report is missing, can't pass. Read from the container's own log
-# (it stays until cleanup), not from what compose streamed.
-if [ "$status" -eq 0 ] &&
-  ! "${compose[@]}" logs --no-log-prefix playwright 2>/dev/null | grep -q "prod-shape: the suite ran to completion"; then
+# (it stays until cleanup), not from what compose streamed. The log is read whole first: with
+# pipefail, `logs | grep -q` fails when grep stops at the match and `logs` dies of the closed pipe.
+suite_log=$("${compose[@]}" logs --no-log-prefix playwright 2>/dev/null)
+if [ "$status" -eq 0 ] && ! grep -q "prod-shape: the suite ran to completion" <<<"$suite_log"; then
   echo "prod-shape: the suite exited 0 without running to completion" >&2
   status=1
 fi
