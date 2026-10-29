@@ -6,6 +6,9 @@ P-numbers below.
 
 ## 0.14.4
 
+- **Docs (P123):** a display taking the keyboard is an accepted risk (THREAT_MODEL §5): the guard
+  stays best effort, and no new rule covers slower typists. P122's entry says what its reading of
+  the typing before an activation loosens (porthole#81).
 - **Security (P122, after 0.14.4's CI):** full Chromium let a nested page that took the keyboard
   while the person typed keep it (its first key reached the page before the shell answered the
   host's ask, and passed for a press). No press of the person's comes within 250 ms of a key they
