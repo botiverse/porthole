@@ -158,8 +158,9 @@ Whatever the use:
   quoted text) only as text, never as HTML.
 - Take what the frame reports about annotations as UI hints (where to draw, what to open), never
   as permissions, and put nothing in a mark the page may not know (§7).
-- Guard a view that a frame's report opens or moves (`activated`, `anchored`, `selected`: a
-  comment's bubble, a composer). The content chooses when it appears and where, so it can bring it
+- Guard a view that a frame's report opens or moves (`activated`, `anchored`, `selected`,
+  `tracked`: a comment's bubble, a composer, a card that follows its mark, which the page moves
+  at will, up to 60 times a second). The content chooses when it appears and where, so it can bring it
   under a press the person meant for the content (a double click on the content's own button whose
   second click lands on the bubble's). Such a view takes no press of any kind for 500 ms after it
   appears or moves (not a `click` only: menu triggers act on `pointerdown`, and menu items click
@@ -349,6 +350,11 @@ encrypted into the path, since WebKit keeps no cookie in a frame (P083).
   shell's label with a one-time ticket); no host's naming makes a `porthole-` label. So no
   content, of any scope, can read the shell's realm (its word to the host, the page's sealed
   address) or drive it (`leak/served/nested-siblings.spec.ts`, negative control `shell-label`).
+  Porthole holds the shell to that label outside `/server` too (P121), for a content Worker of a
+  host's own: the host's mount refuses a nested page located on any other label before a frame
+  is made (a host error, `locate`; negative control `nested-host-label`), the shell frames
+  nothing and says nothing on any other origin, and `nestedShellResponse` and `frameShellScript`
+  refuse one. What else such a Worker serves on that label is its own (below).
   The page is the shell's child, `sandbox="allow-scripts"` (never `allow-same-origin`, held by a
   static check over every sandbox Porthole writes) and the same sandbox in its own CSP, so it is an
   opaque origin in its frame and on a tab; it is loaded, and loads its files, at its sealed address
@@ -387,7 +393,8 @@ encrypted into the path, since WebKit keeps no cookie in a frame (P083).
 - With nested pages, route the shell's label (`porthole-<…>.<domain>`) to the content server as
   every content label is (a wildcard needs nothing; a pattern of the host's own, `a-*`, must add
   it). A content Worker of the host's own serves nested pages on that label alone, and nothing
-  else there (P114).
+  else there (P114): Porthole refuses the shell anywhere else (P121), but can't see what else a
+  Worker of the host's own answers on it. Its page's and files' CSPs come from `nestedFileCsp`.
 
 **Not guaranteed**
 
@@ -699,9 +706,15 @@ own frame, below the shell, P111), so:
   `clear-selection`: a page that replaced it keeps its selection otherwise) and forgets the one it
   told, so the clear makes no `unselected` or `selected`. It goes host to frame only: the host
   takes no such message from a frame, and the shell takes it only from its frame's parent (a page
-  that posts it to its own window is dropped). It gives the page nothing new: a page can clear or
-  select its own text at any time, and can select the words again right after a clear (the host
-  hears that as any selection, while it asked for text).
+  that posts it to its own window is dropped). It gives the page no power it lacks: a page can
+  clear or select its own text at any time, and can select the words again right after a clear
+  (the host hears that as any selection, while it asked for text). But the page sees the clear
+  (the message, and a `selectionchange` with no press of its own) and so learns when the person
+  was done with its selection (P121, after the audit of P115). A host that clears only when a
+  draft is added tells the page that a draft exists on its words, and when: clear when the
+  composer opens, or on every close, kept or dismissed, or leave it to the person's next click,
+  never only on a draft, above all for a page `mayPassOn` says to keep drafts from (ADOPTING.md
+  § Annotations).
 - *What content can always do.* Hide, shrink, move or cover the layer (its scripts can rewrite the
   layer's style, lay elements over it, or transform the page it sits in), change its words so a
   mark is orphaned, or flood the shared rate so real reports are refused. It can also make the

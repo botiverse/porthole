@@ -1,8 +1,9 @@
 import { expect, test } from "@playwright/test";
 import type { PortholeConfig } from "../../src/index.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
+import { storedFiles } from "./files.ts";
 import { harness } from "./harness.ts";
-import { show, unique } from "./nested-pages.ts";
+import { pageOf, show, unique } from "./nested-pages.ts";
 import { mount, outcomeOf } from "./porthole-host.ts";
 
 /**
@@ -154,6 +155,51 @@ test.describe("a nested page's shell beside displays of its own scope (P114)", (
     }
     expect(new URL(nested.origin).origin, "the shell isn't on the scope's origin").not.toBe(
       served.porthole.originFor(scope),
+    );
+  });
+
+  test("[nested-label] a nested page located on its scope's label, not a shell's own, is refused before a frame is made (P121)", async ({
+    page,
+  }) => {
+    const served = await harness();
+    const scope = unique("label");
+    const id = unique("page");
+    served.fileSets.set(`${id}@1`, storedFiles({ "index.html": pageOf() }));
+    const instance: InstanceRef = {
+      scope,
+      document: { kind: "artifact", id, version: "1", preset: "artifactNested" },
+    };
+    // The shell's address as a content Worker of a host's own that kept 0.14.0's layout would
+    // answer it: on the scope's label, beside the scope's other displays (porthole#56).
+    const issued = await served.porthole.issue(instance, { viewer: "probe" });
+    const at = new URL(issued.url);
+    const origin = served.porthole.originFor(scope);
+    const shown = await mount(
+      page,
+      served.hostOrigin,
+      served.configs.artifactNested as PortholeConfig,
+      { ...issued, url: `${origin}${at.pathname}${at.search}`, origin },
+      instance,
+      {
+        runtime: {
+          key: scope,
+          scope,
+          artifact: id,
+          declaration: { capabilities: {}, runtime: "1" },
+          viewer: { level: "interact", id: "ada", name: "Ada" },
+        },
+      },
+    );
+    expect(
+      await outcomeOf(shown.read),
+      "probe: the host refused the location (blocked, locate)",
+    ).toEqual({ state: "blocked", reason: "locate" });
+    expect(
+      (await shown.read()).hostErrors.map((each) => each.kind),
+      "probe: it told the host why",
+    ).toEqual(["locate"]);
+    expect(await page.locator("#displays iframe").count(), "probe: no frame was made for it").toBe(
+      0,
     );
   });
 });

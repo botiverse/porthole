@@ -18,6 +18,7 @@ import {
   isNestedLabel,
   nestedAncestors,
   nestedLabelOf,
+  nestedFileCsp,
   nestedShellResponse,
   PORTHOLE_LABEL_PREFIX,
 } from "./nested.ts";
@@ -1199,11 +1200,11 @@ export function createServer(options: ServerOptions): PortholeServer {
     // A page that may use its artifact's assets loads them from its own origin (P089); every
     // served page carries its frame's sandbox, a tab of its own included (P099).
     const { config, cspDirectives } = served.compiled;
+    const directives = served.assets
+      ? assetCspDirectives(config, cspDirectives, access.origin)
+      : cspDirectives;
     const headers = documentHeaders(
-      servedDocumentCsp(
-        config,
-        served.assets ? assetCspDirectives(config, cspDirectives, access.origin) : cspDirectives,
-      ),
+      nested ? nestedFileCsp("page", directives) : servedDocumentCsp(config, directives),
       servedPermissionsPolicy(config),
       ancestors,
     );

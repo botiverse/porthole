@@ -267,14 +267,20 @@ display.on("annotation", (report) => {
   if (report.type === "activated") bubble.openBeside(frame, report.rect, report.id);
   if (report.type === "anchored") bubble.follow(report.results);
 });
-// The selection was used (a comment posted, a draft added): take it, and its highlight, away.
-composer.onDone(() => display.annotations.clearSelection());
+// The composer closed, whatever came of it (posted, a draft added, dismissed): take the selection,
+// and its highlight, away. The page sees the clear: never clear only when a draft is added.
+composer.onClose(() => display.annotations.clearSelection());
 ```
 
-- **Clear the selection once you used it** (`annotations.clearSelection()`, P115): the page's text
-  selection, and the highlight the browser leaves on it (gray while focus is in your composer),
-  stay until something clears them; the person's next click in the page would, and this does it
-  when your composer is done with it. No `unselected` follows it (you know), and nothing else
+- **Clear the selection when the composer closes, every time** (`annotations.clearSelection()`,
+  P115): the page's text selection, and the highlight the browser leaves on it (gray while focus
+  is in your composer), stay until something clears them; the person's next click in the page
+  would, and this does it when your composer is done with it. The page sees the clear (the
+  message, and a `selectionchange` with no press of its own), so it learns when the person was
+  done with its words (P121): clear on every close, kept or dismissed, or as the composer opens
+  (which tells it nothing `selected` and its blur didn't), or leave it to their next click; never
+  only when a draft is added, which tells the page that a draft exists there, and when. Above all
+  for a page `mayPassOn` says to keep drafts from (below). No `unselected` follows it (you know), and nothing else
   changes: your marks and drafts, the mode (`start`) and a followed mark stay. With nothing
   selected it does nothing; it is never sent to a frame that runs later (a reload has no selection
   to clear). Like `start` and `show`, only where the config declares `annotate`. The shell is your
@@ -293,10 +299,12 @@ composer.onDone(() => display.annotations.clearSelection());
     annotating={commenting ? { elements: false, text: true } : null}
     annotations={marks} trackedAnnotation={openCard?.markId ?? null}
     onAnnotation={(report) => {
-      if (report.type === "tracked") card.moveBeside(report.rect);
+      // The page moves its mark, and so the card, at will: armed again as it moves (§6, P121).
+      if (report.type === "tracked" && card.moveBeside(report.rect) > 4) cardGuard.placed();
       if (report.type === "selected") composer.openBeside(report.rect, report.anchor);
     }} />
-  composer.onDone(() => frame.current?.clearSelection());
+  // cardGuard = guardPresses(card.element) (below); moveBeside answers how far it moved, in px.
+  composer.onClose(() => frame.current?.clearSelection()); // every close, kept or dismissed
   ```
 
 - **Ids say nothing, and a count only where the page may know it**: the content reads every
@@ -323,7 +331,9 @@ composer.onDone(() => display.annotations.clearSelection());
   library CDNs (whose paths only their operators read); show such a page no draft marks.
 - **The content chooses when your view opens and where** (it can post `activated` for a mark you
   show on the person's own press in the content, under their pointer, P105), so a view that a
-  report opens or moves takes no press of any kind for 500 ms after it appears or moves (no
+  report opens or moves (a card that follows a `tracked` mark included, each time it moves more
+  than a few px: the page moves it at will, up to 60 times a second) takes no press of any kind
+  for 500 ms after it appears or moves (no
   `pointerdown`, `pointerup`, `click` or key: menu triggers act on a press, and menu items click
   themselves on a release), ignores a press that began before that, opens beside the frame rather
   than over `rect` where the layout allows, takes no focus, and has nothing one click away that
@@ -614,7 +624,7 @@ and Porthole's libraries (`egress.libraries`); the config refuses them.
 
 What a content origin serves for a nested page (`/server` does all of it; a content Worker of your
 own answers the same, with the helpers `/server` exports: `nestedLabelOf`, `nestedShellResponse`,
-`NESTED_FILE_HEADERS`, `nestedAncestors`). `<origin>` is the shell's own,
+`nestedFileCsp`, `NESTED_FILE_HEADERS`, `nestedAncestors`). `<origin>` is the shell's own,
 `https://<nestedLabelOf(label)>.<content domain>`, where `label` is the scope's label (the one its
 other displays are served on); `<token>` is the access in the path (Porthole's sealed session, or a
 signed token of your own: the shell only needs addresses under the prefix). Your frame location
@@ -623,13 +633,16 @@ for a nested page is on `<origin>`.
 **The rule** (P114): `<origin>` answers the four rows below and Porthole's status pages, nothing
 else (no other display, no clean address, no asset, no app), and the scope's label never answers a
 nested page's shell, page or files. That is what keeps the shell's realm (its word to your page,
-the page's sealed address) out of every other display's reach.
+the page's sealed address) out of every other display's reach. Porthole holds the shell to that
+label (P121): `createHost` refuses a nested page located anywhere else (a host error, `locate`, and
+no frame), `nestedShellResponse` throws for another origin, and the shell runs nowhere else. That
+`<origin>` answers nothing but these is yours to hold: Porthole can't see your Worker's routes.
 
 | Request | Answer |
 | --- | --- |
 | `<origin>/__porthole/d/<key>`, the framed address (a ticket's, a cookie's reload; an entered clean address on the scope's label answers a `303` here with a one-time ticket), a navigation | 200, `text/html`: Porthole's shell, `nestedShellResponse(compiled, { origin, origins: hostOrigins, page: "<origin>/__porthole/f/<token>/<entry>", renew: { url: "<origin>/__porthole/f/<token>/__porthole/renew", expires } })`. Headers: `Content-Security-Policy: default-src 'none'; script-src 'sha256-<its script>'; frame-src <origin>/__porthole/f/; connect-src <origin>/__porthole/f/; base-uri 'none'; form-action 'none'; frame-ancestors <host origins>`; `Cache-Control: no-store`; `Referrer-Policy: no-referrer`; `X-Content-Type-Options: nosniff`; the served `Permissions-Policy`. No content in it. Any other request there: 404. |
-| `<origin>/__porthole/f/<token>/<page>` (the shell's child, or a tab) | The page as served before (the shell's runtime and the page), its plan's `origins` the content origin alone (`[<origin>]`) and its storage `memory`. `Content-Security-Policy: <the page's directives, its files' prefix opened>; sandbox allow-scripts; frame-ancestors <origin> <host origins>` (never `allow-same-origin`). Access from `<token>` alone: no cookie is sent (the page's origin is opaque), and never decide by `Origin` (it is `null`) or `Sec-Fetch-Site` (`cross-site`). |
-| `<origin>/__porthole/f/<token>/<file>` (the page's loads) | As served files are, plus `Cross-Origin-Resource-Policy: cross-origin` and `Access-Control-Allow-Origin: *` (`NESTED_FILE_HEADERS`): the opaque page's images, scripts, modules, fonts and fetches are cross-origin. Every one carries a CSP sandbox, never `allow-same-origin`: a non-page file `default-src 'none'; sandbox`, a script its directives plus `sandbox`, so none opened on a tab of its own (an SVG, an XML file) runs on the shell's origin. |
+| `<origin>/__porthole/f/<token>/<page>` (the shell's child, or a tab) | The page as served before (the shell's runtime and the page), its plan's `origins` the content origin alone (`[<origin>]`) and its storage `memory`. `Content-Security-Policy`: `nestedFileCsp("page", fileSetCspDirectives(compiled.cspDirectives, "<origin>/__porthole/f/"))` then `; frame-ancestors ` and `nestedAncestors("<origin>", "<host origins>")`: the page's directives, its files' prefix opened, and `sandbox allow-scripts` (never `allow-same-origin`). Access from `<token>` alone: no cookie is sent (the page's origin is opaque), and never decide by `Origin` (it is `null`) or `Sec-Fetch-Site` (`cross-site`). |
+| `<origin>/__porthole/f/<token>/<file>` (the page's loads) | As served files are, plus `Cross-Origin-Resource-Policy: cross-origin` and `Access-Control-Allow-Origin: *` (`NESTED_FILE_HEADERS`): the opaque page's images, scripts, modules, fonts and fetches are cross-origin. Every one carries a CSP sandbox, never `allow-same-origin` (`nestedFileCsp(fileTypeOf(path).role, directives)`, then the `frame-ancestors` above): a non-page file `default-src 'none'; sandbox`, a script its directives plus `sandbox`, so none opened on a tab of its own (an SVG, an XML file) runs on the shell's origin. |
 | `<origin>/__porthole/f/<token>/__porthole/renew` | Only the shell's own fetch (`Sec-Fetch-Site: same-origin`, not a navigation): `{ "base": "<origin>/__porthole/f/<new token>/", "expires": <epoch ms> }`, `no-store`; anything else 403. The shell renews 5 minutes before `expires` and moves the page to the new base. |
 | A token that ended, under the prefix | Porthole's status page (`401`, reason `session`), `frame-ancestors <origin> <host origins>`: it tells the shell, which tells your page (`outcome` blocked). |
 

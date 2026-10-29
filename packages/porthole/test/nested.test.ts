@@ -4,8 +4,10 @@ import vm from "node:vm";
 import { describe, expect, test } from "vitest";
 import { compile, presets } from "../src/index.ts";
 import {
+  INERT_FILE_CSP,
   PAGE_SANDBOX_TOKENS,
   sandboxTokens,
+  serializeCsp,
   servedSandboxDirective,
 } from "../src/compile/policy.ts";
 import { ConfigError } from "../src/config/validate.ts";
@@ -17,7 +19,8 @@ import {
   type FocusMove,
 } from "../src/platform/focus-guard.ts";
 import { FRAME_SHELL_RUNTIME, frameShellScript } from "../src/shell/frame.ts";
-import { nestedShellCsp, nestedShellResponse } from "../src/server/nested.ts";
+import { nestedFileCsp, nestedShellCsp, nestedShellResponse } from "../src/server/nested.ts";
+import { checkFrameLocation, onNestedLabel } from "../src/isolation/served.ts";
 import { createServer, isNestedLabel, nestedLabelOf, prefixedName } from "../src/server/index.ts";
 import { LIBRARY_FILES } from "../src/libraries/files.generated.ts";
 
@@ -27,7 +30,10 @@ import { LIBRARY_FILES } from "../src/libraries/files.generated.ts";
  * shell says. The browsers hold the rest (`leak/served/nested.spec.ts`).
  */
 
-const ORIGIN = "https://a-x.example-usercontent.com";
+/** A nested page's shell's own origin (P114): a `porthole-` label of the content domain. */
+const ORIGIN = `https://porthole-${"a".repeat(24)}.example-usercontent.com`;
+/** Its scope's origin, where the scope's other displays run (never the shell's, P121). */
+const SCOPE_ORIGIN = "https://a-x.example-usercontent.com";
 const HOST = "https://app.example.com";
 const nested = () =>
   presets.artifact({
@@ -176,52 +182,120 @@ describe("the shell's document (P111)", () => {
   });
 });
 
-describe("the host's ask to the shell (P120)", () => {
-  /** The shell's script run against a stand-in of its window: what it says, to whom. */
-  const shell = () => {
-    const said: { to: "host" | "page"; message: Record<string, unknown> }[] = [];
-    const heard: ((event: unknown) => void)[] = [];
-    const page = { postMessage: (message: never) => said.push({ to: "page", message }) };
-    const parent = { postMessage: (message: never) => said.push({ to: "host", message }) };
-    const style = {};
-    const context: Record<string, unknown> = {
-      parent,
-      location: { origin: ORIGIN, ancestorOrigins: [HOST] },
-      document: {
-        documentElement: { style },
-        body: { style, append() {} },
-        createElement: () => ({ style, setAttribute() {}, contentWindow: page, focus() {} }),
-        hasFocus: () => true,
-        activeElement: null,
-        addEventListener() {},
-      },
-      navigator: { userActivation: { isActive: false } },
-      performance: { now: () => 1_000 },
-      requestAnimationFrame: () => 0,
-      setInterval: () => 0,
-      setTimeout: () => 0,
-      addEventListener: (type: string, listener: (event: unknown) => void) => {
-        if (type === "message") {
-          heard.push(listener);
-        }
-      },
-      URL,
-    };
-    context.window = context;
-    vm.runInNewContext(
-      frameShellScript({ origins: [HOST], page: `${ORIGIN}/__porthole/f/abc/` }),
-      context,
-    );
-    const fromHost = (data: unknown) => {
-      for (const listener of heard) {
-        listener({ source: parent, origin: HOST, data });
+/** The shell's script run against a stand-in of its window: what it says, to whom. */
+const shellAt = (at = ORIGIN) => {
+  const said: { to: "host" | "page"; message: Record<string, unknown> }[] = [];
+  const heard: ((event: unknown) => void)[] = [];
+  const page = { postMessage: (message: never) => said.push({ to: "page", message }) };
+  const parent = { postMessage: (message: never) => said.push({ to: "host", message }) };
+  const style = {};
+  const context: Record<string, unknown> = {
+    parent,
+    location: { origin: at, hostname: new URL(at).hostname, ancestorOrigins: [HOST] },
+    document: {
+      documentElement: { style },
+      body: { style, append: () => said.push({ to: "page", message: { framed: true } }) },
+      createElement: () => ({ style, setAttribute() {}, contentWindow: page, focus() {} }),
+      hasFocus: () => true,
+      activeElement: null,
+      addEventListener() {},
+    },
+    navigator: { userActivation: { isActive: false } },
+    performance: { now: () => 1_000 },
+    requestAnimationFrame: () => 0,
+    setInterval: () => 0,
+    setTimeout: () => 0,
+    addEventListener: (type: string, listener: (event: unknown) => void) => {
+      if (type === "message") {
+        heard.push(listener);
       }
-    };
-    return { said, fromHost };
+    },
+    URL,
   };
+  context.window = context;
+  // The script as a host's own Worker might make it for `at` (P121: `frameShellScript` refuses
+  // any origin but a shell's own label, so it is moved there by hand).
+  vm.runInNewContext(
+    frameShellScript({ origins: [HOST], page: `${ORIGIN}/__porthole/f/abc/` }).replaceAll(
+      ORIGIN,
+      at,
+    ),
+    context,
+  );
+  const fromHost = (data: unknown) => {
+    for (const listener of heard) {
+      listener({ source: parent, origin: HOST, data });
+    }
+  };
+  return { said, fromHost };
+};
 
+describe("a nested page's shell on its own label alone (P121)", () => {
+  test("frameShellScript and nestedShellResponse refuse any origin but a shell's own label", () => {
+    expect(() =>
+      frameShellScript({ origins: [HOST], page: `${SCOPE_ORIGIN}/__porthole/f/abc/` }),
+    ).toThrow(/nested page's own label/u);
+    const options = {
+      origin: SCOPE_ORIGIN,
+      origins: [HOST],
+      page: `${SCOPE_ORIGIN}/__porthole/f/abc/`,
+    };
+    expect(() => nestedShellResponse(compile(nested()), options)).toThrow(/own label/u);
+    // Its page on another origin than its own, even another shell's.
+    const other = `https://porthole-${"b".repeat(24)}.example-usercontent.com`;
+    expect(() =>
+      nestedShellResponse(compile(nested()), {
+        origin: ORIGIN,
+        origins: [HOST],
+        page: `${other}/__porthole/f/abc/`,
+      }),
+    ).toThrow(TypeError);
+    // A label that only starts like one.
+    expect(onNestedLabel(`https://porthole-${"a".repeat(23)}.example-usercontent.com`)).toBe(false);
+    expect(onNestedLabel(`https://x.porthole-${"a".repeat(24)}.example-usercontent.com`)).toBe(
+      false,
+    );
+    expect(onNestedLabel(ORIGIN)).toBe(true);
+  });
+
+  test("the host refuses a nested page's frame located anywhere but a shell's own label", () => {
+    const locate = (origin: string, nestedConfig: boolean) => () =>
+      checkFrameLocation(
+        { url: `${origin}/__porthole/d/${"k".repeat(16)}?t=x`, origin },
+        ["https://*.example-usercontent.com"],
+        HOST,
+        nestedConfig,
+      );
+    expect(locate(SCOPE_ORIGIN, true)).toThrow(/isn't a nested page's own/u);
+    expect(locate(ORIGIN, true)).not.toThrow();
+    // A config that doesn't nest: as before.
+    expect(locate(SCOPE_ORIGIN, false)).not.toThrow();
+  });
+
+  test("a nested page's files' CSP, one source for /server and a Worker of a host's own (nestedFileCsp)", () => {
+    const directives = compile(nested()).cspDirectives;
+    const page = nestedFileCsp("page", directives);
+    expect(page).toMatch(/; sandbox allow-scripts$/u);
+    expect(page.startsWith(serializeCsp(directives))).toBe(true);
+    expect(nestedFileCsp("script", directives)).toBe(`${serializeCsp(directives)}; sandbox`);
+    expect(nestedFileCsp("file", directives)).toBe(INERT_FILE_CSP);
+    for (const role of ["page", "script", "file"] as const) {
+      expect(nestedFileCsp(role, directives)).not.toContain("allow-same-origin");
+    }
+  });
+
+  test("the shell made for another origin frames nothing and says nothing there", () => {
+    expect(shellAt(SCOPE_ORIGIN).said).toEqual([]);
+  });
+});
+
+describe("the host's ask to the shell (P120)", () => {
   test("asked to look, the shell says its state at once, naming the ask; the page hears none of it", () => {
-    const { said, fromHost } = shell();
+    const { said, fromHost } = shellAt();
+    expect(
+      said.filter((each) => each.to === "page"),
+      "it framed its page",
+    ).toEqual([{ to: "page", message: { framed: true } }]);
     said.length = 0;
     fromHost({ jsonrpc: "2.0", method: "porthole/shell/look", params: { n: 3 } });
     expect(said).toEqual([
@@ -237,7 +311,7 @@ describe("the host's ask to the shell (P120)", () => {
   });
 
   test("the host's words in the shell's namespace never reach the page; an ask without a number is none", () => {
-    const { said, fromHost } = shell();
+    const { said, fromHost } = shellAt();
     said.length = 0;
     fromHost({ jsonrpc: "2.0", method: "porthole/shell/look", params: { n: -1 } });
     fromHost({ jsonrpc: "2.0", method: "porthole/shell/look", params: { n: "1" } });

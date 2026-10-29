@@ -6052,7 +6052,7 @@ takes it only while it asked for it. Each item below landed on its own, with its
   `comments` (the host's own UI; the composer is the person's, under the host's duties), and `user`
   (it only reads). Tested: `test/pass-on.test.ts`, each channel alone.
 
-## P115 · 2026-10-28 · The host clears the page's selection: `annotations.clearSelection()` · Accepted
+## P115 · 2026-10-28 · The host clears the page's selection: `annotations.clearSelection()` · Accepted; amended by P121
 
 **Context.** In a comment mode (Raft's web app, Kirby) the person selects words, the host's
 composer opens beside them, and they post a comment or add a draft. The selection stays: the
@@ -6083,7 +6083,8 @@ There is no highlight of Porthole's own to remove: a settled selection is drawn 
 
 **Trust.** Host to frame only. The host takes no `clearSelection` from a frame (it is no report);
 the shell takes it only from its frame's parent and the host's origins, as every host message
-(a page that posts it to its own window is dropped). It gives the page nothing it hasn't: a page
+(a page that posts it to its own window is dropped). It gives the page no power it hasn't (but the
+page sees the clear, and so when the person was done with its selection: P121): a page
 can clear or select its own text at any time, and can select the words again right after (the
 host hears that as a selection, while it asked for text). A report the shell posted just before
 the clear arrived (a selection that settled in the same moment) still reaches the host after its
@@ -6508,3 +6509,72 @@ Chromium, under load too; non-nested frames as in 0.13; the controls fail as the
 out-of-process frame, says what turned activation on, or tells a frame's parent as focus comes
 into it; or a host can tell a frame in its own process from one out of it before the pointer has
 been over one (then a first move into a nested page there is judged as 0.13 judged it, P120-1).
+
+## P121 · 2026-10-29 · After the audit of 0.14.2: a nested page's shell held to its own label outside `/server`, one source for its files' CSP, what `clearSelection` tells the page, `tracked` guarded · Accepted
+
+Amends P114 and P115. From the audit of aedc412 (2026-10-29; no P0 or P1): two findings on nested
+pages (M1, P2; M2, P3) and two on annotations (AN-1, P2; AN-2, P3).
+
+- **M1.** P114's rule, that a nested page's shell runs on a `porthole-` label of its own where
+  nothing else is served, was held by `/server` alone. A content Worker of a host's own (ADOPTING
+  "Nested pages") had it as a duty, with no check behind it: `nestedShellResponse` took any origin,
+  the shell ran wherever it was served, and `createHost` framed a nested page located on any
+  content origin. A Worker that kept 0.14.0's layout (the shell on its scope's label) rebuilt
+  porthole#56 without an error.
+- **M2.** A Worker of a host's own had to write a nested page's CSP sandbox (`sandbox
+  allow-scripts`) and its scripts' (`sandbox`) by hand; `/server` built them inside its own code.
+- **AN-1.** THREAT_MODEL §7 and P115 said the clear gives the page nothing new. It gives the page no
+  power, but the page sees it: the message, and a `selectionchange` to nothing with no press of its
+  own (the audit's probe, Chromium and Firefox). ADOPTING cleared when "the selection was used (a
+  comment posted, a draft added)", so in a comment mode where a draft is added before anything is
+  posted, the clear told the page that a draft exists on its words, and when: what ADOPTING's
+  `mayPassOn` rule keeps from a page that can pass it on.
+- **AN-2.** `tracked` (P112) moves a host's card at the page's will, up to 60 times a second, but
+  §6's guard (no press for 500 ms after a view appears or moves) didn't name it, and ADOPTING's
+  React example (P118) moved the card without arming it again.
+
+**Decision.**
+1. **The shell on its own label, held where Porthole can hold it.** `isNestedLabel` and
+   `PORTHOLE_LABEL_PREFIX` move to `isolation/served.ts` (re-exported from `/server` as before),
+   with `onNestedLabel(origin)`. `createHost` refuses a nested config's location whose host's first
+   label isn't a shell's (`checkFrameLocation(..., nested)`): no frame is made, a host error
+   (`locate`) says why, the outcome is blocked (`locate`). The shell returns at once, framing
+   nothing and saying nothing, on any origin whose first label isn't one. `nestedShellResponse`
+   throws for such an origin, or a page on another origin, and `frameShellScript` for a page on
+   one. What else a Worker of a host's own answers on that label stays its duty (THREAT_MODEL S3):
+   Porthole can't see its routes.
+2. **`nestedFileCsp(role, directives)`** (`/server`): a page's directives and `sandbox
+   allow-scripts`, a script's and `sandbox`, any other file `default-src 'none'; sandbox`; then
+   `frame-ancestors` (`nestedAncestors`). `/server` uses it for every nested page and file, and
+   ADOPTING's table for a Worker names it.
+3. **`clearSelection` is said to tell the page when.** THREAT_MODEL §7 and P115 say so. ADOPTING
+   clears on every close of the composer (posted, a draft added, dismissed), or as it opens, or
+   leaves it to the person's next click; never only when a draft is added, above all for a page
+   `mayPassOn` says to keep drafts from.
+4. **`tracked` is guarded.** §6 names it; ADOPTING arms a card that follows a mark again each time
+   it moves more than a few px (re-arming on every report would let a page that keeps its mark
+   moving keep the card inert, which only costs its own comments).
+
+**Threat it re-opens.** None. A Worker of a host's own that served the shell on another label
+than `nestedLabelOf`'s now fails closed (the display is blocked) where it ran before.
+
+**Tested.** `test/nested.test.ts`: `frameShellScript` and `nestedShellResponse` refuse the scope's
+origin and a page on another origin; `onNestedLabel` takes `nestedLabelOf`'s form only (not a
+shorter one, not one below another label); `checkFrameLocation` refuses a nested page's location on
+the scope's label, as before for a config that doesn't nest; the shell's script, moved to the
+scope's origin and run against a stand-in of its window, frames nothing and says nothing;
+`nestedFileCsp` per role, never `allow-same-origin`. `/server`'s nested answers are unchanged
+(its tests pass as they were). `leak/served/nested-siblings.spec.ts` on full Chromium, the headless
+shell and Firefox: "[nested-label] a nested page located on its scope's label, not a shell's own, is
+refused before a frame is made (P121)". Negative controls: `nested-host-label` (the host's check
+out) fails it on Chromium and Firefox; `nested-shell-origin` (the shell's out) fails nothing alone,
+the host's check holding first; `shell-label`, which serves the shell on its scope's label, now
+runs with both (`shell-label,nested-host-label,nested-shell-origin`) and fails `[nested-siblings]`
+and `[nested-label]` as `shell-label` alone did before. WebKit wasn't run (its libraries are
+missing on this box). AN-1 and AN-2 are documents only: the audit's probe of the clear is its own.
+
+**Rejected.** A conformance case in `defineHostConformance` asking a host's content domain for a
+non-nested address on a shell label (the audit's suggestion): it needs a known scope label and a
+second display kind from the app under test, and what it would hold (a Worker's own routes) is the
+host's; left for when a host with its own Worker asks for one. Hiding the clear from the page:
+the `selectionchange` gives it away whatever the message says.

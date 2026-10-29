@@ -1,8 +1,17 @@
 import type { CompiledConfig } from "../compile/compile.ts";
-import { servedPermissionsPolicy, serializeCsp, type CspDirective } from "../compile/policy.ts";
+import {
+  INERT_FILE_CSP,
+  PAGE_SANDBOX_TOKENS,
+  servedPermissionsPolicy,
+  serializeCsp,
+  type CspDirective,
+} from "../compile/policy.ts";
 import { frameShellDocument, frameShellScript, type FrameShellOptions } from "../shell/frame.ts";
+import { onNestedLabel, PORTHOLE_LABEL_PREFIX } from "../isolation/served.ts";
 import { sha256, utf8 } from "./crypto.ts";
 import { base32 } from "./keys.ts";
+
+export { isNestedLabel, PORTHOLE_LABEL_PREFIX } from "../isolation/served.ts";
 
 /**
  * A nested page's serving (P111): what the address the host frames answers (Porthole's shell,
@@ -17,14 +26,6 @@ import { base32 } from "./keys.ts";
  */
 
 /**
- * The start of every label Porthole serves for itself on a content domain (P114): no host's naming
- * may make one (`content.name` is refused one, and `prefixedName` won't take the prefix).
- */
-export const PORTHOLE_LABEL_PREFIX = "porthole-";
-
-const NESTED_LABEL = /^porthole-[a-z2-7]{24}$/u;
-
-/**
  * The label a nested page's shell is served on (P114), for its scope's label: `porthole-` and 24
  * base32 characters of the label's SHA-256, one per scope, the same for every nested page of it. No
  * content label is ever one (a keyed label has no hyphen, a host's is refused the prefix), so
@@ -36,9 +37,6 @@ const NESTED_LABEL = /^porthole-[a-z2-7]{24}$/u;
 export function nestedLabelOf(label: string): string {
   return `${PORTHOLE_LABEL_PREFIX}${base32(sha256(utf8(`porthole/nested/${label}`)).subarray(0, 15))}`;
 }
-
-/** Whether a label is a nested page's shell's own (`nestedLabelOf`'s form). */
-export const isNestedLabel = (label: string): boolean => NESTED_LABEL.test(label);
 
 /** Where every page and file of a nested page is, on its origin: its sealed files' prefix. */
 export const NESTED_FILES_PREFIX = "/__porthole/f/";
@@ -77,6 +75,16 @@ export function nestedShellResponse(
   compiled: CompiledConfig,
   options: FrameShellOptions & { readonly origin: string; readonly method?: string },
 ): Response {
+  // On the shell's own label alone (P114), its page on that origin (P121): a content Worker of a
+  // host's own that would serve it beside other content is refused here, not left to its routes.
+  if (!onNestedLabel(options.origin)) {
+    throw new TypeError(
+      `nestedShellResponse: origin ${options.origin} isn't on a nested page's own label (${PORTHOLE_LABEL_PREFIX}<24 base32>, nestedLabelOf)`,
+    );
+  }
+  if (new URL(options.page).origin !== options.origin) {
+    throw new TypeError("nestedShellResponse: page is on the shell's own origin");
+  }
   const script = frameShellScript(options);
   const headers = new Headers({
     "content-type": "text/html; charset=utf-8",
@@ -103,6 +111,30 @@ export function nestedShellResponse(
  */
 export const nestedAncestors = (origin: string, frameAncestors: string): string =>
   `${origin} ${frameAncestors}`;
+
+/**
+ * A nested page's answer's CSP below its sealed prefix, by what it is (P111; the one source for
+ * `/server` and a content Worker of a host's own, P121): a page its directives and
+ * `sandbox allow-scripts`, so it is an opaque origin in the shell's child and on a tab of its own
+ * (never `allow-same-origin`, which would give it the shell's origin and realm); a script its
+ * directives and `sandbox` (a worker's policy is its script's; opened on its own it runs nothing on
+ * the shell's origin); any other file nothing at all. `directives` are the page's: the compiled
+ * config's, its files' prefix opened (`fileSetCspDirectives(compiled.cspDirectives, source)`) for
+ * a page of a file set. Then who may frame it: `frame-ancestors` (`nestedAncestors`).
+ */
+export function nestedFileCsp(
+  role: "page" | "script" | "file",
+  directives: readonly CspDirective[],
+): string {
+  switch (role) {
+    case "page":
+      return serializeCsp([...directives, ["sandbox", ...PAGE_SANDBOX_TOKENS]]);
+    case "script":
+      return serializeCsp([...directives, ["sandbox"]]);
+    case "file":
+      return INERT_FILE_CSP;
+  }
+}
 
 /**
  * What a nested page's files (not its pages) carry beyond a served file's (P111): its page's

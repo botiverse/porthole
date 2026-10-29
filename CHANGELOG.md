@@ -6,6 +6,22 @@ P-numbers below.
 
 ## Unreleased
 
+- **Changed (P121, after the audit of 0.14.2):** a nested page's shell runs on a `porthole-` label
+  of its own alone, outside `/server` too: `createHost` refuses a nested page located on any other
+  label (a host error, `locate`; no frame is made), the shell frames nothing and says nothing on
+  another origin, and `nestedShellResponse` and `frameShellScript` throw for one. A content Worker
+  of a host's own that served the shell on its scope's label (0.14.0's layout) now fails closed.
+- **New (P121):** `nestedFileCsp(role, directives)` from `/server`: a nested page's CSP
+  (`sandbox allow-scripts`), a script's (`sandbox`), any other file's (inert), as `/server` sends
+  them, for a content Worker of a host's own (ADOPTING "Nested pages").
+- **Docs (P121):** `annotations.clearSelection()` tells the page when the person was done with its
+  selection (it sees the clear); ADOPTING now clears on every close of the composer, never only
+  when a draft is added (which told the page a draft exists). THREAT_MODEL §6's guard names
+  `tracked`, and ADOPTING's React example arms the card again as it moves.
+- **Tests (P121):** `leak/served/nested-siblings.spec.ts` `[nested-label]` (negative control
+  `nested-host-label`); `shell-label` now runs with `nested-host-label` and `nested-shell-origin`;
+  `test/nested.test.ts` (the helpers' refusals, the shell on another origin, `nestedFileCsp`).
+
 - **Security (P120, porthole#56, the audit's NG-1):** on Firefox a nested page that focused its
   field as it loaded, and again whenever it lost focus, got everything the person typed in the
   host's composer and was never stopped: the guard waited for the shell's word on the page's move,
