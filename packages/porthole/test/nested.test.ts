@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import vm from "node:vm";
 import { describe, expect, test } from "vitest";
 import { compile, presets } from "../src/index.ts";
 import {
@@ -8,7 +9,13 @@ import {
   servedSandboxDirective,
 } from "../src/compile/policy.ts";
 import { ConfigError } from "../src/config/validate.ts";
-import { personMoved, shellGesture, type FocusMove } from "../src/platform/focus-guard.ts";
+import {
+  TYPING_MS,
+  personMoved,
+  pressPossible,
+  shellGesture,
+  type FocusMove,
+} from "../src/platform/focus-guard.ts";
 import { FRAME_SHELL_RUNTIME, frameShellScript } from "../src/shell/frame.ts";
 import { nestedShellCsp, nestedShellResponse } from "../src/server/nested.ts";
 import { createServer, isNestedLabel, nestedLabelOf, prefixedName } from "../src/server/index.ts";
@@ -169,6 +176,79 @@ describe("the shell's document (P111)", () => {
   });
 });
 
+describe("the host's ask to the shell (P120)", () => {
+  /** The shell's script run against a stand-in of its window: what it says, to whom. */
+  const shell = () => {
+    const said: { to: "host" | "page"; message: Record<string, unknown> }[] = [];
+    const heard: ((event: unknown) => void)[] = [];
+    const page = { postMessage: (message: never) => said.push({ to: "page", message }) };
+    const parent = { postMessage: (message: never) => said.push({ to: "host", message }) };
+    const style = {};
+    const context: Record<string, unknown> = {
+      parent,
+      location: { origin: ORIGIN, ancestorOrigins: [HOST] },
+      document: {
+        documentElement: { style },
+        body: { style, append() {} },
+        createElement: () => ({ style, setAttribute() {}, contentWindow: page, focus() {} }),
+        hasFocus: () => true,
+        activeElement: null,
+        addEventListener() {},
+      },
+      navigator: { userActivation: { isActive: false } },
+      performance: { now: () => 1_000 },
+      requestAnimationFrame: () => 0,
+      setInterval: () => 0,
+      setTimeout: () => 0,
+      addEventListener: (type: string, listener: (event: unknown) => void) => {
+        if (type === "message") {
+          heard.push(listener);
+        }
+      },
+      URL,
+    };
+    context.window = context;
+    vm.runInNewContext(
+      frameShellScript({ origins: [HOST], page: `${ORIGIN}/__porthole/f/abc/` }),
+      context,
+    );
+    const fromHost = (data: unknown) => {
+      for (const listener of heard) {
+        listener({ source: parent, origin: HOST, data });
+      }
+    };
+    return { said, fromHost };
+  };
+
+  test("asked to look, the shell says its state at once, naming the ask; the page hears none of it", () => {
+    const { said, fromHost } = shell();
+    said.length = 0;
+    fromHost({ jsonrpc: "2.0", method: "porthole/shell/look", params: { n: 3 } });
+    expect(said).toEqual([
+      {
+        to: "host",
+        message: {
+          jsonrpc: "2.0",
+          method: "porthole/shell/state",
+          params: { supported: true, active: false, ago: null, focused: true, gap: 0, asked: 3 },
+        },
+      },
+    ]);
+  });
+
+  test("the host's words in the shell's namespace never reach the page; an ask without a number is none", () => {
+    const { said, fromHost } = shell();
+    said.length = 0;
+    fromHost({ jsonrpc: "2.0", method: "porthole/shell/look", params: { n: -1 } });
+    fromHost({ jsonrpc: "2.0", method: "porthole/shell/look", params: { n: "1" } });
+    fromHost({ jsonrpc: "2.0", method: "porthole/shell/look" });
+    fromHost({ jsonrpc: "2.0", method: "porthole/shell/state", params: {} });
+    expect(said).toEqual([]);
+    fromHost({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: {} });
+    expect(said.map((each) => each.to)).toEqual(["page"]);
+  });
+});
+
 describe("the host's rule on the shell's word (P111)", () => {
   const word = { supported: true, activatedAt: 9_800, focused: true, focusedAt: 9_850 };
   const move: FocusMove = {
@@ -227,6 +307,26 @@ describe("the host's rule on the shell's word (P111)", () => {
     expect(personMoved({ ...move, now: 20_000, lastKey: { key: "Tab", at: 19_900 } })).toBe(true);
     expect(personMoved({ ...move, now: 20_000, hostMoved: true })).toBe(true);
     expect(personMoved({ ...move, now: 20_000, pressed: true })).toBe(true);
+  });
+
+  test("where the host's page sees the pointer, an activation while it is off the frame and the person typing is their keys, not a press (P120)", () => {
+    // Typing at 9,500, the move at 10,000: within a second of it, the pointer must have come over
+    // the frame since.
+    expect(pressPossible(true, false, -Infinity, 9_500, 10_000)).toBe(false);
+    expect(pressPossible(true, true, 9_400, 9_500, 10_000)).toBe(false);
+    expect(pressPossible(true, true, 9_600, 9_500, 10_000)).toBe(true);
+    // Not typing within the second; or an engine that never shows the pointer over a frame.
+    expect(pressPossible(true, false, -Infinity, 10_000 - TYPING_MS - 1, 10_000)).toBe(true);
+    expect(pressPossible(false, false, -Infinity, 9_500, 10_000)).toBe(true);
+    // The rule, as the activation turned on (`keyed`, P120 after its review), where the pointer is
+    // seen: a key of the person's, not a press; where it isn't, or not keyed, as before.
+    const keyed = { ...word, keyed: true };
+    const shown = { ...move, shell: { word: keyed, hostInputAt: 9_500, pointerShown: true } };
+    expect(personMoved(shown)).toBe(false);
+    expect(personMoved({ ...shown, shell: { ...shown.shell, pointerShown: false } })).toBe(true);
+    expect(personMoved({ ...shown, shell: { ...shown.shell, word } })).toBe(true);
+    // A press the engine shows still counts.
+    expect(personMoved({ ...shown, pressed: true })).toBe(true);
   });
 
   test("an engine without userActivation in the shell: 0.13's rules", () => {

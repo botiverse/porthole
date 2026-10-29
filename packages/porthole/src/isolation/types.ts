@@ -80,6 +80,12 @@ export const SHELL_STATE_METHOD = "porthole/shell/state";
 /** A nested page's shell's heartbeat, every 50 ms while it runs (P111, after its review). */
 export const SHELL_BEAT_METHOD = "porthole/shell/beat";
 
+/**
+ * The host's ask to a nested page's shell (P120): look now, and say what it saw in a state report
+ * that names the ask (`asked`). The host asks as it hears focus move into the frame.
+ */
+export const SHELL_LOOK_METHOD = "porthole/shell/look";
+
 /** The shell's own namespace (P111): the shell drops a page's message that names a method in it. */
 export const SHELL_METHOD_PREFIX = "porthole/shell/";
 

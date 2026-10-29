@@ -88,6 +88,10 @@ const BLUR_TAKE =
 const FIELD_TAKE =
   "a composer the host focuses with focusField, beside a page with the person's gesture that takes focus back on its blur, gets their words";
 
+/** A nested page's keyboard in a fight over the host's composer (P120). */
+const NESTED_FIGHT =
+  "a page that holds the keyboard from its load and takes it back on its own blur gets none of what the person types in the host's composer, and is stopped (P120)";
+
 /** What the CSP sandbox alone holds on a tab (P099), every engine. */
 const TAB_SANDBOX = [
   "served.domain.tab-escapes",
@@ -618,6 +622,16 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "a page's SVG or XML file opened on a tab of its own is an opaque origin, and its script touches nothing of the shell's (P111, after its review)",
     ),
   },
+  // A nested page's frame that takes focus back in a fight over a text field is judged as any
+  // frame is, its shell not asked (P120): let be, the page keeps the keyboard. Only Firefox lets a
+  // page take focus back on its own blur.
+  "nested-fight": {
+    specs: [NESTED],
+    fails: { chromium: [], webkit: [], firefox: [NESTED_FIGHT] },
+    holds: {
+      why: "no probe can see it on Chromium and WebKit: a page can't take focus back from its own blur there, so no fight has a frame take focus again (measured)",
+    },
+  },
   // A stalled shell's activation is uncertain (P111, after its review).
   "shell-stall": {
     specs: [NESTED],
@@ -629,6 +643,14 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     specs: [NESTED],
     fails: all(
       "a page's focus() just after the person pressed it and went back to the host's composer is taken back",
+    ),
+  },
+  // Where the host's page sees the pointer, an activation that turned on as the person typed, the
+  // pointer elsewhere, is their key landing in the page, judged as it turned on (P120).
+  "pointer-rule": {
+    specs: [NESTED],
+    fails: all(
+      "an activation that came as the person typed, the pointer elsewhere, is no gesture a second on either (P120, after its review)",
     ),
   },
   "comment-draft": {

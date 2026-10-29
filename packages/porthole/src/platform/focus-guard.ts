@@ -18,6 +18,15 @@
  * frame again (the review of the guard, GK-1): the guard keeps watching after each take-back and
  * counts one that didn't hold. Every engine keeps a gesture's transient activation for 5 s
  * (measured: 5.04 to 5.10 s).
+ *
+ * A nested page's shell (P111) says when its activation turned on, which a press in the page does,
+ * and so does a key the person typed into it: one meant for the host's composer, after the page took
+ * the keyboard and before the guard took it back (the audit of P111's guard, NG-1). Neither the
+ * shell nor the host's page can tell the two apart from the activation (the shell gets no event as
+ * focus comes into its child, measured), so (P120): in a fight over a text field the shell's word
+ * isn't asked; a wait on a move from a text field doesn't end with the frame holding focus unjudged;
+ * and where the host's page sees the pointer over its frames, an activation while it isn't over the
+ * frame and the person was typing is no press.
  */
 
 /** How long the person's Tab counts as moving focus (the move follows its keydown at once). */
@@ -104,6 +113,12 @@ export interface ShellWord {
   readonly focusedAt: number;
   /** Its activation turned on while it was stalled: uncertain until it goes off (`SHELL_STALL_MS`). */
   readonly uncertain?: boolean;
+  /**
+   * Its activation turned on within `TYPING_MS` of the person's typing on the host's page, the
+   * pointer not come over the frame since (`pressPossible`, judged as it turned on): where the
+   * host's page sees the pointer, their key landing in the page, no press (P120).
+   */
+  readonly keyed?: boolean;
 }
 
 /** One move of the keyboard the guard undid. */
@@ -144,7 +159,12 @@ export interface FocusMove {
    * A nested page's frame (P111): what its shell said, and when the host's page last had a
    * trusted press or key of its own. Absent for any other frame.
    */
-  readonly shell?: { readonly word: ShellWord; readonly hostInputAt: number };
+  readonly shell?: {
+    readonly word: ShellWord;
+    readonly hostInputAt: number;
+    /** The host's page sees the pointer over its frames on this engine (`pressPossible`, P120). */
+    readonly pointerShown?: boolean;
+  };
 }
 
 /**
@@ -172,11 +192,14 @@ export function personMoved(move: FocusMove): boolean {
     return true;
   }
   // A nested page (P111): its shell's activation turned on within the last second, and the host's
-  // page had no press or key of its own since (the person went back to it); or, where the engine
-  // tells it, a press on the frame. Nothing else: no pointer over it, no host-wide activation.
+  // page had no press or key of its own since (the person went back to it), where it may have been
+  // a press (P120); or, where the engine tells it, a press on the frame. Nothing else: no pointer
+  // over it, no host-wide activation.
   if (move.shell !== undefined && move.shell.word.supported) {
     return (
-      (move.seen && move.pressed) || shellGesture(move.shell.word, move.shell.hostInputAt, move.now)
+      (move.seen && move.pressed) ||
+      (shellGesture(move.shell.word, move.shell.hostInputAt, move.now) &&
+        !(move.shell.pointerShown === true && move.shell.word.keyed === true))
     );
   }
   if (
@@ -201,6 +224,24 @@ export function shellGesture(word: ShellWord, hostInputAt: number, now: number):
     now >= word.activatedAt &&
     hostInputAt < word.activatedAt
   );
+}
+
+/**
+ * Whether the person could have pressed the frame just before `at` (P120): a nested page's shell
+ * says its activation turned on, which a key typed into the page does as well as a press. Where the
+ * host's page sees the pointer over its frames (`shown`: Firefox; Chromium and WebKit where the frame
+ * is in their process, not full Chromium), a press needs the pointer over the frame, come over it
+ * since the person last typed on the host's page; within `TYPING_MS` of that typing, an activation
+ * with the pointer elsewhere is their keys landing in the page. Anywhere else it may be a press.
+ */
+export function pressPossible(
+  shown: boolean,
+  over: boolean,
+  overSince: number,
+  typedAt: number,
+  at: number,
+): boolean {
+  return !shown || at - typedAt > TYPING_MS || (over && overSince > typedAt);
 }
 
 /** Keys that type nothing on their own: they don't count as typing (a gesture still). */
@@ -246,7 +287,11 @@ export interface FocusGuard {
   add(
     frame: HTMLIFrameElement,
     taken: (take: FocusTake) => void,
-    options?: { readonly nested?: boolean },
+    options?: {
+      readonly nested?: boolean;
+      /** Asks a nested page's shell to look now (P120); it answers with a report naming `n`. */
+      readonly ask?: (n: number) => void;
+    },
   ): () => void;
   /** What a nested page's shell said (P111): its activation, its focus. */
   shell(
@@ -257,6 +302,8 @@ export interface FocusGuard {
       readonly focused: boolean;
       /** How long the shell went without a look before this one (its own clock). */
       readonly gap: number;
+      /** The ask this report answers (P120), if it answers one. */
+      readonly asked?: number;
     },
   ): void;
   /** A nested page's shell's heartbeat (P111): it is looking. */
@@ -281,6 +328,10 @@ interface Guarded {
   word: ShellWord | null;
   /** When the host last heard the shell (a report or a heartbeat). */
   heardAt: number;
+  /** Asks the shell to look now (P120), the last ask's number, and whether it was answered. */
+  readonly ask: ((n: number) => void) | undefined;
+  asked: number;
+  answered: boolean;
 }
 
 const guards = new WeakMap<Window, FocusGuard>();
@@ -312,8 +363,14 @@ export function focusGuard(view: Window): FocusGuard {
     readonly frame: HTMLIFrameElement;
     readonly guarded: Guarded;
     readonly since: number;
-    readonly failed: boolean;
   } | null = null;
+  /**
+   * Whether the host's page sees the pointer over its frames (P120): learned once the pointer comes
+   * over one (`pointerover` on its element: Firefox, and Chromium and WebKit where frames are in their
+   * process), or a move from a text field into one doesn't blur the window (Firefox, which shows
+   * the pointer over a frame, measured). Full Chromium shows neither, and never learns it.
+   */
+  let pointerShown = false;
   /** When focus last went into a guarded frame, and whether the person moved it there. */
   let enteredAt = -Infinity;
   let earned = false;
@@ -328,12 +385,15 @@ export function focusGuard(view: Window): FocusGuard {
   /**
    * A take-back in progress: the field focus goes back to, the frame it came from, when focus was
    * last given back, and since when it has stayed in the field. Ends once it has stayed `HELD_MS`,
-   * the person moves focus somewhere of their own, or the field or frame is gone.
+   * the person moves focus somewhere of their own, or the field or frame is gone. A `fight` undoes
+   * the page's own move (a take-back, `focusField`, or the person leaving a frame that took focus
+   * itself), not the person leaving a frame they moved into (P120).
    */
   let contest: {
     readonly field: HTMLElement;
     readonly frame: HTMLIFrameElement;
     readonly guarded: Guarded;
+    readonly fight: boolean;
     gaveAt: number;
     heldSince: number | null;
   } | null = null;
@@ -350,20 +410,25 @@ export function focusGuard(view: Window): FocusGuard {
 
   /**
    * What the person's move would need, read now: see `personMoved`. Into a nested page's frame
-   * whose shell hasn't spoken of this move yet, `wait` (P111).
+   * whose shell hasn't spoken of this move yet, `wait` (P111). In a fight over a text field
+   * (`fight`, P120), a nested page's frame is judged as any frame is, its shell's word not asked:
+   * an activation it says turned on then is the person's keys landing in it far more often than a
+   * press (a press back into the page within `HELD_MS` of focus landing in the field).
    */
   const judge = (
     frame: HTMLIFrameElement,
     guarded: Guarded,
     seen: boolean,
     at: number,
+    fight = false,
   ): boolean | "wait" => {
-    const word = guarded.word;
+    const word = fight ? null : guarded.word;
+    const over = frame.matches(":hover");
     const moved = personMoved({
       now: at,
       seen,
       pressed: frame.matches(":active"),
-      over: frame.matches(":hover"),
+      over,
       overSince: guarded.overSince,
       lastKey,
       typedAt,
@@ -371,12 +436,19 @@ export function focusGuard(view: Window): FocusGuard {
       gestureAt,
       activation: activation(),
       hostMoved: hostMove !== null && hostMove.frame === frame && at - hostMove.at <= TAB_MS,
-      ...(word === null ? {} : { shell: { word, hostInputAt: inputAt } }),
+      ...(word === null ? {} : { shell: { word, hostInputAt: inputAt, pointerShown } }),
     });
     hostMove = null;
     // The shell tells a move at its next frame, the host's page hears it first: until the shell
-    // said focus came in (around now), its activation may be on its way.
-    if (!moved && word !== null && word.supported && word.focusedAt < at - SHELL_EARLY_MS) {
+    // said focus came in (around now), its activation may be on its way; unless no press could
+    // have made the move (P120), which nothing the shell says changes.
+    if (
+      !moved &&
+      word !== null &&
+      word.supported &&
+      word.focusedAt < at - SHELL_EARLY_MS &&
+      pressPossible(pointerShown, over, guarded.overSince, typedAt, at)
+    ) {
       return "wait";
     }
     return moved;
@@ -388,9 +460,14 @@ export function focusGuard(view: Window): FocusGuard {
     frame: HTMLIFrameElement,
     guarded: Guarded,
     at: number,
-    failed: boolean,
   ) => {
-    waiting = { field, frame, guarded, since: at, failed };
+    waiting = { field, frame, guarded, since: at };
+    // The shell looks at its next frame, and a key the person types into the page before then
+    // turns its activation on as a press does: asked to look now, it says what it saw as the move
+    // was heard (P120).
+    guarded.asked += 1;
+    guarded.answered = false;
+    guarded.ask?.(guarded.asked);
     known = frame;
     enteredAt = at;
     earned = false;
@@ -407,15 +484,38 @@ export function focusGuard(view: Window): FocusGuard {
       return;
     }
     const { field, frame, guarded } = held;
-    if (deepActive(document) !== frame || !frames.has(frame)) {
-      // Moved on since: from the frame, as the next look judges it.
+    const active = deepActive(document);
+    if (active !== frame || !frames.has(frame)) {
       waiting = null;
+      // Moved on since to nothing, or back to the field, with no press of the person's on the
+      // host's page: still the page's move from that field (P120, after the audit of P111's guard:
+      // NG-1, where the frame took it again at once and was then let be), watched as a take-back
+      // is, focus on nothing given back and counted.
+      if (
+        field !== null &&
+        field.isConnected &&
+        pressAt <= held.since &&
+        (active === null || active === document.body || active === field)
+      ) {
+        known = field;
+        contest = { field, frame, guarded, fight: true, gaveAt: held.since, heldSince: null };
+        schedule();
+        return;
+      }
+      // Anywhere else: from the frame, as the next look judges it.
       known = frame;
       return;
     }
     const word = guarded.word;
-    const theirs = word !== null && shellGesture(word, inputAt, at);
-    const spoke = word !== null && word.focusedAt >= held.since - SHELL_EARLY_MS;
+    // The shell's activation, where a press could have made it: within a second of the person's
+    // typing on the host's page with the pointer elsewhere, it is their keys landing in the page
+    // (P120). Read as of the move.
+    const theirs =
+      word !== null && shellGesture(word, inputAt, at) && !(pointerShown && word.keyed === true);
+    // It said focus came in around the move, or answered the ask the move made with focus in it.
+    const spoke =
+      word !== null &&
+      (word.focusedAt >= held.since - SHELL_EARLY_MS || (guarded.answered && word.focused));
     if (theirs) {
       waiting = null;
       known = frame;
@@ -427,7 +527,7 @@ export function focusGuard(view: Window): FocusGuard {
     }
     waiting = null;
     if (field !== null && field.isConnected) {
-      takeBack(field, frame, guarded, at, held.failed);
+      takeBack(field, frame, guarded, at, false);
     }
   };
 
@@ -460,7 +560,7 @@ export function focusGuard(view: Window): FocusGuard {
     // Until it is back, the field counts as the page's focus, so a move that didn't take is seen.
     known = field;
     focusedAt = at;
-    contest = { field, frame, guarded, gaveAt: at, heldSince: null };
+    contest = { field, frame, guarded, fight: true, gaveAt: at, heldSince: null };
     giveBack(field, frame);
     schedule();
     const take: FocusTake = { typing: at - typedAt <= TYPING_MS, failed };
@@ -509,7 +609,10 @@ export function focusGuard(view: Window): FocusGuard {
       return false;
     }
     if (active === frame) {
-      const verdict = judge(frame, guarded, seen, at);
+      // The frame has it again. In a fight, the person's only by a Tab, the host's own move, or a
+      // press the engine shows: a nested page's too, its shell's word not asked (P120, after the
+      // audit of P111's guard, NG-1, where waiting for it let the frame keep the keyboard).
+      const verdict = judge(frame, guarded, seen, at, watched.fight);
       if (verdict === true) {
         contest = null;
         known = frame;
@@ -518,10 +621,11 @@ export function focusGuard(view: Window): FocusGuard {
         return true;
       }
       if (verdict === "wait") {
-        // A nested page's frame took it again (P111): its shell decides, as it would at first.
+        // The person left a nested page they had moved into, and focus went back in (P111): its
+        // shell decides, as it would at first.
         if (watched.heldSince !== null || at - watched.gaveAt >= GIVE_BACK_MS) {
           contest = null;
-          wait(field, frame, guarded, at, true);
+          wait(field, frame, guarded, at);
         }
         return true;
       }
@@ -580,7 +684,7 @@ export function focusGuard(view: Window): FocusGuard {
       const verdict = takesText(was) || judge(active as HTMLIFrameElement, entered, seen, at);
       if (verdict === "wait") {
         // A nested page's (P111): theirs once its shell says so; nothing to take back.
-        wait(null, active as HTMLIFrameElement, entered, at, false);
+        wait(null, active as HTMLIFrameElement, entered, at);
         return;
       }
       earned = verdict;
@@ -594,6 +698,7 @@ export function focusGuard(view: Window): FocusGuard {
         field: active,
         frame: was as HTMLIFrameElement,
         guarded: left,
+        fight: !earned,
         gaveAt: at,
         heldSince: at,
       };
@@ -604,12 +709,17 @@ export function focusGuard(view: Window): FocusGuard {
       return;
     }
     const frame = active as HTMLIFrameElement;
+    if (!seen) {
+      // A move out of a text field the window didn't blur for: Firefox, which shows the host's
+      // page the pointer over a frame (P120).
+      pointerShown = true;
+    }
     const verdict = judge(frame, guarded, seen, at);
     if (verdict === true) {
       return;
     }
     if (verdict === "wait") {
-      wait(was, frame, guarded, at, false);
+      wait(was, frame, guarded, at);
       return;
     }
     takeBack(was, frame, guarded, at, false);
@@ -710,6 +820,9 @@ export function focusGuard(view: Window): FocusGuard {
           taken: new Set(),
           overSince: -Infinity,
           heardAt: -Infinity,
+          ask: options?.nested === true ? options.ask : undefined,
+          asked: 0,
+          answered: false,
           word:
             options?.nested === true
               ? { supported: true, activatedAt: -Infinity, focused: false, focusedAt: -Infinity }
@@ -717,6 +830,7 @@ export function focusGuard(view: Window): FocusGuard {
         };
         frame.addEventListener("pointerover", () => {
           entry.overSince = now();
+          pointerShown = true;
         });
         frames.set(frame, entry);
         guarded = entry;
@@ -739,17 +853,34 @@ export function focusGuard(view: Window): FocusGuard {
       }
       const at = now();
       // Off to on after a stall, the shell's or the host's (no word for longer than its beat
-      // allows): uncertain, and so until it goes off (P111, after its review).
+      // allows): uncertain, and so until it goes off (P111, after its review). So is one that
+      // turned on while the guard fights this frame for a text field (P120): the person's keys,
+      // meant for the field, landing in the page.
       const turnedOn = said.ago !== null && before.activatedAt === -Infinity && !before.uncertain;
       const stalled = said.gap > SHELL_STALL_MS || at - guarded.heardAt > SHELL_STALL_MS;
-      const uncertain = said.ago !== null && (before.uncertain === true || (turnedOn && stalled));
+      const fought = contest !== null && contest.fight && contest.frame === frame;
+      const uncertain =
+        said.ago !== null && (before.uncertain === true || (turnedOn && (stalled || fought)));
       guarded.heardAt = at;
+      if (said.asked !== undefined && said.asked === guarded.asked) {
+        guarded.answered = true;
+      }
+      // Whether a press could have turned it on, judged as it did (P120, after its review): the
+      // person's typing then, and the pointer then, not when a move is later judged.
+      const activatedAt = said.ago === null || uncertain ? -Infinity : at - said.ago;
+      const keyed =
+        activatedAt === -Infinity
+          ? false
+          : turnedOn
+            ? !pressPossible(true, frame.matches(":hover"), guarded.overSince, typedAt, activatedAt)
+            : before.keyed === true;
       guarded.word = {
         supported: said.supported,
-        activatedAt: said.ago === null || uncertain ? -Infinity : at - said.ago,
+        activatedAt,
         focused: said.focused,
         focusedAt: said.focused && !before.focused ? at : before.focusedAt,
         ...(uncertain ? { uncertain: true } : {}),
+        ...(keyed ? { keyed: true } : {}),
       };
       if (waiting?.frame === frame) {
         settle(at);
@@ -762,8 +893,17 @@ export function focusGuard(view: Window): FocusGuard {
       }
     },
     gesture(frame) {
-      const word = frames.get(frame)?.word ?? null;
-      return word !== null && shellGesture(word, inputAt, now());
+      const guarded = frames.get(frame);
+      const word = guarded?.word ?? null;
+      const at = now();
+      // Where a press could have made it (P120): a key the person typed into the page, meant for
+      // the host's composer, turns the shell's activation on too.
+      return (
+        guarded !== undefined &&
+        word !== null &&
+        shellGesture(word, inputAt, at) &&
+        !(pointerShown && word.keyed === true)
+      );
     },
     focus(frame) {
       hostMove = { frame, at: now() };
@@ -790,7 +930,7 @@ export function focusGuard(view: Window): FocusGuard {
       field.focus({ preventScroll: true });
       known = field;
       focusedAt = now();
-      contest = { field, frame, guarded, gaveAt: focusedAt, heldSince: null };
+      contest = { field, frame, guarded, fight: true, gaveAt: focusedAt, heldSince: null };
       schedule();
     },
   };

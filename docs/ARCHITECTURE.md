@@ -214,6 +214,7 @@ Host app                  Shell (its own origin)            Page (opaque child)
    │◄── the page's messages ──────│◄── postMessage (by source) ───│
    │── the host's messages ──────►│── postMessage ───────────────►│
    │◄── porthole/shell/state ─────│ its own activation, its focus │
+   │── porthole/shell/look ──────►│ look now (as a move is heard) │
 ```
 
 ### URL frame
@@ -292,7 +293,10 @@ several displays on one page are in [THREAT_MODEL.md](THREAT_MODEL.md).
    transient activation, which only a press or key in the page turns on, and whether
    focus is in it), and the host, which knows the frame is nested from its config
    only, uses it to tell the person's gesture from the page's (the focus guard,
-   `comments.open`). Everything else the page says is still the content's word.
+   `comments.open`). The host's own words in that namespace (its ask to look, P120)
+   go to the shell alone. A key and a press look the same in that word, so the host
+   doesn't ask it while it fights a frame for the keyboard (P120). Everything else
+   the page says is still the content's word.
 
 5. **Host's decision ↔ content domain.** Authentication and authorization
    *policy* are the host's; carrying the host's decision safely onto the content

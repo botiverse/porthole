@@ -4,6 +4,34 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **Security (P120, porthole#56, the audit's NG-1):** on Firefox a nested page that focused its
+  field as it loaded, and again whenever it lost focus, got everything the person typed in the
+  host's composer and was never stopped: the guard waited for the shell's word on the page's move,
+  and the person's next key, landing in the page, turned the shell's activation on as a press
+  would. Now a nested frame that takes focus again while the guard is taking it back is judged as
+  any frame is (a Tab, the host's own move, a press the engine shows), taken back at once and
+  counted toward the stop, and an activation it reports then is no gesture (`comments.open`
+  included); a wait never ends with the frame let be; the host asks the shell to look as it hears
+  a move (`porthole/shell/look`), so a key typed a frame later can't pass for a press; and where
+  the host's page sees the pointer over its frames (Firefox, and frames in the host's process), an
+  activation with the pointer elsewhere, within a second of typing on the host's page, is no press.
+  Measured: Firefox, at most 2 keys of a sentence to the page, stopped. Cost: a press back into
+  the page within 300 ms of focus going back to the host's field is taken back on full Chromium.
+  Residual on full Chromium (neither the host nor the shell sees the pointer there): a key typed
+  before the shell answers the ask passes for a press, the page keeping the keyboard and getting
+  `comments.open`; and so, more often, on Chromium with the page's frames in the host's process
+  (Chrome on Android, the headless shell) until the host has seen the pointer over one of its
+  frames (THREAT_MODEL §7). After its review, whether a key passes for a press is judged when the
+  activation turns on, not a second later.
+- **Tests (P120):** `leak/served/nested.spec.ts`: a page that holds the keyboard from its load and
+  takes it back on its own blur (negative control `nested-fight`); `leak/served/nested-keyboard.spec.ts`:
+  one that starts while the person types (its `comments.open` on a key it got reaches no handler; a
+  race, no control's probe); the guard driven directly: an activation that came as the person typed,
+  the pointer elsewhere, is no gesture (negative control `pointer-rule`). `test/nested.test.ts`:
+  the pointer rule, and the shell's answer to the host's ask.
+
 ## 0.14.3
 
 - **Changed (P119, part of porthole#42):** on touch, an annotation marker takes a tap anywhere in a

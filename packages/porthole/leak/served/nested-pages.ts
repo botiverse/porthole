@@ -184,6 +184,24 @@ export async function show(
   };
 }
 
+/**
+ * Until a fight over the keyboard is over: the display stopped, or the host's composer holding
+ * focus; at most `ms`. It decides nothing (a control that takes the guard out leaves the fight
+ * on): the probes after it do.
+ */
+export async function fightOver(page: Page, ms = 10_000): Promise<void> {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (
+      (await seen(page)).errors.includes(STOPPED) ||
+      (await hostActive(page)) === "host-composer"
+    ) {
+      return;
+    }
+    await page.waitForTimeout(100);
+  }
+}
+
 export const field = (shown: Shown) => ({ x: shown.box.x + 130, y: shown.box.y + 40 });
 export const button = (shown: Shown) => ({ x: shown.box.x + 120, y: shown.box.y + 110 });
 export const composer = { x: 100, y: 30 };
