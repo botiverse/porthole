@@ -5,7 +5,7 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes Porthole 0.14.4 (2026-10-29). A review on 2026-10-19 found gaps, and every decision it led to
+**Status.** This describes Porthole 0.14.5 (2026-10-29). A review on 2026-10-19 found gaps, and every decision it led to
 has merged ([§8](#8-fixes-in-flight) lists them). P096 changed the negative-control runner and CI,
 and the shipped conformance probes' messages and timing, not what they check. P104 (0.9.0's
 annotation markers) had a review of its own, and P105, in 0.10.0, is what it led to. 0.11.0 was
@@ -982,7 +982,7 @@ what was wrong, what holds now, and the limit its decision accepts, if any. Late
 are in the status line and in DECISIONS.md: P105 (after the review of P104), P109 (after the review
 of 0.12.0's drafts), P111 (a nested page, S3; in 0.14.0), P114 (a nested page's shell on a label of
 its own, after porthole#56; in 0.14.1), P124 (a frame status is the word of Porthole's pages, after
-the audit raft-security-audit#16; unreleased: §4, §6, §7, S6).
+the audit raft-security-audit#16; in 0.14.5: §4, §6, §7, S6).
 
 | Decision | State | What it closes | Sections |
 | --- | --- | --- | --- |

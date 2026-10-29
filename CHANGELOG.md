@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.14.5
 
 - **Security (P124, after the audit raft-security-audit#16):** any frame could say
   `porthole/notifications/frame-status` (an opaque widget, a served page, an MCP Apps view, a
