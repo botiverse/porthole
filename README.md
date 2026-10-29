@@ -71,7 +71,7 @@ that proves the isolation holds.
 
 ## Status
 
-**Pre-1.0, published on npm; the latest release is 0.14.2.** One package,
+**Pre-1.0, published on npm; the latest release is 0.14.3.** One package,
 [`@botiverse/porthole`](packages/porthole/README.md), with `/react`, `/mcp`, `/conformance`,
 `/server`, `/node` and `/check` subpaths; its versions and what each changed are in
 [CHANGELOG.md](CHANGELOG.md) (until 1.0 a minor version may change the API, and says how). Only
