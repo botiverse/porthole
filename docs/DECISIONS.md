@@ -6741,6 +6741,14 @@ on, and nothing the agent can fix.
 - A frame that speaks whose shell never runs: the content can't run either (it is the shell's to
   run), so nothing speaks and the outcome is `framing` or a timeout, as before.
 
+**The invariant this rests on.** Every document a frame that speaks can hold is one Porthole
+wrote first: a served page, a set's HTML page and a nested page reach the frame only carried inside
+`shellDocument` (as `scriptJson`, rendered after the shell's synchronous `initialize()`), and an MCP
+view only after the proxy's `sandbox-proxy-ready`. A frame status arriving after the shell's hello in
+a run is therefore never a status page's. Whoever changes how `shellDocument` carries a page, or adds
+a path that serves stored HTML as a frame's document by itself, breaks this rule and must revisit it
+(raft-security-audit#16 review of this decision, Cato).
+
 **Tested.** `test/outcome.test.ts` ("who may say how loading went (P124)"): an opaque frame's word
 dropped before and after its handshake, told once; a served frame's first document that is a status
 page still decides `blocked`, with its code; a served shell's content after its hello, before and
