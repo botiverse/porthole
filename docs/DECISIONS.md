@@ -6611,7 +6611,9 @@ restarted under the control, instead of failing by its verdict.
 2. **The pointer rule reads the typing before the activation.** The guard keeps the last two
    seconds of the person's typing; whether an activation could be a press (P120's `keyed`), and
    whether it came within 250 ms of a key, are judged from the last key before it, never one
-   typed after.
+   typed after. The shell sees its activation at a look, up to a look's gap (`gap`, at most
+   `SHELL_STALL_MS`) after it turned on: only a key before the look before counts (CI's runner
+   typed in the host's composer within that gap after its press in the page).
 3. **In-set link probes fail by their verdict**: their clicks in the frame are part of the verdict
    (`clickIn`), so a display that restarts under `navigate-guard` fails them as the wall seen to
    fail, not as an error.
@@ -6628,7 +6630,8 @@ one of the page's frames, within the time the page's input runs before the ask.
 **Tested.** `test/nested.test.ts`: a move within `KEY_PRESS_MS` of the last key is the page's, a
 press the engine shows still counts. `leak/served/nested-key.spec.ts` (the guard driven directly,
 on a page that never saw the pointer, every engine): an activation 30 ms after the person's key is
-no gesture; a key typed after the press, before the shell's word, changes nothing. Negative control
+no gesture; a key typed after the press, before the shell's look saw it, changes nothing (that
+part failed on the first cut of this decision, as CI's `shell-host-input` showed). Negative control
 `key-press` (the window out) fails it on Chromium and Firefox; its own file, because the cases that
 race the shell's answer stand on the rule by chance and are no control's probes. P120's guard test
 puts its activation 300 ms after the key, so it stays `pointer-rule`'s alone. `shell-host-input`

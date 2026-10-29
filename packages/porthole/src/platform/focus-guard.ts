@@ -895,9 +895,13 @@ export function focusGuard(view: Window): FocusGuard {
       const stalled = said.gap > SHELL_STALL_MS || at - guarded.heardAt > SHELL_STALL_MS;
       const fought = contest !== null && contest.fight && contest.frame === frame;
       // The typing before it, never after: a key the person typed on the host's page after they
-      // pressed the page, before the shell's word came, says nothing of that press (P122, after CI).
-      const typing = said.ago === null ? -Infinity : typedBefore(at - said.ago);
-      const soon = said.ago !== null && at - said.ago - typing < KEY_PRESS_MS;
+      // pressed the page, before the shell's word came, says nothing of that press (P122, after
+      // CI). The shell saw it turn on at its look, so it turned on at most a look's gap before:
+      // only a key before then counts.
+      const turnedAt =
+        said.ago === null ? -Infinity : at - said.ago - Math.min(said.gap, SHELL_STALL_MS);
+      const typing = typedBefore(turnedAt);
+      const soon = said.ago !== null && turnedAt - typing < KEY_PRESS_MS;
       const uncertain =
         said.ago !== null &&
         (before.uncertain === true || (turnedOn && (stalled || fought || soon)));
@@ -912,7 +916,7 @@ export function focusGuard(view: Window): FocusGuard {
         activatedAt === -Infinity
           ? false
           : turnedOn
-            ? !pressPossible(true, frame.matches(":hover"), guarded.overSince, typing, activatedAt)
+            ? !pressPossible(true, frame.matches(":hover"), guarded.overSince, typing, turnedAt)
             : before.keyed === true;
       guarded.word = {
         supported: said.supported,

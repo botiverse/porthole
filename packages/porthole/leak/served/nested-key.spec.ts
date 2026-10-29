@@ -45,20 +45,14 @@ test.describe("a nested page (P111)", () => {
       guard.beat(soon);
       guard.shell(soon, { supported: true, ago: 0, focused: true, gap: 16 });
       const afterKey = guard.gesture(soon);
-      // The person's key on the host's page after they pressed the page, before the shell's word
-      // came, says nothing of that press (after CI).
+      // The person's key on the host's page after they pressed the page, before the shell's look
+      // saw the press (its look 90 ms after the one before): says nothing of that press (after CI,
+      // where a runner typed into the host's composer within the shell's look).
       const late = frameAt();
       await wait(1_100);
-      const pressedAt = performance.now();
-      await wait(40);
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "b" }));
       guard.beat(late);
-      guard.shell(late, {
-        supported: true,
-        ago: Math.round(performance.now() - pressedAt),
-        focused: true,
-        gap: 16,
-      });
+      guard.shell(late, { supported: true, ago: 0, focused: true, gap: 90 });
       const keyAfter = guard.gesture(late);
       return { afterKey, keyAfter };
     }, "/src/platform/focus-guard.ts");
