@@ -820,7 +820,8 @@ unposted words beside the frame and tell the page when.
   opens; and so, more often, where Chromium keeps the page's frames in the host's process (the
   headless shell; a person's Chrome without full site isolation, Chrome on Android) until the
   host's page has seen the pointer over one of the page's frames, since the page's input runs
-  before the ask there. 0.13 took such a move back; a person typing slower than one key in 250 ms
+  before the ask there (measured in P122's review on the headless shell: a person typing one key
+  every 450 ms lost 34 of 36 keys to the page in 1 run of 8, and the page was not stopped). 0.13 took such a move back; a person typing slower than one key in 250 ms
   is the case left, and only a key that lands within that message's time of the page's move
   (P122); a press back into the page within 300 ms of a fight putting focus in the host's field is
   taken back on full Chromium; where the pointer is seen, an assistive technology's activation in
