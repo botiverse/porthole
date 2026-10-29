@@ -3,7 +3,9 @@ import { presets, type PortholeConfig } from "../../src/index.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
 import { keepsFramedCookies } from "../../src/conformance/cookies.ts";
 import { harness } from "./harness.ts";
-import { app, mount, outcomeOf } from "./porthole-host.ts";
+import { storedFiles } from "./files.ts";
+import { pageOf, unique } from "./nested-pages.ts";
+import { app, mount, outcomeOf, type DisplayRecord } from "./porthole-host.ts";
 
 /**
  * A served display's load outcome (P040), through Porthole's own `createHost` and `/server`: what a
@@ -166,4 +168,144 @@ test("what the content throws is a content error, never the host's", async ({ pa
   expect(record.contentErrors[0]).toContain("widget broke");
   expect(record.hostErrors).toEqual([]);
   expect(record.errors[0]).toMatch(/^content: .*widget broke/u);
+});
+
+/**
+ * Who may say how loading went (P124): a frame status draws the host's own fallback, in Porthole's
+ * wording ("open this in a new tab to sign in", "you no longer have access"), with a link. Content
+ * that says one, to its parent or to the host's window, at once and again later, is told nothing
+ * and shown nothing: the display's only outcome is `loaded`, and the host hears a `frame-status`
+ * host error, once.
+ */
+const FORGE = `
+  const forged = (to, reason) => to.postMessage({ jsonrpc: "2.0", method: "porthole/notifications/frame-status", params: { state: "blocked", reason, status: 401, code: "phish" } }, "*");
+  const forge = () => {
+    forged(parent, "sign-in");
+    forged(top, "denied");
+    parent.postMessage({ jsonrpc: "2.0", method: "porthole/notifications/frame-status", params: { state: "entering" } }, "*");
+  };
+  forge();
+  setTimeout(forge, 300);
+`;
+
+const UNTRUSTED = {
+  kind: "frame-status",
+  message:
+    "A frame status (porthole/notifications/frame-status) came from the frame's content, not from a page of Porthole's server: not taken (P124)",
+};
+
+/** The display's record once the content's forged words have reached the host (taken or not). */
+async function forgedHeard(read: () => Promise<DisplayRecord>): Promise<DisplayRecord> {
+  await expect
+    .poll(
+      async () => {
+        const record = await read();
+        // It finished its handshake, and the forger's word arrived: refused, or (a control) taken.
+        return (
+          record.initialized &&
+          (record.hostErrors.length > 0 || record.outcomes.some((each) => each.state !== "loaded"))
+        );
+      },
+      { message: "the forged frame status reached the host" },
+    )
+    .toBe(true);
+  // The later copies too.
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  return read();
+}
+
+function untold(record: DisplayRecord): void {
+  expect(record.outcomes, "probe: the content's frame status drew nothing: loaded only").toEqual([
+    { state: "loaded" },
+  ]);
+  expect(record.hostErrors, "probe: the host heard it, once, as a frame-status host error").toEqual(
+    [UNTRUSTED],
+  );
+  expect(record.contentErrors).toEqual([]);
+}
+
+test("a served shell's content that says it is blocked is told nothing and shown nothing (P124)", async ({
+  page,
+}) => {
+  const served = await harness();
+  const instance: InstanceRef = {
+    scope: "outcome-forge-shell",
+    document: { kind: "shell", preset: "inlineWidget" },
+  };
+  const { read } = await mount(
+    page,
+    served.hostOrigin,
+    served.configs.inlineWidget as PortholeConfig,
+    await served.porthole.issue(instance, { viewer: "probe" }),
+    instance,
+    { content: `<p>forger</p><script>${FORGE}</script>` },
+  );
+  untold(await forgedHeard(read));
+});
+
+test("a served artifact page that says it is blocked as it loads is told nothing and shown nothing (P124)", async ({
+  page,
+}) => {
+  const served = await harness();
+  served.pages.set(
+    "forger@1",
+    `<!doctype html><html><head><title>Forger</title><script>${FORGE}</script></head><body><main>a page</main></body></html>`,
+  );
+  const instance: InstanceRef = {
+    scope: "outcome-forge-page",
+    document: { kind: "artifact", id: "forger", version: "1" },
+  };
+  const { read } = await mount(
+    page,
+    served.hostOrigin,
+    served.configs.artifact as PortholeConfig,
+    await served.porthole.issue(instance, { viewer: "probe" }),
+    instance,
+  );
+  untold(await forgedHeard(read));
+});
+
+test("an opaque widget that says it is blocked is told nothing and shown nothing (P124)", async ({
+  page,
+}) => {
+  const served = await harness();
+  const { read } = await mount(
+    page,
+    served.hostOrigin,
+    presets.inlineWidget(),
+    null,
+    { scope: "outcome-forge-opaque", document: { kind: "shell", preset: "inlineWidget" } },
+    { content: `<p>forger</p><script>${FORGE}</script>` },
+  );
+  untold(await forgedHeard(read));
+});
+
+test("a nested page that says it is blocked, through its shell or past it, is told nothing and shown nothing (P124)", async ({
+  page,
+}) => {
+  const served = await harness();
+  const scope = unique("outcome-forge-nested");
+  const id = unique("forger");
+  served.fileSets.set(`${id}@1`, storedFiles({ "index.html": pageOf(FORGE) }));
+  const instance: InstanceRef = {
+    scope,
+    document: { kind: "artifact", id, version: "1", preset: "artifactNested" },
+  };
+  const { read } = await mount(
+    page,
+    served.hostOrigin,
+    served.configs.artifactNested as PortholeConfig,
+    await served.porthole.issue(instance, { viewer: "probe" }),
+    instance,
+    {
+      runtime: {
+        key: scope,
+        scope,
+        artifact: id,
+        declaration: { capabilities: {}, runtime: "1" },
+        viewer: { level: "interact", id: "ada", name: "Ada" },
+      },
+    },
+  );
+  untold(await forgedHeard(read));
 });

@@ -15,6 +15,27 @@ import type { FrameBlock, FrameOutcome } from "./types.ts";
  * - an app from a host's own gateway is loaded on its first load, unless its page says it is
  *   blocked (the gateway may send the same message);
  * - nothing settled in `timeoutMs`: a timeout.
+ *
+ * Who may say how loading went (P124). A frame status is taken only from a document of Porthole's
+ * server, a host's gateway or the host's own pages, never from content: its words draw the host's
+ * fallback, in Porthole's wording, with a link. Nothing in a message tells who sent it (a page
+ * that shares the frame's window and origin can send the same bytes), so the host goes by what
+ * content can't change: where the frame's documents come from, and in what order they speak.
+ *
+ * - An opaque frame's only document is the host's own shell, with the content in it: no page of
+ *   Porthole's server ever loads there, so its every frame status is the content's.
+ * - A frame that speaks (a served shell, a view through the sandbox proxy, a nested page's shell)
+ *   says Porthole's own word first in every document that holds content, before any of the
+ *   content's code runs: the shell's hello, the proxy's ready (a nested page's own runtime's hello
+ *   reaches the host before anything its page says, through its shell). A status page says
+ *   nothing but its frame status. So a frame status is taken only before anything else was heard
+ *   from the frame in this run: from its first document, which then was a page of Porthole's.
+ *   After that, it came from the content (or from a later document, which in a display without
+ *   files starts the display again, whose first document then says how it went).
+ * - A url-mode app has no shell to speak first, and shares its origin with the entry page and the
+ *   status pages: its frame status is taken as before, the app's word (THREAT_MODEL S6).
+ *
+ * A frame status not taken is dropped, and told once a run to the host (`refused`).
  */
 
 /** How long after a load the frame's word may still arrive. */
@@ -77,6 +98,16 @@ export function parseFrameStatus(data: unknown): FrameStatus | null {
   };
 }
 
+/** Whether a message names the frame-status method, well formed or not. */
+const namesFrameStatus = (data: unknown): boolean =>
+  data !== null &&
+  typeof data === "object" &&
+  (data as { method?: unknown }).method === FRAME_STATUS_METHOD;
+
+/** What the host is told of a frame status it didn't take (P124). */
+export const UNTRUSTED_FRAME_STATUS =
+  "A frame status (porthole/notifications/frame-status) came from the frame's content, not from a page of Porthole's server: not taken (P124)";
+
 export interface OutcomeWatch {
   /** The frame finished its handshake. */
   initialized(): void;
@@ -90,12 +121,17 @@ export function watchOutcome(options: {
   readonly speaks: boolean;
   readonly timeoutMs: number;
   readonly onOutcome: (outcome: FrameOutcome) => void;
+  /** A frame status that wasn't taken, once a run (P124): the host's to hear, never shown. */
+  readonly refused?: (message: string) => void;
 }): OutcomeWatch {
   const { surface, source, speaks } = options;
   const reports = source.kind === "url" && source.reports === true;
   // The first outcome; after a load, only a later block (a status page, access revoked) is told.
   let decided: FrameOutcome["state"] | null = null;
   let heard = false;
+  // Whether the frame said anything but a frame status in this run (P124).
+  let spoke = false;
+  let told = false;
   let entering = false;
   let loads = 0;
   const timers = new Set<ReturnType<typeof setTimeout>>();
@@ -127,8 +163,21 @@ export function watchOutcome(options: {
       options.onOutcome(outcome);
     }
   };
+  // Whether a frame status may be the word of a page of Porthole's (P124, above).
+  const mayBePorthole = () => source.kind === "url" && (!speaks || !spoke);
   const unlisten = surface.transport.listen((data) => {
     heard = true;
+    if (!namesFrameStatus(data)) {
+      spoke = true;
+      return;
+    }
+    if (!mayBePorthole()) {
+      if (!told) {
+        told = true;
+        options.refused?.(UNTRUSTED_FRAME_STATUS);
+      }
+      return;
+    }
     const status = parseFrameStatus(data);
     if (status?.state === "entering") {
       entering = true;

@@ -589,6 +589,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           speaks,
           timeoutMs: config.limits.loadTimeoutMs ?? DEFAULT_LOAD_TIMEOUT_MS,
           onOutcome: (outcome) => emit("outcome", outcome),
+          // A frame status from the content (P124): never shown, the host's to hear.
+          refused: (message) => hostError(message, "frame-status"),
         });
         outcomeWatch = watch;
         if (!speaks) {

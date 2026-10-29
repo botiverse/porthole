@@ -563,7 +563,8 @@ export interface PortholeFrameProps {
   readonly onContentError?: (message: string) => void;
   /**
    * What failed on the host's side: its locator (`locate`), a display that couldn't be made
-   * (`mount`), an annotation call refused (`annotations`). Never the agent's.
+   * (`mount`), an annotation call refused (`annotations`), a frame status the content forged and
+   * the host didn't take (`frame-status`, P124). Never the agent's.
    */
   readonly onHostError?: (error: {
     readonly message: string;

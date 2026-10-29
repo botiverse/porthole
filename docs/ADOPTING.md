@@ -816,6 +816,11 @@ display.on("outcome", (outcome) => {
 openButton.onclick = () => porthole.openInTab(instance);           // the clean address
 ```
 
+A `blocked` outcome is the word of Porthole's own pages, never of the content (P124): an opaque
+frame's frame status is never taken, nor one a frame says after its first word; the host hears
+those as a `hostError` of kind `"frame-status"` (log it, show nothing for it). Draw the fallback
+from `outcome` only. A url-mode app is the exception: it can say any outcome (THREAT_MODEL S6).
+
 `porthole.config(kind)` is the served config while frames are served, the opaque one while they
 aren't, and null until the meta is known, so a frame never starts opaque and then restarts
 served. The client's functions take no `this`: pass them bare

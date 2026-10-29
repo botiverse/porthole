@@ -603,6 +603,17 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   },
   // A nested page's shell keeps its own namespace (P111): a page that says the shell's words, just
   // before a call of its own, has its comments.open believed.
+  // Who may say how loading went (P124): without the rule, every forger's frame status is an
+  // outcome.
+  "frame-status": {
+    specs: ["leak/served/outcome.spec.ts"],
+    fails: all(
+      "a served shell's content that says it is blocked is told nothing and shown nothing (P124)",
+      "a served artifact page that says it is blocked as it loads is told nothing and shown nothing (P124)",
+      "an opaque widget that says it is blocked is told nothing and shown nothing (P124)",
+      "a nested page that says it is blocked, through its shell or past it, is told nothing and shown nothing (P124)",
+    ),
+  },
   "shell-namespace": {
     specs: [NESTED],
     fails: all(

@@ -81,7 +81,10 @@ the agent, but it is not a wall.
    - everything beyond drawing is a host function the config declares, behind gates: a user
      gesture, a person's confirmation, consent, a rate;
    - the host draws its confirmations and consent outside the frame, where content can't draw over
-     them.
+     them;
+   - the host's fallback for a frame that showed nothing ("open this in a new tab to sign in",
+     "you no longer have access", with a link) is drawn from Porthole's pages' word only, never
+     from what the content says (P124; a url-mode app aside, S6).
 
 The app runtime adds a third: **the host's API is the wall for its data.** The bridge refuses a
 call the page didn't declare (`undeclared`), or that the viewer's level doesn't allow, before any
@@ -164,6 +167,11 @@ Whatever the use:
   host's own UI. A copy notice of its own shows what went on the clipboard (S1).
 - Show the text content reports (its errors, a blocked navigation's address, an annotation's
   quoted text) only as text, never as HTML.
+- Draw a frame's fallback (what `frameFallback` words, or your own) from its `outcome` alone, never
+  from a message of your own reading off the frame's window: a `blocked` outcome is the word of a
+  page of Porthole's server, a gateway or your own pages, never of an opaque frame or of content in
+  a frame that speaks (P124). Hear the `frame-status` host error as a display trying to speak as
+  Porthole: log it, and show nothing for it. A url-mode app can still say any outcome (S6).
 - Take what the frame reports about annotations as UI hints (where to draw, what to open), never
   as permissions, and put nothing in a mark the page may not know (§7).
 - Guard a view that a frame's report opens or moves (`activated`, `anchored`, `selected`,
@@ -575,6 +583,11 @@ the attacker (c), and its readers are strangers.
 **Not guaranteed**
 
 - The app's network is its own.
+- The app's word about how it loaded is its own: it shares its origin with Porthole's entry page
+  and status pages and has no shell to speak first, so it can make the display's `outcome` any
+  `blocked`, with any code, and the host show its fallback ("open this in a new tab to sign in")
+  with a link out of the page (P124). A host that previews code it doesn't trust words that
+  fallback as its own, not as Porthole's or the person's sign-in.
 - A page on another origin can still open the app by a navigation (a link, a frame of its own),
   which reaches the app's GET routes as any link does.
 - A request with neither `Origin` nor `Sec-Fetch-Site` goes on: in browsers without fetch
@@ -622,6 +635,21 @@ wall on three engines, and `defineHostConformance` runs it against a host's own 
 
 **The host must** do what [every host](#what-every-host-must-do) does, write the handlers (their
 effects are its own), and group displays by page (S7).
+
+**The host's fallback** (P040, P124). A display's `outcome` says how its frame loaded, and a host
+draws its own UI on a `blocked` one, in Porthole's wording (`frameFallback`: "Open this in a new
+tab to sign in", "You can't open this anymore") with a link out of the page: UI the person takes
+for the host's and Porthole's, which content must not be able to summon. A `blocked` comes from a
+frame status (`porthole/notifications/frame-status`), and nothing in that message says who sent
+it: Porthole's status pages are documents of the frame's own window and origin, as content is. So
+the host takes one only where content can't have said it: never from an opaque frame (no page of
+Porthole's loads there), and in a frame that speaks (a served shell, a view through the sandbox
+proxy, a nested page's shell) only before anything else is heard from it in the run, since
+Porthole's own word opens every document that holds content, before the content runs, and a status
+page says nothing else. What it drops is no outcome and no code; the host hears a `frame-status`
+host error, once a run (control `frame-status`). What follows: in a display with files, a page of
+the set answered by a status page (access revoked) shows the server's words in the frame, and the
+host isn't told until the next mount. Not covered: a url-mode app (S6).
 
 **Annotations** (`annotate`, P053, P104, P107). The shell that draws marks and reports anchors shares
 its realm with the content (a nested page's too: its marks are drawn by the runtime in the page's
@@ -953,7 +981,8 @@ The decisions below come from the 2026-10-19 review, and all of them have merged
 what was wrong, what holds now, and the limit its decision accepts, if any. Later reviews' decisions
 are in the status line and in DECISIONS.md: P105 (after the review of P104), P109 (after the review
 of 0.12.0's drafts), P111 (a nested page, S3; in 0.14.0), P114 (a nested page's shell on a label of
-its own, after porthole#56; in 0.14.1).
+its own, after porthole#56; in 0.14.1), P124 (a frame status is the word of Porthole's pages, after
+the audit raft-security-audit#16; unreleased: §4, §6, §7, S6).
 
 | Decision | State | What it closes | Sections |
 | --- | --- | --- | --- |
