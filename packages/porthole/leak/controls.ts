@@ -316,7 +316,15 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   },
   "marker-tap": {
     specs: [ANNOTATE],
-    fails: each([], { webkit: [MARKER_TAP] }),
+    // P119's touch probes tap a marker too, so on WebKit they fail with it.
+    fails: each([], {
+      webkit: [
+        MARKER_TAP,
+        "on touch, a marker takes a tap a few px off its bubble (44 by 44), after the page scrolled itself; a tap past that is the page's (P119)",
+        "on touch, where two markers' 44 px boxes overlap, a tap is the nearest bubble's (P119)",
+        "a paragraph's marker pinned at the frame's top once its start scrolled away takes a mouse click and a tap where it is drawn (P119, porthole#42)",
+      ],
+    }),
     holds: {
       why: "no probe can see it on Chromium and Firefox: they make a tap a click on the marker without a listener of its own (measured, P105)",
     },
