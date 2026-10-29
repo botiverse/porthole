@@ -1,4 +1,38 @@
 /**
+ * Which marker a press on the shell's layer is for (P119), spliced into the runtime: the index of
+ * `count` boxes (`boxAt(i)`, the markers' own boxes in the viewport, the last drawn on top), or -1.
+ * A point on a marker's own box is that marker's (the topmost, as before). With `touch` (the last
+ * pointer a finger or a pen), a marker also takes the points of a 44 by 44 CSS px box centred on
+ * its own (its own size where it is larger): where those overlap, the marker whose own box's
+ * centre is nearest the point. No built-in is called (content may have patched them).
+ */
+export const MARKER_HIT = String.raw`(count, boxAt, x, y, touch) => {
+        const TARGET = 44;
+        let best = -1;
+        let nearest = 0;
+        for (let i = count - 1; i >= 0; i -= 1) {
+          const rect = boxAt(i);
+          if (x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height) {
+            return i;
+          }
+          if (touch) {
+            const dx = x - (rect.x + rect.width / 2);
+            const dy = y - (rect.y + rect.height / 2);
+            const halfWidth = (rect.width > TARGET ? rect.width : TARGET) / 2;
+            const halfHeight = (rect.height > TARGET ? rect.height : TARGET) / 2;
+            if (dx >= -halfWidth && dx <= halfWidth && dy >= -halfHeight && dy <= halfHeight) {
+              const distance = dx * dx + dy * dy;
+              if (best === -1 || distance < nearest) {
+                best = i;
+                nearest = distance;
+              }
+            }
+          }
+        }
+        return best;
+      }`;
+
+/**
  * The shell's annotation runtime (P053), spliced into the shell's runtime (`__ANNOTATE__`) when
  * the config declares `annotate`, so it runs before any content does, with the DOM's own
  * functions as they were. Plain ES2020 like the rest of the shell; no template literals (it sits
@@ -376,7 +410,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       // layer inherits from the page could reach it, so each of those is set here). A draft
       // (P107) is a comment not yet posted: its line is dashed (an element's outline too) and its
       // marker hollow, a light bubble with a dashed edge and the glyph's outline, no number.
-      const STYLE = ".mark{position:absolute;border-radius:2px;background:rgba(250,204,21,.18);box-shadow:inset 0 -2px 0 rgba(234,179,8,.95)}.mark.element{background:rgba(250,204,21,.07);box-shadow:none;outline:2px solid rgba(234,179,8,.9);outline-offset:1px}.mark.active{background:rgba(250,204,21,.26);box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 2px rgba(234,179,8,.45)}.mark.element.active{background:rgba(250,204,21,.12);box-shadow:none;outline-width:3px}.mark.element.quiet{background:rgba(250,204,21,.05);outline:1px solid rgba(234,179,8,.6);outline-offset:2px}.mark.element.quiet.active{background:rgba(250,204,21,.1);outline:2px solid rgba(234,179,8,.9)}.mark.draft{box-sizing:border-box;background:rgba(250,204,21,.08);box-shadow:none;border-bottom:2px dashed rgba(202,138,4,.95)}.mark.draft.active{background:rgba(250,204,21,.16);box-shadow:0 0 0 2px rgba(234,179,8,.45);border-bottom-width:3px}.mark.element.draft{background:rgba(250,204,21,.04);border-bottom:0;outline-style:dashed}.mark.element.draft.active{background:rgba(250,204,21,.08);box-shadow:none;outline-style:dashed}.marker{position:absolute;box-sizing:border-box;height:18px;min-width:18px;display:flex;align-items:center;justify-content:center;gap:3px;margin:0;padding:0 5px;border:1px solid rgba(161,98,7,.6);border-radius:9px 9px 9px 2px;background:#fde68a;color:#422006;box-shadow:0 1px 2px rgba(0,0,0,.3);font:600 11px/16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-style:normal;letter-spacing:0;word-spacing:0;text-transform:none;text-indent:0;text-shadow:none;direction:ltr;writing-mode:horizontal-tb;white-space:nowrap;user-select:none;-webkit-user-select:none;cursor:pointer;pointer-events:auto}.marker:hover{background:#fcd34d}.marker.active{background:#facc15;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.3)}.marker.compact{padding:0 4px}.marker.draft{border:1px dashed rgb(202,138,4);background:#fffdf5;color:#a16207;box-shadow:0 1px 2px rgba(0,0,0,.2)}.marker.draft:hover{background:#fef9e7}.marker.draft.active{background:#fef3c7;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.2)}.marker.inert{pointer-events:none}.marker svg{display:block;width:11px;height:11px;flex:none}.mark.flash{animation:flash 1.8s ease-out}@keyframes flash{from{box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 6px rgba(250,204,21,.6)}}.hover{position:absolute;outline:2px solid #2563eb;outline-offset:1px;background:rgba(37,99,235,.12)}.tag{position:absolute;max-width:70vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace;padding:0 6px;border-radius:4px;background:#1e293b;color:#fff}";
+      // While the last pointer was a finger or a pen (P119), each marker takes the pointer in a
+      // box of at least 44 by 44 px centred on its own (an invisible ::before; 100% is its padding
+      // box, its border 1 px), so a tap a few px off still lands on the shell's layer.
+      const STYLE = ".mark{position:absolute;border-radius:2px;background:rgba(250,204,21,.18);box-shadow:inset 0 -2px 0 rgba(234,179,8,.95)}.mark.element{background:rgba(250,204,21,.07);box-shadow:none;outline:2px solid rgba(234,179,8,.9);outline-offset:1px}.mark.active{background:rgba(250,204,21,.26);box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 2px rgba(234,179,8,.45)}.mark.element.active{background:rgba(250,204,21,.12);box-shadow:none;outline-width:3px}.mark.element.quiet{background:rgba(250,204,21,.05);outline:1px solid rgba(234,179,8,.6);outline-offset:2px}.mark.element.quiet.active{background:rgba(250,204,21,.1);outline:2px solid rgba(234,179,8,.9)}.mark.draft{box-sizing:border-box;background:rgba(250,204,21,.08);box-shadow:none;border-bottom:2px dashed rgba(202,138,4,.95)}.mark.draft.active{background:rgba(250,204,21,.16);box-shadow:0 0 0 2px rgba(234,179,8,.45);border-bottom-width:3px}.mark.element.draft{background:rgba(250,204,21,.04);border-bottom:0;outline-style:dashed}.mark.element.draft.active{background:rgba(250,204,21,.08);box-shadow:none;outline-style:dashed}.marker{position:absolute;box-sizing:border-box;height:18px;min-width:18px;display:flex;align-items:center;justify-content:center;gap:3px;margin:0;padding:0 5px;border:1px solid rgba(161,98,7,.6);border-radius:9px 9px 9px 2px;background:#fde68a;color:#422006;box-shadow:0 1px 2px rgba(0,0,0,.3);font:600 11px/16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-style:normal;letter-spacing:0;word-spacing:0;text-transform:none;text-indent:0;text-shadow:none;direction:ltr;writing-mode:horizontal-tb;white-space:nowrap;user-select:none;-webkit-user-select:none;cursor:pointer;pointer-events:auto}.marker:hover{background:#fcd34d}.marker.active{background:#facc15;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.3)}.marker.compact{padding:0 4px}.marker.draft{border:1px dashed rgb(202,138,4);background:#fffdf5;color:#a16207;box-shadow:0 1px 2px rgba(0,0,0,.2)}.marker.draft:hover{background:#fef9e7}.marker.draft.active{background:#fef3c7;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.2)}.marker.inert{pointer-events:none}.touch>.marker::before{content:'';position:absolute;left:50%;top:50%;width:max(100% + 2px,44px);height:max(100% + 2px,44px);transform:translate(-50%,-50%)}.marker svg{display:block;width:11px;height:11px;flex:none}.mark.flash{animation:flash 1.8s ease-out}@keyframes flash{from{box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 6px rgba(250,204,21,.6)}}.hover{position:absolute;outline:2px solid #2563eb;outline-offset:1px;background:rgba(37,99,235,.12)}.tag{position:absolute;max-width:70vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace;padding:0 6px;border-radius:4px;background:#1e293b;color:#fff}";
       // Inline and important: the content's own style sheets can't hide, shrink or move it by
       // accident. Set again at each draw, since its scripts can rewrite it (narrowing only: the
       // content can still cover the layer, or move it with its ancestors, P104).
@@ -404,6 +441,13 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       // marker's node across draws, so a press that spans a redraw ends on the node it began on.
       let markers = [];
       const markerNodes = new Map();
+      // Whether the last pointer was a finger or a pen (P119): then each marker takes the pointer
+      // in a 44 px box around it (the markers' box has the class "touch"). Until a pointer is
+      // seen, whether the device has a coarse pointer at all (a phone, a tablet, a laptop with a
+      // touch screen): a mouse moves before it presses, and its first move turns it off.
+      const coarseQuery = typeof window.matchMedia === "function" ? window.matchMedia("(any-pointer: coarse)") : null;
+      let touch = coarseQuery !== null && coarseQuery.matches === true;
+      const markerHit = ${MARKER_HIT};
       const MARKER_HEIGHT = 18;
       const SVG = "http://www.w3.org/2000/svg";
       const labelOf = (count) => (count === 0 ? "" : count > 99 ? "99+" : String(count));
@@ -713,6 +757,9 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
         if (boxes.style.textContent !== STYLE) {
           boxes.style.textContent = STYLE;
+        }
+        if (boxes.markers.className !== (touch ? "touch" : "")) {
+          boxes.markers.className = touch ? "touch" : "";
         }
         return boxes;
       };
@@ -1118,14 +1165,11 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         const rect = callOf(elementRect, element, []);
         return { x: callOf(leftOf, rect, []), y: callOf(topOf, rect, []), width: callOf(widthOf, rect, []), height: callOf(heightOf, rect, []) };
       };
+      // The marker a press at (x, y) is for: on a marker's own box, that one; after a finger or a
+      // pen, also within the 44 px box around one, the nearest (P119).
       const markerAt = (x, y) => {
-        for (let i = markers.length - 1; i >= 0; i -= 1) {
-          const rect = markerBox(markers[i].element);
-          if (x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height) {
-            return markers[i];
-          }
-        }
-        return null;
+        const at = markerHit(markers.length, (i) => markerBox(markers[i].element), x, y, touch);
+        return at < 0 ? null : markers[at];
       };
       const isShown = (id) => {
         for (let i = 0; i < marks.length; i += 1) {
@@ -1170,6 +1214,28 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const CANCELLED = { mousedown: 1, mouseup: 1, click: 1, dblclick: 1, auxclick: 1, contextmenu: 1 };
       // The pointer on a marker (1), or leaving the layer for the content (0).
       const HOVERS = { pointerover: 1, pointermove: 1, pointerout: 0, pointerleave: 0 };
+      // Which pointer the person uses (P119), from each real one that goes down or moves, before
+      // the marker's listener (which stops a press on the layer): a finger or a pen gives every
+      // marker its 44 px box, a mouse takes it away. A mouse moves before it presses, so its press
+      // is hit-tested on the markers' own boxes. Read through the platform's getter, kept now; an
+      // event the page makes up (isTrusted is false) changes nothing.
+      const pointerTypeOf = getterOf(typeof PointerEvent === "function" ? PointerEvent.prototype : null, "pointerType");
+      const onPointer = (event) => {
+        if (!event.isTrusted || pointerTypeOf === null) {
+          return;
+        }
+        const kind = callOf(pointerTypeOf, event, []);
+        const next = kind === "touch" || kind === "pen";
+        if (next !== touch) {
+          touch = next;
+          if (boxes !== null) {
+            boxes.markers.className = touch ? "touch" : "";
+          }
+        }
+      };
+      for (const type of ["pointerdown", "pointermove"]) {
+        window.addEventListener(type, onPointer, true);
+      }
       for (const type of ["pointerdown", "pointerup", "pointercancel", "mousedown", "mouseup", "click", "dblclick", "auxclick", "contextmenu", "touchstart", "touchend", "touchcancel", "pointerover", "pointerout", "pointerenter", "pointerleave", "pointermove", "mouseover", "mouseout", "mouseenter", "mouseleave", "mousemove"]) {
         window.addEventListener(type, onMarker, true);
       }

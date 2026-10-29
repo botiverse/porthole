@@ -679,7 +679,12 @@ own frame, below the shell, P111), so:
   `marker-prevent`), so content can't act on it or cancel it; nor can it read or reach inside the
   shell's layer (a closed shadow root). Content can still tell that a marker was pressed, and
   roughly where: the pointer leaving its own element names the layer, the layer matches `:hover`
-  and `:active`, and the frame gets user activation.
+  and `:active`, and the frame gets user activation. On touch (P119), a marker is also the
+  44 by 44 px box around its bubble, drawn in that same layer: a tap there is a press on the
+  marker, with the same checks (a trusted click, the main button, on the layer), so the content
+  loses a tap within 13 px of a bubble (a few px of its words above and below it), as it loses
+  one on the bubble. Which pointer is used is read from trusted pointer events only; a page that
+  makes its own up changes nothing, and a real `activated` still needs a real click.
 - *What doesn't hold against content that does.* The shell shares the content's realm. It reads
   and stops a marker's press through the platform's own functions and getters, kept before
   content runs (P105, control `marker-originals`), so patching `Event`'s or `MouseEvent`'s

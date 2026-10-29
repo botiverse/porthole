@@ -1085,7 +1085,14 @@ chooses), and the annotation runtime is in the shell only then.
   moves over it, are stopped in the shell's first window listener, read through the
   platform's own functions kept before content runs (P105), and a trusted click is
   reported `activated`; a tap too, on WebKit as well, since each marker has a click
-  listener of its own (WebKit makes a tap a click only on such an element, P105). Against content that patches none of the built-ins, none of
+  listener of its own (WebKit makes a tap a click only on such an element, P105). On
+  touch (P119), while the last pointer down or moved was a finger or a pen (before any,
+  where `(any-pointer: coarse)` matches), each marker also takes the pointer in a box of
+  at least 44 by 44 px centred on its bubble (an invisible `::before` in the layer), the
+  bubble itself unchanged; a press there is a press on the marker, and where two such
+  boxes overlap it is the marker whose bubble's centre is nearest (on a bubble, that
+  bubble). A mouse's move takes the boxes away, so a mouse is hit-tested on bubbles
+  alone. Against content that patches none of the built-ins, none of
   its handlers, nor what is under the marker, gets them; content that patches others
   can reach the layer's nodes (P105). Either way the content can tell a press
   happened, by `:active`, `relatedTarget` and user activation. Markers step aside
@@ -1439,7 +1446,7 @@ control the tables above name to the registry):
 | `annotation-activated` | `annotate.spec.ts` | `a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker` | — | — |
 | `annotation-activated-count` | `annotate.spec.ts` | `a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker` | — | — |
 | `marker-trusted` | `annotate.spec.ts` | `a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker` | — | — |
-| `marker-click` | `annotate.spec.ts` | `markers: a mark with a count gets a numbered bubble; its click is reported and never reaches the content`, `a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection`, `a page that patches the event's built-ins neither hears a marker's press nor stops its report (P105)`, `a tap on a marker is reported on every engine, and the content hears none of it (P105)`, `drafts (P107): a dashed line and a hollow marker with no number, apart from posted marks; their clicks are reported the same` | — | — |
+| `marker-click` | `annotate.spec.ts` | `markers: a mark with a count gets a numbered bubble; its click is reported and never reaches the content`, `a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection`, `a page that patches the event's built-ins neither hears a marker's press nor stops its report (P105)`, `a tap on a marker is reported on every engine, and the content hears none of it (P105)`, `drafts (P107): a dashed line and a hollow marker with no number, apart from posted marks; their clicks are reported the same`, `on touch, a marker takes a tap a few px off its bubble (44 by 44), after the page scrolled itself; a tap past that is the page's (P119)`, `on touch, where two markers' 44 px boxes overlap, a tap is the nearest bubble's (P119)`, `a paragraph's marker pinned at the frame's top once its start scrolled away takes a mouse click and a tap where it is drawn (P119, porthole#42)` | — | — |
 | `marker-prevent` | `annotate.spec.ts` | `a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection` | — | — |
 | `marker-place` | `annotate.spec.ts` | `text markers cover no word: on a column page, and on a phone's lines with one marker each (P105, #36)` | — | — |
 | `marker-tap` | `annotate.spec.ts` | nothing | WebKit: `a tap on a marker is reported on every engine, and the content hears none of it (P105)` | no probe can see it on Chromium and Firefox: they make a tap a click on the marker without a listener of its own (measured, P105) |

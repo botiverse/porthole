@@ -4,6 +4,22 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **Changed (P119, part of porthole#42):** on touch, an annotation marker takes a tap anywhere in a
+  box of at least 44 by 44 CSS px centred on its bubble, so a finger a few px off still opens it.
+  The bubble looks the same. Where two such boxes overlap, the marker whose bubble's centre is
+  nearest takes the tap. A press there goes the way one on the bubble does (stopped in the shell's
+  layer, a trusted click, `activated` with the bubble's box). The boxes are there while the last
+  pointer was a finger or a pen (before any, where `(any-pointer: coarse)` matches); a mouse's
+  move takes them away, so a mouse is as before, also on a touch laptop. Trade-off: on touch, a
+  tap within 13 px of a bubble is the marker's, not the words' under it.
+- **Tests (P119):** `test/annotate.test.ts` (the hit rule); `leak/annotate.spec.ts` on all three
+  engines: taps 11 px off a bubble after the page scrolled itself, the nearest of two, a tap past
+  the box reaching the page, a marker pinned at the frame's top clicked and tapped where it is
+  drawn, and a mouse just off a bubble reaching the page. Raft QA's two reports (a tap after an
+  in-page `scrollBy`, a pinned marker's click) did not reproduce in the shell (DECISIONS P119).
+
 ## 0.14.2
 
 - **New (React, P118):** `PortholeFrame` and `PortholeView` take `trackedAnnotation` (a shown

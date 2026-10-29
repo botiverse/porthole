@@ -297,6 +297,11 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       MARKER_TAP,
       // P107: a draft's and a posted marker's presses beside each other reach none of the content.
       "drafts (P107): a dashed line and a hollow marker with no number, apart from posted marks; their clicks are reported the same",
+      // P119: a tap in a marker's 44 px box, the nearest of two, and a pinned marker's click and
+      // tap are the marker's, so with the marker's click not taken they reach the content.
+      "on touch, a marker takes a tap a few px off its bubble (44 by 44), after the page scrolled itself; a tap past that is the page's (P119)",
+      "on touch, where two markers' 44 px boxes overlap, a tap is the nearest bubble's (P119)",
+      "a paragraph's marker pinned at the frame's top once its start scrolled away takes a mouse click and a tap where it is drawn (P119, porthole#42)",
     ),
   },
   // After the review of P104 (P105): the press's default cancelled (focus on every engine; a
