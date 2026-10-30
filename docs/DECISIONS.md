@@ -6843,14 +6843,15 @@ start the clock again (one `loadTimeoutMs` per loading episode, from its first r
 outcome; an outcome, or the host's `reload()`, begins a new one), and a frame stopped once its
 restarts ran out is `blocked: error` (its `contentError` as before). Before, a sibling that wiped a
 display again and again left it with no outcome and no timeout (Cato, on WebKit, 2026-10-30). **On
-WebKit the sibling probes' attack can't be made as they make it:** a sibling's `document.open`
-into another display's loading document throws (measured in CI on 2026-10-30: in four runs A never got in, and in the two
-that logged its tries each one threw; a script appended to a loaded document still runs, and other ways into a loading one
-are not measured). `[sibling-inject]`, `[sibling-reload]`, `[sibling-wipe]` and `[proxy]`
-measure their positive control on every run (`requireReach`) and skip there with the measurement,
-never pass; their controls hold on WebKit for that reason (`leak/controls.ts`). P125's rule doesn't
-depend on it — no frame status of a served non-nested frame is taken on any engine — and the
-probes run whole again on a WebKit that lets A write: retest with each WebKit version. Nested displays (their shell is on a label of its own, P114), url mode and opaque
+WebKit the sibling probes' attack lands only sometimes** (measured in CI, 2026-10-30): in most runs
+every `document.open` A tried into B's loading document threw, and in some A got in (under the
+`door-silence` control it wiped B, and B was `blocked: framing`, the weakening caught). So
+`[sibling-inject]`, `[sibling-reload]`, `[sibling-wipe]` and `[proxy]` check their positive control
+on every run (`requireReach`): when A got in they are judged as on every engine (unweakened: pass;
+under a control: fail); when every try was refused they skip with the measurement, never pass, and
+their controls take that skip as held on WebKit (`measured`, `leak/controls.ts`; Tenny and Cato).
+P125's rule doesn't depend on any of this — no frame status of a served non-nested frame is taken
+on any engine — and WebKit's refusal is never a premise of it. Retest with each WebKit version. Nested displays (their shell is on a label of its own, P114), url mode and opaque
 frames are unchanged: a nested page's shell keeps P124's ordering rule, a url-mode app's word is
 taken as before (S6), an opaque frame's every status is the content's (rule 1).
 

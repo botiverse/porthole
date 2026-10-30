@@ -33,7 +33,17 @@ export interface Control {
    * (`why` starts "no probe").
    */
   readonly holds?: { readonly why: string; readonly by?: string };
+  /**
+   * Per engine, the named probes whose attack lands only sometimes there (measured): such a probe
+   * checks on every run whether its attack happened (its positive control) and skips with a
+   * reason starting `MEASURED_SKIP` when the engine refused every try. That skip holds the control
+   * on that engine as its failure does; its passing is still a problem (P096, P125's review).
+   */
+  readonly measured?: Readonly<Partial<Record<Engine, readonly string[]>>>;
 }
+
+/** How a probe's skip reason starts when its attack's precondition didn't hold in that run (measured). */
+export const MEASURED_SKIP = "precondition doesn't hold";
 
 /**
  * The mark a probe's verdict carries: its deciding `expect`'s message starts with it (`expect(x,
@@ -103,16 +113,13 @@ const TAB_SANDBOX = [
 ];
 
 /**
- * WebKit throws on the probes' attack, a sibling's `document.open` into another display's loading
- * document (measured in CI on 2026-10-30: in four runs A never got in; in the two that logged its tries, each
- * one threw; a script appended to a loaded
- * one still runs, and other ways into a loading one are not measured): the probes whose attack is
- * that write skip there, with the measurement (`requireReach`), so no control can see their walls
- * on WebKit. Retest with each WebKit version: the probes measure it on every run and
- * run whole again once A can write.
+ * On WebKit the sibling probes' attack (A's `document.open` into B's loading document) lands only
+ * sometimes: in most CI runs every try threw, and in some A got in (2026-10-30). Each probe checks
+ * on every run whether it did (`requireReach`): if so it is judged as on every engine, if not it
+ * skips with the measurement, which holds its controls there (`measured`). Retest with each
+ * WebKit version.
  */
-const WEBKIT_REFUSES_SIBLING_WRITE =
-  "no probe on WebKit: the probes' attack, a sibling's document.open() into another display's loading document, throws there (measured in CI 2026-10-30: in four runs A never got in, and in the two that logged its tries each one threw; other ways in are not measured), so [sibling-inject], [sibling-reload], [sibling-wipe] and [proxy] skip there with that measurement; retest with each WebKit version";
+const WEBKIT_SIBLING_WRITE = ["[sibling-inject]", "[sibling-reload]", "[sibling-wipe]", "[proxy]"];
 
 /** The same tests on every engine. */
 function all(...tests: string[]): Control["fails"] {
@@ -626,33 +633,27 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   // whether its own content's (the two P124 outcome cases) or a sibling's (inject, reload, proxy).
   "content-status": {
     specs: [OUTCOME, SIBLINGS_STATUS],
-    fails: {
-      ...all(
-        "a served shell's content that says it is blocked is told nothing and shown nothing (P124)",
-        "a served artifact page that says it is blocked as it loads is told nothing and shown nothing (P124)",
-        "[sibling-inject]",
-        "[sibling-reload]",
-        "[proxy]",
-      ),
-      // The sibling probes skip on WebKit (WEBKIT_REFUSES_SIBLING_WRITE): its own content's word.
-      webkit: [
-        "a served shell's content that says it is blocked is told nothing and shown nothing (P124)",
-        "a served artifact page that says it is blocked as it loads is told nothing and shown nothing (P124)",
-      ],
-    },
+    fails: all(
+      "a served shell's content that says it is blocked is told nothing and shown nothing (P124)",
+      "a served artifact page that says it is blocked as it loads is told nothing and shown nothing (P124)",
+      "[sibling-inject]",
+      "[sibling-reload]",
+      "[proxy]",
+    ),
+    measured: { webkit: WEBKIT_SIBLING_WRITE },
   },
   // P124's first-word rule in place of the door: a sibling that speaks first in a served
   // non-nested display's frame (its own, or the sandbox proxy's) is taken.
   "door-status": {
     specs: [SIBLINGS_STATUS],
-    fails: { ...all("[sibling-inject]", "[sibling-reload]", "[proxy]"), webkit: [] },
-    holds: { why: WEBKIT_REFUSES_SIBLING_WRITE },
+    fails: all("[sibling-inject]", "[sibling-reload]", "[proxy]"),
+    measured: { webkit: WEBKIT_SIBLING_WRITE },
   },
   // A served non-nested display's silence read as `framing` again: a sibling that wipes it.
   "door-silence": {
     specs: [SIBLINGS_STATUS],
-    fails: { ...all("[sibling-wipe]"), webkit: [] },
-    holds: { why: WEBKIT_REFUSES_SIBLING_WRITE },
+    fails: all("[sibling-wipe]"),
+    measured: { webkit: WEBKIT_SIBLING_WRITE },
   },
   // The door not opaque, heard from the location's origin (displays still work): a sibling reads
   // the live door and rewrites it into Porthole's own status page, which speaks for the display.
@@ -811,6 +812,8 @@ export interface TestResult {
   readonly expected: "passed" | "failed" | "skipped";
   /** The first line of its error, where it has one. */
   readonly error: string;
+  /** Why it skipped, where it did and said (its `skip` annotation). */
+  readonly skipReason?: string;
 }
 
 export interface Verdict {
@@ -826,16 +829,22 @@ const ANSI = /\u001b\[[0-9;]*m/g;
 interface JsonError {
   readonly message?: string;
 }
+interface JsonAnnotation {
+  readonly type: string;
+  readonly description?: string;
+}
 interface JsonResult {
   readonly status?: string;
   readonly error?: JsonError;
   readonly errors?: readonly JsonError[];
+  readonly annotations?: readonly JsonAnnotation[];
 }
 interface JsonTest {
   readonly projectName: string;
   readonly status: string;
   readonly expectedStatus?: string;
   readonly results?: readonly JsonResult[];
+  readonly annotations?: readonly JsonAnnotation[];
 }
 interface JsonSuite {
   readonly title?: string;
@@ -917,11 +926,16 @@ export function resultsOf(report: { readonly suites?: readonly JsonSuite[] }): T
       suite.title === undefined || suite.title.endsWith(".ts") ? titles : [...titles, suite.title];
     for (const spec of suite.specs ?? []) {
       for (const test of spec.tests) {
+        const skip = [
+          ...(test.results?.at(-1)?.annotations ?? []),
+          ...(test.annotations ?? []),
+        ].find((one) => one.type === "skip" && one.description !== undefined);
         out.push({
           title: [...here, spec.title].join(" › "),
           name: spec.title,
           project: test.projectName,
           ...outcomeOf(test),
+          ...(skip?.description === undefined ? {} : { skipReason: skip.description }),
         });
       }
     }
@@ -974,8 +988,10 @@ export function judge(control: Control, engines: readonly Engine[], run: Run): V
       continue;
     }
     const targets = control.fails[engine];
-    expectsFailure ||= targets.length > 0;
+    const measured = control.measured?.[engine] ?? [];
     const matched = new Set<TestResult>();
+    let targetFailed = false;
+    let measuredSkips = 0;
     for (const expected of targets) {
       // A probe in more than one spec (the leak suite on two host pages) is a test in each.
       const found = mine.filter((one) => names(expected, one.name));
@@ -985,9 +1001,18 @@ export function judge(control: Control, engines: readonly Engine[], run: Run): V
       for (const probe of found) {
         matched.add(probe);
         const which = found.length > 1 ? ` (${probe.title})` : "";
-        if (probe.outcome === "passed") {
+        if (probe.outcome === "failed") {
+          targetFailed = true;
+        } else if (
+          probe.outcome === "skipped" &&
+          measured.includes(expected) &&
+          probe.skipReason?.startsWith(MEASURED_SKIP) === true
+        ) {
+          // Its attack didn't land in this run (measured): held, as its failure would be.
+          measuredSkips += 1;
+        } else if (probe.outcome === "passed") {
           problems.push(`[${engine}] "${expected}"${which} passed: the control has gone blind`);
-        } else if (probe.outcome !== "failed") {
+        } else {
           problems.push(
             `[${engine}] "${expected}"${which} didn't fail by its verdict: ${said(probe)}`,
           );
@@ -1023,10 +1048,14 @@ export function judge(control: Control, engines: readonly Engine[], run: Run): V
         problems.push(`[${engine}] "${one.title}" ${outcome} too${why(one)}`);
       }
     }
+    expectsFailure ||= targetFailed;
     const failed = mine.filter((one) => one.outcome === "failed").length;
     const skipped = mine.filter((one) => one.outcome === "skipped").length;
     counts.push(
-      `${engine} ${failed} of ${mine.length} failed${skipped > 0 ? ` (${skipped} skipped)` : ""}`,
+      `${engine} ${failed} of ${mine.length} failed${skipped > 0 ? ` (${skipped} skipped)` : ""}` +
+        (measuredSkips > 0
+          ? `, ${measuredSkips} probe(s) whose attack didn't land (measured)`
+          : ""),
     );
   }
   for (const project of new Set(results.map((one) => one.project))) {
@@ -1203,14 +1232,25 @@ export function controlsTable(): string {
       .map(([tests, engines]) => `${engines.map((one) => ENGINE_NAMES[one]).join(", ")}: ${tests}`)
       .join("; ");
     const every = control.others === "fail" ? ", and every other test" : "";
-    const holds =
-      control.holds === undefined
-        ? "—"
-        : `${control.holds.why}${control.holds.by === undefined ? "" : ` (\`${control.holds.by}\`)`}`;
+    const measured = ENGINES.filter((engine) => (control.measured?.[engine] ?? []).length > 0)
+      .map(
+        (engine) =>
+          `${ENGINE_NAMES[engine]}: ${list(control.measured?.[engine] ?? [])} may skip instead, measured (their attack lands only sometimes there)`,
+      )
+      .join("; ");
+    const reasons = [
+      ...(control.holds === undefined
+        ? []
+        : [
+            `${control.holds.why}${control.holds.by === undefined ? "" : ` (\`${control.holds.by}\`)`}`,
+          ]),
+      ...(measured === "" ? [] : [measured]),
+    ];
+    const holds = reasons.length === 0 ? "—" : reasons.join("; ");
     return `| \`${name}\` | ${specs} | ${list(common)}${every} | ${some === "" ? "—" : some} | ${holds} |`;
   });
   return [
-    "| Control | Run with | Fails on every engine | Fails only on | Where it fails nothing, why |",
+    "| Control | Run with | Fails on every engine | Fails only on | Where it fails nothing, or may skip, why |",
     "|---------|----------|-----------------------|---------------|-----------------------------|",
     ...rows,
   ].join("\n");

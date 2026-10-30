@@ -1,6 +1,7 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import type { PortholeConfig } from "../../src/index.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
+import { MEASURED_SKIP } from "../controls.ts";
 import { storedFiles } from "./files.ts";
 import { harness } from "./harness.ts";
 import { unique } from "./nested-pages.ts";
@@ -161,11 +162,11 @@ function watchA(page: Page): unknown[] {
 
 /**
  * The positive control of a probe whose attack is A writing into B's document: A did (`done`, one
- * of what A reports when it acted: `wrote`, `wiped`, `spokeFirst`). Where the engine refused every
- * write A tried (each threw), the attack can't be made there: the probe is skipped with that
- * measurement, never passed (P096; Cato, 2026-10-30). It is measured on every run, so a version of
- * the engine that lets A write runs the probe whole again: retest with each engine version. A that
- * neither acted nor was refused never reached B: that fails.
+ * of what A reports when it acted: `wrote`, `wiped`, `spokeFirst`). Then the probe is judged as on
+ * every engine. Where the engine refused every write A tried in this run (each threw: on WebKit,
+ * most runs), the attack didn't happen: the probe skips with that measurement, never passes, and
+ * its controls take the skip as held there (`measured`, leak/controls.ts; P096, P125's review). A
+ * that neither acted nor was refused never reached B: that fails. Retest with each engine version.
  */
 async function requireReach(
   said: unknown[],
@@ -181,7 +182,7 @@ async function requireReach(
   const refused = reports.filter((each) => typeof each.act === "string");
   test.skip(
     refused.length > 0,
-    `precondition doesn't hold on ${browser.browserType().name()} ${browser.version()} (measured): ` +
+    `${MEASURED_SKIP} on ${browser.browserType().name()} ${browser.version()} (measured): ` +
       `the attack A tried on B's document threw every time (${refused.length}×, ${JSON.stringify(refused.slice(0, 2))}); ` +
       "retest with each engine version",
   );

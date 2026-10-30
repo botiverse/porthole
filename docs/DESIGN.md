@@ -1418,7 +1418,7 @@ measured weight, stable for a registry), and the `controls` job checks every sha
 every weakening to a control, every control that fails nothing to its reason, and every
 control the tables above name to the registry):
 
-| Control | Run with | Fails on every engine | Fails only on | Where it fails nothing, why |
+| Control | Run with | Fails on every engine | Fails only on | Where it fails nothing, or may skip, why |
 |---------|----------|-----------------------|---------------|-----------------------------|
 | `connect-src` | `leak.spec.ts` | `[1.connect]`, `[14.silent]` | — | — |
 | `webrtc` | `leak.spec.ts` | `[3.webrtc]`, `[14.workers]` | — | — |
@@ -1491,9 +1491,9 @@ control the tables above name to the registry):
 | `order-check` | `annotate.spec.ts` | `every found mark's place in the document comes with its box, offscreen ones too; a place that isn't one is no report (P112)` | — | — |
 | `hold-click` | `annotate.spec.ts` | `holding a block 500 ms selects it and its release's click never reaches the page; a tap, a moving finger and a mouse are the page's (P112)` | — | — |
 | `clear-selection` | `annotate.spec.ts` | `clearSelection takes the page's selection away and tells nothing back; marks and drafts stay, the next selection is told (P115)` | — | — |
-| `content-status` | `served/outcome.spec.ts`, `served/siblings-status.spec.ts` | `a served shell's content that says it is blocked is told nothing and shown nothing (P124)`, `a served artifact page that says it is blocked as it loads is told nothing and shown nothing (P124)` | Chromium, Firefox: `[sibling-inject]`, `[sibling-reload]`, `[proxy]` | — |
-| `door-status` | `served/siblings-status.spec.ts` | nothing | Chromium, Firefox: `[sibling-inject]`, `[sibling-reload]`, `[proxy]` | no probe on WebKit: the probes' attack, a sibling's document.open() into another display's loading document, throws there (measured in CI 2026-10-30: in four runs A never got in, and in the two that logged its tries each one threw; other ways in are not measured), so [sibling-inject], [sibling-reload], [sibling-wipe] and [proxy] skip there with that measurement; retest with each WebKit version |
-| `door-silence` | `served/siblings-status.spec.ts` | nothing | Chromium, Firefox: `[sibling-wipe]` | no probe on WebKit: the probes' attack, a sibling's document.open() into another display's loading document, throws there (measured in CI 2026-10-30: in four runs A never got in, and in the two that logged its tries each one threw; other ways in are not measured), so [sibling-inject], [sibling-reload], [sibling-wipe] and [proxy] skip there with that measurement; retest with each WebKit version |
+| `content-status` | `served/outcome.spec.ts`, `served/siblings-status.spec.ts` | `a served shell's content that says it is blocked is told nothing and shown nothing (P124)`, `a served artifact page that says it is blocked as it loads is told nothing and shown nothing (P124)`, `[sibling-inject]`, `[sibling-reload]`, `[proxy]` | — | WebKit: `[sibling-inject]`, `[sibling-reload]`, `[sibling-wipe]`, `[proxy]` may skip instead, measured (their attack lands only sometimes there) |
+| `door-status` | `served/siblings-status.spec.ts` | `[sibling-inject]`, `[sibling-reload]`, `[proxy]` | — | WebKit: `[sibling-inject]`, `[sibling-reload]`, `[sibling-wipe]`, `[proxy]` may skip instead, measured (their attack lands only sometimes there) |
+| `door-silence` | `served/siblings-status.spec.ts` | `[sibling-wipe]` | — | WebKit: `[sibling-inject]`, `[sibling-reload]`, `[sibling-wipe]`, `[proxy]` may skip instead, measured (their attack lands only sometimes there) |
 | `door-opaque` | `served/siblings-status.spec.ts` | `[door-reach]` | — | — |
 | `frame-status-order` | `served/outcome.spec.ts` | `a nested page that says it is blocked, through its shell or past it, is told nothing and shown nothing (P124)` | — | — |
 | `shell-namespace` | `served/nested.spec.ts` | `the shell's words are the shell's alone: a page that says them, to its parent or to the host's window, moves nothing` | — | — |
