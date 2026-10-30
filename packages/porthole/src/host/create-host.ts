@@ -28,10 +28,11 @@ import type { ColorScheme, PortholeConfig } from "../config/schema.ts";
 import { locateServed } from "./locate.ts";
 import { mayPassOn } from "./pass-on.ts";
 import { watchOutcome, type OutcomeWatch } from "./outcome.ts";
+import { watchDoor, type DoorWatch } from "./door.ts";
 import { STORAGE_USED_METHOD, type FrameSource } from "../isolation/types.ts";
 import { webPlatform } from "../platform/web.ts";
 import { TAKES } from "../platform/focus-guard.ts";
-import type { Surface } from "../platform/types.ts";
+import type { DoorSurface, Surface } from "../platform/types.ts";
 import type { AdapterConnection, ProtocolAdapter, ShellConnection } from "../protocol/adapter.ts";
 import {
   MCP_APPS_STYLE_VARIABLES,
@@ -57,6 +58,10 @@ const DEFAULT_LOAD_TIMEOUT_MS = 15_000;
 
 /** How many times a display is started again after its content navigated its frame away. */
 const MAX_RESTARTS = 3;
+
+/** What the host is told of a served display located without its door (P125), once a mount. */
+export const NO_DOOR =
+  "The server gives no door for this display (FrameLocation.door, P125): upgrade it first, and pass the door on from a locator of your own. Until then no frame status is taken from it: a block shows as a timeout";
 
 const BASE_KEYS = new Set(["hostContextChanged", "teardown", "close"]);
 
@@ -94,6 +99,10 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
   }
   // A url frame is someone else's app: no shell, no protocol, and its navigations are its own.
   const speaks = config.mode !== "url";
+  const nested = config.nested === true;
+  // A served display on its scope's origin, beside the scope's other content (P125): its door
+  // says how loading went, before its frame is made.
+  const hasDoor = config.isolation === "domain" && speaks && !nested;
   const adapter = (options.adapter ?? shellAdapter) as ProtocolAdapter<C>;
   const platform = options.platform ?? webPlatform;
   const hostInfo = options.hostInfo ?? { name: "porthole", version: "0" };
@@ -181,6 +190,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           : onceConsent(options.consent);
       let abort: AbortController | null = null;
       let outcomeWatch: OutcomeWatch | null = null;
+      let door: { readonly frame: DoorSurface; readonly watch: DoorWatch } | null = null;
+      let doorTold = false;
       let themeFrame: number | null = null;
       const view = container.ownerDocument.defaultView;
       // The adapter's own operations, the last call of each, replayed into every new frame.
@@ -492,6 +503,12 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         }
       };
 
+      const closeDoor = () => {
+        door?.watch.stop();
+        door?.frame.destroy();
+        door = null;
+      };
+
       const stop = () => {
         // A run that ran a page with storage of its own making and never heard it used: no (P111).
         if (bridge !== null && handshaken && !storageTold && compiled.shell?.storage === "memory") {
@@ -507,13 +524,54 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         abort = null;
         outcomeWatch?.stop();
         outcomeWatch = null;
+        closeDoor();
         connection?.close();
         connection = null;
         surface?.destroy();
         surface = null;
       };
 
-      const start = (source: FrameSource) => {
+      const timeoutMs = config.limits.loadTimeoutMs ?? DEFAULT_LOAD_TIMEOUT_MS;
+
+      /**
+       * A served display with a door (P125): its door first, alone, in a frame of the host's own;
+       * its frame only once the door said `open`, within what is left of the run's time. A door
+       * that said `blocked` (or never ran, or never answered) is the run's outcome, and nothing of
+       * the content is framed. Without a door (an older server, a locator that drops it, a platform
+       * without doors) the display is framed as it is, takes no frame status, and the host hears
+       * why, once.
+       */
+      const enter = (source: FrameSource) => {
+        if (!hasDoor || source.kind !== "url") {
+          start(source, timeoutMs);
+          return;
+        }
+        if (source.door === undefined || platform.createDoor === undefined) {
+          if (!doorTold) {
+            doorTold = true;
+            hostError(NO_DOOR, "door");
+          }
+          start(source, timeoutMs);
+          return;
+        }
+        const began = Date.now();
+        const frame = platform.createDoor(container, { url: source.door });
+        const watch = watchDoor({
+          door: frame,
+          timeoutMs,
+          onOpen: () => {
+            closeDoor();
+            start(source, Math.max(0, timeoutMs - (Date.now() - began)));
+          },
+          onOutcome: (outcome) => {
+            closeDoor();
+            emit("outcome", outcome);
+          },
+        });
+        door = { frame, watch };
+      };
+
+      const start = (source: FrameSource, timeLeft: number) => {
         const navigatedAway = () => {
           emit("navigated", undefined);
           if (restarts < MAX_RESTARTS) {
@@ -587,7 +645,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           surface: created,
           source,
           speaks,
-          timeoutMs: config.limits.loadTimeoutMs ?? DEFAULT_LOAD_TIMEOUT_MS,
+          nested,
+          timeoutMs: timeLeft,
           onOutcome: (outcome) => emit("outcome", outcome),
           // A frame status from the content (P124): never shown, the host's to hear.
           refused: (message) => hostError(message, "frame-status"),
@@ -680,7 +739,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         }
         generation += 1;
         if (config.isolation === "opaque") {
-          start({
+          enter({
             kind: "srcdoc",
             html: compiled.shellDocument({
               origins: [container.ownerDocument.defaultView?.location.origin ?? ""],
@@ -703,7 +762,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         locateServed(locator, instance, config, hostOrigin, controller.signal).then(
           (source) => {
             if (mine === generation && !destroyed) {
-              start(source);
+              enter(source);
             }
           },
           (error: unknown) => {

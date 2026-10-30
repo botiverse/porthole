@@ -80,8 +80,29 @@ export interface Surface {
   destroy(): void;
 }
 
+/**
+ * A served display's door (P125): a hidden frame of the host's own at the door's address,
+ * sandboxed with scripts alone (an opaque origin no content shares), with no `allow`, no name, out
+ * of focus and of the accessibility tree. Its one frame status is heard from its window and the
+ * opaque origin (`"null"`) alone.
+ */
+export interface DoorSurface {
+  readonly transport: Transport;
+  /** The platform's own element for the door (an `HTMLIFrameElement` on the web). */
+  readonly element: unknown;
+  /** Every load of the door's document. */
+  onLoad(listener: () => void): () => void;
+  destroy(): void;
+}
+
 export interface PlatformHost<Container = HTMLElement> {
   readonly name: string;
   /** Creates an isolated frame in `container`, its policy set before its document loads. */
   createSurface(container: Container, spec: SurfaceSpec): Surface;
+  /**
+   * Creates a served display's door in `container` (P125), loading `url`. A platform without one
+   * shows served displays that have a door without it: no frame status is taken from them, and
+   * the host hears a `door` host error.
+   */
+  createDoor?(container: Container, spec: { readonly url: string }): DoorSurface;
 }

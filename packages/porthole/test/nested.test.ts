@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 import { compile, presets } from "../src/index.ts";
 import {
   INERT_FILE_CSP,
+  DOOR_SANDBOX_TOKENS,
   PAGE_SANDBOX_TOKENS,
   sandboxTokens,
   serializeCsp,
@@ -147,8 +148,11 @@ describe("the sandbox (P111): never allow-same-origin on a nested page", () => {
     );
     expect(writes).toEqual([
       'platform/web.ts: frame.setAttribute("sandbox", spec.sandbox);',
+      // A served display's door (P125): scripts alone, from its own list.
+      'platform/web.ts: frame.setAttribute("sandbox", DOOR_SANDBOX_TOKENS.join(" "));',
       'shell/frame.ts: frame.setAttribute("sandbox", plan.sandbox);',
     ]);
+    expect(DOOR_SANDBOX_TOKENS).toEqual(["allow-scripts"]);
   });
 });
 

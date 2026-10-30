@@ -35,6 +35,18 @@ export interface HttpLocatorOptions {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
+/**
+ * A location's door as an issue endpoint answered it (P125): passed on as it came, checked with the
+ * location before any frame is made (`checkFrameLocation`); null for none, "bad" for one that
+ * isn't `{ url: string }`.
+ */
+export function doorOf(data: Record<string, unknown>): { readonly url: string } | null | "bad" {
+  if (data.door === undefined) {
+    return null;
+  }
+  return isRecord(data.door) && typeof data.door.url === "string" ? { url: data.door.url } : "bad";
+}
+
 /** A locator that POSTs `{ instance }` to the app's issue endpoint at `url`. */
 export function httpLocator(url: string, options: HttpLocatorOptions = {}): InstanceLocator {
   return {
@@ -87,11 +99,20 @@ export function httpLocator(url: string, options: HttpLocatorOptions = {}): Inst
           "bad-location",
         );
       }
+      const door = doorOf(data);
+      if (door === "bad") {
+        throw new LocateError(
+          "The app's issue endpoint named a door that isn't one",
+          response.status,
+          "bad-location",
+        );
+      }
       return {
         url: data.url,
         origin: data.origin,
         ...(typeof data.reports === "boolean" ? { reports: data.reports } : {}),
         ...(viewer === null ? {} : { viewer }),
+        ...(door === null ? {} : { door }),
       } satisfies FrameLocation;
     },
   };

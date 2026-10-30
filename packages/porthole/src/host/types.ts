@@ -129,9 +129,17 @@ export type HostErrorKind =
   /**
    * A frame status (`porthole/notifications/frame-status`) the host didn't take, since it came
    * from the frame's content, not from a page of Porthole's server (P124): never shown, never an
-   * outcome. Told once a run.
+   * outcome. Told once a run. A served display that isn't nested takes none from its frame at
+   * all: its door says how loading went (P125).
    */
-  | "frame-status";
+  | "frame-status"
+  /**
+   * A served display that has a door (P125: a served shell, a page that isn't nested, the sandbox
+   * proxy) was located without one: the server is older than the host (upgrade it first), or a
+   * locator dropped `FrameLocation.door`. The display shows, but no frame status is taken, so a
+   * block is told as a timeout. Told once a mount.
+   */
+  | "door";
 
 /** What a display reports, by event name. */
 /** Why a display's frame showed nothing of its content (`FrameOutcome`). */

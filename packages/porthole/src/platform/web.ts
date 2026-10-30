@@ -1,3 +1,4 @@
+import { DOOR_SANDBOX_TOKENS } from "../compile/policy.ts";
 import type { ColorScheme } from "../config/schema.ts";
 import {
   FRAME_STATUS_METHOD,
@@ -9,7 +10,7 @@ import {
 import { postMessageTransport } from "../transport/post-message.ts";
 import { focusGuard, type FocusGuard, type FocusTake } from "./focus-guard.ts";
 import type { Transport } from "../transport/types.ts";
-import type { PlatformHost, Surface, SurfaceSpec } from "./types.ts";
+import type { DoorSurface, PlatformHost, Surface, SurfaceSpec } from "./types.ts";
 
 /** A frame-status message (`porthole/notifications/frame-status`), by its method alone. */
 const isFrameStatus = (data: unknown): boolean =>
@@ -222,6 +223,55 @@ export const webPlatform: PlatformHost = {
         loaded.clear();
         taken.clear();
         unguard();
+        transport.close();
+        frame.remove();
+      },
+    };
+  },
+  /**
+   * A served display's door (P125): hidden (no size, `visibility: hidden`, which still runs its
+   * script and fires its load on all three engines), out of focus and of the accessibility tree,
+   * sandboxed with scripts alone, no `allow`, no name. Nothing but its frame status is heard from
+   * it, from its window and the opaque origin alone; the focus guard, the bridge and annotations
+   * never see it.
+   */
+  createDoor(container: HTMLElement, spec: { readonly url: string }): DoorSurface {
+    // oxlint-disable-next-line react/iframe-missing-sandbox -- set from the door's list, next
+    const frame = container.ownerDocument.createElement("iframe");
+    frame.setAttribute("sandbox", DOOR_SANDBOX_TOKENS.join(" "));
+    frame.setAttribute("allow", "");
+    frame.setAttribute("referrerpolicy", "no-referrer");
+    frame.setAttribute("aria-hidden", "true");
+    frame.setAttribute("tabindex", "-1");
+    frame.setAttribute("inert", "");
+    frame.setAttribute("loading", "eager");
+    frame.dataset.portholeDoor = "";
+    Object.assign(frame.style, {
+      display: "block",
+      width: "0",
+      height: "0",
+      border: "0",
+      visibility: "hidden",
+    });
+    frame.src = spec.url;
+    const loaded = new Set<() => void>();
+    frame.addEventListener("load", () => {
+      for (const listener of loaded) {
+        listener();
+      }
+    });
+    container.append(frame);
+    const view = container.ownerDocument.defaultView ?? window;
+    const transport = postMessageTransport(() => frame.contentWindow, "null", view);
+    return {
+      transport,
+      element: frame,
+      onLoad(listener) {
+        loaded.add(listener);
+        return () => loaded.delete(listener);
+      },
+      destroy() {
+        loaded.clear();
         transport.close();
         frame.remove();
       },

@@ -32,6 +32,15 @@ import type { FrameBlock, FrameOutcome } from "./types.ts";
  *   from the frame in this run: from its first document, which then was a page of Porthole's.
  *   After that, it came from the content (or from a later document, which in a display without
  *   files starts the display again, whose first document then says how it went).
+ *   That holds against the display's own content, not against another display's (P125): a
+ *   scope's displays share its origin, and one that runs reaches a new document of another's
+ *   before that document's first script, where it can speak first, or stop or rewrite it so it
+ *   says nothing. So the rule holds only where no content runs on the frame's origin: a nested
+ *   page's shell, on a label of its own (P114).
+ * - A served display that isn't nested (a served shell, a page, a view through the sandbox proxy)
+ *   takes no frame status from its frame at all, and infers nothing from its silence (a load and
+ *   no word is a timeout, never `framing`): its door said how loading went before the frame was
+ *   made (P125, `watchDoor`), from an opaque frame of the host's that no content can reach.
  * - A url-mode app has no shell to speak first, and shares its origin with the entry page and the
  *   status pages: its frame status is taken as before, the app's word (THREAT_MODEL S6).
  *
@@ -39,7 +48,7 @@ import type { FrameBlock, FrameOutcome } from "./types.ts";
  */
 
 /** How long after a load the frame's word may still arrive. */
-const SETTLE_MS = 400;
+export const SETTLE_MS = 400;
 
 const BLOCKS: readonly FrameBlock[] = [
   "framing",
@@ -53,7 +62,8 @@ const BLOCKS: readonly FrameBlock[] = [
 ];
 
 interface FrameStatus {
-  readonly state: "entering" | "blocked";
+  /** `open` is a door's word alone (P125): its display may be framed. */
+  readonly state: "entering" | "open" | "blocked";
   readonly reason?: FrameBlock;
   readonly status?: number;
   readonly code?: string;
@@ -77,8 +87,8 @@ export function parseFrameStatus(data: unknown): FrameStatus | null {
   if (params === null || typeof params !== "object") {
     return null;
   }
-  if (params.state === "entering") {
-    return { state: "entering" };
+  if (params.state === "entering" || params.state === "open") {
+    return { state: params.state };
   }
   if (params.state !== "blocked") {
     return null;
@@ -119,12 +129,19 @@ export function watchOutcome(options: {
   readonly source: FrameSource;
   /** Whether the frame speaks for itself (a shell or a view): then its handshake is the proof. */
   readonly speaks: boolean;
+  /**
+   * The config nests its pages (P111): the frame holds Porthole's shell, on a label no content
+   * runs on, whose first word may be a frame status. Any other served frame that speaks takes
+   * none: its door told (P125).
+   */
+  readonly nested?: boolean;
   readonly timeoutMs: number;
   readonly onOutcome: (outcome: FrameOutcome) => void;
   /** A frame status that wasn't taken, once a run (P124): the host's to hear, never shown. */
   readonly refused?: (message: string) => void;
 }): OutcomeWatch {
   const { surface, source, speaks } = options;
+  const nested = options.nested === true;
   const reports = source.kind === "url" && source.reports === true;
   // The first outcome; after a load, only a later block (a status page, access revoked) is told.
   let decided: FrameOutcome["state"] | null = null;
@@ -163,8 +180,8 @@ export function watchOutcome(options: {
       options.onOutcome(outcome);
     }
   };
-  // Whether a frame status may be the word of a page of Porthole's (P124, above).
-  const mayBePorthole = () => source.kind === "url" && (!speaks || !spoke);
+  // Whether a frame status may be the word of a page of Porthole's (P124, P125, above).
+  const mayBePorthole = () => source.kind === "url" && (!speaks || (nested && !spoke));
   const unlisten = surface.transport.listen((data) => {
     heard = true;
     if (!namesFrameStatus(data)) {
@@ -179,6 +196,7 @@ export function watchOutcome(options: {
       return;
     }
     const status = parseFrameStatus(data);
+    // `open` is a door's word (P125), never a frame's: nothing here.
     if (status?.state === "entering") {
       entering = true;
     } else if (status?.state === "blocked") {
@@ -196,16 +214,30 @@ export function watchOutcome(options: {
         decide({ state: "blocked", reason: "framing" });
       }
     });
+  // A served frame whose door told (P125): a load from which nothing spoke shows nothing, and
+  // no one can say why (another display of its scope may have stopped or rewritten it): a timeout,
+  // without waiting the whole of it, never `framing`.
+  const silent = () =>
+    later(SETTLE_MS, () => {
+      if (!spoke) {
+        decide({ state: "timeout" });
+      }
+    });
   const unload = surface.onLoad(() => {
     loads += 1;
     if (decided !== null) {
       return;
     }
     if (speaks) {
-      // A served shell or view says something before its first load ends; one that never did
-      // never ran. (An opaque srcdoc frame always runs: its handshake decides.)
+      // A served shell or view says something before its first load ends; a nested page's shell
+      // that never did never ran. Any other served frame's silence tells nothing (P125). (An
+      // opaque srcdoc frame always runs: its handshake decides.)
       if (source.kind === "url") {
-        neverRan();
+        if (nested) {
+          neverRan();
+        } else {
+          silent();
+        }
       }
       return;
     }

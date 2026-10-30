@@ -48,7 +48,7 @@ const served = (reports: boolean): FrameSource => ({
   reports,
 });
 
-function watch(source: FrameSource, speaks: boolean) {
+function watch(source: FrameSource, speaks: boolean, nested = false) {
   const fake = fakeSurface();
   const seen: FrameOutcome[] = [];
   const refused: string[] = [];
@@ -56,6 +56,7 @@ function watch(source: FrameSource, speaks: boolean) {
     surface: fake.surface,
     source,
     speaks,
+    nested,
     timeoutMs: 5_000,
     onOutcome: (each) => seen.push(each),
     refused: (message) => refused.push(message),
@@ -96,9 +97,9 @@ describe("a display's load outcome", () => {
     expect(seen).toEqual([{ state: "blocked", reason: "framing" }]);
   });
 
-  test("a served shell that loaded without a word never ran either", () => {
+  test("a nested page's shell that loaded without a word never ran either", () => {
     vi.useFakeTimers();
-    const { seen, load } = watch(served(true), true);
+    const { seen, load } = watch(served(true), true, true);
     load();
     vi.advanceTimersByTime(1_000);
     expect(seen).toEqual([{ state: "blocked", reason: "framing" }]);
@@ -197,9 +198,9 @@ describe("who may say how loading went (P124)", () => {
     expect(refused).toEqual([UNTRUSTED_FRAME_STATUS]);
   });
 
-  test("a served frame's first document that is a status page says how it went", () => {
+  test("a nested page's frame's first document that is a status page says how it went", () => {
     vi.useFakeTimers();
-    const { seen, refused, say, load } = watch(served(true), true);
+    const { seen, refused, say, load } = watch(served(true), true, true);
     say(status({ state: "blocked", reason: "denied", status: 403, code: "revoked" }));
     load();
     vi.advanceTimersByTime(10_000);
@@ -209,7 +210,7 @@ describe("who may say how loading went (P124)", () => {
 
   test("a served shell's content, after the shell's hello, can't say it is blocked: before or after the handshake", () => {
     vi.useFakeTimers();
-    const { seen, refused, say, load, handle } = watch(served(true), true);
+    const { seen, refused, say, load, handle } = watch(served(true), true, true);
     say(hello);
     // Before the host answered: the content runs after the shell spoke, never before.
     say(status(SIGN_IN));
@@ -226,7 +227,7 @@ describe("who may say how loading went (P124)", () => {
     vi.useFakeTimers();
     // The shell's own words (porthole/shell/) never reach the watch (the platform takes them);
     // the page's hello, relayed, is the first thing it hears.
-    const { seen, refused, say, load, handle } = watch(served(true), true);
+    const { seen, refused, say, load, handle } = watch(served(true), true, true);
     load();
     say(hello);
     handle.initialized();
@@ -238,7 +239,7 @@ describe("who may say how loading went (P124)", () => {
 
   test("any other word counts as the frame speaking, a malformed one too", () => {
     vi.useFakeTimers();
-    const { seen, refused, say } = watch(served(true), true);
+    const { seen, refused, say } = watch(served(true), true, true);
     say({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: { height: 10 } });
     say(status(SIGN_IN));
     vi.advanceTimersByTime(5_000);
@@ -259,6 +260,79 @@ describe("who may say how loading went (P124)", () => {
       { state: "blocked", reason: "denied", status: 403 },
     ]);
     expect(refused).toEqual([]);
+  });
+});
+
+describe("a served display that isn't nested takes no frame status from its frame (P125)", () => {
+  test("its frame's status is dropped, even as the first word, and the host is told once", () => {
+    vi.useFakeTimers();
+    const { seen, refused, say, load, handle } = watch(served(true), true);
+    say(status(SIGN_IN));
+    say(status({ state: "blocked", reason: "denied", status: 403, code: "revoked" }));
+    say(hello);
+    load();
+    handle.initialized();
+    vi.advanceTimersByTime(10_000);
+    expect(seen).toEqual([{ state: "loaded" }]);
+    expect(refused).toEqual([UNTRUSTED_FRAME_STATUS]);
+  });
+
+  test("a load from which nothing spoke is a timeout, decided early, never framing", () => {
+    vi.useFakeTimers();
+    const { seen, load } = watch(served(true), true);
+    load();
+    vi.advanceTimersByTime(399);
+    expect(seen).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(seen).toEqual([{ state: "timeout" }]);
+    vi.advanceTimersByTime(10_000);
+    expect(seen).toEqual([{ state: "timeout" }]);
+  });
+
+  test("a load after which only frame statuses came is a timeout too", () => {
+    vi.useFakeTimers();
+    const { seen, refused, say, load } = watch(served(true), true);
+    say(status({ state: "blocked", reason: "denied", status: 403 }));
+    load();
+    vi.advanceTimersByTime(1_000);
+    expect(seen).toEqual([{ state: "timeout" }]);
+    expect(refused).toEqual([UNTRUSTED_FRAME_STATUS]);
+  });
+
+  test("a frame that spoke before its load isn't timed out early", () => {
+    vi.useFakeTimers();
+    const { seen, say, load, handle } = watch(served(true), true);
+    say(hello);
+    load();
+    vi.advanceTimersByTime(1_000);
+    expect(seen).toEqual([]);
+    handle.initialized();
+    expect(seen).toEqual([{ state: "loaded" }]);
+  });
+
+  test("a door's word in a frame is no entry page's: an app isn't loaded by it", () => {
+    vi.useFakeTimers();
+    const url = watch(served(true), false);
+    url.say(status({ state: "open" }));
+    url.load();
+    url.load();
+    vi.advanceTimersByTime(1_000);
+    expect(url.seen).toEqual([]);
+    vi.advanceTimersByTime(5_000);
+    expect(url.seen).toEqual([{ state: "timeout" }]);
+  });
+
+  test("url mode and opaque frames are as before", () => {
+    vi.useFakeTimers();
+    const app = watch(served(true), false);
+    app.say(status({ state: "blocked", reason: "sign-in", status: 401 }));
+    expect(app.seen).toEqual([{ state: "blocked", reason: "sign-in", status: 401 }]);
+    const opaque = watch({ kind: "srcdoc", html: "" }, true);
+    opaque.say(status(SIGN_IN));
+    opaque.load();
+    vi.advanceTimersByTime(1_000);
+    expect(opaque.seen).toEqual([]);
+    expect(opaque.refused).toEqual([UNTRUSTED_FRAME_STATUS]);
   });
 });
 
@@ -320,5 +394,149 @@ describe("createHost: a frame status from the content is a host error, never an 
     expect(hostErrors).toEqual([{ message: UNTRUSTED_FRAME_STATUS, kind: "frame-status" }]);
     expect(contentErrors).toEqual([]);
     shown.destroy();
+  });
+});
+
+describe("createHost: a served display's door decides, before the content frame (P125)", () => {
+  /** A platform whose door and content surfaces the test drives. */
+  function harness(withDoor = true) {
+    const made: { door?: Harnessed; content?: Harnessed } = {};
+    interface Harnessed {
+      say(message: unknown): void;
+      load(): void;
+      destroyed: boolean;
+    }
+    const surface = (): Harnessed & {
+      transport: {
+        send: () => void;
+        listen: (l: (m: unknown) => void) => () => void;
+        close: () => void;
+      };
+      onLoad: (l: () => void) => () => void;
+    } => {
+      const listeners = new Set<(m: unknown) => void>();
+      const loads = new Set<() => void>();
+      const h = {
+        destroyed: false,
+        say: (m: unknown) => listeners.forEach((each) => each(m)),
+        load: () => loads.forEach((each) => each()),
+        transport: {
+          send: () => {},
+          listen: (l: (m: unknown) => void) => {
+            listeners.add(l);
+            return () => listeners.delete(l);
+          },
+          close: () => listeners.clear(),
+        },
+        onLoad: (l: () => void) => {
+          loads.add(l);
+          return () => loads.delete(l);
+        },
+      };
+      return h;
+    };
+    const platform: PlatformHost = {
+      name: "stand-in",
+      createSurface: () => {
+        const s = surface();
+        made.content = s;
+        return {
+          transport: s.transport,
+          element: null,
+          setHeight: () => {},
+          setColorScheme: () => {},
+          userActivation: () => undefined,
+          onNavigated: () => () => {},
+          onLoad: s.onLoad,
+          destroy: () => {
+            s.destroyed = true;
+          },
+        };
+      },
+      ...(withDoor
+        ? {
+            createDoor: (_c: HTMLElement, _spec: { url: string }) => {
+              const s = surface();
+              made.door = s;
+              return {
+                transport: s.transport,
+                element: null,
+                onLoad: s.onLoad,
+                destroy: () => {
+                  s.destroyed = true;
+                },
+              };
+            },
+          }
+        : {}),
+    };
+    const container = {
+      ownerDocument: {
+        defaultView: { location: { origin: "https://app.example" }, navigator: { language: "en" } },
+      },
+      getBoundingClientRect: () => ({ width: 600 }),
+    } as unknown as HTMLElement;
+    const config = presets.artifact({
+      isolation: "domain",
+      contentOrigins: ["https://*.example-usercontent.com"],
+    });
+    const locator = {
+      locate: () =>
+        Promise.resolve({
+          kind: "url" as const,
+          url: "https://a-x.example-usercontent.com/__porthole/d/aaaaaaaaaaaaaaaa?ticket=t",
+          origin: "https://a-x.example-usercontent.com",
+          reports: true,
+          ...(withDoor
+            ? {
+                door: {
+                  url: "https://a-x.example-usercontent.com/__porthole/door/aaaaaaaaaaaaaaaa?ticket=d",
+                },
+              }
+            : {}),
+        }),
+    };
+    const outcomes: FrameOutcome[] = [];
+    const hostErrors: DisplayEvents["hostError"][] = [];
+    const shown = createHost(config, { platform, locator }).mount(container, {
+      displayId: "d1",
+      title: "Artifact",
+      scheme: "light",
+      instance: { scope: "s", document: { kind: "artifact", id: "p", version: "1" } },
+    });
+    shown.on("outcome", (each) => outcomes.push(each));
+    shown.on("hostError", (each) => hostErrors.push(each));
+    return { made, outcomes, hostErrors, shown };
+  }
+
+  test("the door opens, then the content frame is made and loads", async () => {
+    const h = harness();
+    await vi.waitFor(() => expect(h.made.door).toBeDefined());
+    expect(h.made.content, "no content frame before the door opens").toBeUndefined();
+    h.made.door!.say(status({ state: "open" }));
+    expect(h.made.door!.destroyed, "the door is removed once it opened").toBe(true);
+    await vi.waitFor(() => expect(h.made.content).toBeDefined());
+    h.made.content!.load();
+    // The content's handshake loads it.
+    h.shown.destroy();
+  });
+
+  test("the door blocks: the outcome is the block, and no content frame is made", async () => {
+    const h = harness();
+    await vi.waitFor(() => expect(h.made.door).toBeDefined());
+    h.made.door!.say(status({ state: "blocked", reason: "denied", status: 403, code: "revoked" }));
+    expect(h.outcomes).toEqual([
+      { state: "blocked", reason: "denied", status: 403, code: "revoked" },
+    ]);
+    expect(h.made.content, "no content frame after a door block").toBeUndefined();
+    expect(h.made.door!.destroyed).toBe(true);
+    h.shown.destroy();
+  });
+
+  test("a served non-nested location without a door is strict and raises a door host error", async () => {
+    const h = harness(false);
+    await vi.waitFor(() => expect(h.made.content).toBeDefined());
+    expect(h.hostErrors.map((each) => each.kind)).toEqual(["door"]);
+    h.shown.destroy();
   });
 });

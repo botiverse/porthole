@@ -1,4 +1,4 @@
-import type { FrameLocation } from "./types.ts";
+import { DOOR_PATH, type FrameLocation } from "./types.ts";
 
 /**
  * Checks for served frames (domain and external isolation), shared by the host's mount and by
@@ -172,11 +172,46 @@ export function checkFrameLocation(
       `The located origin ${location.origin} isn't a nested page's own: its shell is served on a label of its own alone (${PORTHOLE_LABEL_PREFIX}<24 base32>, nestedLabelOf(label), P114), never beside other content`,
     );
   }
+  if (location.door !== undefined) {
+    checkDoor(location.door, location.origin, nested);
+  }
   const host = parseOrigin(hostOrigin);
   if (host !== null && maybeSameSite(origin.host, host.host)) {
     throw new TypeError(
       `The located origin ${location.origin} may be the same site as the host (${hostOrigin}): content must be served from a registrable domain the host uses for nothing else`,
     );
+  }
+}
+
+/**
+ * A location's door (P125): on the location's own origin, at Porthole's door path, never for a
+ * nested page (its shell's label serves no door: its first document is Porthole's own, P114).
+ * Named by its origin only in what is thrown: the door's address carries a ticket.
+ */
+function checkDoor(door: unknown, origin: string, nested: boolean): void {
+  const url =
+    door !== null && typeof door === "object" ? (door as { url?: unknown }).url : undefined;
+  if (typeof url !== "string") {
+    throw new TypeError("The located door is not { url }");
+  }
+  if (nested) {
+    throw new TypeError(
+      "A nested page is located with no door: its shell is Porthole's own first document (P125)",
+    );
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new TypeError("The located door is not a URL");
+  }
+  if (parsed.origin !== origin) {
+    throw new TypeError(
+      `The located door is not on its location's origin ${JSON.stringify(origin)} (it is on ${JSON.stringify(safeOrigin(url))})`,
+    );
+  }
+  if (!parsed.pathname.startsWith(DOOR_PATH) || parsed.hash !== "") {
+    throw new TypeError(`The located door is not at ${DOOR_PATH}<key> on its origin`);
   }
 }
 

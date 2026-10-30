@@ -1,7 +1,7 @@
 import type { PortholeConfig } from "../config/schema.ts";
 import type { Displays } from "../displays/displays.ts";
 import type { FrameLocation, InstanceLocator, InstanceRef } from "../isolation/types.ts";
-import { LocateError } from "./locator.ts";
+import { doorOf, LocateError } from "./locator.ts";
 import type { FrameOutcome } from "./types.ts";
 
 /**
@@ -233,11 +233,21 @@ export function portholeClient<N extends string>(
         "bad-location",
       );
     }
+    const door = doorOf(data);
+    if (door === "bad") {
+      throw new LocateError(
+        "The app's frame endpoint named a door that isn't one",
+        answer.status,
+        "bad-location",
+      );
+    }
     links.set(keyOf(instance), typeof data.link === "string" ? data.link : null);
     return {
       url: data.url,
       origin: data.origin,
       ...(typeof data.reports === "boolean" ? { reports: data.reports } : {}),
+      // The display's door (P125), as the server gave it.
+      ...(door === null ? {} : { door }),
     };
   };
 
