@@ -540,3 +540,158 @@ describe("createHost: a served display's door decides, before the content frame 
     h.shown.destroy();
   });
 });
+
+describe("createHost: every restart goes through a new door, with a new ticket (P125)", () => {
+  interface Driven {
+    readonly url: string;
+    destroyed: boolean;
+    say(message: unknown): void;
+    load(): void;
+    /** The platform's word that the frame loaded a second document (P031): a restart. */
+    navigate(): void;
+  }
+
+  function driven(url: string): Driven & {
+    readonly transport: Surface["transport"];
+    readonly onLoad: (listener: () => void) => () => void;
+    readonly onNavigated: (listener: () => void) => () => void;
+  } {
+    const listeners = new Set<(message: unknown) => void>();
+    const loads = new Set<() => void>();
+    const navigations = new Set<() => void>();
+    return {
+      url,
+      destroyed: false,
+      say: (message) => [...listeners].forEach((each) => each(message)),
+      load: () => [...loads].forEach((each) => each()),
+      navigate: () => [...navigations].forEach((each) => each()),
+      transport: {
+        send: () => {},
+        listen: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        close: () => listeners.clear(),
+      },
+      onLoad: (listener) => {
+        loads.add(listener);
+        return () => loads.delete(listener);
+      },
+      onNavigated: (listener) => {
+        navigations.add(listener);
+        return () => navigations.delete(listener);
+      },
+    };
+  }
+
+  const ORIGIN = "https://a-x.example-usercontent.com";
+
+  function mounted() {
+    const doors: Driven[] = [];
+    const contents: Driven[] = [];
+    let located = 0;
+    const platform: PlatformHost = {
+      name: "stand-in",
+      createSurface: (_container, spec) => {
+        const each = driven(spec.source.kind === "url" ? spec.source.url : "srcdoc");
+        contents.push(each);
+        return {
+          transport: each.transport,
+          element: null,
+          setHeight: () => {},
+          setColorScheme: () => {},
+          userActivation: () => undefined,
+          onNavigated: each.onNavigated,
+          onLoad: each.onLoad,
+          destroy: () => {
+            each.destroyed = true;
+          },
+        };
+      },
+      createDoor: (_container, spec) => {
+        const each = driven(spec.url);
+        doors.push(each);
+        return {
+          transport: each.transport,
+          element: null,
+          onLoad: each.onLoad,
+          destroy: () => {
+            each.destroyed = true;
+          },
+        };
+      },
+    };
+    // A host's locator issues afresh on every run: a new content ticket and a new door ticket.
+    const locator = {
+      locate: () => {
+        located += 1;
+        return Promise.resolve({
+          url: `${ORIGIN}/__porthole/d/aaaaaaaaaaaaaaaa?ticket=content-${located}`,
+          origin: ORIGIN,
+          reports: true,
+          door: { url: `${ORIGIN}/__porthole/door/aaaaaaaaaaaaaaaa?ticket=door-${located}` },
+        });
+      },
+    };
+    const container = {
+      ownerDocument: {
+        defaultView: { location: { origin: "https://app.example" }, navigator: { language: "en" } },
+      },
+      getBoundingClientRect: () => ({ width: 600 }),
+    } as unknown as HTMLElement;
+    const config = presets.inlineWidget({
+      isolation: "domain",
+      contentOrigins: ["https://*.example-usercontent.com"],
+    });
+    const outcomes: FrameOutcome[] = [];
+    const shown = createHost(config, { platform, locator }).mount(container, {
+      displayId: "d1",
+      title: "Widget",
+      scheme: "light",
+      instance: { scope: "s", document: { kind: "shell", preset: "inlineWidget" } },
+    });
+    shown.on("outcome", (each) => outcomes.push(each));
+    return { doors, contents, outcomes, shown };
+  }
+
+  test("a restart (the frame's second load) makes a new door frame with the new ticket, and no content frame before it opens", async () => {
+    const { doors, contents, shown } = mounted();
+    await vi.waitFor(() => expect(doors).toHaveLength(1));
+    expect(doors[0]?.url).toBe(`${ORIGIN}/__porthole/door/aaaaaaaaaaaaaaaa?ticket=door-1`);
+    expect(contents, "no content frame before the first door opens").toHaveLength(0);
+    doors[0]?.say(status({ state: "open" }));
+    expect(doors[0]?.destroyed, "the first door is gone once it opened").toBe(true);
+    expect(contents).toHaveLength(1);
+    expect(contents[0]?.url).toBe(`${ORIGIN}/__porthole/d/aaaaaaaaaaaaaaaa?ticket=content-1`);
+
+    // The content navigates its frame away: the platform tells the second load (P031).
+    contents[0]?.navigate();
+    expect(contents[0]?.destroyed, "the old content frame is destroyed on the restart").toBe(true);
+    await vi.waitFor(() => expect(doors).toHaveLength(2));
+    expect(doors[1]?.url, "the restart's door carries the second door ticket").toBe(
+      `${ORIGIN}/__porthole/door/aaaaaaaaaaaaaaaa?ticket=door-2`,
+    );
+    expect(doors[1]).not.toBe(doors[0]);
+    expect(contents, "no new content frame before the new door opens").toHaveLength(1);
+
+    doors[1]?.say(status({ state: "open" }));
+    expect(doors[1]?.destroyed).toBe(true);
+    expect(contents).toHaveLength(2);
+    expect(contents[1]?.url, "the restart's content carries the second content ticket").toBe(
+      `${ORIGIN}/__porthole/d/aaaaaaaaaaaaaaaa?ticket=content-2`,
+    );
+    shown.destroy();
+  });
+
+  test("a restart's door that blocks makes no content frame at all", async () => {
+    const { doors, contents, outcomes, shown } = mounted();
+    await vi.waitFor(() => expect(doors).toHaveLength(1));
+    doors[0]?.say(status({ state: "open" }));
+    contents[0]?.navigate();
+    await vi.waitFor(() => expect(doors).toHaveLength(2));
+    doors[1]?.say(status({ state: "blocked", reason: "session", status: 401 }));
+    expect(outcomes).toEqual([{ state: "blocked", reason: "session", status: 401 }]);
+    expect(contents, "no content frame after the restart's door blocked").toHaveLength(1);
+    shown.destroy();
+  });
+});

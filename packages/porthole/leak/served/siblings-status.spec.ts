@@ -352,6 +352,12 @@ test.describe("a served display's word comes from a door no sibling can reach (P
     // from A's own realm (source: A) is dropped by the transport.
     served.silentDoors.add(new URL(location.door?.url ?? "").pathname.split("/").at(-1) ?? "");
     const reaches = watchA(page);
+    const opened: string[] = [];
+    page.context().on("page", (each) => opened.push(each.url()));
+    // A knows the door's address here (the worst case: the door has no name to target, so
+    // knowing where it is must not be enough) and tries, once each, a window.open into a guessed
+    // name and a form submitted into one, as well as an empty name.
+    const doorUrl = location.door?.url ?? "";
     const act = `
       const isDoor = (() => { try { return !!d.querySelector("[data-porthole-door]") || w.location.pathname.indexOf("/__porthole/door/") === 0; } catch (e) { return false; } })();
       if (isDoor) {
@@ -362,7 +368,30 @@ test.describe("a served display's word comes from a door no sibling can reach (P
       try { parent.postMessage({ jsonrpc: "2.0", method: "porthole/notifications/frame-status", params: { state: "open" } }, "*"); } catch (e) {}
       try { parent.postMessage({ jsonrpc: "2.0", method: "porthole/notifications/frame-status", params: { state: "blocked", reason: "sign-in", status: 401, code: "phish" } }, "*"); } catch (e) {}
     `;
-    const bHandle = await mountAthenB(page, served, scope, hostile(act), async () =>
+    const target = `<script>
+      let tries = 0;
+      const tryAll = () => {
+        for (const name of ["porthole-door", "door", ""]) {
+          let got;
+          try { got = window.open(${JSON.stringify(doorUrl)}, name) !== null; } catch (e) { got = "threw: " + e.name; }
+          let submitted;
+          try {
+            const form = document.createElement("form");
+            form.method = "GET";
+            form.action = ${JSON.stringify(doorUrl)};
+            form.target = name || "_blank";
+            document.body.append(form);
+            form.submit();
+            form.remove();
+            submitted = true;
+          } catch (e) { submitted = "threw: " + e.name; }
+          if (tries === 0) console.log("__A " + JSON.stringify([{ open: name, got }, { form: name, submitted }]));
+        }
+        if ((tries += 1) < 30) setTimeout(tryAll, 200);
+      };
+      tryAll();
+    </script>`;
+    const bHandle = await mountAthenB(page, served, scope, hostile(act) + target, async () =>
       mount(
         page,
         served.hostOrigin,
@@ -371,13 +400,20 @@ test.describe("a served display's word comes from a door no sibling can reach (P
         instance,
       ),
     );
-    // B's silent door makes it framing (the door said nothing), never A's forged sign-in; and A
-    // never read the door.
+    // B's silent door makes it framing (the door said nothing): never A's forged sign-in, and
+    // never another word from a door A replaced (its ticket is used, so a replaced door would say
+    // `session`); and A never read the door, and opened no window.
     const outcome = await outcomeOf(bHandle.read, 10_000);
     expect(
-      outcome.state !== "blocked" || outcome.reason !== "sign-in",
-      `probe: A's fake door word moved nothing (${JSON.stringify(outcome)})`,
-    ).toBe(true);
+      outcome,
+      `probe: B's door stayed its own (its silence), not replaced or spoken for by A (${JSON.stringify(outcome)})`,
+    ).toEqual({ state: "blocked", reason: "framing" });
+    await page.waitForTimeout(400);
+    expect(
+      reaches.filter((each) => "open" in (each as object) || "form" in (each as object)),
+      "A tried window.open and a form into each guessed name",
+    ).toHaveLength(6);
+    expect(opened, "probe: A's window.open and form submits opened no window").toEqual([]);
     expect(
       reaches.some((each) => (each as { reachedDoor?: unknown }).reachedDoor === true),
       "probe: A read no door of B's (it is opaque)",

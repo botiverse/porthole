@@ -153,6 +153,17 @@ describe("the sandbox (P111): never allow-same-origin on a nested page", () => {
       'shell/frame.ts: frame.setAttribute("sandbox", plan.sandbox);',
     ]);
     expect(DOOR_SANDBOX_TOKENS).toEqual(["allow-scripts"]);
+    // The door frame has no name (P125): nothing can target it (`window.open(url, name)`, a link's or
+    // a form's `target`), so the only window that can say the door's word is the one the host made.
+    const web = readFileSync(path.join(root, "platform/web.ts"), "utf8");
+    const createDoor = web.slice(web.indexOf("  createDoor("));
+    expect(createDoor.length, "createDoor is in platform/web.ts").toBeLessThan(web.length);
+    const code = createDoor
+      .split("\n")
+      .map((line) => line.replace(/\/\/.*$/u, "").replace(/^\s*(\/\*\*|\*).*$/u, ""))
+      .join("\n");
+    expect(code, "the door sets no name attribute").not.toMatch(/setAttribute\(\s*["']name["']/u);
+    expect(code, "the door sets no name property").not.toMatch(/\.name\s*=(?!=)/u);
   });
 });
 

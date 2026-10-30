@@ -505,24 +505,81 @@ describe("a served display's door (P125)", () => {
     expect(refused?.status).toBe(401);
   });
 
-  it("the door answers the same block the content route would, for the same grant (Cato's check)", async () => {
-    const revoked = new Set<string>(["gone"]);
-    const porthole = server({
-      authorize: {
-        check: ({ subject }) =>
-          subject !== undefined && revoked.has(subject)
-            ? { allow: false, code: "revoked" }
-            : { allow: true },
-      },
+  /** A status page's word: its status, `data-porthole-reason` and `data-porthole-code`. */
+  const wordOf = async (response: Response | null) => {
+    const body = (await response?.text()) ?? "";
+    return {
+      status: response?.status,
+      reason: /data-porthole-reason="([a-z-]+)"/u.exec(body)?.[1],
+      code: /data-porthole-code="([a-z0-9-]+)"/u.exec(body)?.[1],
+    };
+  };
+
+  /** One issue's door ticket at the door route, and its content ticket at `/__porthole/d/`. */
+  const bothRoutes = async (
+    porthole: ReturnType<typeof server>,
+    location: { readonly url: string; readonly door?: { readonly url: string } },
+  ) => ({
+    door: await wordOf(await porthole.handle(get(doorOf(location)))),
+    content: await wordOf(await porthole.handle(get(location.url))),
+  });
+
+  describe("the door answers the same block the content route would, for the same grant (Cato's check)", () => {
+    it("denied, with the host's code", async () => {
+      const revoked = new Set<string>(["gone"]);
+      const porthole = server({
+        authorize: {
+          check: ({ subject }) =>
+            subject !== undefined && revoked.has(subject)
+              ? { allow: false, code: "revoked" }
+              : { allow: true },
+        },
+      });
+      const location = await porthole.issue(artifact, { viewer: "v", subject: "gone" });
+      const { door, content } = await bothRoutes(porthole, location);
+      expect(door).toEqual({ status: 403, reason: "denied", code: "revoked" });
+      expect(content).toEqual(door);
     });
-    const location = await porthole.issue(artifact, { viewer: "v", subject: "gone" });
-    const doorResp = await porthole.handle(get(doorOf(location)));
-    const contentResp = await porthole.handle(get(location.url));
-    expect(doorResp?.status).toBe(403);
-    expect(contentResp?.status).toBe(403);
-    for (const r of [doorResp, contentResp]) {
-      expect((await r?.text()) ?? "").toContain('data-porthole-code="revoked"');
-    }
+
+    it("session: each ticket already used once", async () => {
+      const porthole = server();
+      const location = await porthole.issue(shell, { viewer: "v" });
+      // The same issue's two tickets, each taken once at its own route...
+      expect((await porthole.handle(get(doorOf(location))))?.status).toBe(200);
+      expect((await porthole.handle(get(location.url)))?.status).toBe(200);
+      // ...and again: both used. (No cookie is sent back, as a fresh frame would have none.)
+      const { door, content } = await bothRoutes(porthole, location);
+      expect(door).toEqual({ status: 401, reason: "session", code: undefined });
+      expect(content).toEqual(door);
+    });
+
+    it("not-found: a document that doesn't exist", async () => {
+      const porthole = server();
+      const location = await porthole.issue(
+        { scope: "c", document: { kind: "artifact", id: "page", version: "99" } },
+        { viewer: "v" },
+      );
+      const { door, content } = await bothRoutes(porthole, location);
+      expect(door).toEqual({ status: 404, reason: "not-found", code: undefined });
+      expect(content).toEqual(door);
+    });
+
+    it("not-found: a file set whose entry isn't a page", async () => {
+      const porthole = server({
+        artifacts: {
+          get: () =>
+            Promise.resolve({
+              files: { "note.txt": { size: 4, sha256: "0".repeat(64) } },
+              entry: "note.txt",
+              read: () => Promise.resolve(new TextEncoder().encode("note")),
+            }),
+        },
+      });
+      const location = await porthole.issue(artifact, { viewer: "v" });
+      const { door, content } = await bothRoutes(porthole, location);
+      expect(door).toEqual({ status: 404, reason: "not-found", code: undefined });
+      expect(content).toEqual(door);
+    });
   });
 });
 
