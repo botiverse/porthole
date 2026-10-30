@@ -84,7 +84,9 @@ the agent, but it is not a wall.
      them;
    - the host's fallback for a frame that showed nothing ("open this in a new tab to sign in",
      "you no longer have access", with a link) is drawn from Porthole's pages' word only, never
-     from what the content says (P124; a url-mode app aside, S6).
+     from what the content says (P124; a url-mode app aside, S6). Until P125 that holds for a
+     nested display, or a served display with no other display of its scope on the page;
+     otherwise another display of the scope can make the host draw it ([§7](#the-display-layer)).
 
 The app runtime adds a third: **the host's API is the wall for its data.** The bridge refuses a
 call the page didn't declare (`undeclared`), or that the viewer's level doesn't allow, before any
@@ -171,7 +173,10 @@ Whatever the use:
   from a message of your own reading off the frame's window: a `blocked` outcome is the word of a
   page of Porthole's server, a gateway or your own pages, never of an opaque frame or of content in
   a frame that speaks (P124). Hear the `frame-status` host error as a display trying to speak as
-  Porthole: log it, and show nothing for it. A url-mode app can still say any outcome (S6).
+  Porthole: log it, and show nothing for it. A url-mode app can still say any outcome (S6). Until
+  P125 this holds for a nested display, or a served display with no other display of its scope on
+  the page: if you show several served displays of one scope on a page, nest them, or take a
+  `blocked` outcome of one whose scope has another display running as unconfirmed (§7).
 - Take what the frame reports about annotations as UI hints (where to draw, what to open), never
   as permissions, and put nothing in a mark the page may not know (§7).
 - Guard a view that a frame's report opens or moves (`activated`, `anchored`, `selected`,
@@ -651,6 +656,20 @@ host error, once a run (control `frame-status`). What follows: in a display with
 the set answered by a status page (access revoked) shows the server's words in the frame, and the
 host isn't told until the next mount. Not covered: a url-mode app (S6).
 
+Its limit (the audit of 2026-10-30, P124-1; P125 will close it): content can't speak first in its
+own display's run, but a scope's displays share one origin. A served display that isn't nested
+reaches every frame on the page (`top[i]`), and a new document of its scope is same-origin to it
+before that document's shell runs. It can post a frame status there, which the host takes as the
+run's first word, with no `frame-status` error; or stop or rewrite the document, so the host
+infers `framing` from silence. A `location.reload()` it puts into a running display starts a new
+run for it. So the rule holds for a nested display (its shell is on a `porthole-` label, P114), or
+a served display with no other display of its scope on the page; otherwise another display of the
+scope can make the host draw a fallback in Porthole's wording. A view through the sandbox proxy is
+on its scope's origin too. Until P125, a host that shows several served displays of one scope on a
+page nests them, or takes a `blocked` outcome of a display whose scope has another display running
+as unconfirmed. Also open (P124-2): a file set whose entry isn't a page (`note.txt`, `pic.svg`)
+says nothing, so the host infers `framing`; the entry will have to be a page.
+
 **Annotations** (`annotate`, P053, P104, P107). The shell that draws marks and reports anchors shares
 its realm with the content (a nested page's too: its marks are drawn by the runtime in the page's
 own frame, below the shell, P111), so:
@@ -982,7 +1001,9 @@ what was wrong, what holds now, and the limit its decision accepts, if any. Late
 are in the status line and in DECISIONS.md: P105 (after the review of P104), P109 (after the review
 of 0.12.0's drafts), P111 (a nested page, S3; in 0.14.0), P114 (a nested page's shell on a label of
 its own, after porthole#56; in 0.14.1), P124 (a frame status is the word of Porthole's pages, after
-the audit raft-security-audit#16; in 0.14.5: §4, §6, §7, S6).
+the audit raft-security-audit#16; in 0.14.5: §4, §6, §7, S6; the audit of 2026-10-30 found it holds
+only for a nested display or one alone in its scope on the page, which §4, §6 and §7 now say, and
+P125 will close).
 
 | Decision | State | What it closes | Sections |
 | --- | --- | --- | --- |
@@ -1004,6 +1025,9 @@ Open with no decision yet; until then they are the host's to cover:
 - a check, at mount or in development, that the page sends its `frame-src` (S1: run
   `defineHostConformance`);
 - a check of which displays share a page (S7: group them yourself);
+- a frame status from a served display whose scope has another display on the page (§7: nest
+  them, or take its `blocked` as unconfirmed, until P125), and a file set whose entry isn't a page
+  (§7: refuse one yourself);
 - an interstitial, report and takedown hooks for public pages, and a `lintContent` rule for
   secrets (S4);
 - refusing weak or example secrets, and a health answer that isn't derived from the secret (S3);

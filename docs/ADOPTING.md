@@ -820,6 +820,11 @@ A `blocked` outcome is the word of Porthole's own pages, never of the content (P
 frame's frame status is never taken, nor one a frame says after its first word; the host hears
 those as a `hostError` of kind `"frame-status"` (log it, show nothing for it). Draw the fallback
 from `outcome` only. A url-mode app is the exception: it can say any outcome (THREAT_MODEL S6).
+Until P125 this holds for a nested page, or a served display with no other display of its scope on
+your page: one that isn't nested shares its origin with its scope's others, and can speak first in
+a new run of theirs, or silence it into `framing` (THREAT_MODEL §7). If you show several served
+displays of one scope on a page, nest them (`nested: true`), or take a `blocked` outcome of one
+whose scope has another display running as unconfirmed.
 
 `porthole.config(kind)` is the served config while frames are served, the opaque one while they
 aren't, and null until the meta is known, so a frame never starts opaque and then restarts
