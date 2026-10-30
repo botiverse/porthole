@@ -78,19 +78,21 @@ const PORTHOLE_PAGE = `(d.querySelector("[data-porthole-door]") || (() => { try 
 
 const wipePost = (source: string): string => `
   if (d.querySelector("#b") || d.querySelector("[data-a]") || ${PORTHOLE_PAGE}) return;
+  const at = d.readyState;
   d.open();
   d.write('<!doctype html><meta data-a><body><scr' + 'ipt>' + ${JSON.stringify(source)} + '</scr' + 'ipt>');
   d.close();
-  seen.push({ i, wrote: true });
+  seen.push({ i, wrote: true, at });
 `;
 
 /** Wipe a readable sibling's loading document and say nothing (its silence is the test). */
 const wipeOnly = `
   if (d.querySelector("#b") || d.querySelector("[data-a]") || ${PORTHOLE_PAGE}) return;
+  const at = d.readyState;
   d.open();
   d.write("<!doctype html><meta data-a><p>wiped by A</p>");
   d.close();
-  seen.push({ i, wiped: true });
+  seen.push({ i, wiped: true, at });
 `;
 
 /**
@@ -176,14 +178,18 @@ async function requireReach(
   // A reports over the console every 200 ms.
   await new Promise((resolve) => setTimeout(resolve, 500));
   const reports = said as Record<string, unknown>[];
-  if (reports.some((each) => done.some((key) => each[key] !== undefined))) {
+  const acted = reports.filter((each) => done.some((key) => each[key] !== undefined));
+  // The attack is A's word before B's own: a write into a document that had already loaded (its
+  // shell had run and spoken) lands too late to be one.
+  if (acted.some((each) => each.at !== "complete")) {
     return;
   }
   const refused = reports.filter((each) => typeof each.act === "string");
   test.skip(
-    refused.length > 0,
+    refused.length + acted.length > 0,
     `${MEASURED_SKIP} on ${browser.browserType().name()} ${browser.version()} (measured): ` +
-      `the attack A tried on B's document threw every time (${refused.length}×, ${JSON.stringify(refused.slice(0, 2))}); ` +
+      `A's attack on B's loading document never landed: ${refused.length} tr${refused.length === 1 ? "y" : "ies"} threw, ` +
+      `${acted.length} only after B's document had loaded (${JSON.stringify([...refused, ...acted].slice(0, 2))}); ` +
       "retest with each engine version",
   );
   throw new Error(`positive control: A never reached B\nA saw: ${JSON.stringify(said)}`);
@@ -281,10 +287,11 @@ test.describe("a served display's word comes from a door no sibling can reach (P
       }
       if (window.__kicked.has(w)) return;
       window.__done.add(w);
+      const at = d.readyState;
       d.open();
       d.write("<!doctype html><body><scr" + "ipt>" + ${JSON.stringify(POST_BLOCKED)} + "</scr" + "ipt>");
       d.close();
-      seen.push({ i, spokeFirst: d.readyState });
+      seen.push({ i, spokeFirst: at, at });
     `;
     const aInstance = shell(scope);
     const shownA = await mount(

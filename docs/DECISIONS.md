@@ -6847,7 +6847,9 @@ WebKit the sibling probes' attack lands only sometimes** (measured in CI, 2026-1
 every `document.open` A tried into B's loading document threw, and in some A got in (under the
 `door-silence` control it wiped B, and B was `blocked: framing`, the weakening caught). So
 `[sibling-inject]`, `[sibling-reload]`, `[sibling-wipe]` and `[proxy]` check their positive control
-on every run (`requireReach`): when A got in they are judged as on every engine (unweakened: pass;
+on every run (`requireReach`): A's write counts only into a document still loading (one into a
+document that had already loaded comes after B's own word: on WebKit `[proxy]` got in that late);
+when A got in in time they are judged as on every engine (unweakened: pass;
 under a control: fail); when every try was refused they skip with the measurement, never pass, and
 their controls take that skip as held on WebKit (`measured`, `leak/controls.ts`; Tenny and Cato).
 P125's rule doesn't depend on any of this — no frame status of a served non-nested frame is taken
