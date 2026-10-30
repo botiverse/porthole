@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.14.6
 
 - **Every display ends with an outcome (P125):** a frame started again until its restarts ran out
   is `blocked: error` (it had no outcome at all: an empty box), and restarts no longer start its
