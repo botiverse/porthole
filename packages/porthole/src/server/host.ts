@@ -12,7 +12,7 @@ import {
 } from "./domain.ts";
 import { reservedLabels, type Naming } from "./naming.ts";
 import { peerAddress } from "./peer.ts";
-import { appStatusPage } from "./pages.ts";
+import { appStatusPage, tabOnlyPage } from "./pages.ts";
 import { createServer } from "./server.ts";
 import type {
   Access,
@@ -825,6 +825,30 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
 
   // Issues per key per minute, in this process.
   const issued = new Map<string, number[]>();
+  /**
+   * What a clean address names (P068, P125): its label's scope (the naming's `scopeOf`) and what
+   * `entry.at` answers for its path, for this viewer. One mapping for a tab (`authorize`) and for a
+   * frame (`issue` given `{ address }`), so a frame shows what the address's tab would.
+   */
+  const entryAt = async (
+    label: string,
+    pathname: string,
+    viewer: V | null,
+    request: Request,
+  ): Promise<{
+    readonly scope: string | null;
+    readonly answer: InstanceRef | FileAddress | null;
+  }> => {
+    const scope = options.name?.scopeOf?.(label) ?? null;
+    const at = options.entry?.at;
+    const answer =
+      scope === null || at === undefined
+        ? null
+        : ((await at(scope, new URL(pathname, "https://x.invalid").pathname, viewer, request)) ??
+          null);
+    return { scope, answer };
+  };
+
   const withinRate = (key: string): boolean => {
     const limit = options.rateLimit;
     if (limit === undefined) {
@@ -1038,6 +1062,10 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
         } catch {
           return refusal(400, "bad-json", "The body is JSON: { instance }");
         }
+        // A clean address (P125): what it names, as its tab would open it, issued for a frame.
+        if (isRecord(body) && body.instance === undefined && body.address !== undefined) {
+          return issueAddress(body.address, viewer, request);
+        }
         const proposal = isRecord(body) ? body.instance : undefined;
         if (
           !isRecord(proposal) ||
@@ -1062,25 +1090,99 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
               ? refusal(401, "unauthenticated", "Sign in to see this")
               : refusal(403, "forbidden", "You can't see this");
           }
-          let location: FrameLocation;
-          try {
-            location = await server.issue(instance, grant);
-          } catch (error) {
-            return refusal(409, "refused", error instanceof Error ? error.message : String(error));
-          }
-          // The clean address, where the app says the instance's path (P072, P074).
-          let link: string | null = null;
-          try {
-            const path = (await options.entry?.pathOf?.(instance, request)) ?? null;
-            link = path === null ? null : server.urlOf(instance.scope, path);
-          } catch {
-            link = null;
-          }
-          return json(201, link === null ? location : { ...location, link });
+          return issuedFor(instance, grant, request);
         } catch {
           return refusal(500, "failed", "The app's policy failed");
         }
       };
+
+      /** A location issued for what the host's access granted, with its clean address. */
+      async function issuedFor(
+        instance: InstanceRef,
+        grant: Grant,
+        request: Request,
+        more: { readonly page?: string; readonly resolved?: boolean } = {},
+      ): Promise<Response> {
+        let location: FrameLocation;
+        try {
+          location = await server!.issue(
+            instance,
+            grant,
+            more.page === undefined ? undefined : { page: more.page },
+          );
+        } catch (error) {
+          return refusal(409, "refused", error instanceof Error ? error.message : String(error));
+        }
+        // The clean address, where the app says the instance's path (P072, P074).
+        let link: string | null = null;
+        try {
+          const path = (await options.entry?.pathOf?.(instance, request)) ?? null;
+          link = path === null ? null : server!.urlOf(instance.scope, path);
+        } catch {
+          link = null;
+        }
+        return json(201, {
+          ...location,
+          ...(link === null ? {} : { link }),
+          // What a clean address named (P125): the instance its later frames are issued for.
+          ...(more.resolved === true ? { instance } : {}),
+        });
+      }
+
+      /**
+       * A clean address asked about for a frame (P125): resolved as its tab's authorize would
+       * resolve it (`entry.at`, then the host's access), and answered before any frame: a location
+       * with its door, or the same refusal the tab would get (401 signed out, 403 no access, 404
+       * nothing there). Never a redirect, never a page: the host shows its fallback from this.
+       */
+      async function issueAddress(
+        given: unknown,
+        viewer: V | null,
+        request: Request,
+      ): Promise<Response> {
+        let url: URL;
+        try {
+          if (typeof given !== "string" || given.length > 4_096) {
+            throw new TypeError("not an address");
+          }
+          url = new URL(given);
+        } catch {
+          return refusal(400, "bad-request", "The body is { address: <a clean address> }");
+        }
+        const label = domain?.labelOf(url.host) ?? null;
+        if (
+          options.entry === undefined ||
+          domain === null ||
+          label === null ||
+          domain.originOf(label) !== url.origin ||
+          url.pathname.startsWith("/__porthole/")
+        ) {
+          return refusal(404, "not-found", "That address names nothing here");
+        }
+        try {
+          const { answer } = await entryAt(label, `${url.pathname}${url.search}`, viewer, request);
+          const address = answer !== null && isFileAddress(answer) ? answer : null;
+          const instance = address === null ? (answer as InstanceRef | null) : address.instance;
+          if (instance === null) {
+            return refusal(404, "not-found", "That address names nothing here");
+          }
+          const grant = await options.access(instance, viewer, request);
+          if (grant === null) {
+            return viewer === null
+              ? refusal(401, "unauthenticated", "Sign in to see this")
+              : refusal(403, "forbidden", "You can't see this");
+          }
+          // A file set's address below its version (P081): the frame opens at that page.
+          const page =
+            address?.file !== undefined && address.file !== "" ? address.file : undefined;
+          return await issuedFor(instance, grant, request, {
+            ...(page === undefined ? {} : { page }),
+            resolved: true,
+          });
+        } catch {
+          return refusal(500, "failed", "The app's policy failed");
+        }
+      }
     },
 
     meta: () => ({
@@ -1231,20 +1333,19 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
         if (state === null) {
           return appPage(400, "This link isn't valid", "Open the address again.", "error", method);
         }
+        // Redirect entry is for a tab alone (P125): asked in a frame, it never shows the app's
+        // sign-in or refusal there, and says nothing to the page that frames it.
         const dest = request.headers.get("sec-fetch-dest");
-        const framed = dest === null ? state.framed : dest !== "document";
+        if (dest === "iframe" || dest === "frame") {
+          return tabOnlyPage(options.appOrigins.join(" "), method);
+        }
         const clean = `${domain.originOf(state.label)}${state.path}`;
         if (state.expired) {
-          return appPage(
-            401,
-            "This took too long",
-            "Open the address again.",
-            "session",
-            method,
-            framed ? undefined : { href: clean, text: "Open it again" },
-          );
+          return appPage(401, "This took too long", "Open the address again.", "session", method, {
+            href: clean,
+            text: "Open it again",
+          });
         }
-        const scope = options.name?.scopeOf?.(state.label) ?? null;
         let viewer: V | null;
         try {
           viewer = (await viewerOf(request)) ?? (await handedOver(request));
@@ -1258,15 +1359,7 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
           );
         }
         try {
-          const answer =
-            scope === null
-              ? null
-              : ((await entry.at(
-                  scope,
-                  new URL(state.path, "https://x.invalid").pathname,
-                  viewer,
-                  request,
-                )) ?? null);
+          const { scope, answer } = await entryAt(state.label, state.path, viewer, request);
           // A file set's address (P081) names its instance and where its version lives.
           const address = answer !== null && isFileAddress(answer) ? answer : null;
           const instance = address === null ? (answer as InstanceRef | null) : address.instance;
@@ -1278,23 +1371,15 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
             path: state.path,
             url: clean,
             instance,
-            framed,
+            // A frame never gets here since P125: kept for the hooks' type.
+            framed: false,
           };
           if (instance === null || grant === null) {
             if (viewer === null) {
-              // The app's sign-in never shows in a frame: the person opens a tab for it.
-              return framed
-                ? appPage(
-                    401,
-                    "Open this in a new tab to sign in",
-                    "Signing in doesn't work inside a frame.",
-                    "sign-in",
-                    method,
-                  )
-                : await signInWith(entry, request, context);
+              return await signInWith(entry, request, context);
             }
             const status = instance === null ? 404 : 403;
-            const own = framed ? null : await entry.refusal?.(status, request, context);
+            const own = await entry.refusal?.(status, request, context);
             if (own !== null && own !== undefined) {
               return own;
             }

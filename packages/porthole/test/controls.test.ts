@@ -8,6 +8,7 @@ import {
   VERDICT,
   controlsTable,
   judge,
+  MEASURED_SKIP,
   names,
   shard,
   summarize,
@@ -35,6 +36,8 @@ interface Synthetic {
   readonly message?: string;
   /** What the test declares: `test.fail` is "failed". */
   readonly expected?: "passed" | "failed";
+  /** Why it skipped (its `skip` annotation). */
+  readonly skipReason?: string;
 }
 
 /** A Playwright JSON report: each engine's tests, in one spec file ("A › b": b in describe A). */
@@ -60,6 +63,9 @@ function report(tests: Readonly<Record<string, readonly Synthetic[]>>, errors: s
               : [
                   {
                     status: one.status,
+                    ...(one.skipReason === undefined
+                      ? {}
+                      : { annotations: [{ type: "skip", description: one.skipReason }] }),
                     errors:
                       one.status === "failed" || one.status === "timedOut"
                         ? [
@@ -488,5 +494,52 @@ describe("V02: one registry of the negative controls", () => {
     expect(summary).toContain(
       "run: node packages/porthole/scripts/controls.ts --summary .dev/shards",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// P125's review: a probe whose attack lands only sometimes on an engine (WebKit) holds its control
+// there by failing (the attack landed, the weakening was caught) or by skipping with the
+// measurement (the engine refused every try); passing is still the control gone blind.
+
+describe("P125's review: a probe's measured skip", () => {
+  const measured: Control = { ...control, measured: { webkit: ["[3.webrtc]"] } };
+  const skippedWith = (skipReason: string): Synthetic[] => [
+    { title: "[3.webrtc] WebRTC is gone", status: "skipped", skipReason },
+    { title: "[1.connect] fetch reaches only allowed origins", status: "passed" },
+  ];
+  const because = `${MEASURED_SKIP} on webkit 26.0 (measured): the attack A tried on B's document threw every time`;
+
+  test("held on its engine by failing, or by skipping with the measurement", () => {
+    expect(judge(measured, ["webkit"], run(report({ webkit: good("failed") }))).ok).toBe(true);
+    const skipped = judge(measured, ["webkit"], run(report({ webkit: skippedWith(because) }), 0));
+    expect(skipped.problems).toEqual([]);
+    expect(skipped.ok).toBe(true);
+    expect(skipped.summary).toMatch(/didn't land \(measured\)/);
+  });
+
+  test("passing is still the control gone blind", () => {
+    const passed = judge(measured, ["webkit"], run(report({ webkit: good("passed") }), 0));
+    expect(passed.ok).toBe(false);
+    expect(passed.problems.join("\n")).toMatch(/gone blind/);
+  });
+
+  test("a skip without the measurement, or on an engine not listed, is a problem", () => {
+    expect(
+      judge(measured, ["webkit"], run(report({ webkit: skippedWith("not today") }), 0)).ok,
+    ).toBe(false);
+    expect(
+      judge(measured, ["chromium"], run(report({ chromium: skippedWith(because) }), 0)).ok,
+    ).toBe(false);
+    expect(judge(control, ["webkit"], run(report({ webkit: skippedWith(because) }), 0)).ok).toBe(
+      false,
+    );
+  });
+
+  test("the run exits as what happened: 1 when the probe failed, 0 when it skipped measured", () => {
+    expect(judge(measured, ["webkit"], run(report({ webkit: skippedWith(because) }), 1)).ok).toBe(
+      false,
+    );
+    expect(judge(measured, ["webkit"], run(report({ webkit: good("failed") }), 0)).ok).toBe(false);
   });
 });

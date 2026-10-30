@@ -28,10 +28,12 @@ import type { ColorScheme, PortholeConfig } from "../config/schema.ts";
 import { locateServed } from "./locate.ts";
 import { mayPassOn } from "./pass-on.ts";
 import { watchOutcome, type OutcomeWatch } from "./outcome.ts";
+import { watchDoor, type DoorWatch } from "./door.ts";
+import { outcomeOfRefusal } from "./locator.ts";
 import { STORAGE_USED_METHOD, type FrameSource } from "../isolation/types.ts";
 import { webPlatform } from "../platform/web.ts";
 import { TAKES } from "../platform/focus-guard.ts";
-import type { Surface } from "../platform/types.ts";
+import type { DoorSurface, Surface } from "../platform/types.ts";
 import type { AdapterConnection, ProtocolAdapter, ShellConnection } from "../protocol/adapter.ts";
 import {
   MCP_APPS_STYLE_VARIABLES,
@@ -57,6 +59,22 @@ const DEFAULT_LOAD_TIMEOUT_MS = 15_000;
 
 /** How many times a display is started again after its content navigated its frame away. */
 const MAX_RESTARTS = 3;
+
+/** What the host is told of a served display located without its door (P125), once a mount. */
+export const NO_DOOR =
+  "A served display needs a door from issue (FrameLocation.door, P125), and this location has none, so no frame was made: upgrade the server (or content Worker) that issues it, and pass the door on from a locator of your own. A clean address is for a tab: to frame what it names, resolve it with client.resolve(address) or <PortholeView address>";
+
+/**
+ * What the host is told when its locator gives a run the location an earlier run had (P125): its
+ * tickets were taken by that run, so its door says `blocked: session`. A locator issues anew for
+ * every run (a reload, a restart after the content navigated away).
+ */
+export const REUSED_LOCATION =
+  "The locator gave this run a location an earlier run of this display already used (P125): its tickets are taken, so its door answers that the link has been used. A locator must issue anew for every run (InstanceLocator.locate is called for each one)";
+
+/** What the host is told when its platform makes no doors (P125): no served frame is made. */
+export const NO_DOOR_PLATFORM =
+  "This platform makes no door frames (PlatformHost.createDoor, P125), so no served display that isn't nested is framed on it";
 
 const BASE_KEYS = new Set(["hostContextChanged", "teardown", "close"]);
 
@@ -94,6 +112,10 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
   }
   // A url frame is someone else's app: no shell, no protocol, and its navigations are its own.
   const speaks = config.mode !== "url";
+  const nested = config.nested === true;
+  // A served display on its scope's origin, beside the scope's other content (P125): its door
+  // says how loading went, before its frame is made.
+  const hasDoor = config.isolation === "domain" && speaks && !nested;
   const adapter = (options.adapter ?? shellAdapter) as ProtocolAdapter<C>;
   const platform = options.platform ?? webPlatform;
   const hostInfo = options.hostInfo ?? { name: "porthole", version: "0" };
@@ -148,6 +170,11 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
 
       const listeners = new Map<keyof DisplayEvents, Set<(detail: never) => void>>();
       const emit = <E extends keyof DisplayEvents>(event: E, detail: DisplayEvents[E]) => {
+        // An outcome ends a loading episode: the next run (a restart, a reload) gets a clock of
+        // its own (P125).
+        if (event === "outcome") {
+          episodeBegan = null;
+        }
         for (const listener of listeners.get(event) ?? []) {
           (listener as (detail: DisplayEvents[E]) => void)(detail);
         }
@@ -172,6 +199,10 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       let bridge: DisplayBridge | null = null;
       let destroyed = false;
       let restarts = 0;
+      // When the loading episode that has no outcome yet began: its first run, not each restart's
+      // (P125). However often a frame is started again (a sibling of its scope wiping or
+      // navigating it, P125 S7), the display's time runs out and it has an outcome.
+      let episodeBegan: number | null = null;
       let generation = 0;
       // The viewer's answer for this display (P079): asked once, kept across its frames; or the
       // host's refusal of them all (P080).
@@ -181,6 +212,10 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           : onceConsent(options.consent);
       let abort: AbortController | null = null;
       let outcomeWatch: OutcomeWatch | null = null;
+      let door: { readonly frame: DoorSurface; readonly watch: DoorWatch } | null = null;
+      // The addresses earlier runs were located at (P125): a ticket opens once, so a run given one
+      // again is told to the host (its outcome is the server's word, unchanged).
+      const locatedAt = new Set<string>();
       let themeFrame: number | null = null;
       const view = container.ownerDocument.defaultView;
       // The adapter's own operations, the last call of each, replayed into every new frame.
@@ -492,6 +527,12 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         }
       };
 
+      const closeDoor = () => {
+        door?.watch.stop();
+        door?.frame.destroy();
+        door = null;
+      };
+
       const stop = () => {
         // A run that ran a page with storage of its own making and never heard it used: no (P111).
         if (bridge !== null && handshaken && !storageTold && compiled.shell?.storage === "memory") {
@@ -507,13 +548,51 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         abort = null;
         outcomeWatch?.stop();
         outcomeWatch = null;
+        closeDoor();
         connection?.close();
         connection = null;
         surface?.destroy();
         surface = null;
       };
 
-      const start = (source: FrameSource) => {
+      const timeoutMs = config.limits.loadTimeoutMs ?? DEFAULT_LOAD_TIMEOUT_MS;
+
+      /**
+       * A served display with a door (P125): its door first, alone, in a frame of the host's own;
+       * its frame only once the door said `open`, within what is left of the run's time. A door
+       * that said `blocked` (or never ran, or never answered) is the run's outcome, and nothing of
+       * the content is framed. A location without a door (an older server, a locator that drops
+       * it, a clean address someone framed) is refused before any frame is made: `blocked:
+       * locate`, and the host hears why (`door`). Nothing infers a door's word from anything else.
+       */
+      const enter = (source: FrameSource, timeLeft = timeoutMs) => {
+        if (!hasDoor || source.kind !== "url") {
+          start(source, timeLeft);
+          return;
+        }
+        if (source.door === undefined || platform.createDoor === undefined) {
+          hostError(source.door === undefined ? NO_DOOR : NO_DOOR_PLATFORM, "door");
+          emit("outcome", { state: "blocked", reason: "locate" });
+          return;
+        }
+        const began = Date.now();
+        const frame = platform.createDoor(container, { url: source.door });
+        const watch = watchDoor({
+          door: frame,
+          timeoutMs: timeLeft,
+          onOpen: () => {
+            closeDoor();
+            start(source, Math.max(0, timeLeft - (Date.now() - began)));
+          },
+          onOutcome: (outcome) => {
+            closeDoor();
+            emit("outcome", outcome);
+          },
+        });
+        door = { frame, watch };
+      };
+
+      const start = (source: FrameSource, timeLeft: number) => {
         const navigatedAway = () => {
           emit("navigated", undefined);
           if (restarts < MAX_RESTARTS) {
@@ -522,6 +601,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           } else {
             stop();
             contentError("The content kept navigating its frame away; it was stopped.");
+            // Every display ends with an outcome (P125): a frame stopped after its restarts ran out
+            // is one the host can draw a fallback for, never an empty box.
+            emit("outcome", { state: "blocked", reason: "error" });
           }
         };
         const framed = platform.createSurface(container, {
@@ -587,7 +669,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           surface: created,
           source,
           speaks,
-          timeoutMs: config.limits.loadTimeoutMs ?? DEFAULT_LOAD_TIMEOUT_MS,
+          nested,
+          timeoutMs: timeLeft,
           onOutcome: (outcome) => emit("outcome", outcome),
           // A frame status from the content (P124): never shown, the host's to hear.
           refused: (message) => hostError(message, "frame-status"),
@@ -679,16 +762,24 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           return;
         }
         generation += 1;
+        if (episodeBegan === null) {
+          episodeBegan = Date.now();
+        }
+        // What is left of this episode's time: a restart doesn't start the clock again.
+        const timeLeft = Math.max(0, timeoutMs - (Date.now() - episodeBegan));
         if (config.isolation === "opaque") {
-          start({
-            kind: "srcdoc",
-            html: compiled.shellDocument({
-              origins: [container.ownerDocument.defaultView?.location.origin ?? ""],
-              title: mount.title,
-              ...nonceOf(options.nonce),
-              ...(mount.document === undefined ? {} : { document: mount.document }),
-            }),
-          });
+          enter(
+            {
+              kind: "srcdoc",
+              html: compiled.shellDocument({
+                origins: [container.ownerDocument.defaultView?.location.origin ?? ""],
+                title: mount.title,
+                ...nonceOf(options.nonce),
+                ...(mount.document === undefined ? {} : { document: mount.document }),
+              }),
+            },
+            timeLeft,
+          );
           return;
         }
         const mine = generation;
@@ -700,18 +791,52 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           return;
         }
         const hostOrigin = container.ownerDocument.defaultView?.location.origin ?? "";
+        // The run's time covers locating too: a backend that never answers is a timeout.
+        const began = Date.now();
+        let settled = false;
+        const late = setTimeout(() => {
+          if (!settled && mine === generation && !destroyed) {
+            settled = true;
+            controller.abort();
+            hostError("The host's backend didn't give a location in time", "locate");
+            emit("outcome", { state: "timeout" });
+          }
+        }, timeLeft);
+        // A run stopped (destroyed, started again) stops its clock too.
+        controller.signal.addEventListener("abort", () => clearTimeout(late), { once: true });
         locateServed(locator, instance, config, hostOrigin, controller.signal).then(
           (source) => {
-            if (mine === generation && !destroyed) {
-              start(source);
+            clearTimeout(late);
+            if (!settled && mine === generation && !destroyed) {
+              settled = true;
+              if (source.kind === "url") {
+                const seen = [source.url, ...(source.door === undefined ? [] : [source.door])];
+                if (seen.some((each) => locatedAt.has(each))) {
+                  hostError(REUSED_LOCATION, "locate");
+                }
+                for (const each of seen) {
+                  locatedAt.add(each);
+                }
+              }
+              enter(source, Math.max(0, timeLeft - (Date.now() - began)));
             }
           },
           (error: unknown) => {
-            if (mine === generation && !controller.signal.aborted) {
-              // The host's own failure (its backend down, access gone): never the content's.
-              hostError(error instanceof Error ? error.message : String(error), "locate");
-              emit("outcome", { state: "blocked", reason: "locate" });
+            clearTimeout(late);
+            if (settled || mine !== generation || controller.signal.aborted) {
+              return;
             }
+            settled = true;
+            // The host's own issue endpoint refused (signed out, denied, not found, P125): its
+            // word, before any frame, never the content's. Anything else is the host's own failure
+            // (its backend down, a network error, a malformed answer): `locate`, never `denied`.
+            const refused = outcomeOfRefusal(error);
+            if (refused !== null) {
+              emit("outcome", refused);
+              return;
+            }
+            hostError(error instanceof Error ? error.message : String(error), "locate");
+            emit("outcome", { state: "blocked", reason: "locate" });
           },
         );
       };
@@ -754,6 +879,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         },
         reload() {
           restarts = 0;
+          episodeBegan = null;
           run();
         },
         focus() {

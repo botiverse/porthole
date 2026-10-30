@@ -6,14 +6,27 @@ import {
   originMatchesSource,
   parseOrigin,
 } from "../isolation/served.ts";
-import type { FrameLocation, InstanceRef, ServedDocument } from "../isolation/types.ts";
+import {
+  DOOR_PATH,
+  type FrameLocation,
+  type InstanceRef,
+  type ServedDocument,
+} from "../isolation/types.ts";
 import { sandboxProxyDocument } from "../mcp/proxy.ts";
 import { base32, createKeys, newTicket, ticketId } from "./keys.ts";
 import { randomBytes } from "./crypto.ts";
 import { isHostLabel, reservedLabels } from "./naming.ts";
-import { enterPage, pageScript, SESSION_PATH, statusPage } from "./pages.ts";
+import {
+  doorResponse,
+  doorStatusResponse,
+  enterPage,
+  pageScript,
+  SESSION_PATH,
+  statusPage,
+  tabOnlyPage,
+} from "./pages.ts";
 import { libraryFile } from "./libraries.ts";
-import { isNavigation, ownLoad, serveAsset, serveFile } from "./files.ts";
+import { isNavigation, ownLoad, serveAsset, serveFile, ticketPage } from "./files.ts";
 import {
   isNestedLabel,
   nestedAncestors,
@@ -23,6 +36,7 @@ import {
   PORTHOLE_LABEL_PREFIX,
 } from "./nested.ts";
 import { DEFAULT_ENTRY } from "../files/paths.ts";
+import { isPagePath } from "../files/types.ts";
 import { isPortholeCookie, setsPortholeCookie } from "./proxy.ts";
 import {
   assetCodeRuns,
@@ -54,6 +68,8 @@ import type {
 const PREFIX = "/__porthole/";
 /** A served document (shell, artifact page, sandbox proxy), by its instance's key. */
 const DOCUMENT_PATH = /^\/__porthole\/d\/([a-z2-7]{16})$/u;
+/** A served display's door (P125), by its instance's key: `DOOR_PATH<key>`. */
+const DOOR_ROUTE = /^\/__porthole\/door\/([a-z2-7]{16})$/u;
 /**
  * A file set's files in a frame (P083): `/__porthole/f/<sealed access>/<path>`. The access is
  * in the path, so a frame whose engine keeps no cookie (WebKit, P025) loads them too.
@@ -158,6 +174,12 @@ interface FilesAt {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
+
+/** Whether a file set opens at a page of its own (P125, P124-2): its entry is a file, and a page. */
+const entryIsPage = (set: StoredFiles): boolean => {
+  const entry = set.entry ?? DEFAULT_ENTRY;
+  return Object.hasOwn(set.files, entry) && isPagePath(entry);
+};
 
 const isStoredFiles = (stored: StoredVersion): stored is StoredFiles =>
   isRecord(stored) &&
@@ -453,6 +475,24 @@ export function createServer(options: ServerOptions): PortholeServer {
    * page saying it's denied. Answers are reused only for the host's own `ttlSeconds`.
    */
   async function denied(request: Request, access: Access): Promise<Response | null> {
+    const refused = await refusalOf(request, access);
+    return refused === null
+      ? null
+      : page(
+          403,
+          "You can't open this anymore",
+          "The app that showed it no longer lets you see it here.",
+          request.method.toUpperCase(),
+          "denied",
+          refused.code,
+        );
+  }
+
+  /** The host's check (P050): null to go on, or its refusal and the host's code, if a good one. */
+  async function refusalOf(
+    request: Request,
+    access: Access,
+  ): Promise<{ readonly code?: string } | null> {
     if (authorize === undefined) {
       return null;
     }
@@ -497,14 +537,7 @@ export function createServer(options: ServerOptions): PortholeServer {
       return null;
     }
     const code = typeof given?.code === "string" && CODE.test(given.code) ? given.code : undefined;
-    return page(
-      403,
-      "You can't open this anymore",
-      "The app that showed it no longer lets you see it here.",
-      request.method.toUpperCase(),
-      "denied",
-      code,
-    );
+    return code === undefined ? {} : { code };
   }
 
   /** The config a served document is served under, checked to fit it and this server. */
@@ -1058,9 +1091,11 @@ export function createServer(options: ServerOptions): PortholeServer {
     // still shows it. The cookie serves what follows (a reload), where the engine keeps it.
     const record = method === "GET" ? await take(url.searchParams.get("ticket"), label) : null;
     // An entry code opens its clean address alone, through its own browser's nonce (P068, P114).
+    // A door's ticket is the door's alone (P125): here it is no ticket.
     if (
       record !== null &&
       record.entry === undefined &&
+      record.door !== true &&
       record.instance.document.kind !== "external" &&
       keys.instanceKey(record.instance) === key
     ) {
@@ -1091,6 +1126,74 @@ export function createServer(options: ServerOptions): PortholeServer {
   }
 
   /**
+   * A served display's door (P125): its own ticket's, taken once, for this instance on this
+   * origin, and the checks the content's address runs for the same grant (the host's check, the
+   * document, its entry), so the door says what the content's address would: `open`, or `blocked`
+   * and why. It sets no cookie and serves nothing of the content; the content's address takes its
+   * own ticket and checks again (P050), so the door only tells. No other ticket opens it, and a
+   * nested page's shell's label serves none (`serveShellLabel`).
+   */
+  async function serveDoor(
+    request: Request,
+    url: URL,
+    label: string,
+    key: string,
+  ): Promise<Response> {
+    const method = request.method.toUpperCase();
+    const say = (status: number, reason: FrameBlock, code?: string): Response =>
+      doorStatusResponse({
+        status,
+        reason,
+        ...(code === undefined ? {} : { code }),
+        hostOrigins: options.hostOrigins,
+        frameAncestors,
+        method,
+      });
+    if (method !== "GET" && method !== "HEAD") {
+      return say(405, "error");
+    }
+    try {
+      const record = method === "GET" ? await take(url.searchParams.get("ticket"), label) : null;
+      if (
+        record === null ||
+        record.door !== true ||
+        record.entry !== undefined ||
+        record.instance.document.kind === "external" ||
+        keys.instanceKey(record.instance) !== key ||
+        compiledFor(record.instance)?.config.nested === true
+      ) {
+        return say(401, "session");
+      }
+      const access: Access = {
+        instance: record.instance,
+        viewer: record.viewer,
+        origin: originOfLabel(label),
+        expiresAt: Date.now() + (record.sessionSeconds ?? DEFAULT_SESSION_SECONDS) * 1_000,
+        ...(record.anonymous === true ? { anonymous: true } : {}),
+        ...(record.subject === undefined ? {} : { subject: record.subject }),
+      };
+      const refused = await refusalOf(request, access);
+      if (refused !== null) {
+        return say(403, "denied", refused.code);
+      }
+      const served = await documentOf(access.instance);
+      // The same document, entry and page checks the content's address runs (`serveAccess`).
+      const below = isPageRest(record.page) ? record.page : undefined;
+      if (
+        served === null ||
+        ("files" in served
+          ? !entryIsPage(served.files) || ticketPage(served.files, below) === null
+          : below !== undefined)
+      ) {
+        return say(404, "not-found");
+      }
+      return doorResponse({ hostOrigins: options.hostOrigins, frameAncestors, method });
+    } catch {
+      return say(500, "error");
+    }
+  }
+
+  /**
    * The document an access opens, once the host's check lets it in: at its document's path, or
    * (`at`) a path under a file set's base (P081).
    */
@@ -1109,6 +1212,20 @@ export function createServer(options: ServerOptions): PortholeServer {
     }
     const served = await documentOf(access.instance);
     if (served === null) {
+      return page(404, "Not found", "This page, or this version of it, doesn't exist.", method);
+    }
+    // A frame's document opens at its file set's entry, which is a page (P125, P124-2): a set
+    // stored before that was checked shows Porthole's word, never an inert file that says nothing.
+    if ("files" in served && at === undefined && !entryIsPage(served.files)) {
+      return page(404, "Not found", "This page, or this version of it, doesn't exist.", method);
+    }
+    // A page below a base (P125) names a file set's page: for one page alone, nothing; for a set,
+    // the page the frame opens at (its entry, or the page it was issued for) must be one of its
+    // pages. The door asks the same (`serveDoor`), so both say `not-found` alike.
+    if (
+      at === undefined &&
+      ("files" in served ? ticketPage(served.files, pageAt) === null : pageAt !== undefined)
+    ) {
       return page(404, "Not found", "This page, or this version of it, doesn't exist.", method);
     }
     // A nested page (P111): the address the host frames (a ticket's, a cookie's, an entered
@@ -1189,7 +1306,7 @@ export function createServer(options: ServerOptions): PortholeServer {
         compiled: served.compiled,
         hostOrigins: options.hostOrigins,
         frameAncestors,
-        ticket: { expires: sealed.expires },
+        ticket: { expires: sealed.expires, ...(pageAt === undefined ? {} : { page: pageAt }) },
         ...versionOf(access.instance),
       });
     }
@@ -1418,6 +1535,13 @@ export function createServer(options: ServerOptions): PortholeServer {
    */
   async function beginEntry(request: Request, url: URL, label: string, to: URL): Promise<Response> {
     const method = request.method.toUpperCase();
+    // A clean address is for a tab (P125): in a frame it never goes to the app (no authorize, no
+    // sign-in, no refusal of the app's) and says nothing to the page that frames it, whatever it
+    // names. A host frames what a clean address names by resolving it through `issue`.
+    const framedAs = request.headers.get("sec-fetch-dest");
+    if (framedAs === "iframe" || framedAs === "frame") {
+      return tabOnlyPage(frameAncestors, method);
+    }
     // An address that names nothing is nothing here (P070): never a trip to the app's sign-in.
     const scopeOf = content.name?.scopeOf;
     const named = options.entry?.named;
@@ -1720,7 +1844,15 @@ export function createServer(options: ServerOptions): PortholeServer {
     instance: InstanceRef,
     grant: Grant,
     entry?: TicketRecord["entry"],
-  ): Promise<{ readonly clean: InstanceRef; readonly key: string; readonly ticket: string }> {
+    /** A page below a file set's base its frame opens at (P125: a clean address's file). */
+    below?: string,
+  ): Promise<{
+    readonly clean: InstanceRef;
+    readonly key: string;
+    readonly ticket: string;
+    /** The door's own ticket (P125), for a display framed on its scope's origin. */
+    readonly door: string | null;
+  }> {
     const clean = cleanInstance(instance);
     check(clean);
     const anonymous = grant.anonymous === true;
@@ -1768,7 +1900,7 @@ export function createServer(options: ServerOptions): PortholeServer {
       throw new TypeError("This instance is too large to carry in a cookie (fewer origins?)");
     }
     const ticket = newTicket();
-    await tickets.put(ticketId(ticket), {
+    const record: TicketRecord = {
       instance: clean,
       viewer,
       expiresAt: Date.now() + ttl * 1_000,
@@ -1776,8 +1908,25 @@ export function createServer(options: ServerOptions): PortholeServer {
       ...(anonymous ? { anonymous: true } : {}),
       ...(grant.subject === undefined ? {} : { subject: grant.subject }),
       ...(entry === undefined ? {} : { entry }),
-    });
-    return { clean, key, ticket };
+      ...(below === undefined ? {} : { page: below }),
+    };
+    await tickets.put(ticketId(ticket), record);
+    // A frame on its scope's origin has a door (P125): its ticket, for the same grant and as long.
+    let door: string | null = null;
+    if (entry === undefined && hasDoor(clean)) {
+      door = newTicket();
+      await tickets.put(ticketId(door), { ...record, door: true });
+    }
+    return { clean, key, ticket, door };
+  }
+
+  /**
+   * Whether an instance's frame has a door (P125): a document framed on its scope's origin, where
+   * the scope's other displays run content (a served shell, a page that isn't nested, the sandbox
+   * proxy). A nested page's frame is its shell, on a label of its own; a url-mode app has none.
+   */
+  function hasDoor(instance: InstanceRef): boolean {
+    return instance.document.kind !== "external" && compiledFor(instance)?.config.nested !== true;
   }
 
   const underDomain = (host: string): boolean => host === domain || host.endsWith(`.${domain}`);
@@ -1832,8 +1981,15 @@ export function createServer(options: ServerOptions): PortholeServer {
 
     originFor: (scope) => originOfLabel(nameOf(scope)),
 
-    async issue(instance, grant): Promise<FrameLocation> {
-      const { clean, key, ticket } = await mint(instance, grant);
+    async issue(instance, grant, at = {}): Promise<FrameLocation> {
+      // A page below a file set's base (P125: what a clean address names, resolved for a frame).
+      const below = at.page;
+      if (below !== undefined && (!isPageRest(below) || instance.document?.kind !== "artifact")) {
+        throw new TypeError(
+          "A frame's page is a relative path below an artifact's files (no . or ..)",
+        );
+      }
+      const { clean, key, ticket, door } = await mint(instance, grant, undefined, below);
       // A nested page's frame is its shell, on the shell's own label (P114).
       const origin = originOfLabel(labelFor(clean));
       const path =
@@ -1842,7 +1998,14 @@ export function createServer(options: ServerOptions): PortholeServer {
           : `${PREFIX}d/${key}?ticket=${ticket}`;
       // The viewer's level, as the host's access decided it now (P087): for the display's bridge.
       const viewer = viewerOfGrant(grant);
-      return { url: `${origin}${path}`, origin, reports: true, ...(viewer ? { viewer } : {}) };
+      return {
+        url: `${origin}${path}`,
+        origin,
+        reports: true,
+        ...(viewer ? { viewer } : {}),
+        // Its door (P125): the host frames it first, and takes its word alone.
+        ...(door === null ? {} : { door: { url: `${origin}${DOOR_PATH}${key}?ticket=${door}` } }),
+      };
     },
 
     forget(filter = {}) {
@@ -2003,6 +2166,10 @@ export function createServer(options: ServerOptions): PortholeServer {
         const asset = options.assets === undefined ? null : ASSET_ROUTE.exec(url.pathname);
         if (asset?.[1] !== undefined) {
           return await serveAssetAt(request, label, asset[1]);
+        }
+        const door = DOOR_ROUTE.exec(url.pathname);
+        if (door?.[1] !== undefined) {
+          return await serveDoor(request, url, label, door[1]);
         }
         const document = DOCUMENT_PATH.exec(url.pathname);
         if (document?.[1] !== undefined) {

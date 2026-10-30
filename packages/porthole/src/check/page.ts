@@ -62,6 +62,9 @@ const NOBODY: PlatformHost = {
     const surface = webPlatform.createSurface(container, spec);
     return { ...surface, userActivation: () => false };
   },
+  // A served display's door (P125), as the web platform makes it: a platform without doors frames
+  // no served display that isn't nested.
+  createDoor: (container, spec) => webPlatform.createDoor!(container, spec),
 };
 
 /** A handler for each host function the config declares: it notes the call and answers no. */
@@ -107,7 +110,9 @@ interface Run {
 const runs = new Map<number, Run>();
 let next = 0;
 
-const frameOf = (run: Run) => run.box.querySelector("iframe");
+/** A run's frame: the display's own, never its door (P125), which is gone once it said its word. */
+const frameOf = (run: Run) =>
+  run.box.querySelector<HTMLIFrameElement>("iframe:not([data-porthole-door])");
 
 addEventListener("message", (event: MessageEvent) => {
   const data = event.data as { portholeCheck?: unknown; data?: unknown } | null;

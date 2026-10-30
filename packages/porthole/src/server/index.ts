@@ -69,7 +69,12 @@ export {
   type D1Like,
   type D1StatementLike,
 } from "./tickets.ts";
-export { FRAME_STATUS_METHOD } from "../isolation/types.ts";
+export { DOOR_PATH, FRAME_STATUS_METHOD } from "../isolation/types.ts";
+// A served display's door (P125): `/server` serves it for a shell, a page that isn't nested and the
+// sandbox proxy; a content Worker of a host's own answers the same at `DOOR_PATH<key>`, after
+// taking the door's own ticket (`TicketRecord.door`) and running the checks its content's address
+// runs (docs/ADOPTING.md, "The door").
+export { doorResponse, doorStatusResponse, type DoorOptions } from "./pages.ts";
 // A nested page (P111): Porthole's shell at the framed address, the page and its files below the
 // sealed prefix, all on the shell's own label (P114, `nestedLabelOf`). `/server` serves them for a
 // config with `nested`; a content Worker of its own answers the same (docs/ADOPTING.md, "Nested

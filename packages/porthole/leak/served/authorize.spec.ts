@@ -144,12 +144,11 @@ test("a framed page mid-session: its next load after revocation is denied where 
   served.revoked.add(subject);
   await reloadItself(await shown.frame());
   // A frame that speaks for itself and navigates is mounted again (its navigation recovery), at
-  // a location the host gives again: each mounting tells its own outcome. Every one after the
-  // first is the refusal. A browser that keeps no cookie in a cross-site frame (P025, measured:
-  // P098) had no session to revoke on its reload.
-  const refusal = (await keepsFramedCookies(page, "http:"))
-    ? DENIED
-    : { state: "blocked", reason: "session", status: 401 };
+  // a location the host issues again (P125: a locator issues anew for every run). Every run after
+  // the first goes through a door of its own, whose fresh ticket the host's check refuses: denied
+  // on every engine, a browser that keeps no cookie in a cross-site frame (WebKit, P025) too, since
+  // the door takes a ticket, not a cookie.
+  const refusal = DENIED;
   await expect
     .poll(async () => (await shown.read()).outcomes.at(-1), {
       timeout: 10_000,

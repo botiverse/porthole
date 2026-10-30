@@ -45,7 +45,14 @@ export interface FileServing {
    * moves the frame to the entry's own address under `base` before anything loads, and renews
    * that address before it ends (`expires`, epoch ms).
    */
-  readonly ticket?: { readonly expires: number };
+  readonly ticket?: {
+    readonly expires: number;
+    /**
+     * A page below the base the ticket was issued for (P125: a clean address's file, resolved
+     * through `issue`), opened instead of the entry (`ticketPage`).
+     */
+    readonly page?: string;
+  };
   /** The artifact version the set is, which its pages name in their notices to the host (P098). */
   readonly artifact?: { readonly id: string; readonly version: string };
 }
@@ -175,6 +182,33 @@ function nothing(serving: FileServing, status: 403 | 404 | 405, method: string):
   });
 }
 
+/**
+ * The page a ticket opens in a set (P081, P125): its entry, or the page below the base it was
+ * issued for, found as a navigation finds it (`dir/` its index, `name` its `.html`); null when
+ * that is no page of the set. The door asks the same (`serveDoor`), so both say `not-found` alike.
+ */
+export function ticketPage(set: StoredFiles, page?: string): string | null {
+  const has = (each: string): boolean => Object.hasOwn(set.files, each);
+  const entry = set.entry ?? DEFAULT_ENTRY;
+  if (page === undefined || page === "") {
+    return has(entry) ? entry : null;
+  }
+  const path = requestFilePath(page);
+  if (path === null) {
+    return null;
+  }
+  let found = lookupFile(has, path, { entry, navigation: false });
+  if (found.kind === "redirect") {
+    found = lookupFile(has, found.to, { entry, navigation: false });
+  }
+  return found.kind === "file" && found.status === 200 && fileTypeOf(found.path).role === "page"
+    ? found.path
+    : null;
+}
+
+const ticketLookup = (path: string | null): FileLookup =>
+  path === null ? { kind: "none" } : { kind: "file", path, status: 200 };
+
 export async function serveFile(serving: FileServing): Promise<Response> {
   const { request, set } = serving;
   const method = request.method.toUpperCase();
@@ -197,9 +231,7 @@ export async function serveFile(serving: FileServing): Promise<Response> {
   const entryPath = set.entry ?? DEFAULT_ENTRY;
   const found: FileLookup =
     serving.ticket !== undefined
-      ? has(entryPath)
-        ? { kind: "file", path: entryPath, status: 200 }
-        : { kind: "none" }
+      ? ticketLookup(ticketPage(set, serving.ticket.page))
       : lookupFile(has, path, {
           ...(set.entry === undefined ? {} : { entry: set.entry }),
           ...(set.spa === undefined ? {} : { spa: set.spa }),
@@ -282,7 +314,7 @@ export async function serveFile(serving: FileServing): Promise<Response> {
         ...(serving.ticket === undefined
           ? {}
           : {
-              address: `${base}${found.path.includes("/") ? encodePath(found.path) : ""}`,
+              address: `${base}${found.path === entryPath && !found.path.includes("/") ? "" : encodePath(found.path)}`,
               expires: serving.ticket.expires,
             }),
         ...(serving.artifact === undefined ? {} : { set: serving.artifact }),

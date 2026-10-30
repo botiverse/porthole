@@ -69,7 +69,21 @@ export interface FrameLocation {
    * the display's bridge checks each runtime method's level against it.
    */
   readonly viewer?: ViewerInfo;
+  /**
+   * The display's door (P125): a page of Porthole's on the same origin, at
+   * `/__porthole/door/<instance key>?ticket=<its own ticket>`, that says how loading went before
+   * any content is framed. The host frames it opaque and hidden, and takes its one frame status
+   * (`open`, or `blocked` and why); then frames `url`. Given for a served shell, a page that isn't
+   * nested and the sandbox proxy: content of the scope runs on their origin, so no frame status
+   * from their own frame is ever Porthole's. A host that is given none for one of them takes no
+   * frame status at all (a load that shows nothing is a timeout) and says so (`hostError` kind
+   * `door`). A custom locator passes it on as it came.
+   */
+  readonly door?: { readonly url: string };
 }
+
+/** Where a served display's door is (P125): `<origin>/__porthole/door/<instance key>`. */
+export const DOOR_PATH = "/__porthole/door/";
 
 /** The message a served page sends its host about loading (own-prefixed, P040). */
 export const FRAME_STATUS_METHOD = "porthole/notifications/frame-status";
@@ -94,8 +108,9 @@ export const STORAGE_USED_METHOD = "porthole/storage-used";
 
 /**
  * Turns an instance into the URL its frame loads. Implemented by the host, usually by asking its
- * own backend (which authenticates the viewer and calls `PortholeServer.issue`). Called on every
- * mount: a ticket is good once.
+ * own backend (which authenticates the viewer and calls `PortholeServer.issue`). Called for every
+ * run (a mount, a reload, a restart after the content navigated away): answer each with a fresh
+ * issue, since a ticket and a door ticket are each good once (P125).
  */
 export interface InstanceLocator {
   locate(instance: InstanceRef, signal?: AbortSignal): Promise<FrameLocation>;
@@ -114,4 +129,6 @@ export type FrameSource =
       readonly reports?: boolean;
       /** The issue's viewer (`FrameLocation.viewer`), for the display's bridge. */
       readonly viewer?: ViewerInfo;
+      /** The display's door (`FrameLocation.door`, P125): framed before `url`. */
+      readonly door?: string;
     };

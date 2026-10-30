@@ -6808,3 +6808,167 @@ own run (navigating, reloading, redirecting, history, its own frames, a nested c
 **Revisit when** a host needs a later block told in a display with files (then: start it again on a
 dropped status, its next run's first document says it), or url mode gets a shell of Porthole's on
 the app's origin.
+
+## P125 · 2026-10-30 · A served display's word comes from a door no content of its scope can reach · Accepted
+
+**Amends P040, P050, P124.** After the audit of 0.14.5 (2026-10-30): P124's "a frame status is
+the word of Porthole's pages" held against a display's own content, but not against another display
+of its scope. A scope's displays share one origin (P114), and a served display that isn't nested is
+framed there, where the scope's others run content with `allow-same-origin`. One of them reaches a
+new document of another's before its first script runs, and can speak a frame status (taken, no
+host error), or stop or rewrite it so its silence reads as `framing` (P124-1); a reload it puts into
+a running display starts a new run it can speak first in. So Porthole's word for such a display
+can't come from its own frame at all.
+
+**The rule.** A non-nested served frame's frame status is never taken by the host; blocked or
+allowed is said either by the door frame or by the host asking `issue` before it builds the frame.
+
+**Decision.** For a served display that isn't nested (a served shell, a page, a view through the
+sandbox proxy), the host first makes a hidden **door**: a page of Porthole's server on the same
+origin, in a frame of the host's own that no content can reach — `sandbox="allow-scripts"` (an
+opaque origin, a fresh one each run), `allow=""`, `referrerpolicy="no-referrer"`, `aria-hidden`,
+`tabindex=-1`, `inert`, 0×0, `visibility:hidden`, and **no `name`** (nothing targets it). The door
+is at `<origin>/__porthole/door/<instance key>?ticket=<door ticket>`. Its one frame status decides:
+a new state **`open`** (not `entering`, so it never meets url mode's `loads >= 2` rule) → the host
+removes the door and makes the content frame as before; **`blocked`** (reason, status, code) → that
+is the outcome, and no content frame is made; the door `load` then `SETTLE_MS` of silence →
+`blocked: framing` (now trustworthy: only the door was ever in that frame).
+
+The content frame of such a display is then **strict**: no frame status from it is ever taken (each
+run, the first is dropped with one `frame-status` host error), and `framing` is never inferred from
+its silence — a load with no hello is a `timeout`, decided early (load + `SETTLE_MS`). Every
+reload or navigation (`navigatedAway` → `run()`) starts again with a new door, counted against
+`MAX_RESTARTS`. **Every display ends with an outcome** (the host's contract): a restart doesn't
+start the clock again (one `loadTimeoutMs` per loading episode, from its first run until it has an
+outcome; an outcome, or the host's `reload()`, begins a new one), and a frame stopped once its
+restarts ran out is `blocked: error` (its `contentError` as before). Before, a sibling that wiped a
+display again and again left it with no outcome and no timeout (Cato, on WebKit, 2026-10-30). **On
+WebKit the sibling probes' attack lands only sometimes** (measured in CI, 2026-10-30): in most runs
+every `document.open` A tried into B's loading document threw, and in some A got in (under the
+`door-silence` control it wiped B, and B was `blocked: framing`, the weakening caught). So
+`[sibling-inject]`, `[sibling-reload]`, `[sibling-wipe]` and `[proxy]` check their positive control
+on every run (`requireReach`): A's write counts only into a document still being parsed (`loading`;
+by `interactive` B's inline shell has run and may have spoken: on WebKit `[proxy]` got in that late);
+when A got in in time they are judged as on every engine (unweakened: pass;
+under a control: fail); when every try was refused they skip with the measurement, never pass, and
+their controls take that skip as held on WebKit (`measured`, `leak/controls.ts`; Tenny and Cato).
+P125's rule doesn't depend on any of this — no frame status of a served non-nested frame is taken
+on any engine — and WebKit's refusal is never a premise of it. Retest with each WebKit version. Nested displays (their shell is on a label of its own, P114), url mode and opaque
+frames are unchanged: a nested page's shell keeps P124's ordering rule, a url-mode app's word is
+taken as before (S6), an opaque frame's every status is the content's (rule 1).
+
+**Server.** `issue` mints the content ticket as today **plus a door ticket** (`TicketRecord.door:
+true`, same grant and TTL, a JSON field, no D1 migration) for those kinds, and returns `door: { url
+}` in the `FrameLocation`. `/__porthole/door/<key>` → `serveDoor`: takes the door ticket (single
+use, bound to label and key, `record.door === true`, refusing an entry or hop ticket), then runs
+the **same** `denied`/authorize, document and entry checks `serveDocument` runs for the same grant,
+and answers `doorPage` (`open`) or `doorStatusPage` (401 session / 403 denied+code / 404 not-found /
+500 error). Both carry `default-src 'none'; script-src 'sha256-…'; base-uri 'none'; form-action
+'none'; sandbox allow-scripts; frame-ancestors <hostOrigins>`, `no-store`, `no-referrer`, `nosniff`,
+`noindex`, and no cookie (the inline script by hash, since `'self'` is unreliable in an opaque
+document). **Invariant: the door and the content route run the same checks for the same grant** —
+`serveDocument` keeps taking its own ticket and running `authorize` and the document checks itself
+(P050, its data's wall), so the door only reports. `serveDocument` refuses a door ticket; the door
+refuses a content, entry or hop ticket; a nested page's label serves no door.
+
+**Before any frame: the host asks `issue`.** A clean address (P068) is for a top-level tab. A host
+that shows what one names in a frame resolves it first through its issue endpoint (`{ address }`:
+`client.resolve(address)`, `<PortholeView address>`), which maps the address as its tab's
+authorize would (the naming's `scopeOf`, `entry.at`, then `access`) and answers before any frame: a
+location with its door (and, for a file set's page below its version, a frame that opens at that
+page, the door checking the same page), or the refusal the tab would get. A refusal from the host's
+own issue endpoint is the display's outcome, one to one with the status pages it replaces, the
+fallback's wording unchanged: **401 → `blocked: sign-in`, 403 → `blocked: denied` (with the host's
+reason code, only from the answer's own `error.reason`), 404 → `blocked: not-found`**, with no host
+error. Every other failure (a 5xx, a network error, a malformed answer) is the host's own: `blocked:
+locate` and a `locate` host error, never `denied`; a backend that never answers within
+`loadTimeoutMs` is a `timeout`. This applies to every locate, an instance's too. No frame is made
+for any of them. In a frame, `cookies`, an expired entry state and redeem's `session`/`denied` no
+longer occur: an issued frame carries its access in its ticket and sealed address (P025, P083).
+
+**A location with no door is refused.** For a served, non-nested config, `createHost` builds no
+frame for a location without a `door` (an older server, a locator that drops it, a clean address
+someone framed): `blocked: locate`, and a host error of kind **`door`** naming the fix ("a served
+display needs a door from issue; a clean address is for a tab: resolve it with `client.resolve` or
+`<PortholeView address>`"). One rule for both cases; nothing infers a door's word from anything
+else. The door's load-bearing check is that it is on the display's own origin (the one its issue
+located) and came with that issue; its path is pinned to `/__porthole/door/` for now, in a check of
+its own, so relaxing the path later (a content Worker's own route) can't drop the origin check.
+
+**Compatibility.**
+
+| Host \ server | Old (no `door`) | New (`door`, `issue { address }`) |
+| --- | --- | --- |
+| Old (P124) | P124 as before (exposed, P124-1) | `door` ignored (its ticket expires unused): P124 as before; a framed clean address gets a page with no status at all |
+| New (P125) | **refused before any frame**: `blocked: locate`, `door` host error | P125 |
+
+No fallback to P124's rule, no option, no knob (PRINCIPLES 1, 8). **Deploy order: the server/Worker
+first, then the host** (a hard requirement in ADOPTING). A custom locator must pass `door` through,
+and must issue anew for every run. No grace release for a framed clean address: no documented flow
+(`portholeClient`, `PortholeView`, the examples) ever framed one, and the one undocumented way
+(`createHost` given a hand-built clean URL) is refused with a message naming the fix (CHANGELOG).
+
+**Removed from here on.** P068's in-frame branch: the content origin answers a clean address asked
+from a frame (`Sec-Fetch-Dest: iframe` or `frame`) with Porthole's "open this in a new tab" page,
+never a trip to the app, and so does the app's authorize route asked from a frame; that page carries
+the status pages' policy (`default-src 'none'`, `frame-ancestors` the host origins) with no
+`script-src` and no script at all. And the transport's `also` channel (a frame's status heard from
+the host's own origin, P068): a frame is heard from its own window and its located origin alone. No
+negative control needs either (`content-status` takes out the strict rule, not a channel).
+
+**A `load` event is not a committed document** (required reading for any future timing exception).
+Before choosing the issue-first rule, an exception was weighed for a framed clean address: take a
+frame status from the host's own origin, on the frame's first load, before anything else. It fails:
+a document wiped and navigated while it parses never fires `load`. Measured on Chromium (a framed
+document that runs `document.open(); location.href = <a host-origin page that posts a status>`
+during parse): the status arrived with `loadsSoFar=0`, then `load#1`. So a same-scope sibling that
+writes into a signed-in clean-address display before its shell's hello could send it to another
+clean address of the scope, and the host's honest page there (`sign-in`, `denied`) would be taken as
+this display's first word. A host can count `load` events; it can't see committed documents. Any
+rule that reads "the first load" as "the first document" re-opens P124-1.
+
+**Folded in.** P124-2: `checkFileSet`/`admitFiles`/`lintFiles` refuse an entry that isn't `.html`
+or `.htm` (code `entry`); a stored set whose entry isn't a page answers Porthole's `not-found`
+status page, and the door says `not-found` (so an old host, which has no door, still gets Porthole's
+word, not an inert file that says nothing). P124-3: the one `frame-status` control is split per the
+design's §4 table (`content-status`, `door-status`, `door-silence`, `door-opaque`,
+`frame-status-order`).
+
+**What holds the door (after the audit of P125, Ferryman).** A sibling of the scope does get the
+live door's `WindowProxy` while it loads (`top[i]`): it can read its `length` and post to it
+(nothing listens). The wall is three things, each measured: reading the door's document throws a
+`SecurityError` (it is opaque: the frame's `sandbox` attribute and the door answer's CSP `sandbox`
+each make it so on its own); setting or replacing its `location` throws a `SecurityError` (the
+sibling's own sandbox sets the sandboxed navigation flag: it navigates no frame that isn't its own);
+and the door has no name, so `window.open(url, name)`, a link's or a form's `target` reach nothing.
+Behind them, the host takes the door's word from the opaque origin (`"null"`) alone. One slip
+changes nothing: removing one sandbox token leaves the other; removing both makes every served
+display `framing` (the honest door then speaks from the content origin, which the host doesn't hear:
+fail closed). Only opacity and the `"null"` check removed together let displays work while a sibling
+reads the live door and rewrites it into Porthole's own status page, which then says `blocked:
+session` from the door's window: that is the `door-opaque` control, and `[door-reach]` (which does
+exactly that, with a lingering door) fails under it. An earlier draft of this entry said a sibling
+never meets a live door; it does. `[sibling-reload]` is Ferryman's reload probe (a sibling reloads a
+loaded display and speaks first in its next run), red under `door-status` and `content-status`.
+
+**A locator issues anew for every run.** A door ticket opens one door. A host whose locator returns
+the same location every run used to restart through the session cookie; now its restart's door says
+`blocked: session`, and a sibling could force that by reloading the display. `createHost` tells the
+host (`hostError` kind `locate`, "a locator must issue anew for every run") when a run is located at
+an address an earlier run used; the outcome is unchanged, the server's word (ADOPTING, CHANGELOG).
+
+**Costs accepted** (THREAT_MODEL S7, the premise being a scope its author controls): one extra
+request and a ~1 KB document per mount, and about one RTT of added latency (sequential). A sibling
+of a scope can still spend a display's three restarts, force it to a timeout ("This is taking too
+long", no link), deface it, and read a sandbox-proxy view's HTML once it is sent — the known costs
+of sharing a scope, not a forged sign-in with a link out.
+
+**Planned, not in this release:** a host-only **parallel-mount** variant (the door and the content
+frame opened together, the door's `blocked` winning even after `loaded`, door silence meaning
+`framing` only before a hello, content statuses still never taken), measured against the sequential
+default before either is chosen. It is a later commit; nothing of the server or the wire changes for
+it.
+
+**Revisit when** a host needs a later block told in a display with files (then: start it again on a
+dropped status, its next run's first door says it), url mode gets a shell of Porthole's on the app's
+origin, or the parallel-mount variant is measured and chosen.

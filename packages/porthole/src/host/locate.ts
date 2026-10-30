@@ -31,5 +31,7 @@ export async function locateServed(
     origin: location.origin,
     ...(location.reports === true ? { reports: true } : {}),
     ...(viewer === null ? {} : { viewer }),
+    // Its door (P125), checked with the location: the host frames it before `url`.
+    ...(location.door === undefined ? {} : { door: new URL(location.door.url).href }),
   };
 }

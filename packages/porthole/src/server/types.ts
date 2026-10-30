@@ -106,6 +106,13 @@ export interface TicketRecord {
    * its files' base the shell opens (the entry page when absent).
    */
   readonly page?: string;
+  /**
+   * A door's ticket (P125): `issue` mints one beside the content's, for the same grant and as
+   * long, for a display whose frame is on its scope's origin (a served shell, a page that isn't
+   * nested, the sandbox proxy). Taken only at the door (`/__porthole/door/<key>`), never at the
+   * content's address; the door takes no other.
+   */
+  readonly door?: true;
 }
 
 /** Where tickets live between `issue` and their one use. Default: in memory (one process). */
@@ -326,7 +333,15 @@ export interface PortholeServer {
    * Mints a one-time ticket for `instance` and returns the URL its frame loads. Call it from the
    * host's own authenticated API, once the host has decided the viewer may see the instance.
    */
-  issue(instance: InstanceRef, grant: Grant): Promise<FrameLocation>;
+  issue(
+    instance: InstanceRef,
+    grant: Grant,
+    /**
+     * Where in the instance its frame opens (P125): a page below a file set's base (what a clean
+     * address names, resolved by `issue` given `{ address }`). Default: its entry.
+     */
+    at?: { readonly page?: string },
+  ): Promise<FrameLocation>;
   /**
    * The access a request's cookie carries for a url-mode app on the request's origin, or null
    * (no good cookie, an `Origin` or `Sec-Fetch-Site` of another origin's (P101), or the host's

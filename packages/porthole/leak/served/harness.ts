@@ -79,6 +79,18 @@ export interface Harness {
    * page's reference services add to it (`POST /__assets`), and a case may too.
    */
   readonly assets: Map<string, StoredAsset>;
+  /**
+   * Doors answered late, by origin, in ms (P125): a case gives another display time to try to
+   * reach one before it says anything.
+   */
+  readonly slowDoors: Map<string, number>;
+  /**
+   * Door instance keys whose door loads but says nothing (P125): the door frame then lingers until
+   * the host frames it (`SETTLE_MS`), long enough for A to try to read it. Its one inline script's
+   * hash is recomputed so the no-op still runs under the door's CSP. By key (not origin), so only
+   * one display's door is silenced.
+   */
+  readonly silentDoors: Set<string>;
 }
 
 /** A library as a CDN serves it, for the CDN cases (routed by the test, never fetched). */
@@ -300,6 +312,8 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
       box.style.cssText = "width: 600px; height: 300px";
       document.getElementById("displays").append(box);
       // A null location: the host's backend failing to give one.
+      let located = false;
+      let current = location;
       const runtime = options.runtime ? runtimeOf(options.runtime) : null;
       const host = createHost(config, {
         // The runtime's services, a person who says yes to every confirmation and consent.
@@ -322,7 +336,16 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
             if (location === null) {
               throw new Error("The host's backend is down");
             }
-            return location;
+            // A run started again goes through a door of its own (P125): its tickets were taken,
+            // so the host's backend issues afresh, as a host's locator does on every run.
+            if (located && location.door !== undefined) {
+              const answer = await fetch("/__reissue", { method: "POST", body: JSON.stringify({ url: current.url }) });
+              if (answer.ok) {
+                current = await answer.json();
+              }
+            }
+            located = true;
+            return current;
           },
         },
       });
@@ -376,6 +399,14 @@ async function start(): Promise<Harness> {
   const requests: string[] = [];
   const fileSets = new Map<string, StoredFiles>();
   const assets = new Map<string, StoredAsset>();
+  const slowDoors = new Map<string, number>();
+  const silentDoors = new Set<string>();
+  // What each location with a door was issued for (P125): a host's locator issues afresh on every
+  // run, so a display started again goes through a door of its own (POST /__reissue).
+  const issuedFor = new Map<
+    string,
+    { instance: InstanceRef; grant: Parameters<PortholeServer["issue"]>[1] }
+  >();
 
   const app = createHttpServer((request, response) => {
     const pathname = new URL(request.url ?? "/", "http://app").pathname;
@@ -513,13 +544,32 @@ async function start(): Promise<Harness> {
         }),
   });
   const shared = sharedShellLabel(porthole);
+  const base = shared?.porthole ?? porthole;
+  const recorded: PortholeServer = {
+    ...base,
+    async issue(instance, grant) {
+      const location = await base.issue(instance, grant);
+      if (location.door !== undefined) {
+        issuedFor.set(location.url, { instance, grant });
+      }
+      return location;
+    },
+  };
   const hostCsp = embedderCsp(Object.values(configs));
   hostCspOf = () => hostCsp;
   handle = async (request) => {
     requests.push(request.url);
     // A content address that never answers: a load that never settles.
-    if (new URL(request.url).pathname === "/__hang") {
+    const asked = new URL(request.url);
+    if (asked.pathname === "/__hang") {
       return new Promise<Response>(() => {});
+    }
+    const isDoor = asked.pathname.startsWith("/__porthole/door/");
+    if (isDoor) {
+      const delay = slowDoors.get(asked.origin);
+      if (delay !== undefined) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
     }
     const served =
       (await shared?.handle(request)) ??
@@ -568,6 +618,38 @@ async function start(): Promise<Harness> {
       if (weakened.includes("permissions-policy")) {
         answer = withoutPermissionsPolicy(answer);
       }
+      // The door's own sandbox (P125), taken out of its answers' header with its frame's
+      // (`door-opaque`): the server runs in this process, unweakened, so the harness does it.
+      if (weakened.includes("door-opaque") && isDoor) {
+        const headers = new Headers(answer.headers);
+        headers.set(
+          "content-security-policy",
+          (headers.get("content-security-policy") ?? "").replace(/; sandbox [^;]*/u, ""),
+        );
+        answer = new Response(answer.body, { status: answer.status, headers });
+      }
+      // A silent door (P125, `door-reach`): it loads but says nothing, so its frame lingers while
+      // A tries to read it. The one inline script becomes a no-op; its hash is recomputed. By the
+      // door's instance key, so a sibling's own door is unaffected.
+      const doorKey = isDoor
+        ? (/\/__porthole\/door\/([a-z2-7]{16})/u.exec(asked.pathname)?.[1] ?? "")
+        : "";
+      if (isDoor && silentDoors.has(doorKey) && answer.status === 200) {
+        const body = (await answer.text()).replace(
+          /<script>[\s\S]*?<\/script>/u,
+          "<script>void 0;</script>",
+        );
+        const headers = new Headers(answer.headers);
+        const csp = headers.get("content-security-policy");
+        if (csp !== null && csp.includes("'sha256-")) {
+          const hash = createHash("sha256").update("void 0;").digest("base64");
+          headers.set(
+            "content-security-policy",
+            csp.replace(/'sha256-[^']+'/u, `'sha256-${hash}'`),
+          );
+        }
+        answer = new Response(body, { status: answer.status, headers });
+      }
       // A negative control on the served shell (its navigation guard, P079; its window.open on a
       // tab, P099) reaches served shells too.
       if (
@@ -591,6 +673,19 @@ async function start(): Promise<Harness> {
       return answer;
     }
     const pathname = new URL(request.url).pathname;
+    // A run started again (P125): the location issued afresh, for what the first was issued for.
+    if (pathname === "/__reissue" && request.method === "POST") {
+      const { url } = (await request.json()) as { url: string };
+      const first = issuedFor.get(url);
+      if (first === undefined) {
+        return new Response(null, { status: 404 });
+      }
+      const again = await base.issue(first.instance, first.grant);
+      issuedFor.set(again.url, first);
+      return new Response(JSON.stringify(again), {
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      });
+    }
     // The host page's services keep assets here (P089): the bytes /_blob/<id> serves.
     if (pathname === "/__assets" && (request.method === "POST" || request.method === "DELETE")) {
       const body = (await request.json()) as {
@@ -631,7 +726,7 @@ async function start(): Promise<Harness> {
     hostOrigin,
     contentSource,
     foreignOrigin: `http://127.0.0.1:${foreignPort}`,
-    porthole: shared?.porthole ?? porthole,
+    porthole: recorded,
     configs,
     hits,
     pages,
@@ -639,6 +734,8 @@ async function start(): Promise<Harness> {
     revoked,
     requests,
     assets,
+    slowDoors,
+    silentDoors,
   };
 }
 

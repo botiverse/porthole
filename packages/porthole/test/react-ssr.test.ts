@@ -2,6 +2,7 @@ import { createElement, createRef } from "react";
 import { renderToString } from "react-dom/server";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { defineDisplays, portholeClient, presets } from "../src/index.ts";
+import { tabLinkOf } from "../src/react/view.tsx";
 import {
   PortholeFrame,
   PortholeProvider,
@@ -116,5 +117,32 @@ describe("trackedAnnotation and the handle (P118)", () => {
     );
     expect(frame).toContain('data-porthole-display="f"');
     expect(frameRef.current).toBeNull();
+  });
+});
+
+describe("<PortholeView address>'s fallback link (P125)", () => {
+  it("offers the clean address as the tab link only on the served content domain", () => {
+    const source = "https://*.usercontent.example.net";
+    expect(tabLinkOf("https://a-abc.usercontent.example.net/v/1", source)).toBe(
+      "https://a-abc.usercontent.example.net/v/1",
+    );
+    for (const address of [
+      // Another site, another scheme or port, the bare domain, Porthole's own paths, no URL.
+      "https://evil.example/",
+      "http://a-abc.usercontent.example.net/",
+      "https://a-abc.usercontent.example.net:8443/",
+      "https://usercontent.example.net/",
+      "https://a-abc.usercontent.example.net/__porthole/d/aaaaaaaaaaaaaaaa",
+      "javascript:alert(1)",
+      "not a url",
+    ]) {
+      expect(tabLinkOf(address, source), address).toBeNull();
+    }
+    // Content not served (no source known): no link.
+    expect(tabLinkOf("https://a-abc.usercontent.example.net/", null)).toBeNull();
+    // A dev content domain over http on localhost: its own scheme and port.
+    expect(tabLinkOf("http://a-1.content.localhost:8796/", "http://*.content.localhost:8796")).toBe(
+      "http://a-1.content.localhost:8796/",
+    );
   });
 });

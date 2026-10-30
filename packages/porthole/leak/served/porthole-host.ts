@@ -102,7 +102,11 @@ export async function mount(
       ),
     [config, location, instance, extras] as const,
   );
-  const element = page.locator("#displays iframe").nth(index);
+  // The display's own frame, never its door (P125), which is gone once it said its word.
+  const element = page
+    .locator("#displays > section")
+    .nth(index)
+    .locator("iframe:not([data-porthole-door])");
   return {
     read: () =>
       page.evaluate(

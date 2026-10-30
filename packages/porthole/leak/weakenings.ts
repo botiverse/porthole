@@ -15,6 +15,10 @@ const BRIDGE = "src/bridge/bridge.ts";
 const SHELL_ADAPTER = "src/protocol/shell-adapter.ts";
 const MCP_ADAPTER = "src/mcp/adapter.ts";
 const REQUESTS = "src/runtime/requests.ts";
+const OUTCOME = "src/host/outcome.ts";
+const WEB = "src/platform/web.ts";
+const MAY_BE_PORTHOLE =
+  '  const mayBePorthole = () => source.kind === "url" && (!speaks || (nested && !spoke));';
 /**
  * Each weakening: edits to the core's sources (served to the browser as they are stripped or
  * bundled), or a name the leak server (`embedder-csp`) or the served harness (`harness`) acts on.
@@ -640,13 +644,56 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "false",
     },
   ],
-  // Who may say how loading went (P124): any frame's frame status is taken, an opaque widget's, a
-  // served page's or a nested page's after its first word, and draws the host's fallback.
-  "frame-status": [
+  // Who may say how loading went (P124, P125), one control per rule.
+  // A served display's own content is believed again: any status from a frame that isn't nested.
+  "content-status": [
     {
-      file: "src/host/outcome.ts",
-      find: '  const mayBePorthole = () => source.kind === "url" && (!speaks || !spoke);',
-      replace: "  const mayBePorthole = () => true;",
+      file: OUTCOME,
+      find: MAY_BE_PORTHOLE,
+      replace:
+        '  const mayBePorthole = () => source.kind === "url" && (!speaks || !nested || !spoke);',
+    },
+  ],
+  // P124's first-word rule in place of the door: a status before the frame's hello is taken.
+  "door-status": [
+    {
+      file: OUTCOME,
+      find: MAY_BE_PORTHOLE,
+      replace: '  const mayBePorthole = () => source.kind === "url" && (!speaks || !spoke);',
+    },
+  ],
+  // A served display's silence read as `framing` again, as P040 had it before its door.
+  // The door not opaque (P125): its frame keeps its origin (`allow-same-origin`), the served harness
+  // strips the sandbox from its answers' header, and the host hears it from the location's origin
+  // instead of "null", so displays still work. A sibling of the scope then reads the live door and
+  // rewrites it into Porthole's own status page, which speaks for the display (Ferryman's probe).
+  "door-opaque": [
+    {
+      file: POLICY,
+      find: 'export const DOOR_SANDBOX_TOKENS: readonly string[] = ["allow-scripts"];',
+      replace:
+        'export const DOOR_SANDBOX_TOKENS: readonly string[] = ["allow-scripts", "allow-same-origin"];',
+    },
+    {
+      file: WEB,
+      find: '    const transport = postMessageTransport(() => frame.contentWindow, "null", view);',
+      replace:
+        "    const transport = postMessageTransport(() => frame.contentWindow, new URL(spec.url).origin, view);",
+    },
+  ],
+  "door-silence": [
+    {
+      file: OUTCOME,
+      find: "        if (nested) {\n          neverRan();\n        } else {\n          silent();\n        }",
+      replace: "        neverRan();",
+    },
+  ],
+  // The ordering rule taken out for a nested page's shell: a status after its first word taken.
+  "frame-status-order": [
+    {
+      file: OUTCOME,
+      find: MAY_BE_PORTHOLE,
+      replace: '  const mayBePorthole = () => source.kind === "url" && (!speaks || nested);',
     },
   ],
   // The asset library's CSP (P089), taken out by the served harness: scripts from it run

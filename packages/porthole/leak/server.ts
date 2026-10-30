@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { createServer } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import { stripTypeScriptTypes } from "node:module";
 import { build } from "esbuild";
 import path from "node:path";
@@ -120,8 +120,25 @@ function strictPolicy(html: string, closed: string | null): { policy: string; bo
   };
 }
 
+/**
+ * A served display's door (P125), for the React binding's served views: this server stands in for
+ * a content origin's (`localhost`, its host the React page on 127.0.0.1), so it answers the door as
+ * `/server` does once the door's ticket was taken and its checks passed: `doorResponse`, with its
+ * own headers. The views' frame endpoint (the test app's) gives each location a door of its own.
+ */
+async function door(response: ServerResponse, method: string): Promise<void> {
+  const { doorResponse } = await import("../src/server/index.ts");
+  const answer = doorResponse({ hostOrigins: [`http://127.0.0.1:${port}`], method });
+  response.writeHead(answer.status, Object.fromEntries(answer.headers));
+  response.end(await answer.text());
+}
+
 createServer((request, response) => {
   const url = new URL(request.url ?? "/", "http://localhost");
+  if (/^\/__porthole\/door\/[a-z2-7]{16}$/u.test(url.pathname)) {
+    void door(response, request.method ?? "GET");
+    return;
+  }
   serve(url.pathname).then(
     (found) => {
       if (found === null) {

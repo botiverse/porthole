@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 import { compile, presets } from "../src/index.ts";
 import {
   INERT_FILE_CSP,
+  DOOR_SANDBOX_TOKENS,
   PAGE_SANDBOX_TOKENS,
   sandboxTokens,
   serializeCsp,
@@ -147,8 +148,43 @@ describe("the sandbox (P111): never allow-same-origin on a nested page", () => {
     );
     expect(writes).toEqual([
       'platform/web.ts: frame.setAttribute("sandbox", spec.sandbox);',
+      // A served display's door (P125): scripts alone, from its own list.
+      'platform/web.ts: frame.setAttribute("sandbox", DOOR_SANDBOX_TOKENS.join(" "));',
       'shell/frame.ts: frame.setAttribute("sandbox", plan.sandbox);',
     ]);
+    expect(DOOR_SANDBOX_TOKENS).toEqual(["allow-scripts"]);
+    // The door frame has no name (P125): nothing can target it (`window.open(url, name)`, a link's or
+    // a form's `target`), so the only window that can say the door's word is the one the host made.
+    const web = readFileSync(path.join(root, "platform/web.ts"), "utf8");
+    const createDoor = web.slice(web.indexOf("  createDoor("));
+    expect(createDoor.length, "createDoor is in platform/web.ts").toBeLessThan(web.length);
+    const code = createDoor
+      .split("\n")
+      .map((line) => line.replace(/\/\/.*$/u, "").replace(/^\s*(\/\*\*|\*).*$/u, ""))
+      .join("\n");
+    expect(code, "the door sets no name attribute").not.toMatch(/setAttribute\(\s*["']name["']/u);
+    // Every platform in the source makes its doors with the web platform's own (P125, P125-6): a
+    // platform that wraps createSurface without them would refuse every served display, and one
+    // with doors of its own would escape the checks above.
+    const platforms = files.filter((file) => {
+      const text = readFileSync(file, "utf8");
+      // A platform's own createSurface (a method with a body), never a call or the interface's.
+      return (
+        /(?<![.\w])createSurface\(container[^)]*\)\s*(?::\s*\w+\s*)?\{/u.test(text) &&
+        !file.endsWith("platform/web.ts")
+      );
+    });
+    expect(
+      platforms.map((file) => path.relative(root, file)),
+      "the platforms that wrap the web's",
+    ).toEqual(["check/page.ts"]);
+    for (const file of platforms) {
+      expect(
+        readFileSync(file, "utf8"),
+        `${path.relative(root, file)} makes the web's doors`,
+      ).toMatch(/createDoor: \(container, spec\) => webPlatform\.createDoor!\(container, spec\)/u);
+    }
+    expect(code, "the door sets no name property").not.toMatch(/\.name\s*=(?!=)/u);
   });
 });
 

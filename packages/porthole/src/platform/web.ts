@@ -1,6 +1,6 @@
+import { DOOR_SANDBOX_TOKENS } from "../compile/policy.ts";
 import type { ColorScheme } from "../config/schema.ts";
 import {
-  FRAME_STATUS_METHOD,
   SHELL_BEAT_METHOD,
   SHELL_LOOK_METHOD,
   SHELL_METHOD_PREFIX,
@@ -9,14 +9,7 @@ import {
 import { postMessageTransport } from "../transport/post-message.ts";
 import { focusGuard, type FocusGuard, type FocusTake } from "./focus-guard.ts";
 import type { Transport } from "../transport/types.ts";
-import type { PlatformHost, Surface, SurfaceSpec } from "./types.ts";
-
-/** A frame-status message (`porthole/notifications/frame-status`), by its method alone. */
-const isFrameStatus = (data: unknown): boolean =>
-  data !== null &&
-  typeof data === "object" &&
-  (data as { jsonrpc?: unknown }).jsonrpc === "2.0" &&
-  (data as { method?: unknown }).method === FRAME_STATUS_METHOD;
+import type { DoorSurface, PlatformHost, Surface, SurfaceSpec } from "./types.ts";
 
 /** A shell's own message (P111), by its namespace. */
 const isShellWord = (data: unknown): data is { method: string; params?: unknown } =>
@@ -139,17 +132,10 @@ export const webPlatform: PlatformHost = {
     const guard = focusGuard(view);
     const taken = new Set<(take: FocusTake) => void>();
     const nested = spec.nested === true && spec.source.kind === "url";
-    // A served frame may pass through the host's own pages (a redirect entry's, P068): what they
-    // say of the frame's status is heard too, and nothing else from there.
-    const own = view.origin;
-    const opened = postMessageTransport(
-      () => frame.contentWindow,
-      origin,
-      view,
-      origin === "null" || own === "null" || own === origin
-        ? undefined
-        : { origin: own, accept: isFrameStatus },
-    );
+    // A frame is heard from its own window and its located origin alone: never the host's own
+    // origin (P125 removed P068's in-frame pages and the channel that heard them), so no page of
+    // the host's own can speak for a frame either.
+    const opened = postMessageTransport(() => frame.contentWindow, origin, view);
     const unguard = guard.add(
       frame,
       (take) => {
@@ -222,6 +208,55 @@ export const webPlatform: PlatformHost = {
         loaded.clear();
         taken.clear();
         unguard();
+        transport.close();
+        frame.remove();
+      },
+    };
+  },
+  /**
+   * A served display's door (P125): hidden (no size, `visibility: hidden`, which still runs its
+   * script and fires its load on all three engines), out of focus and of the accessibility tree,
+   * sandboxed with scripts alone, no `allow`, no name. Nothing but its frame status is heard from
+   * it, from its window and the opaque origin alone; the focus guard, the bridge and annotations
+   * never see it.
+   */
+  createDoor(container: HTMLElement, spec: { readonly url: string }): DoorSurface {
+    // oxlint-disable-next-line react/iframe-missing-sandbox -- set from the door's list, next
+    const frame = container.ownerDocument.createElement("iframe");
+    frame.setAttribute("sandbox", DOOR_SANDBOX_TOKENS.join(" "));
+    frame.setAttribute("allow", "");
+    frame.setAttribute("referrerpolicy", "no-referrer");
+    frame.setAttribute("aria-hidden", "true");
+    frame.setAttribute("tabindex", "-1");
+    frame.setAttribute("inert", "");
+    frame.setAttribute("loading", "eager");
+    frame.dataset.portholeDoor = "";
+    Object.assign(frame.style, {
+      display: "block",
+      width: "0",
+      height: "0",
+      border: "0",
+      visibility: "hidden",
+    });
+    frame.src = spec.url;
+    const loaded = new Set<() => void>();
+    frame.addEventListener("load", () => {
+      for (const listener of loaded) {
+        listener();
+      }
+    });
+    container.append(frame);
+    const view = container.ownerDocument.defaultView ?? window;
+    const transport = postMessageTransport(() => frame.contentWindow, "null", view);
+    return {
+      transport,
+      element: frame,
+      onLoad(listener) {
+        loaded.add(listener);
+        return () => loaded.delete(listener);
+      },
+      destroy() {
+        loaded.clear();
         transport.close();
         frame.remove();
       },

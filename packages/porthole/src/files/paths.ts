@@ -1,4 +1,5 @@
 import type { Limits, PortholeConfig } from "../config/schema.ts";
+import { isPagePath } from "./types.ts";
 
 /**
  * A version made of files (P081): the rules a published path follows, the limits a version is
@@ -124,8 +125,8 @@ const sizeOf = (bytes: number): string =>
 /**
  * Checks a version's files before it is published (P081): every path by `filePathProblem`; no
  * two paths that differ only in case, and no path that is both a file and a directory; the
- * entry is one of them; the count, each size and the total within the limits (a config's, see
- * `fileLimits`). Empty when it may be published.
+ * entry is one of them, and a page (`.html` or `.htm`, P125); the count, each size and the total
+ * within the limits (a config's, see `fileLimits`). Empty when it may be published.
  */
 export function checkFileSet(
   files: Readonly<Record<string, FileSetEntryLike>>,
@@ -199,6 +200,14 @@ export function checkFileSet(
       path: entry,
       code: "entry",
       message: `No ${JSON.stringify(entry)}: the page the version opens at is one of its files`,
+    });
+  } else if (!isPagePath(entry)) {
+    // A version opens at a page (P125, P124-2): any other file is served inert, says nothing, and
+    // would show only Porthole's fallback.
+    problems.push({
+      path: entry,
+      code: "entry",
+      message: `${JSON.stringify(entry)} isn't a page: the version opens at an .html (or .htm) file of its own`,
     });
   }
   return problems;

@@ -163,6 +163,27 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** A served display's door that says `open` at once (P125): these cases are about its frame. */
+const openingDoor: NonNullable<PlatformHost["createDoor"]> = () => ({
+  transport: {
+    send: () => {},
+    listen: (listener) => {
+      void Promise.resolve().then(() =>
+        listener({
+          jsonrpc: "2.0",
+          method: "porthole/notifications/frame-status",
+          params: { state: "open" },
+        }),
+      );
+      return () => {};
+    },
+    close: () => {},
+  },
+  element: null,
+  onLoad: () => () => {},
+  destroy: () => {},
+});
+
 describe("published paths (P081)", () => {
   it("takes canonical relative paths, case-sensitive", () => {
     for (const path of [
@@ -221,6 +242,16 @@ describe("published paths (P081)", () => {
     ).toEqual(["collision"]);
     expect(codes(checkFileSet({ "main.html": { size: 1 } }))).toEqual(["entry"]);
     expect(checkFileSet({ "main.html": { size: 1 } }, { entry: "main.html" })).toEqual([]);
+    // The entry must be a page (P125, P124-2): a set opening at a non-page is refused.
+    expect(codes(checkFileSet({ "note.txt": { size: 1 } }, { entry: "note.txt" }))).toEqual([
+      "entry",
+    ]);
+    expect(
+      codes(
+        checkFileSet({ "index.html": { size: 1 }, "pic.svg": { size: 1 } }, { entry: "pic.svg" }),
+      ),
+    ).toEqual(["entry"]);
+    expect(checkFileSet({ "page.htm": { size: 1 } }, { entry: "page.htm" })).toEqual([]);
     expect(codes(checkFileSet({ "index.html": { size: 1 }, "../x": { size: 1 } }))).toEqual([
       "path",
     ]);
@@ -1646,6 +1677,7 @@ describe("after the security review of 0.6.0's first cut", () => {
       let surfaces = 0;
       const platform: PlatformHost = {
         name: "stand-in",
+        createDoor: openingDoor,
         createSurface: () => {
           surfaces += 1;
           return {
@@ -1682,6 +1714,7 @@ describe("after the security review of 0.6.0's first cut", () => {
             url: `https://abc.${DOMAIN}/__porthole/d/x`,
             origin: `https://abc.${DOMAIN}`,
             reports: true,
+            door: { url: `https://abc.${DOMAIN}/__porthole/door/x?ticket=d` },
           }),
       };
       const display = createHost(config, { platform, locator }).mount(container, {
@@ -1733,6 +1766,7 @@ describe("after the security review of 0.6.0's first cut", () => {
     let surfaces = 0;
     const platform: PlatformHost = {
       name: "stand-in",
+      createDoor: openingDoor,
       createSurface: () => {
         surfaces += 1;
         return {
@@ -1769,6 +1803,7 @@ describe("after the security review of 0.6.0's first cut", () => {
           url: `https://abc.${DOMAIN}/__porthole/d/x`,
           origin: `https://abc.${DOMAIN}`,
           reports: true,
+          door: { url: `https://abc.${DOMAIN}/__porthole/door/x?ticket=d` },
         }),
     };
     const display = createHost(

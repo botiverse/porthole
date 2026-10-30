@@ -251,6 +251,13 @@ export function servedSandboxDirective(config: PortholeConfig): CspDirective | n
  */
 export const PAGE_SANDBOX_TOKENS: readonly string[] = ["allow-scripts"];
 
+/**
+ * A served display's door's sandbox (P125): its frame's attribute, which the host writes, and its
+ * answer's CSP header's. Scripts only: an opaque origin, a new one each time, that no content of
+ * the scope is the same origin as, so none reaches the door's document or speaks from its window.
+ */
+export const DOOR_SANDBOX_TOKENS: readonly string[] = ["allow-scripts"];
+
 /** A served page's CSP header: the page's directives, then its sandbox (P099). */
 export function servedDocumentCsp(
   config: PortholeConfig,
