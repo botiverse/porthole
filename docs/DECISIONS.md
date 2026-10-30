@@ -6844,8 +6844,8 @@ outcome; an outcome, or the host's `reload()`, begins a new one), and a frame st
 restarts ran out is `blocked: error` (its `contentError` as before). Before, a sibling that wiped a
 display again and again left it with no outcome and no timeout (Cato, on WebKit, 2026-10-30). **On
 WebKit the sibling probes' attack can't be made as they make it:** a sibling's `document.open`
-into another display's loading document throws (measured in CI on 2026-10-30, every attempt of
-three runs; a script appended to a loaded document still runs, and other ways into a loading one
+into another display's loading document throws (measured in CI on 2026-10-30: in four runs A never got in, and in the two
+that logged its tries each one threw; a script appended to a loaded document still runs, and other ways into a loading one
 are not measured). `[sibling-inject]`, `[sibling-reload]`, `[sibling-wipe]` and `[proxy]`
 measure their positive control on every run (`requireReach`) and skip there with the measurement,
 never pass; their controls hold on WebKit for that reason (`leak/controls.ts`). P125's rule doesn't

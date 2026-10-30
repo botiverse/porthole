@@ -104,14 +104,15 @@ const TAB_SANDBOX = [
 
 /**
  * WebKit throws on the probes' attack, a sibling's `document.open` into another display's loading
- * document (measured in CI on 2026-10-30, three runs, every attempt; a script appended to a loaded
+ * document (measured in CI on 2026-10-30: in four runs A never got in; in the two that logged its tries, each
+ * one threw; a script appended to a loaded
  * one still runs, and other ways into a loading one are not measured): the probes whose attack is
  * that write skip there, with the measurement (`requireReach`), so no control can see their walls
  * on WebKit. Retest with each WebKit version: the probes measure it on every run and
  * run whole again once A can write.
  */
 const WEBKIT_REFUSES_SIBLING_WRITE =
-  "no probe on WebKit: the probes' attack, a sibling's document.open() into another display's loading document, throws there (measured in CI 2026-10-30, every attempt of three runs; other ways in are not measured), so [sibling-inject], [sibling-reload], [sibling-wipe] and [proxy] skip there with that measurement; retest with each WebKit version";
+  "no probe on WebKit: the probes' attack, a sibling's document.open() into another display's loading document, throws there (measured in CI 2026-10-30: in four runs A never got in, and in the two that logged its tries each one threw; other ways in are not measured), so [sibling-inject], [sibling-reload], [sibling-wipe] and [proxy] skip there with that measurement; retest with each WebKit version";
 
 /** The same tests on every engine. */
 function all(...tests: string[]): Control["fails"] {
