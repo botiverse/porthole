@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.14.7
 
 - **`server.doorAnswer(instance, grant, request?, at?)` (P126):** the door's answer for a grant a
   host admitted itself, for a host that signs its own tickets and verifies them in its content
