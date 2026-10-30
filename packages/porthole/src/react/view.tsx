@@ -50,6 +50,13 @@ export interface PortholeViewProps extends Omit<
    */
   readonly instance?: InstanceRef;
   /**
+   * A clean address to show instead of an instance (P125): resolved through the client
+   * (`client.resolve`) before any frame. What it names is framed through its issued location (a
+   * door, a ticket); signed out, denied or not found, the fallback is drawn from that answer, and
+   * no frame is made. A clean address is never framed itself.
+   */
+  readonly address?: string;
+  /**
    * The content: a served shell's to draw, and what an opaque frame shows while frames aren't
    * served (a stored page's HTML). Without it, a served-only display shows the fallback then.
    */
@@ -96,9 +103,92 @@ function DefaultFallback({ title, message, link }: PortholeFallbackProps): React
 }
 
 export function PortholeView(props: PortholeViewProps): ReactElement | null {
+  return props.address !== undefined && props.instance === undefined ? (
+    <AddressView {...props} address={props.address} />
+  ) : (
+    <InstanceView {...props} />
+  );
+}
+
+/** A clean address's view (P125): resolved first; its instance's view, or the answer's fallback. */
+function AddressView(props: PortholeViewProps & { readonly address: string }): ReactElement | null {
+  const client = useClient();
+  const { address, fallback, pending, onOutcome } = props;
+  const [state, setState] = useState<
+    | { readonly kind: "resolving" }
+    | { readonly kind: "instance"; readonly instance: InstanceRef }
+    | { readonly kind: "refused"; readonly said: FrameFallback }
+  >({ kind: "resolving" });
+  const [generation, setGeneration] = useState(0);
+  const retry = useCallback(() => setGeneration((each) => each + 1), []);
+  useEffect(() => {
+    const controller = new AbortController();
+    setState({ kind: "resolving" });
+    client.resolve(address, controller.signal).then(
+      (resolved) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        if ("outcome" in resolved) {
+          onOutcome?.(resolved.outcome);
+          const said = frameFallback(resolved.outcome);
+          setState(
+            said === null
+              ? {
+                  kind: "refused",
+                  said: { kind: "failed", title: "This can't be shown now", message: "" },
+                }
+              : { kind: "refused", said },
+          );
+          return;
+        }
+        setState({ kind: "instance", instance: resolved.instance });
+      },
+      () => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        const outcome: FrameOutcome = { state: "blocked", reason: "locate" };
+        onOutcome?.(outcome);
+        setState({
+          kind: "refused",
+          said: frameFallback(outcome) ?? {
+            kind: "failed",
+            title: "This can't be shown now",
+            message: "",
+          },
+        });
+      },
+    );
+    return () => controller.abort();
+    // The address and a retry decide; a new onOutcome doesn't resolve it again.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, address, generation]);
+  if (state.kind === "resolving") {
+    return <>{pending ?? null}</>;
+  }
+  if (state.kind === "refused") {
+    // The clean address is the "open in a new tab": a tab is where it opens.
+    return <>{(fallback ?? DefaultFallback)({ ...state.said, link: address, retry })}</>;
+  }
+  const { address: _address, ...rest } = props;
+  return <InstanceView {...rest} instance={state.instance} />;
+}
+
+function InstanceView(props: PortholeViewProps): ReactElement | null {
   const client = useClient();
   const meta = useMeta(client);
-  const { display, instance, content, fallback, pending, onOutcome, ref, ...frame } = props;
+  const {
+    display,
+    instance,
+    content,
+    fallback,
+    pending,
+    onOutcome,
+    ref,
+    address: _address,
+    ...frame
+  } = props;
   // The view's handle (P118) is there while the view is, a fallback drawn or not: its calls reach
   // the frame's display when one runs, and do nothing otherwise.
   const shown = useRef<PortholeFrameHandle>(null);

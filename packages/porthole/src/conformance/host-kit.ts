@@ -138,12 +138,30 @@ function invoke<K extends keyof ConformanceHarness>(
 }
 
 /** The display's frame element's document, once it exists. */
+/** A display's first outcome, once it has one (P040, P125). */
+async function outcomeOf(page: Page, id: number): Promise<FrameOutcome> {
+  let found: FrameOutcome | null = null;
+  await expect
+    .poll(
+      async () => {
+        const events = await invoke(page, "events", id);
+        const each = events.find((event) => event.type === "outcome");
+        found = each === undefined ? null : each.detail;
+        return found !== null;
+      },
+      { message: "the display has an outcome", timeout: 15_000 },
+    )
+    .toBe(true);
+  return found as unknown as FrameOutcome;
+}
+
 async function frameIn(page: Page, id: number): Promise<Frame> {
   let found: Frame | null = null;
   await expect
     .poll(async () => {
       const element = await page
-        .locator(`#porthole-display-${id} iframe`)
+        // The display's own frame, never its door (P125), which is gone once it said its word.
+        .locator(`#porthole-display-${id} iframe:not([data-porthole-door])`)
         .elementHandle({ timeout: 2_000 })
         .catch(() => null);
       found = (await element?.contentFrame()) ?? null;
@@ -370,26 +388,44 @@ export function hostConformance(options: HostConformanceOptions): HostConformanc
               }),
           async frame(page, url) {
             await ready(page);
+            if (options.issue === undefined) {
+              throw new Error(
+                "A clean address is framed through the app's issue endpoint ({ address }, P125): give defineHostConformance its issue",
+              );
+            }
+            const instance = await served.artifact("entry", "1");
+            const id = await invoke(
+              page,
+              "showAddress",
+              configOf(instance),
+              {
+                issue: options.issue.url,
+                ...(options.issue.headers === undefined ? {} : { headers: options.issue.headers }),
+              },
+              url,
+            );
+            return {
+              frame: () => frameIn(page, id),
+              outcome: () => outcomeOf(page, id),
+              framed: () => invoke(page, "framed", id),
+            };
+          },
+          async frameDirectly(page, url) {
+            await ready(page);
             const instance = await served.artifact("entry", "1");
             const id = await invoke(page, "show", configOf(instance), instance, {
               location: { url, origin: new URL(url).origin },
             });
             return {
-              frame: () => frameIn(page, id),
-              async outcome(): Promise<FrameOutcome> {
-                let found: FrameOutcome | null = null;
-                await expect
-                  .poll(
-                    async () => {
-                      const events = await invoke(page, "events", id);
-                      const each = events.find((event) => event.type === "outcome");
-                      found = each === undefined ? null : each.detail;
-                      return found !== null;
-                    },
-                    { message: "the display has an outcome", timeout: 15_000 },
-                  )
-                  .toBe(true);
-                return found as unknown as FrameOutcome;
+              outcome: () => outcomeOf(page, id),
+              framed: () => invoke(page, "framed", id),
+              async hostErrors() {
+                const events = await invoke(page, "events", id);
+                return events.flatMap((event) =>
+                  event.type === "hostError"
+                    ? [event.detail as { readonly message: string; readonly kind: string }]
+                    : [],
+                );
               },
             };
           },

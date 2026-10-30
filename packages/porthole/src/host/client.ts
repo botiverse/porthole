@@ -1,7 +1,7 @@
 import type { PortholeConfig } from "../config/schema.ts";
 import type { Displays } from "../displays/displays.ts";
 import type { FrameLocation, InstanceLocator, InstanceRef } from "../isolation/types.ts";
-import { doorOf, LocateError } from "./locator.ts";
+import { LocateError, locationOf, outcomeOfRefusal, refusalOf, type Resolved } from "./locator.ts";
 import type { FrameOutcome } from "./types.ts";
 
 /**
@@ -65,6 +65,13 @@ export interface PortholeClient<N extends string = string> extends InstanceLocat
   config(this: void, kind: N): PortholeConfig | null;
   /** The same, for an instance's kind. */
   configFor(this: void, instance: InstanceRef): PortholeConfig | null;
+  /**
+   * What a clean address names, for this viewer (P125): its instance and an issued location (a
+   * door, a ticket), which the instance's first frame then uses; or the outcome the frame endpoint
+   * answered instead (signed out, denied, not found), with no frame built. A clean address is for
+   * a tab: never frame one directly (`checkFrameLocation` refuses it).
+   */
+  resolve(this: void, address: string, signal?: AbortSignal): Promise<Resolved>;
   /** An instance's clean address (`entry.pathOf` on the server), or null. */
   link(this: void, instance: InstanceRef): Promise<string | null>;
   /** The clean address if already known (from locating the instance), for rendering. */
@@ -199,7 +206,11 @@ export function portholeClient<N extends string>(
     }
   };
 
-  const issue = async (instance: InstanceRef, signal?: AbortSignal): Promise<FrameLocation> => {
+  // A location `resolve` already got for an instance (P125): its first frame uses it, so the
+  // clean address is asked about once; every later run issues afresh, by instance.
+  const resolved = new Map<string, FrameLocation>();
+
+  const askFrames = async (body: Record<string, unknown>, signal?: AbortSignal) => {
     const headers = headersNow();
     headers.set("content-type", "application/json");
     headers.set("accept", "application/json");
@@ -208,47 +219,71 @@ export function portholeClient<N extends string>(
       headers,
       credentials,
       redirect: "error",
-      body: JSON.stringify({ instance }),
+      body: JSON.stringify(body),
       ...(signal === undefined ? {} : { signal }),
     });
     const data: unknown = await answer.json().catch(() => null);
     if (!answer.ok) {
-      const error = isRecord(data) && isRecord(data.error) ? data.error : {};
-      const code = typeof error.code === "string" ? error.code : "failed";
-      if (code === "not-served") {
+      const refused = refusalOf(answer, data);
+      if (refused.code === "not-served") {
         void refresh();
       }
-      throw new LocateError(
-        typeof error.message === "string"
-          ? error.message
-          : `The app's frame endpoint answered ${answer.status}`,
-        answer.status,
-        code,
-      );
+      throw refused;
     }
-    if (!isRecord(data) || typeof data.url !== "string" || typeof data.origin !== "string") {
+    return { status: answer.status, data };
+  };
+
+  /** A location as the frame endpoint gave it: its door (P125) passed on, as it came. */
+  const located = (status: number, data: unknown): FrameLocation => {
+    const { viewer: _viewer, ...location } = locationOf(status, data);
+    return location;
+  };
+
+  const issue = async (instance: InstanceRef, signal?: AbortSignal): Promise<FrameLocation> => {
+    const key = keyOf(instance);
+    const first = resolved.get(key);
+    if (first !== undefined) {
+      resolved.delete(key);
+      return first;
+    }
+    const { status, data } = await askFrames({ instance }, signal);
+    const location = located(status, data);
+    links.set(key, isRecord(data) && typeof data.link === "string" ? data.link : null);
+    return location;
+  };
+
+  const resolve = async (address: string, signal?: AbortSignal): Promise<Resolved> => {
+    let answer: { readonly status: number; readonly data: unknown };
+    try {
+      answer = await askFrames({ address }, signal);
+    } catch (error) {
+      // Signed out, denied, not found: the host's own answer, before any frame (P125).
+      const outcome = outcomeOfRefusal(error);
+      if (outcome !== null) {
+        return { outcome };
+      }
+      throw error;
+    }
+    const { status, data } = answer;
+    const instance = isRecord(data) ? data.instance : undefined;
+    if (
+      !isRecord(instance) ||
+      typeof instance.scope !== "string" ||
+      !isRecord(instance.document) ||
+      typeof instance.document.kind !== "string"
+    ) {
       throw new LocateError(
-        "The app's frame endpoint gave no location",
-        answer.status,
+        "The app's frame endpoint resolved the address to no instance",
+        status,
         "bad-location",
       );
     }
-    const door = doorOf(data);
-    if (door === "bad") {
-      throw new LocateError(
-        "The app's frame endpoint named a door that isn't one",
-        answer.status,
-        "bad-location",
-      );
-    }
-    links.set(keyOf(instance), typeof data.link === "string" ? data.link : null);
-    return {
-      url: data.url,
-      origin: data.origin,
-      ...(typeof data.reports === "boolean" ? { reports: data.reports } : {}),
-      // The display's door (P125), as the server gave it.
-      ...(door === null ? {} : { door }),
-    };
+    const found = instance as unknown as InstanceRef;
+    const location = located(status, data);
+    const key = keyOf(found);
+    resolved.set(key, location);
+    links.set(key, isRecord(data) && typeof data.link === "string" ? data.link : null);
+    return { instance: found, location };
   };
 
   let lastHandoff = 0;
@@ -307,6 +342,7 @@ export function portholeClient<N extends string>(
     config: (kind) => configOf(kind),
     configFor: (instance) => configOf(options.displays.kindOf(instance)),
     locate: issue,
+    resolve,
     link,
     knownLink: (instance) => links.get(keyOf(instance)) ?? null,
     openInTab: (instance) => {

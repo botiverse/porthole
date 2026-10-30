@@ -25,6 +25,21 @@ P-numbers below.
   - **A file set's entry must be a page** (P124-2): `checkFileSet`, `admitFiles` and `lintFiles`
     refuse an entry that isn't `.html`/`.htm` (code `entry`); a set stored before this answers
     Porthole's `not-found` status page, and the door says `not-found`.
+  - **Before any frame, the host asks `issue`** (P125): blocked or allowed is said by the door or by
+    the host's own issue endpoint, never by a frame. A refusal from the frame route is now the
+    display's outcome with no frame built: 401 `blocked: sign-in`, 403 `blocked: denied` (with the
+    host's code from an optional, additive `error.reason`), 404 `blocked: not-found`, with no
+    `locate` host error; any other failure stays `blocked: locate`; a backend that never answers is
+    a `timeout`. This holds for every locate.
+  - **Migration (no grace release): a clean address is for a top-level tab.** `createHost` refuses
+    a served non-nested location without a door before any frame (`blocked: locate`, `door` host
+    error), which replaces 0.14.5-P125's "frame it strict and time out" and covers both an old
+    server and a clean address framed as it is. To frame what a clean address names, resolve it:
+    `client.resolve(address)` or `<PortholeView address>` (the issue endpoint takes `{ address }`
+    and answers `{ ...location, instance }`). In a frame the content origin answers a clean address
+    (and the app's authorize route answers itself) with a page that has no script and goes nowhere:
+    P068's in-frame sign-in page and the transport's host-origin channel (`also`) are removed. A
+    locator must issue anew for every run: a reused location's door says `blocked: session`.
   - Planned, not in this release: a host-only parallel-mount variant (the door and content opened
     together), to be measured against the sequential default.
 

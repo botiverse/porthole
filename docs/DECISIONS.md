@@ -6820,6 +6820,9 @@ host error), or stop or rewrite it so its silence reads as `framing` (P124-1); a
 a running display starts a new run it can speak first in. So Porthole's word for such a display
 can't come from its own frame at all.
 
+**The rule.** A non-nested served frame's frame status is never taken by the host; blocked or
+allowed is said either by the door frame or by the host asking `issue` before it builds the frame.
+
 **Decision.** For a served display that isn't nested (a served shell, a page, a view through the
 sandbox proxy), the host first makes a hidden **door**: a page of Porthole's server on the same
 origin, in a frame of the host's own that no content can reach — `sandbox="allow-scripts"` (an
@@ -6853,12 +6856,61 @@ document). **Invariant: the door and the content route run the same checks for t
 (P050, its data's wall), so the door only reports. `serveDocument` refuses a door ticket; the door
 refuses a content, entry or hop ticket; a nested page's label serves no door.
 
-**Compatibility.** `FrameLocation.door` is additive: an old host ignores it (its door ticket
-expires unused) and runs P124 as before. A **new** host given a served non-nested location
-**without** a door is strict (no frame status taken, silence → timeout) and raises a host error of a
-new kind **`door`** once per mount ("the server gives no door; upgrade it first"). No fallback to
-P124's rule, no option, no knob (PRINCIPLES 1, 8). **Deploy order: the server/Worker first, then the
-host** (a hard requirement in ADOPTING). A custom locator must pass `door` through.
+**Before any frame: the host asks `issue`.** A clean address (P068) is for a top-level tab. A host
+that shows what one names in a frame resolves it first through its issue endpoint (`{ address }`:
+`client.resolve(address)`, `<PortholeView address>`), which maps the address as its tab's
+authorize would (the naming's `scopeOf`, `entry.at`, then `access`) and answers before any frame: a
+location with its door (and, for a file set's page below its version, a frame that opens at that
+page, the door checking the same page), or the refusal the tab would get. A refusal from the host's
+own issue endpoint is the display's outcome, one to one with the status pages it replaces, the
+fallback's wording unchanged: **401 → `blocked: sign-in`, 403 → `blocked: denied` (with the host's
+reason code, only from the answer's own `error.reason`), 404 → `blocked: not-found`**, with no host
+error. Every other failure (a 5xx, a network error, a malformed answer) is the host's own: `blocked:
+locate` and a `locate` host error, never `denied`; a backend that never answers within
+`loadTimeoutMs` is a `timeout`. This applies to every locate, an instance's too. No frame is made
+for any of them. In a frame, `cookies`, an expired entry state and redeem's `session`/`denied` no
+longer occur: an issued frame carries its access in its ticket and sealed address (P025, P083).
+
+**A location with no door is refused.** For a served, non-nested config, `createHost` builds no
+frame for a location without a `door` (an older server, a locator that drops it, a clean address
+someone framed): `blocked: locate`, and a host error of kind **`door`** naming the fix ("a served
+display needs a door from issue; a clean address is for a tab: resolve it with `client.resolve` or
+`<PortholeView address>`"). One rule for both cases; nothing infers a door's word from anything
+else. The door's load-bearing check is that it is on the display's own origin (the one its issue
+located) and came with that issue; its path is pinned to `/__porthole/door/` for now, in a check of
+its own, so relaxing the path later (a content Worker's own route) can't drop the origin check.
+
+**Compatibility.**
+
+| Host \ server | Old (no `door`) | New (`door`, `issue { address }`) |
+| --- | --- | --- |
+| Old (P124) | P124 as before (exposed, P124-1) | `door` ignored (its ticket expires unused): P124 as before; a framed clean address gets a page with no status at all |
+| New (P125) | **refused before any frame**: `blocked: locate`, `door` host error | P125 |
+
+No fallback to P124's rule, no option, no knob (PRINCIPLES 1, 8). **Deploy order: the server/Worker
+first, then the host** (a hard requirement in ADOPTING). A custom locator must pass `door` through,
+and must issue anew for every run. No grace release for a framed clean address: no documented flow
+(`portholeClient`, `PortholeView`, the examples) ever framed one, and the one undocumented way
+(`createHost` given a hand-built clean URL) is refused with a message naming the fix (CHANGELOG).
+
+**Removed from here on.** P068's in-frame branch: the content origin answers a clean address asked
+from a frame (`Sec-Fetch-Dest: iframe` or `frame`) with Porthole's "open this in a new tab" page,
+never a trip to the app, and so does the app's authorize route asked from a frame; that page carries
+the status pages' policy (`default-src 'none'`, `frame-ancestors` the host origins) with no
+`script-src` and no script at all. And the transport's `also` channel (a frame's status heard from
+the host's own origin, P068): a frame is heard from its own window and its located origin alone. No
+negative control needs either (`content-status` takes out the strict rule, not a channel).
+
+**A `load` event is not a committed document** (required reading for any future timing exception).
+Before choosing the issue-first rule, an exception was weighed for a framed clean address: take a
+frame status from the host's own origin, on the frame's first load, before anything else. It fails:
+a document wiped and navigated while it parses never fires `load`. Measured on Chromium (a framed
+document that runs `document.open(); location.href = <a host-origin page that posts a status>`
+during parse): the status arrived with `loadsSoFar=0`, then `load#1`. So a same-scope sibling that
+writes into a signed-in clean-address display before its shell's hello could send it to another
+clean address of the scope, and the host's honest page there (`sign-in`, `denied`) would be taken as
+this display's first word. A host can count `load` events; it can't see committed documents. Any
+rule that reads "the first load" as "the first document" re-opens P124-1.
 
 **Folded in.** P124-2: `checkFileSet`/`admitFiles`/`lintFiles` refuse an entry that isn't `.html`
 or `.htm` (code `entry`); a stored set whose entry isn't a page answers Porthole's `not-found`

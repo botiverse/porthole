@@ -258,17 +258,41 @@ describe("a clean address opened directly", () => {
     expect(back.at).toBe(`${origin("abc")}/v/2`);
   });
 
-  it("signed out in a frame: never the app's sign-in, a page asking for a tab", async () => {
-    const app = kit();
-    const browser = new Browser("iframe");
-    const { answer, at } = await open(app, browser, `${origin("abc")}/`);
-    expect(at.startsWith(AUTHORIZE)).toBe(true);
-    expect(answer.status).toBe(401);
+  /** The page a clean address answers in a frame (P125): the status pages' policy, no script. */
+  const tabOnly = async (answer: Response) => {
+    expect(answer.status).toBe(403);
+    const csp = answer.headers.get("content-security-policy") ?? "";
+    expect(csp, "the status pages' policy").toMatch(/^default-src 'none'; /u);
+    expect(csp).toContain("frame-ancestors ");
+    expect(csp, "no script may run there").not.toMatch(/script-src/u);
+    expect(answer.headers.get("cache-control")).toBe("no-store");
     const text = await answer.text();
-    expect(text).toContain('data-porthole-reason="sign-in"');
-    expect(text).toContain("Open this in a new tab to sign in");
+    expect(text).toContain("data-porthole-tab-only");
+    expect(text, "no script in the page").not.toMatch(/<script/iu);
+    expect(text, "and no frame status").not.toContain("porthole/notifications/frame-status");
+  };
+
+  it("in a frame a clean address never goes to the app: a page asking for a tab, with no script (P125)", async () => {
+    const app = kit();
+    const { answer, at, hops } = await open(app, new Browser("iframe"), `${origin("abc")}/`);
+    expect(hops, "no trip to the app's authorize").toEqual([`${origin("abc")}/`]);
+    expect(at.startsWith(AUTHORIZE)).toBe(false);
+    await tabOnly(answer);
+    expect(answer.headers.get("content-security-policy")).toContain("frame-ancestors ");
     expect(app.signIns).toHaveLength(0);
-    expect(answer.headers.get("content-security-policy")).toContain(`frame-ancestors ${APP}`);
+    // Signed in or not, and for an address that names nothing: the same page, never the app's.
+    await tabOnly((await open(app, new Browser("iframe"), `${origin("abc")}/`, "ada")).answer);
+    await tabOnly((await open(app, new Browser("iframe"), `${origin("abc")}/nothing`)).answer);
+  });
+
+  it("the app's authorize route asked from a frame answers the same page, never its sign-in (P125)", async () => {
+    const app = kit();
+    // The state a tab's clean address would carry, taken to the authorize route in a frame.
+    const begin = await visit(app, new Browser(), `${origin("abc")}/`);
+    const authorize = begin.headers.get("location") ?? "";
+    expect(authorize.startsWith(AUTHORIZE)).toBe(true);
+    await tabOnly(await visit(app, new Browser("iframe"), authorize));
+    expect(app.signIns).toHaveLength(0);
   });
 
   it("a public page opens signed out, anonymously", async () => {
@@ -293,9 +317,10 @@ describe("a clean address opened directly", () => {
     expect(tab.answer.status).toBe(403);
     expect(await tab.answer.text()).toBe("<h1>The app's own refusal</h1>");
     expect(refusals).toEqual([403]);
+    // In a frame, never the app (P125): a page asking for a tab; the refusal hook isn't asked.
     const framed = await open(app, new Browser("iframe"), `${origin("secret1")}/`, "ada");
     expect(framed.answer.status).toBe(403);
-    expect(await framed.answer.text()).toContain('data-porthole-reason="denied"');
+    expect(await framed.answer.text()).toContain("data-porthole-tab-only");
     // An address that names nothing is a 404 on the content origin: no trip to the app (P070).
     const missing = await open(app, new Browser(), `${origin("abc")}/nothing`, "ada");
     expect(missing.answer.status).toBe(404);
@@ -550,5 +575,144 @@ describe("settings", () => {
     const script = /<script>([\s\S]*)<\/script>/u.exec(text)?.[1] ?? "";
     const hash = createHash("sha256").update(script).digest("base64");
     expect(answer.headers.get("content-security-policy")).toContain(`script-src 'sha256-${hash}'`);
+  });
+});
+
+describe("a clean address resolved for a frame, through issue (P125)", () => {
+  const encode = (text: string) => new TextEncoder().encode(text);
+  const files: Record<string, string> = {
+    "index.html": '<!doctype html><title>set</title><h1 id="t">entry</h1>',
+    "docs/a.html": '<!doctype html><title>a</title><h1 id="t">page a</h1>',
+    "notes.txt": "not a page",
+  };
+  /** The kit with a file set at `/v/1/`, a page of one file at `/`, or nothing. */
+  const setKit = () =>
+    kit(
+      {
+        source: (id) =>
+          Promise.resolve(
+            id.startsWith("set")
+              ? {
+                  files: Object.fromEntries(
+                    Object.entries(files).map(([name, body]) => [
+                      name,
+                      { size: encode(body).byteLength, sha256: "" },
+                    ]),
+                  ),
+                  read: (name: string) =>
+                    Promise.resolve(files[name] === undefined ? null : encode(files[name] ?? "")),
+                }
+              : { html: `<!doctype html><title>${id}</title><h1 id="t">${id} v1</h1>` },
+          ),
+      },
+      {
+        at: (scope, path) =>
+          path === "/"
+            ? page(scope)
+            : path.startsWith("/v/1/")
+              ? { instance: page(scope), base: "/v/1/", file: path.slice(5), pinned: true }
+              : null,
+      },
+    );
+  /** POST { address } to the app's issue endpoint, as the client's `resolve` does. */
+  const resolve = (app: ReturnType<typeof kit>, address: unknown, viewer?: string) =>
+    app.content.issue((request) => {
+      const who = request.headers.get("x-viewer");
+      return who === null ? null : { id: who };
+    })(
+      new Request(`${APP}/porthole/frames`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(viewer === undefined ? {} : { "x-viewer": viewer }),
+        },
+        body: JSON.stringify({ address }),
+      }),
+    );
+  const fetchIn = async (app: ReturnType<typeof kit>, url: string) =>
+    (await app.content.fetch(new Request(url, { headers: { "sec-fetch-dest": "iframe" } })))!;
+  /** A status page's word: its status and `data-porthole-reason`. */
+  const wordOf = async (answer: Response) => ({
+    status: answer.status,
+    reason: /data-porthole-reason="([a-z-]+)"/u.exec(await answer.text())?.[1] ?? null,
+  });
+
+  it("signed in: a location with its door and ticket, and the instance it names; the door opens, the frame shows it", async () => {
+    const app = setKit();
+    const answer = await resolve(app, `${origin("abc")}/`, "ada");
+    expect(answer.status).toBe(201);
+    const body = (await answer.json()) as {
+      url: string;
+      origin: string;
+      door?: { url: string };
+      instance: InstanceRef;
+    };
+    expect(body.instance).toEqual(page("abc"));
+    expect(body.origin).toBe(origin("abc"));
+    expect(new URL(body.url).pathname).toMatch(/^\/__porthole\/d\/[a-z2-7]{16}$/u);
+    expect(new URL(body.door?.url ?? "x:").pathname).toMatch(/^\/__porthole\/door\/[a-z2-7]{16}$/u);
+    expect((await fetchIn(app, body.door!.url)).status).toBe(200);
+    const shown = await fetchIn(app, body.url);
+    expect(shown.status).toBe(200);
+    expect(await shown.text()).toContain("abc v1");
+  });
+
+  it("the same refusals its tab would get, before any frame: signed out 401, no access 403, nothing 404", async () => {
+    const app = setKit();
+    const refusal = async (answer: Response) => {
+      const body = (await answer.json()) as { error: { code: string } };
+      return { status: answer.status, code: body.error.code };
+    };
+    expect(await refusal(await resolve(app, `${origin("abc")}/`))).toEqual({
+      status: 401,
+      code: "unauthenticated",
+    });
+    expect(await refusal(await resolve(app, `${origin("secret1")}/`, "ada"))).toEqual({
+      status: 403,
+      code: "forbidden",
+    });
+    expect(await refusal(await resolve(app, `${origin("abc")}/nothing`, "ada"))).toEqual({
+      status: 404,
+      code: "not-found",
+    });
+    // Off the content domain, a label the naming never makes, Porthole's own paths: nothing.
+    for (const address of [
+      "https://elsewhere.example/",
+      "https://zz.usercontent.example.net/",
+      `${origin("abc")}/__porthole/d/aaaaaaaaaaaaaaaa`,
+    ]) {
+      expect(await refusal(await resolve(app, address, "ada")), address).toEqual({
+        status: 404,
+        code: "not-found",
+      });
+    }
+    expect((await resolve(app, 42, "ada")).status).toBe(400);
+  });
+
+  it("a page below a file set's version: the frame opens at that page, the door checks it too", async () => {
+    const app = setKit();
+    const answer = await resolve(app, `${origin("set1")}/v/1/docs/a.html`, "ada");
+    expect(answer.status).toBe(201);
+    const body = (await answer.json()) as { url: string; door: { url: string } };
+    expect((await fetchIn(app, body.door.url)).status).toBe(200);
+    const shown = await fetchIn(app, body.url);
+    expect(shown.status).toBe(200);
+    expect(await shown.text(), "the page it named, not the entry").toContain("page a");
+  });
+
+  it("a page that isn't there, or isn't a page: the door and the content route both say not-found", async () => {
+    const app = setKit();
+    for (const address of [
+      `${origin("set1")}/v/1/docs/missing.html`,
+      `${origin("set1")}/v/1/notes.txt`,
+    ]) {
+      const answer = await resolve(app, address, "ada");
+      expect(answer.status, address).toBe(201);
+      const body = (await answer.json()) as { url: string; door: { url: string } };
+      const door = await wordOf(await fetchIn(app, body.door.url));
+      const content = await wordOf(await fetchIn(app, body.url));
+      expect(door, address).toEqual({ status: 404, reason: "not-found" });
+      expect(content, `${address}: the content route says what the door says`).toEqual(door);
+    }
   });
 });

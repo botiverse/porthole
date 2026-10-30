@@ -177,10 +177,13 @@ Whatever the use:
   a frame that speaks (P124, P125). For a served display that isn't nested, that word is its
   **door**'s (a page of Porthole's on the display's origin, framed hidden and opaque before the
   content, which a same-scope sibling can't reach, P125); its content frame's own word is never
-  taken, and its silence is a `timeout`. Hear the `frame-status` host error as a display trying to
-  speak as Porthole, and the `door` host error as a served display given no door by an out-of-date
-  server (upgrade the server/Worker first, P125): log them, show nothing for them. A url-mode app
-  can still say any outcome (S6).
+  taken, and its silence is a `timeout`. A `blocked` before any frame (`sign-in`, `denied`,
+  `not-found`) is your own issue endpoint's refusal, mapped by `createHost` (P125): its word is
+  your backend's, so what it says is as trustworthy as that endpoint. Hear the `frame-status` host
+  error as a display trying to speak as Porthole, and the `door` host error as a served display
+  refused for having no door (an out-of-date server, a locator that drops it, or a clean address
+  framed as it is: upgrade the server/Worker first, resolve clean addresses through issue, P125):
+  log them, show nothing for them. A url-mode app can still say any outcome (S6).
 - Take what the frame reports about annotations as UI hints (where to draw, what to open), never
   as permissions, and put nothing in a mark the page may not know (§7).
 - Guard a view that a frame's report opens or moves (`activated`, `anchored`, `selected`,
@@ -493,6 +496,11 @@ the attacker (c), and its readers are strangers.
 - Check pages for secrets before publishing them: `lintContent` has no rule for credentials.
 - Pass Porthole's `Content-Security-Policy` and `Permissions-Policy` headers on as they are,
   through any edge or proxy: on a tab they are the page's sandbox.
+- Treat a public link's clean address as a tab's (P125): to show what one names in a frame, resolve
+  it through your issue endpoint (`client.resolve`, `<PortholeView address>`). Its refusals (signed
+  out, denied, not found) are your backend's word, drawn as the fallback with no frame built: keep
+  that endpoint's answers as honest as its access decision, since a `blocked` there is yours, not
+  Porthole's door's.
 
 **Not guaranteed**
 
@@ -588,6 +596,10 @@ the attacker (c), and its readers are strangers.
   cookies included: send the app the headers `upstreamHeaders.request(…, { websocket: true })`
   makes (Porthole's cookies removed, the upgrade's own headers kept).
 - Keep previews off pages with displays that read data (S7).
+- Expect a served (domain) display's `blocked` from two sources only (P125): its door, or, before
+  any frame, your own issue endpoint's refusal (`sign-in`, `denied`, `not-found`). Neither is the
+  previewed app's word; a url-mode app's frame status still is (above), so never put a preview's
+  outcome in the same place in your UI as a served display's.
 
 **Not guaranteed**
 
@@ -690,9 +702,14 @@ P124-2 is closed too: a file set's entry must be a page (`.html`/`.htm`; `checkF
 `admitFiles`, `lintFiles` refuse another), and a set stored before that rule answers Porthole's
 `not-found` status page — the door says `not-found`, never an inert file that says nothing.
 
-The known costs that remain are the costs of sharing a scope (S7), and a served non-nested location
-from a server older than the host (no door) is strict and raises a `door` host error (upgrade the
-server first, P125).
+The known costs that remain are the costs of sharing a scope (S7). A served non-nested location
+without a door (a server older than the host, a locator that drops it, a clean address framed as it
+is) is refused before any frame: `blocked: locate` and a `door` host error (P125). A clean address
+is for a tab: in a frame the content origin answers it with a page that has no script and goes
+nowhere, never the app's authorize or sign-in. To show what a clean address names in a frame, the
+host resolves it through its issue endpoint first, and a refusal there (signed out, denied, not
+found) is the display's outcome with no frame built. P125 also records why no timing rule can stand
+in for that: a `load` event is not a committed document (DECISIONS P125).
 
 **Annotations** (`annotate`, P053, P104, P107). The shell that draws marks and reports anchors shares
 its realm with the content (a nested page's too: its marks are drawn by the runtime in the page's

@@ -105,4 +105,75 @@ describe("checkFrameLocation", () => {
     expect(message).not.toContain("pt_secret");
     expect(message).not.toContain("__porthole");
   });
+
+  describe("a location's door (P125)", () => {
+    const origin = "https://abc.example-usercontent.com";
+    const at = (door: unknown) => ({
+      url: `${origin}/__porthole/d/aaaaaaaaaaaaaaaa?ticket=t`,
+      origin,
+      door,
+    });
+    const check =
+      (door: unknown, nested = false) =>
+      () =>
+        checkFrameLocation(at(door) as never, sources, host, nested);
+
+    it("accepts a door on the display's own origin, at the door route", () => {
+      expect(check({ url: `${origin}/__porthole/door/aaaaaaaaaaaaaaaa?ticket=d` })).not.toThrow();
+    });
+
+    it("the load-bearing check: a door on any other origin is refused, its path right or not", () => {
+      // Another content origin of the same config, at the door route: still not this display's.
+      expect(
+        check({
+          url: "https://other.example-usercontent.com/__porthole/door/aaaaaaaaaaaaaaaa?ticket=d",
+        }),
+      ).toThrow(/not on its location's origin/u);
+      // Another port, another scheme: another origin.
+      expect(
+        check({
+          url: "https://abc.example-usercontent.com:8443/__porthole/door/aaaaaaaaaaaaaaaa?ticket=d",
+        }),
+      ).toThrow(/not on its location's origin/u);
+      expect(
+        check({
+          url: "http://abc.example-usercontent.com/__porthole/door/aaaaaaaaaaaaaaaa?ticket=d",
+        }),
+      ).toThrow(/not on its location's origin/u);
+    });
+
+    it("refuses a door elsewhere on the origin, one that isn't { url }, and any for a nested page", () => {
+      expect(check({ url: `${origin}/__porthole/d/aaaaaaaaaaaaaaaa?ticket=d` })).toThrow(
+        /not at \/__porthole\/door\//u,
+      );
+      expect(check("https://x")).toThrow(/not \{ url \}/u);
+      // A nested page's shell, on its own label (P114): it is located with no door at all.
+      const shell = `https://porthole-${"a".repeat(24)}.example-usercontent.com`;
+      expect(() =>
+        checkFrameLocation(
+          {
+            url: `${shell}/__porthole/d/aaaaaaaaaaaaaaaa?ticket=t`,
+            origin: shell,
+            door: { url: `${shell}/__porthole/door/aaaaaaaaaaaaaaaa?ticket=d` },
+          },
+          sources,
+          host,
+          true,
+        ),
+      ).toThrow(/nested page is located with no door/u);
+    });
+
+    it("never quotes the door's ticket in a refusal", () => {
+      let message = "";
+      try {
+        check({
+          url: "https://other.example-usercontent.com/__porthole/door/k?ticket=pt_secret",
+        })();
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toContain("https://other.example-usercontent.com");
+      expect(message).not.toContain("pt_secret");
+    });
+  });
 });

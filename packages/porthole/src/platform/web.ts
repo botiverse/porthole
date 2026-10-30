@@ -1,7 +1,6 @@
 import { DOOR_SANDBOX_TOKENS } from "../compile/policy.ts";
 import type { ColorScheme } from "../config/schema.ts";
 import {
-  FRAME_STATUS_METHOD,
   SHELL_BEAT_METHOD,
   SHELL_LOOK_METHOD,
   SHELL_METHOD_PREFIX,
@@ -11,13 +10,6 @@ import { postMessageTransport } from "../transport/post-message.ts";
 import { focusGuard, type FocusGuard, type FocusTake } from "./focus-guard.ts";
 import type { Transport } from "../transport/types.ts";
 import type { DoorSurface, PlatformHost, Surface, SurfaceSpec } from "./types.ts";
-
-/** A frame-status message (`porthole/notifications/frame-status`), by its method alone. */
-const isFrameStatus = (data: unknown): boolean =>
-  data !== null &&
-  typeof data === "object" &&
-  (data as { jsonrpc?: unknown }).jsonrpc === "2.0" &&
-  (data as { method?: unknown }).method === FRAME_STATUS_METHOD;
 
 /** A shell's own message (P111), by its namespace. */
 const isShellWord = (data: unknown): data is { method: string; params?: unknown } =>
@@ -140,17 +132,10 @@ export const webPlatform: PlatformHost = {
     const guard = focusGuard(view);
     const taken = new Set<(take: FocusTake) => void>();
     const nested = spec.nested === true && spec.source.kind === "url";
-    // A served frame may pass through the host's own pages (a redirect entry's, P068): what they
-    // say of the frame's status is heard too, and nothing else from there.
-    const own = view.origin;
-    const opened = postMessageTransport(
-      () => frame.contentWindow,
-      origin,
-      view,
-      origin === "null" || own === "null" || own === origin
-        ? undefined
-        : { origin: own, accept: isFrameStatus },
-    );
+    // A frame is heard from its own window and its located origin alone: never the host's own
+    // origin (P125 removed P068's in-frame pages and the channel that heard them), so no page of
+    // the host's own can speak for a frame either.
+    const opened = postMessageTransport(() => frame.contentWindow, origin, view);
     const unguard = guard.add(
       frame,
       (take) => {

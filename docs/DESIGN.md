@@ -488,11 +488,12 @@ a link sent to someone with access.
    A request on a clean address without a cookie for it gets a 302 to the app's authorize route
    with a signed state (label, path, nonce, five minutes), and a cookie holding the nonce on the
    content origin (partitioned in a frame, `Lax` on a tab, like the session cookie).
-2. `authorize` asks `entry.at(scope, path)` and `access`. No viewer: on a tab, the app's own
-   sign-in (`signIn(returnTo, request, entry)`), which comes back to the same route; **in a
-   frame, never the sign-in**: a plain page asking for a new tab (`blocked: sign-in`). No
-   access: the app's refusal on a tab (`refusal(status, request, entry)`; nothing returned:
-   Porthole's page), a plain page in a frame; never content. Both hooks get the address decoded
+2. `authorize` asks `entry.at(scope, path)` and `access`. No viewer: the app's own sign-in
+   (`signIn(returnTo, request, entry)`), which comes back to the same route. No access: the app's
+   refusal (`refusal(status, request, entry)`; nothing returned: Porthole's page); never content.
+   **Redirect entry is for a tab alone (P125):** a clean address asked from a frame
+   (`Sec-Fetch-Dest: iframe`/`frame`), and the authorize route asked from one, answer Porthole's
+   "open this in a new tab" page (the status pages' policy, no script), never a trip to the app. Both hooks get the address decoded
    (`EntryContext`: label, scope, path, clean URL, the instance, framed). `returnTo` (and
    `entry.spa`'s `next`) is `authorizeUrl` with the request's query: the app as it is reached,
    never the request's own URL, whose scheme and host behind a TLS edge or a dev proxy are
@@ -502,14 +503,15 @@ a link sent to someone with access.
    the nonce's cookie, sets the session (bound to the path) and 303s to the clean address. The
    code is in an address for that one hop (gone from history), every redirect sends
    `no-referrer`, and Porthole never logs it.
-4. A browser that keeps no cookie in a frame (WebKit, P025) has no nonce at the redeem: it gets
-   the "open in a new tab" outcome (`blocked: cookies`), and an entered path whose session still
-   didn't come back is caught on the second bounce. No loops.
+4. A path whose session didn't come back is caught on the second bounce (`blocked: cookies`, the
+   loop guard): on a tab only, since a frame never enters (P125).
 
-Use tickets (`issue` → `FrameLocation`) for frames: no extra round trip, and no dependence on the
-app's own cookie reaching its authorize route inside a frame (measured: Firefox and WebKit don't
-send a `Lax` app cookie on a frame navigation that came through a cross-site redirect; Chromium
-does). Use clean addresses for tabs, links, bookmarks and reloads: a host's "open in a new tab"
+Frames use tickets (`issue` → `FrameLocation`, with its door): no extra round trip, and no
+dependence on the app's own cookie reaching its authorize route inside a frame. To frame what a
+clean address names, the host resolves it through `issue` first (`{ address }`, `client.resolve`,
+`<PortholeView address>`, P125); a refusal there is the outcome, with no frame. (Why frames never
+entered, measured before P125: Firefox and WebKit don't send a `Lax` app cookie on a frame
+navigation that came through a cross-site redirect; Chromium does.) Use clean addresses for tabs, links, bookmarks and reloads: a host's "open in a new tab"
 and "copy link" use `urlOf`, never a ticket. The first open of an instance per browser costs one
 extra round trip through the app.
 

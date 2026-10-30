@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { UNTRUSTED_FRAME_STATUS, watchOutcome } from "../src/host/outcome.ts";
 import type { DisplayEvents, FrameOutcome } from "../src/host/types.ts";
 import { createHost, presets, type PlatformHost, type PortholeConfig } from "../src/index.ts";
+import { NO_DOOR } from "../src/host/create-host.ts";
+import { LocateError } from "../src/host/locator.ts";
 import { FRAME_STATUS_METHOD, type FrameSource } from "../src/isolation/types.ts";
 import type { Surface } from "../src/platform/types.ts";
 
@@ -397,91 +399,92 @@ describe("createHost: a frame status from the content is a host error, never an 
   });
 });
 
-describe("createHost: a served display's door decides, before the content frame (P125)", () => {
-  /** A platform whose door and content surfaces the test drives. */
-  function harness(withDoor = true) {
-    const made: { door?: Harnessed; content?: Harnessed } = {};
-    interface Harnessed {
-      say(message: unknown): void;
-      load(): void;
-      destroyed: boolean;
-    }
-    const surface = (): Harnessed & {
+/** A platform whose door and content surfaces the test drives. */
+function harness(withDoor = true, locate?: () => Promise<unknown>) {
+  const made: { door?: Harnessed; content?: Harnessed } = {};
+  interface Harnessed {
+    say(message: unknown): void;
+    load(): void;
+    destroyed: boolean;
+  }
+  const surface = (): Harnessed & {
+    transport: {
+      send: () => void;
+      listen: (l: (m: unknown) => void) => () => void;
+      close: () => void;
+    };
+    onLoad: (l: () => void) => () => void;
+  } => {
+    const listeners = new Set<(m: unknown) => void>();
+    const loads = new Set<() => void>();
+    const h = {
+      destroyed: false,
+      say: (m: unknown) => listeners.forEach((each) => each(m)),
+      load: () => loads.forEach((each) => each()),
       transport: {
-        send: () => void;
-        listen: (l: (m: unknown) => void) => () => void;
-        close: () => void;
-      };
-      onLoad: (l: () => void) => () => void;
-    } => {
-      const listeners = new Set<(m: unknown) => void>();
-      const loads = new Set<() => void>();
-      const h = {
-        destroyed: false,
-        say: (m: unknown) => listeners.forEach((each) => each(m)),
-        load: () => loads.forEach((each) => each()),
-        transport: {
-          send: () => {},
-          listen: (l: (m: unknown) => void) => {
-            listeners.add(l);
-            return () => listeners.delete(l);
-          },
-          close: () => listeners.clear(),
+        send: () => {},
+        listen: (l: (m: unknown) => void) => {
+          listeners.add(l);
+          return () => listeners.delete(l);
         },
-        onLoad: (l: () => void) => {
-          loads.add(l);
-          return () => loads.delete(l);
+        close: () => listeners.clear(),
+      },
+      onLoad: (l: () => void) => {
+        loads.add(l);
+        return () => loads.delete(l);
+      },
+    };
+    return h;
+  };
+  const platform: PlatformHost = {
+    name: "stand-in",
+    createSurface: () => {
+      const s = surface();
+      made.content = s;
+      return {
+        transport: s.transport,
+        element: null,
+        setHeight: () => {},
+        setColorScheme: () => {},
+        userActivation: () => undefined,
+        onNavigated: () => () => {},
+        onLoad: s.onLoad,
+        destroy: () => {
+          s.destroyed = true;
         },
       };
-      return h;
-    };
-    const platform: PlatformHost = {
-      name: "stand-in",
-      createSurface: () => {
-        const s = surface();
-        made.content = s;
-        return {
-          transport: s.transport,
-          element: null,
-          setHeight: () => {},
-          setColorScheme: () => {},
-          userActivation: () => undefined,
-          onNavigated: () => () => {},
-          onLoad: s.onLoad,
-          destroy: () => {
-            s.destroyed = true;
+    },
+    ...(withDoor
+      ? {
+          createDoor: (_c: HTMLElement, _spec: { url: string }) => {
+            const s = surface();
+            made.door = s;
+            return {
+              transport: s.transport,
+              element: null,
+              onLoad: s.onLoad,
+              destroy: () => {
+                s.destroyed = true;
+              },
+            };
           },
-        };
-      },
-      ...(withDoor
-        ? {
-            createDoor: (_c: HTMLElement, _spec: { url: string }) => {
-              const s = surface();
-              made.door = s;
-              return {
-                transport: s.transport,
-                element: null,
-                onLoad: s.onLoad,
-                destroy: () => {
-                  s.destroyed = true;
-                },
-              };
-            },
-          }
-        : {}),
-    };
-    const container = {
-      ownerDocument: {
-        defaultView: { location: { origin: "https://app.example" }, navigator: { language: "en" } },
-      },
-      getBoundingClientRect: () => ({ width: 600 }),
-    } as unknown as HTMLElement;
-    const config = presets.artifact({
-      isolation: "domain",
-      contentOrigins: ["https://*.example-usercontent.com"],
-    });
-    const locator = {
-      locate: () =>
+        }
+      : {}),
+  };
+  const container = {
+    ownerDocument: {
+      defaultView: { location: { origin: "https://app.example" }, navigator: { language: "en" } },
+    },
+    getBoundingClientRect: () => ({ width: 600 }),
+  } as unknown as HTMLElement;
+  const config = presets.artifact({
+    isolation: "domain",
+    contentOrigins: ["https://*.example-usercontent.com"],
+  });
+  const locator = {
+    locate:
+      (locate as (() => Promise<never>) | undefined) ??
+      (() =>
         Promise.resolve({
           kind: "url" as const,
           url: "https://a-x.example-usercontent.com/__porthole/d/aaaaaaaaaaaaaaaa?ticket=t",
@@ -494,21 +497,25 @@ describe("createHost: a served display's door decides, before the content frame 
                 },
               }
             : {}),
-        }),
-    };
-    const outcomes: FrameOutcome[] = [];
-    const hostErrors: DisplayEvents["hostError"][] = [];
-    const shown = createHost(config, { platform, locator }).mount(container, {
-      displayId: "d1",
-      title: "Artifact",
-      scheme: "light",
-      instance: { scope: "s", document: { kind: "artifact", id: "p", version: "1" } },
-    });
-    shown.on("outcome", (each) => outcomes.push(each));
-    shown.on("hostError", (each) => hostErrors.push(each));
-    return { made, outcomes, hostErrors, shown };
-  }
+        })),
+  };
+  const outcomes: FrameOutcome[] = [];
+  const hostErrors: DisplayEvents["hostError"][] = [];
+  const shown = createHost(config, { platform, locator }).mount(container, {
+    displayId: "d1",
+    title: "Artifact",
+    scheme: "light",
+    instance: { scope: "s", document: { kind: "artifact", id: "p", version: "1" } },
+  });
+  shown.on("outcome", (each) => outcomes.push(each));
+  shown.on("hostError", (each) => hostErrors.push(each));
+  return { made, outcomes, hostErrors, shown };
+}
 
+/** The door harness, its locator answering as `locate` does (P125). */
+const harnessOf = (locate: () => Promise<unknown>) => harness(true, locate);
+
+describe("createHost: a served display's door decides, before the content frame (P125)", () => {
   test("the door opens, then the content frame is made and loads", async () => {
     const h = harness();
     await vi.waitFor(() => expect(h.made.door).toBeDefined());
@@ -533,10 +540,139 @@ describe("createHost: a served display's door decides, before the content frame 
     h.shown.destroy();
   });
 
-  test("a served non-nested location without a door is strict and raises a door host error", async () => {
+  test("a served non-nested location without a door (an old server, a clean address) is refused before any frame: blocked locate, and a door host error naming the fix", async () => {
     const h = harness(false);
-    await vi.waitFor(() => expect(h.made.content).toBeDefined());
-    expect(h.hostErrors.map((each) => each.kind)).toEqual(["door"]);
+    await vi.waitFor(() => expect(h.outcomes).toHaveLength(1));
+    expect(h.outcomes).toEqual([{ state: "blocked", reason: "locate" }]);
+    expect(h.made.door, "no door frame").toBeUndefined();
+    expect(h.made.content, "no content frame").toBeUndefined();
+    expect(h.hostErrors).toEqual([{ message: NO_DOOR, kind: "door" }]);
+    expect(NO_DOOR).toMatch(/door from issue/u);
+    expect(NO_DOOR).toMatch(/client\.resolve/u);
+    h.shown.destroy();
+  });
+
+  test("a platform that makes no doors frames no served display that isn't nested", async () => {
+    const h = harness(true);
+    // The same harness, without createDoor: a platform of a host's own that predates P125.
+    h.shown.destroy();
+    const listeners = new Set<(message: unknown) => void>();
+    let surfaces = 0;
+    const platform: PlatformHost = {
+      name: "no doors",
+      createSurface: () => {
+        surfaces += 1;
+        return {
+          transport: {
+            send: () => {},
+            listen: (l) => (listeners.add(l), () => listeners.delete(l)),
+            close: () => {},
+          },
+          element: null,
+          setHeight: () => {},
+          setColorScheme: () => {},
+          userActivation: () => undefined,
+          onNavigated: () => () => {},
+          onLoad: () => () => {},
+          destroy: () => {},
+        };
+      },
+    };
+    const container = {
+      ownerDocument: {
+        defaultView: { location: { origin: "https://app.example" }, navigator: { language: "en" } },
+      },
+      getBoundingClientRect: () => ({ width: 600 }),
+    } as unknown as HTMLElement;
+    const kinds: string[] = [];
+    const outcomes: FrameOutcome[] = [];
+    const shown = createHost(
+      presets.artifact({
+        isolation: "domain",
+        contentOrigins: ["https://*.example-usercontent.com"],
+      }),
+      {
+        platform,
+        locator: {
+          locate: () =>
+            Promise.resolve({
+              url: "https://a-x.example-usercontent.com/__porthole/d/aaaaaaaaaaaaaaaa?ticket=t",
+              origin: "https://a-x.example-usercontent.com",
+              door: { url: "https://a-x.example-usercontent.com/__porthole/door/k?ticket=d" },
+            }),
+        },
+      },
+    ).mount(container, {
+      displayId: "d1",
+      title: "Artifact",
+      scheme: "light",
+      instance: { scope: "s", document: { kind: "artifact", id: "p", version: "1" } },
+    });
+    shown.on("hostError", ({ kind }) => kinds.push(kind));
+    shown.on("outcome", (each) => outcomes.push(each));
+    await vi.waitFor(() => expect(outcomes).toHaveLength(1));
+    expect(outcomes).toEqual([{ state: "blocked", reason: "locate" }]);
+    expect(kinds).toEqual(["door"]);
+    expect(surfaces).toBe(0);
+    shown.destroy();
+  });
+});
+
+describe("createHost: the host's issue endpoint refused, before any frame (P125)", () => {
+  const refused = (answered: number, code: string, reason?: string) => () =>
+    Promise.reject(new LocateError("refused", answered, code, reason));
+
+  test("401, 403 (with the host's own reason code) and 404 are sign-in, denied and not-found: the host's word, no host error, no frame", async () => {
+    for (const [locate, expected] of [
+      [refused(401, "unauthenticated"), { state: "blocked", reason: "sign-in", status: 401 }],
+      [
+        refused(403, "forbidden", "revoked"),
+        { state: "blocked", reason: "denied", status: 403, code: "revoked" },
+      ],
+      [refused(403, "forbidden"), { state: "blocked", reason: "denied", status: 403 }],
+      [refused(404, "not-found"), { state: "blocked", reason: "not-found", status: 404 }],
+    ] as const) {
+      const h = harnessOf(locate);
+      await vi.waitFor(() => expect(h.outcomes).toHaveLength(1));
+      expect(h.outcomes).toEqual([expected]);
+      expect(h.hostErrors, "a refusal is no host failure").toEqual([]);
+      expect(h.made.door).toBeUndefined();
+      expect(h.made.content).toBeUndefined();
+      h.shown.destroy();
+    }
+  });
+
+  test("a reason that isn't a short lowercase token never becomes a code", async () => {
+    const h = harnessOf(refused(403, "forbidden", "<b>Nope</b>"));
+    await vi.waitFor(() => expect(h.outcomes).toHaveLength(1));
+    expect(h.outcomes).toEqual([{ state: "blocked", reason: "denied", status: 403 }]);
+    h.shown.destroy();
+  });
+
+  test("a 500, a network failure or a malformed answer is the host's own failure (locate), never denied", async () => {
+    for (const locate of [
+      refused(500, "failed"),
+      refused(503, "not-served"),
+      refused(429, "rate-limited"),
+      () => Promise.reject(new TypeError("Failed to fetch")),
+      () => Promise.resolve({ url: 42 }),
+    ]) {
+      const h = harnessOf(locate);
+      await vi.waitFor(() => expect(h.outcomes).toHaveLength(1));
+      expect(h.outcomes).toEqual([{ state: "blocked", reason: "locate" }]);
+      expect(h.hostErrors.map((each) => each.kind)).toEqual(["locate"]);
+      h.shown.destroy();
+    }
+  });
+
+  test("a backend that never answers is a timeout", async () => {
+    vi.useFakeTimers();
+    const h = harnessOf(() => new Promise(() => {}));
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(h.outcomes).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.outcomes).toEqual([{ state: "timeout" }]);
+    expect(h.hostErrors.map((each) => each.kind)).toEqual(["locate"]);
     h.shown.destroy();
   });
 });

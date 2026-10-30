@@ -17,6 +17,14 @@ import type { FrameOutcome } from "./types.ts";
  * frame's window, from an opaque origin (`"null"`), the first well-formed frame status it says; a
  * door that loaded and said nothing never ran (`framing`: its server didn't let this page frame
  * it). The door's frame is gone once it said, before the display's frame is made.
+ *
+ * "A `load` event is not a committed document" (DECISIONS P125): a document wiped and navigated
+ * while it parses never fires `load`, so no host may read a frame's first load as its first
+ * document. The door's "load, then `SETTLE_MS` of silence: framing" doesn't rest on that: no content
+ * ever runs in the door (its one script is Porthole's, by its hash, under `default-src 'none'`),
+ * so nothing navigates it from inside; and a sibling of its scope can't reach it from outside (it
+ * is opaque, so reading it or setting its `location` throws, and it has no name, so `window.open`
+ * and a link's or a form's `target` find nothing): `[door-reach]` and `door-opaque` hold that.
  */
 
 export interface DoorWatch {

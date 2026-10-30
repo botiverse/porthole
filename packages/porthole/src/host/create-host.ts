@@ -29,6 +29,7 @@ import { locateServed } from "./locate.ts";
 import { mayPassOn } from "./pass-on.ts";
 import { watchOutcome, type OutcomeWatch } from "./outcome.ts";
 import { watchDoor, type DoorWatch } from "./door.ts";
+import { outcomeOfRefusal } from "./locator.ts";
 import { STORAGE_USED_METHOD, type FrameSource } from "../isolation/types.ts";
 import { webPlatform } from "../platform/web.ts";
 import { TAKES } from "../platform/focus-guard.ts";
@@ -61,7 +62,11 @@ const MAX_RESTARTS = 3;
 
 /** What the host is told of a served display located without its door (P125), once a mount. */
 export const NO_DOOR =
-  "The server gives no door for this display (FrameLocation.door, P125): upgrade it first, and pass the door on from a locator of your own. Until then no frame status is taken from it: a block shows as a timeout";
+  "A served display needs a door from issue (FrameLocation.door, P125), and this location has none, so no frame was made: upgrade the server (or content Worker) that issues it, and pass the door on from a locator of your own. A clean address is for a tab: to frame what it names, resolve it with client.resolve(address) or <PortholeView address>";
+
+/** What the host is told when its platform makes no doors (P125): no served frame is made. */
+export const NO_DOOR_PLATFORM =
+  "This platform makes no door frames (PlatformHost.createDoor, P125), so no served display that isn't nested is framed on it";
 
 const BASE_KEYS = new Set(["hostContextChanged", "teardown", "close"]);
 
@@ -191,7 +196,6 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       let abort: AbortController | null = null;
       let outcomeWatch: OutcomeWatch | null = null;
       let door: { readonly frame: DoorSurface; readonly watch: DoorWatch } | null = null;
-      let doorTold = false;
       let themeFrame: number | null = null;
       const view = container.ownerDocument.defaultView;
       // The adapter's own operations, the last call of each, replayed into every new frame.
@@ -537,31 +541,28 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
        * A served display with a door (P125): its door first, alone, in a frame of the host's own;
        * its frame only once the door said `open`, within what is left of the run's time. A door
        * that said `blocked` (or never ran, or never answered) is the run's outcome, and nothing of
-       * the content is framed. Without a door (an older server, a locator that drops it, a platform
-       * without doors) the display is framed as it is, takes no frame status, and the host hears
-       * why, once.
+       * the content is framed. A location without a door (an older server, a locator that drops
+       * it, a clean address someone framed) is refused before any frame is made: `blocked:
+       * locate`, and the host hears why (`door`). Nothing infers a door's word from anything else.
        */
-      const enter = (source: FrameSource) => {
+      const enter = (source: FrameSource, timeLeft = timeoutMs) => {
         if (!hasDoor || source.kind !== "url") {
-          start(source, timeoutMs);
+          start(source, timeLeft);
           return;
         }
         if (source.door === undefined || platform.createDoor === undefined) {
-          if (!doorTold) {
-            doorTold = true;
-            hostError(NO_DOOR, "door");
-          }
-          start(source, timeoutMs);
+          hostError(source.door === undefined ? NO_DOOR : NO_DOOR_PLATFORM, "door");
+          emit("outcome", { state: "blocked", reason: "locate" });
           return;
         }
         const began = Date.now();
         const frame = platform.createDoor(container, { url: source.door });
         const watch = watchDoor({
           door: frame,
-          timeoutMs,
+          timeoutMs: timeLeft,
           onOpen: () => {
             closeDoor();
-            start(source, Math.max(0, timeoutMs - (Date.now() - began)));
+            start(source, Math.max(0, timeLeft - (Date.now() - began)));
           },
           onOutcome: (outcome) => {
             closeDoor();
@@ -759,18 +760,43 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           return;
         }
         const hostOrigin = container.ownerDocument.defaultView?.location.origin ?? "";
+        // The run's time covers locating too: a backend that never answers is a timeout.
+        const began = Date.now();
+        let settled = false;
+        const late = setTimeout(() => {
+          if (!settled && mine === generation && !destroyed) {
+            settled = true;
+            controller.abort();
+            hostError("The host's backend didn't give a location in time", "locate");
+            emit("outcome", { state: "timeout" });
+          }
+        }, timeoutMs);
+        // A run stopped (destroyed, started again) stops its clock too.
+        controller.signal.addEventListener("abort", () => clearTimeout(late), { once: true });
         locateServed(locator, instance, config, hostOrigin, controller.signal).then(
           (source) => {
-            if (mine === generation && !destroyed) {
-              enter(source);
+            clearTimeout(late);
+            if (!settled && mine === generation && !destroyed) {
+              settled = true;
+              enter(source, Math.max(0, timeoutMs - (Date.now() - began)));
             }
           },
           (error: unknown) => {
-            if (mine === generation && !controller.signal.aborted) {
-              // The host's own failure (its backend down, access gone): never the content's.
-              hostError(error instanceof Error ? error.message : String(error), "locate");
-              emit("outcome", { state: "blocked", reason: "locate" });
+            clearTimeout(late);
+            if (settled || mine !== generation || controller.signal.aborted) {
+              return;
             }
+            settled = true;
+            // The host's own issue endpoint refused (signed out, denied, not found, P125): its
+            // word, before any frame, never the content's. Anything else is the host's own failure
+            // (its backend down, a network error, a malformed answer): `locate`, never `denied`.
+            const refused = outcomeOfRefusal(error);
+            if (refused !== null) {
+              emit("outcome", refused);
+              return;
+            }
+            hostError(error instanceof Error ? error.message : String(error), "locate");
+            emit("outcome", { state: "blocked", reason: "locate" });
           },
         );
       };

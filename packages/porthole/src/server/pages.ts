@@ -285,3 +285,25 @@ export function doorStatusResponse(
     headers: doorHeaders(hashOfStatus(), options.frameAncestors ?? options.hostOrigins.join(" ")),
   });
 }
+
+/**
+ * What a clean address answers in a frame (P125): a clean address is for a tab of its own, so in a
+ * frame it never goes to the app (no authorize, no sign-in, no refusal page of the app's) and says
+ * nothing to the page that frames it: no script at all, under the status pages' policy without
+ * `script-src` (so `default-src 'none'` forbids every script), framed by the host origins only. A
+ * host frames what a clean address names by resolving it through `issue` (`client.resolve`).
+ */
+export function tabOnlyPage(frameAncestors: string, method = "GET"): Response {
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Open this in a new tab</title><style>${STYLE}</style></head><body><main data-porthole-tab-only=""><h1>Open this in a new tab</h1><p>This address opens in a tab of its own, not inside a frame.</p></main></body></html>`;
+  return new Response(method.toUpperCase() === "HEAD" ? null : body, {
+    status: 403,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors ${frameAncestors}`,
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "x-robots-tag": "noindex, nofollow",
+    },
+  });
+}

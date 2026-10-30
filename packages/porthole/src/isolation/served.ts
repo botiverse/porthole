@@ -205,11 +205,15 @@ function checkDoor(door: unknown, origin: string, nested: boolean): void {
   } catch {
     throw new TypeError("The located door is not a URL");
   }
+  // The load-bearing check (P125): the door is on the display's own origin, the one its issue
+  // located. Its path is pinned below too, for now; a later relaxation of the path (a content
+  // Worker's own door route) must keep this check as it is, apart from the path's.
   if (parsed.origin !== origin) {
     throw new TypeError(
       `The located door is not on its location's origin ${JSON.stringify(origin)} (it is on ${JSON.stringify(safeOrigin(url))})`,
     );
   }
+  // Porthole's door route (P125): pinned for now, not what makes the door the display's.
   if (!parsed.pathname.startsWith(DOOR_PATH) || parsed.hash !== "") {
     throw new TypeError(`The located door is not at ${DOOR_PATH}<key> on its origin`);
   }

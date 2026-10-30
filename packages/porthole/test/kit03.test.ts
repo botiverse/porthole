@@ -7,6 +7,7 @@ import {
   portholeClient,
   type InstanceRef,
 } from "../src/index.ts";
+import { httpLocator, outcomeOfRefusal } from "../src/host/locator.ts";
 import { nodeServer } from "../src/node/index.ts";
 import {
   contentHostFor,
@@ -509,6 +510,90 @@ describe("the client", () => {
     );
     // Outside a browser there is no Origin to judge: the app's credential is what counts.
     expect(await client.handoff()).toBe(true);
+  });
+
+  it("resolves a clean address through the frame route before any frame (P125): a location for the instance's first frame, or the outcome its refusal says", async () => {
+    const { routes } = kit();
+    const client = (authorization?: string) =>
+      portholeClient({
+        displays,
+        base: `${APP}/porthole`,
+        ...(authorization === undefined ? {} : { headers: { authorization } }),
+        fetch: async (input: RequestInfo | URL, init?: RequestInit) =>
+          (await routes(new Request(input, init))) ?? new Response(null, { status: 404 }),
+      });
+    const ada = client("Bearer ada");
+    const resolved = await ada.resolve(`${origin("abc")}/`);
+    if (!("instance" in resolved)) {
+      throw new Error(`not resolved: ${JSON.stringify(resolved)}`);
+    }
+    expect(resolved.instance).toEqual(page("abc"));
+    expect(resolved.location.door?.url).toMatch(/\/__porthole\/door\/[a-z2-7]{16}\?ticket=/u);
+    // The instance's first frame takes that location, once; every later run issues afresh.
+    expect(await ada.locate(page("abc"))).toEqual(resolved.location);
+    const again = await ada.locate(page("abc"));
+    expect(again.url).not.toBe(resolved.location.url);
+    expect(again.door?.url).not.toBe(resolved.location.door?.url);
+    // Refused: the outcome, with no location (no frame is ever made for it).
+    expect(await client().resolve(`${origin("abc")}/`)).toEqual({
+      outcome: { state: "blocked", reason: "sign-in", status: 401 },
+    });
+    expect(await ada.resolve(`${origin("secret1")}/`)).toEqual({
+      outcome: { state: "blocked", reason: "denied", status: 403 },
+    });
+    expect(await ada.resolve(`${origin("abc")}/nothing`)).toEqual({
+      outcome: { state: "blocked", reason: "not-found", status: 404 },
+    });
+  });
+
+  it("a frame route that fails, or answers no location, is thrown: never an outcome of denied (P125)", async () => {
+    for (const answer of [
+      () => new Response(JSON.stringify({ error: { code: "failed" } }), { status: 500 }),
+      () => new Response("{}", { status: 201 }),
+    ]) {
+      const client = portholeClient({
+        displays,
+        base: `${APP}/porthole`,
+        fetch: () => Promise.resolve(answer()),
+      });
+      await expect(client.resolve(`${origin("abc")}/`)).rejects.toThrow();
+    }
+    const offline = portholeClient({
+      displays,
+      base: `${APP}/porthole`,
+      fetch: () => Promise.reject(new TypeError("Failed to fetch")),
+    });
+    await expect(offline.resolve(`${origin("abc")}/`)).rejects.toThrow(/Failed to fetch/u);
+  });
+
+  it("a 403's own reason code reaches the outcome only from the answer's error.reason (P125)", async () => {
+    const answer =
+      (error: Record<string, unknown>): typeof fetch =>
+      async () =>
+        new Response(JSON.stringify({ error }), { status: 403 });
+    for (const [error, expected] of [
+      [
+        { code: "forbidden", reason: "revoked" },
+        { state: "blocked", reason: "denied", status: 403, code: "revoked" },
+      ],
+      [{ code: "forbidden" }, { state: "blocked", reason: "denied", status: 403 }],
+      // Not a short lowercase token: no code. The answer's `code` is never taken as one.
+      [
+        { code: "forbidden", reason: "<b>Revoked</b>" },
+        { state: "blocked", reason: "denied", status: 403 },
+      ],
+    ] as const) {
+      const client = portholeClient({ displays, base: `${APP}/porthole`, fetch: answer(error) });
+      expect(await client.resolve(`${origin("abc")}/`)).toEqual({ outcome: expected });
+      // httpLocator throws the same refusal, with the same reason, for createHost to map.
+      let thrown: unknown = null;
+      try {
+        await httpLocator(`${APP}/porthole/frames`, { fetch: answer(error) }).locate(page("abc"));
+      } catch (each) {
+        thrown = each;
+      }
+      expect(outcomeOfRefusal(thrown)).toEqual(expected);
+    }
   });
 
   it("hands out its functions bare, as React's useSyncExternalStore takes them (P074)", async () => {

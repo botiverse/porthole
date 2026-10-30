@@ -832,14 +832,27 @@ for those kinds). The content frame's own frame status is then never taken, and 
 requirements:
 
 - **Deploy the server (or your content Worker) before the host.** The door is minted and served by
-  the server; a host that expects a door from a server that doesn't yet mint one is strict (no
-  frame status taken, a block shows as a timeout) and raises a `hostError` of kind `"door"` once per
-  mount. Upgrade the server/Worker first, then the host. This is a hard requirement, not a
+  the server; a host given a served non-nested location with no door (from a server that doesn't
+  yet mint one) builds no frame for it: `blocked: locate`, and a `hostError` of kind `"door"`
+  naming the fix. Upgrade the server/Worker first, then the host. This is a hard requirement, not a
   preference.
-- **A custom locator must pass `door` through.** If you rebuild `FrameLocation` yourself (a locator
-  of your own rather than `httpLocator`), carry `door` from your issue endpoint unchanged;
-  `httpLocator` and the host kit's client already do. Dropping it makes every served non-nested
-  display strict, as above.
+- **A custom locator must pass `door` through, and issue anew for every run.** If you rebuild
+  `FrameLocation` yourself (a locator of your own rather than `httpLocator`), carry `door` from your
+  issue endpoint unchanged; `httpLocator` and the host kit's client already do. Dropping it refuses
+  every served non-nested display, as above. And `locate` is called again on every run (a reload,
+  a restart after the content navigated its frame away): answer each call with a fresh issue (a new
+  ticket, a new door ticket). A location reused from an earlier run carries tickets already taken,
+  so its door says `blocked: session` ("this link has been used").
+- **A clean address is for a tab.** Never give `createHost` a clean address (`urlOf`, `link`) as a
+  frame's location: it has no door, so it is refused before any frame, as above, and the content
+  origin answers it in a frame with a page that has no script and goes nowhere. To frame what a
+  clean address names, resolve it through your issue endpoint first: `client.resolve(address)` (or
+  `<PortholeView address>`) posts `{ address }`, and the endpoint answers the location for what it
+  names (with its door; a file set's page below its version opens at that page), or the refusal its
+  tab would get. A refusal is the display's outcome with no frame built: 401 `blocked: sign-in`,
+  403 `blocked: denied` (with your reason code if your answer gives `error.reason`), 404 `blocked:
+  not-found`; any other failure is `blocked: locate` with a `locate` host error, and a backend that
+  never answers is a `timeout`. That mapping holds for every locate, an instance's too.
 
 A **content Worker of your own** (one that answers the content origins itself, instead of
 `/server`) serves the door too: `issue` mints the door ticket and returns `door: { url }`, and the

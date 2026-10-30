@@ -3,10 +3,13 @@ import type { FrameOutcome } from "../host/types.ts";
 import type { ConformanceTest } from "./probes.ts";
 
 /**
- * Redirect entry's cases (P068): a clean address opens directly, signed in or not, and never
- * shows content without access; its one-time code works once, on its own origin; in a frame, the
- * app's sign-in never shows. A host implements `EntryConformanceHost` (or gives
- * `defineHostConformance` its `entry`).
+ * Redirect entry's cases (P068, P125): a clean address opens directly in a tab, signed in or not,
+ * and never shows content without access; its one-time code works once, on its own origin. A clean
+ * address is for a tab: a host frames what one names by resolving it through its issue endpoint
+ * first (a door, a ticket), and signed out, denied or not found, it builds no frame at all and
+ * shows its fallback from that answer. A clean address framed as it is goes nowhere: the host
+ * refuses it (no door), and the content origin answers it with a page that says nothing. A host
+ * implements `EntryConformanceHost` (or gives `defineHostConformance` its `entry`).
  */
 
 export interface EntryConformanceHost {
@@ -37,13 +40,32 @@ export interface EntryConformanceHost {
    */
   completeSignIn?(page: Page): Promise<void>;
   /**
-   * Frames a clean address on the app's page as the app would (a location of that address),
-   * returning the frame and the display's outcome once it has one.
+   * Shows a clean address on the app's page as the app would (P125): resolved through the app's
+   * issue endpoint (`client.resolve`, `<PortholeView address>`), then framed through the location
+   * it issued. Returns the frame, the display's outcome once it has one, and whether any frame was
+   * ever made for it.
    */
   frame(
     page: Page,
     url: string,
-  ): Promise<{ frame(): Promise<Frame>; outcome(): Promise<FrameOutcome> }>;
+  ): Promise<{
+    frame(): Promise<Frame>;
+    outcome(): Promise<FrameOutcome>;
+    framed(): Promise<boolean>;
+  }>;
+  /**
+   * Gives the app's `createHost` a clean address as a frame's location, as it is (no issue, no
+   * door), as a host of the wrong kind would. Returns the outcome, whether a frame was made, and
+   * the host errors it heard.
+   */
+  frameDirectly(
+    page: Page,
+    url: string,
+  ): Promise<{
+    outcome(): Promise<FrameOutcome>;
+    framed(): Promise<boolean>;
+    hostErrors(): Promise<readonly { readonly message: string; readonly kind: string }[]>;
+  }>;
 }
 
 export interface EntrySuiteOptions {
@@ -214,42 +236,125 @@ export function entryTests(
 
   define(
     "served.entry.framed",
-    "a clean address in a frame shows the content where the browser keeps the cookies, else asks for a tab: never the app's sign-in",
+    "a clean address shown in a frame is resolved through issue first, then framed through its door: the content, never the app's sign-in",
     async ({ page, browserName }, info) => {
       await host.signIn(page);
       const before = page.url();
       const shown = await host.frame(page, await host.url("entry-framed"));
-      const outcome = await shown.outcome();
+      expect(await shown.outcome(), "probe: the issued frame loaded").toEqual({ state: "loaded" });
       const frame = await shown.frame();
       expect(page.url(), "the app's page stays where it was").toBe(before);
-      expect(new URL(frame.url()).pathname).not.toMatch(/sign-?in/iu);
-      if (outcome.state === "loaded") {
-        await expect(frame.locator("#artifact")).toHaveText("version 1");
-      } else {
-        expect(outcome).toMatchObject({ state: "blocked" });
-        expect(["cookies", "sign-in"]).toContain((outcome as { readonly reason: string }).reason);
-        expect(await shows(frame)).toBe(false);
-      }
-      const said = outcome.state === "blocked" ? `blocked: ${outcome.reason}` : outcome.state;
+      // An issued frame (P125): Porthole's own document address, never the clean address, and
+      // never the app's sign-in. Its access is the ticket's (P083), so every engine shows it.
+      expect(new URL(frame.url()).pathname, "probe: framed through issue").toMatch(
+        /^\/__porthole\/(d|f)\//u,
+      );
+      await expect(frame.locator("#artifact")).toHaveText("version 1");
       info.annotations.push({
         type: "measured",
-        description: `${browserName}: framed entry ${said}`,
+        description: `${browserName}: framed entry loaded`,
       });
     },
   );
 
   define(
     "served.entry.framed-signed-out",
-    "signed out, a clean address in a frame asks for a tab to sign in: the sign-in never shows in a frame",
+    "signed out, a clean address shown in a frame builds no frame: issue says sign in, and the fallback comes from that answer",
     async ({ page }) => {
       await host.signIn(page);
       // The app's page stays; the browser forgets every sign-in.
       await page.context().clearCookies();
       const shown = await host.frame(page, await host.url("entry-framed-out"));
-      expect(await shown.outcome()).toMatchObject({ state: "blocked", reason: "sign-in" });
-      const frame = await shown.frame();
-      await expect(frame.locator("h1")).toHaveText("Open this in a new tab to sign in");
-      expect(await shows(frame)).toBe(false);
+      expect(await shown.outcome(), "probe: issue's answer is the outcome").toEqual({
+        state: "blocked",
+        reason: "sign-in",
+        status: 401,
+      });
+      expect(await shown.framed(), "probe: no frame was made").toBe(false);
+    },
+  );
+
+  define(
+    "served.entry.framed-denied",
+    "a clean address its viewer may not open, shown in a frame, builds no frame: issue says denied",
+    async ({ page }, info) => {
+      info.skip(
+        host.denied === undefined,
+        "the host gave no address its viewer may not open (denied)",
+      );
+      await host.signIn(page);
+      const shown = await host.frame(page, (await host.denied?.("entry-framed-denied")) ?? "");
+      expect(await shown.outcome(), "probe: issue's answer is the outcome").toMatchObject({
+        state: "blocked",
+        reason: "denied",
+        status: 403,
+      });
+      expect(await shown.framed(), "probe: no frame was made").toBe(false);
+    },
+  );
+
+  define(
+    "served.entry.framed-not-found",
+    "a clean address that names nothing, shown in a frame, builds no frame: issue says not found",
+    async ({ page }, info) => {
+      const unknown = (await host.unknown?.()) ?? [];
+      // An address under a label the app never assigns: the first one that has a path.
+      const address = unknown.find((each) => new URL(each).hostname.split(".").length > 2);
+      info.skip(address === undefined, "the host gave no address that names nothing (unknown)");
+      await host.signIn(page);
+      const shown = await host.frame(page, address ?? "");
+      expect(await shown.outcome(), "probe: issue's answer is the outcome").toEqual({
+        state: "blocked",
+        reason: "not-found",
+        status: 404,
+      });
+      expect(await shown.framed(), "probe: no frame was made").toBe(false);
+    },
+  );
+
+  define(
+    "served.entry.in-a-frame",
+    "a clean address framed as it is goes nowhere: the host refuses it (no door), and the content origin answers a page with no script, never the app",
+    async ({ page }) => {
+      await host.signIn(page);
+      const url = await host.url("entry-in-a-frame");
+      // The host's own createHost, given the clean address as a location: refused before any
+      // frame (a served display needs a door from issue), and told why.
+      const direct = await host.frameDirectly(page, url);
+      expect(await direct.outcome(), "probe: refused before any frame").toEqual({
+        state: "blocked",
+        reason: "locate",
+      });
+      expect(await direct.framed(), "probe: no frame was made").toBe(false);
+      expect(
+        (await direct.hostErrors()).map((each) => each.kind),
+        "probe: the host heard why (door)",
+      ).toContain("door");
+      // A plain frame of the app's page at the clean address: the content origin answers it with
+      // a page of its own that has no script and goes nowhere (never the app's authorize).
+      const seen = await page.evaluate(async (address) => {
+        const frame = document.createElement("iframe");
+        const loaded = new Promise((resolve) =>
+          frame.addEventListener("load", resolve, { once: true }),
+        );
+        frame.src = address;
+        document.body.append(frame);
+        await loaded;
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return frame.getAttribute("src");
+      }, url);
+      expect(seen).toBe(url);
+      const frame = page.frames().find((each) => each.url() === url);
+      expect(
+        frame,
+        "probe: the frame stayed on the clean address (never the app's authorize)",
+      ).toBeDefined();
+      expect(
+        await frame?.locator("script").count(),
+        "probe: the page in the frame has no script",
+      ).toBe(0);
+      await expect(frame!.locator("h1")).toHaveText("Open this in a new tab");
+      expect(await shows(frame!), "probe: no content in the frame").toBe(false);
     },
   );
 

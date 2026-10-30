@@ -1,7 +1,7 @@
 import type { CapabilityHandlers, ConfirmRequest } from "../../bridge/types.ts";
 import type { PortholeConfig } from "../../config/schema.ts";
 import { createHost } from "../../host/create-host.ts";
-import { httpLocator } from "../../host/locator.ts";
+import { httpLocator, resolveAddress } from "../../host/locator.ts";
 import type { DisplayEvents, DisplayHandle } from "../../host/types.ts";
 import type { FrameLocation, InstanceLocator, InstanceRef } from "../../isolation/types.ts";
 import type { LaunchSpec, RecordedCall, RecordedEvent } from "../index.ts";
@@ -108,6 +108,73 @@ addEventListener("message", (event) => {
   }
 });
 
+/** A display's record, before anything is mounted for it (a no-op handle until then). */
+function recordOf(id: number): Shown {
+  box(id, 600, 400);
+  const idle = { destroy() {}, setContent() {}, setTheme() {}, on: () => () => {} };
+  const shown: Shown = {
+    handle: idle as unknown as DisplayHandle,
+    calls: [],
+    events: [],
+    confirmations: [],
+    disclosed: [],
+    received: [],
+    origin: null,
+    failure: null,
+    frame: null,
+  };
+  displays.set(id, shown);
+  return shown;
+}
+
+/** Mounts a served display in its box, located by `asked` (the issue endpoint, or a location). */
+function mountServed(
+  id: number,
+  shown: Shown,
+  config: PortholeConfig,
+  instance: InstanceRef,
+  asked: InstanceLocator,
+  content?: string,
+): void {
+  const container = document.getElementById(`porthole-display-${id}`) as HTMLElement;
+  const locator: InstanceLocator = {
+    async locate(each, signal) {
+      try {
+        const location = await asked.locate(each, signal);
+        shown.origin = location.origin;
+        return location;
+      } catch (error) {
+        shown.failure = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+        throw error;
+      }
+    },
+  };
+  const handle = createHost(config, {
+    handlers: recorder(shown.calls),
+    locator,
+    hostInfo: { name: "porthole-conformance", version: "1" },
+    ...(nonce === undefined ? {} : { nonce }),
+  }).mount(container, {
+    displayId: `display-${id}`,
+    title: "Probe",
+    scheme: "light",
+    instance,
+  });
+  (shown as { handle: DisplayHandle }).handle = handle;
+  watch(id, shown);
+  // The frame element, once it exists, so its messages can be told from others' (never a door).
+  const found = () => {
+    shown.frame = container.querySelector("iframe:not([data-porthole-door])");
+    if (shown.frame === null) {
+      requestAnimationFrame(found);
+    }
+  };
+  found();
+  if (content !== undefined) {
+    handle.setContent(content);
+  }
+}
+
 const harness = {
   /** An opaque display with the suite's content (the leak suite's `launch`). */
   async launch(spec: LaunchSpec): Promise<number> {
@@ -178,62 +245,58 @@ const harness = {
   ): number {
     const id = next;
     next += 1;
-    const container = box(id, 600, 400);
-    const calls: RecordedCall[] = [];
-    const shown: Shown = {
-      handle: null as unknown as DisplayHandle,
-      calls,
-      events: [],
-      confirmations: [],
-      disclosed: [],
-      received: [],
-      origin: null,
-      failure: null,
-      frame: null,
-    };
+    const shown = recordOf(id);
     const asked: InstanceLocator =
       "issue" in where
         ? httpLocator(where.issue, where.headers === undefined ? {} : { headers: where.headers })
         : { locate: () => Promise.resolve(where.location) };
-    const locator: InstanceLocator = {
-      async locate(each, signal) {
-        try {
-          const location = await asked.locate(each, signal);
-          shown.origin = location.origin;
-          return location;
-        } catch (error) {
-          shown.failure =
-            error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-          throw error;
-        }
-      },
-    };
-    const handle = createHost(config, {
-      handlers: recorder(calls),
-      locator,
-      hostInfo: { name: "porthole-conformance", version: "1" },
-      ...(nonce === undefined ? {} : { nonce }),
-    }).mount(container, {
-      displayId: `display-${id}`,
-      title: "Probe",
-      scheme: "light",
-      instance,
-    });
-    (shown as { handle: DisplayHandle }).handle = handle;
-    watch(id, shown);
-    // The frame element, once it exists, so its messages can be told from others'.
-    const found = () => {
-      shown.frame = container.querySelector("iframe");
-      if (shown.frame === null) {
-        requestAnimationFrame(found);
-      }
-    };
-    found();
-    if (content !== undefined) {
-      handle.setContent(content);
-    }
+    mountServed(id, shown, config, instance, asked, content);
     return id;
   },
+
+  /**
+   * A clean address, shown as a host shows one (P125): resolved through the app's issue endpoint
+   * first (`{ address }`, `resolveAddress`), then framed through the location it issued (its
+   * door); signed out, denied or not found, the answer is the display's outcome and no frame is
+   * ever made. Later runs issue afresh by the resolved instance.
+   */
+  showAddress(
+    config: PortholeConfig,
+    where: { readonly issue: string; readonly headers?: Readonly<Record<string, string>> },
+    address: string,
+  ): number {
+    const id = next;
+    next += 1;
+    const shown = recordOf(id);
+    const options = where.headers === undefined ? {} : { headers: where.headers };
+    void resolveAddress(where.issue, address, options).then(
+      (resolved) => {
+        if ("outcome" in resolved) {
+          shown.events.push({ type: "outcome", detail: resolved.outcome });
+          return;
+        }
+        shown.origin = resolved.location.origin;
+        let first: FrameLocation | null = resolved.location;
+        const byInstance = httpLocator(where.issue, options);
+        const asked: InstanceLocator = {
+          locate(each, signal) {
+            const given = first;
+            first = null;
+            return given === null ? byInstance.locate(each, signal) : Promise.resolve(given);
+          },
+        };
+        mountServed(id, shown, config, resolved.instance, asked);
+      },
+      (error: unknown) => {
+        shown.failure = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      },
+    );
+    return id;
+  },
+
+  /** Whether a display's frame was ever made (P125: a refused clean address makes none). */
+  framed: (id: number) =>
+    (document.getElementById(`porthole-display-${id}`)?.querySelector("iframe") ?? null) !== null,
 
   origin: (id: number) => displays.get(id)?.origin ?? null,
   failure: (id: number) => displays.get(id)?.failure ?? null,
