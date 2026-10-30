@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Page } from "@playwright/test";
 import type { PortholeConfig } from "../../src/index.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
 import { storedFiles } from "./files.ts";
@@ -54,7 +54,7 @@ const hostile = (act: string, forMs = 6000): string => `<p id="a">A</p><script>
         try { path = w.location.pathname; } catch (e) {}
         seen.push({ i, first: { readyState: d.readyState, hasB: !!d.querySelector("#b"), scripts: d.scripts.length, path }, at: Date.now() - started });
       }
-      try { act(w, d, i); } catch (e) { seen.push({ i, act: "threw: " + e.name }); }
+      try { act(w, d, i); } catch (e) { seen.push({ i, act: "threw: " + e.name + ": " + e.message }); }
     }
   };
   const channel = new MessageChannel();
@@ -159,6 +159,35 @@ function watchA(page: Page): unknown[] {
   return seen;
 }
 
+/**
+ * The positive control of a probe whose attack is A writing into B's document: A did (`done`, one
+ * of what A reports when it acted: `wrote`, `wiped`, `spokeFirst`). Where the engine refused every
+ * write A tried (each threw), the attack can't be made there: the probe is skipped with that
+ * measurement, never passed (P096; Cato, 2026-10-30). It is measured on every run, so a version of
+ * the engine that lets A write runs the probe whole again: retest with each engine version. A that
+ * neither acted nor was refused never reached B: that fails.
+ */
+async function requireReach(
+  said: unknown[],
+  done: readonly string[],
+  browser: Browser,
+): Promise<void> {
+  // A reports over the console every 200 ms.
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const reports = said as Record<string, unknown>[];
+  if (reports.some((each) => done.some((key) => each[key] !== undefined))) {
+    return;
+  }
+  const refused = reports.filter((each) => typeof each.act === "string");
+  test.skip(
+    refused.length > 0,
+    `precondition doesn't hold on ${browser.browserType().name()} ${browser.version()} (measured): ` +
+      `every write A tried into B's document threw (${refused.length}×, ${JSON.stringify(refused.slice(0, 2))}); ` +
+      "retest with each engine version",
+  );
+  throw new Error(`positive control: A never reached B\nA saw: ${JSON.stringify(said)}`);
+}
+
 test.use({ trace: "off" });
 
 test.describe("a served display's word comes from a door no sibling can reach (P125)", () => {
@@ -166,6 +195,7 @@ test.describe("a served display's word comes from a door no sibling can reach (P
 
   test("[sibling-inject] a sibling that speaks first in B's frame moves nothing: B is never blocked, the host hears it", async ({
     page,
+    browser,
   }) => {
     const served = await harness();
     const scope = unique("inject");
@@ -194,6 +224,7 @@ test.describe("a served display's word comes from a door no sibling can reach (P
       outcome.state !== "blocked",
       `probe: A's injected block moved nothing (${JSON.stringify(outcome)})`,
     ).toBe(true);
+    await requireReach(said, ["wrote"], browser);
     await expect
       .poll(async () => (await bHandle.read()).hostErrors.length, {
         message: "probe: the host heard A's status, as a frame-status error",
@@ -216,6 +247,7 @@ test.describe("a served display's word comes from a door no sibling can reach (P
 
   test("[sibling-reload] a sibling that reloads a loaded B and speaks first in the new run moves nothing", async ({
     page,
+    browser,
   }) => {
     // After Ferryman's probe (the audit of P125): honest B loads; hostile A, of B's scope, mounted
     // after, puts `location.reload()` into B (a reload passes the shell's guard, and the host starts
@@ -279,8 +311,9 @@ test.describe("a served display's word comes from a door no sibling can reach (P
         },
       )
       .toBe(true)
-      .catch((error: Error) => {
-        throw new Error(`${error.message}\nA saw: ${JSON.stringify(said)}`);
+      .catch(async (error: Error) => {
+        await requireReach(said, ["spokeFirst"], browser);
+        throw error;
       });
     await page.waitForTimeout(4_000);
     const record = await bHandle.read();
@@ -316,9 +349,11 @@ test.describe("a served display's word comes from a door no sibling can reach (P
 
   test("[sibling-wipe] a sibling that wipes B's first document never makes it blocked (framing): a timeout", async ({
     page,
+    browser,
   }) => {
     const served = await harness();
     const scope = unique("wipe");
+    const said = watchA(page);
     const bHandle = await mountAthenB(page, served, scope, hostile(wipeOnly), async () => {
       const instance = shell(scope);
       return mount(
@@ -335,6 +370,7 @@ test.describe("a served display's word comes from a door no sibling can reach (P
       outcome.state === "loaded" || outcome.state === "timeout",
       `probe: B never blocked, never framing (${JSON.stringify(outcome)})`,
     ).toBe(true);
+    await requireReach(said, ["wiped"], browser);
     const record = await bHandle.read();
     expect(
       record.outcomes.some((each) => each.state === "blocked"),
@@ -344,6 +380,7 @@ test.describe("a served display's word comes from a door no sibling can reach (P
 
   test("[proxy] a sibling can't forge a block or framing against a sandbox-proxy view", async ({
     page,
+    browser,
   }) => {
     const served = await harness();
     const scope = unique("proxy");
@@ -374,6 +411,7 @@ test.describe("a served display's word comes from a door no sibling can reach (P
           `${error.message}\nB: ${JSON.stringify({ outcomes: record.outcomes, hostErrors: record.hostErrors })}\nA saw: ${JSON.stringify(said)}`,
         );
       });
+    await requireReach(said, ["wrote"], browser);
     const { outcomes } = await bHandle.read();
     expect(
       outcomes.filter(forged),

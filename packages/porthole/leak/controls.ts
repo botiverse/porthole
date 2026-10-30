@@ -102,6 +102,16 @@ const TAB_SANDBOX = [
   "a frame's sealed address opened on a tab of its own is sandboxed as its frame is",
 ];
 
+/**
+ * WebKit refuses a sibling's write into another display's loading document (each `document.open`
+ * A tries throws), measured in CI on 2026-10-30 (three runs, every attempt): the probes whose
+ * attack is that write skip there, with the measurement (`requireReach`), so no control can see
+ * their walls on WebKit. Retest with each WebKit version: the probes measure it on every run and
+ * run whole again once A can write.
+ */
+const WEBKIT_REFUSES_SIBLING_WRITE =
+  "no probe on WebKit: it refuses a sibling's write into another display's loading document (document.open throws; measured in CI 2026-10-30, every attempt of three runs), so [sibling-inject], [sibling-reload], [sibling-wipe] and [proxy] skip there with that measurement; retest with each WebKit version";
+
 /** The same tests on every engine. */
 function all(...tests: string[]): Control["fails"] {
   return { chromium: tests, webkit: tests, firefox: tests };
@@ -614,24 +624,33 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   // whether its own content's (the two P124 outcome cases) or a sibling's (inject, reload, proxy).
   "content-status": {
     specs: [OUTCOME, SIBLINGS_STATUS],
-    fails: all(
-      "a served shell's content that says it is blocked is told nothing and shown nothing (P124)",
-      "a served artifact page that says it is blocked as it loads is told nothing and shown nothing (P124)",
-      "[sibling-inject]",
-      "[sibling-reload]",
-      "[proxy]",
-    ),
+    fails: {
+      ...all(
+        "a served shell's content that says it is blocked is told nothing and shown nothing (P124)",
+        "a served artifact page that says it is blocked as it loads is told nothing and shown nothing (P124)",
+        "[sibling-inject]",
+        "[sibling-reload]",
+        "[proxy]",
+      ),
+      // The sibling probes skip on WebKit (WEBKIT_REFUSES_SIBLING_WRITE): its own content's word.
+      webkit: [
+        "a served shell's content that says it is blocked is told nothing and shown nothing (P124)",
+        "a served artifact page that says it is blocked as it loads is told nothing and shown nothing (P124)",
+      ],
+    },
   },
   // P124's first-word rule in place of the door: a sibling that speaks first in a served
   // non-nested display's frame (its own, or the sandbox proxy's) is taken.
   "door-status": {
     specs: [SIBLINGS_STATUS],
-    fails: all("[sibling-inject]", "[sibling-reload]", "[proxy]"),
+    fails: { ...all("[sibling-inject]", "[sibling-reload]", "[proxy]"), webkit: [] },
+    holds: { why: WEBKIT_REFUSES_SIBLING_WRITE },
   },
   // A served non-nested display's silence read as `framing` again: a sibling that wipes it.
   "door-silence": {
     specs: [SIBLINGS_STATUS],
-    fails: all("[sibling-wipe]"),
+    fails: { ...all("[sibling-wipe]"), webkit: [] },
+    holds: { why: WEBKIT_REFUSES_SIBLING_WRITE },
   },
   // The door not opaque, heard from the location's origin (displays still work): a sibling reads
   // the live door and rewrites it into Porthole's own status page, which speaks for the display.
