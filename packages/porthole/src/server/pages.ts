@@ -1,3 +1,4 @@
+import { DOOR_SANDBOX_TOKENS } from "../compile/policy.ts";
 import { FRAME_STATUS_METHOD } from "../isolation/types.ts";
 import type { FrameBlock } from "../host/types.ts";
 import { base64url, sha256, utf8 } from "./crypto.ts";
@@ -142,15 +143,16 @@ export function enterPage(
   return new Response(body, { status: 200, headers });
 }
 
-/** The status script's hash, for a page that carries it inline (`script-src 'sha256-…'`). */
-let statusHash: string | null = null;
-const hashOfStatus = (): string => {
-  statusHash ??= base64url(sha256(utf8(STATUS_SCRIPT)))
+/** A script's hash, for a page that carries it inline (`script-src 'sha256-…'`). */
+const hashOf = (script: string): string => {
+  const hash = base64url(sha256(utf8(script)))
     .replace(/-/gu, "+")
     .replace(/_/gu, "/");
-  const padding = (4 - (statusHash.length % 4)) % 4;
-  return `'sha256-${statusHash}${"=".repeat(padding)}'`;
+  const padding = (4 - (hash.length % 4)) % 4;
+  return `'sha256-${hash}${"=".repeat(padding)}'`;
 };
+let statusHash: string | null = null;
+const hashOfStatus = (): string => (statusHash ??= hashOf(STATUS_SCRIPT));
 
 /**
  * A redirect entry's page on the app's own origin (P068): why it shows nothing, told to the page
@@ -211,4 +213,75 @@ export function statusPageOf(options: {
     options.link,
     options.method,
   );
+}
+
+/** A door's word that its display may be framed (P125), from the page's data attributes. */
+const DOOR_SCRIPT = `(() => {
+  const main = document.querySelector("[data-porthole-door]");
+  if (main === null) return;
+  const hosts = JSON.parse(main.dataset.portholeHosts || "[]");
+  ${say()}
+  say({ state: "open" });
+})();`;
+let doorHash: string | null = null;
+const hashOfDoor = (): string => (doorHash ??= hashOf(DOOR_SCRIPT));
+
+/**
+ * A door's headers (P125): its one script by its hash (an opaque document has no `'self'` to load
+ * one from), nothing else loads, sandboxed with scripts alone in its header too (opaque on a tab, and
+ * in a frame whose attribute a host's own platform forgot), framed by the host origins, never
+ * cached, never sent on, no cookie.
+ */
+const doorHeaders = (script: string, frameAncestors: string): Headers =>
+  new Headers({
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+    "content-security-policy": `default-src 'none'; script-src ${script}; base-uri 'none'; form-action 'none'; sandbox ${DOOR_SANDBOX_TOKENS.join(" ")}; frame-ancestors ${frameAncestors}`,
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-robots-tag": "noindex, nofollow",
+  });
+
+/** What a door is given: the host origins it tells, and who may frame it (default, those). */
+export interface DoorOptions {
+  readonly hostOrigins: readonly string[];
+  readonly frameAncestors?: string;
+  readonly method?: string;
+}
+
+/**
+ * A door that opens (P125): its display may be framed. It says `open` to the page that frames it,
+ * at each web host origin and (a desktop scheme among them) to its parent (P070), once, as it
+ * parses. For a content Worker of a host's own: answer it at `DOOR_PATH<key>` only once the door's
+ * own ticket was taken and the checks the content's address runs passed for the same grant.
+ */
+export function doorResponse(options: DoorOptions): Response {
+  const hosts = escape(JSON.stringify(options.hostOrigins));
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Opening</title></head><body><main data-porthole-door="" data-porthole-hosts="${hosts}"></main><script>${DOOR_SCRIPT}</script></body></html>`;
+  return new Response(options.method?.toUpperCase() === "HEAD" ? null : body, {
+    status: 200,
+    headers: doorHeaders(hashOfDoor(), options.frameAncestors ?? options.hostOrigins.join(" ")),
+  });
+}
+
+/**
+ * A door that doesn't open (P125): why, said `blocked` to the page that frames it, as a content
+ * origin's status page says it (`session` 401: no ticket, or one used, ended, or not a door's of
+ * this instance on this origin; `denied` 403 with the host's code; `not-found` 404: no document, or
+ * a file set whose entry isn't a page; `error` 500).
+ */
+export function doorStatusResponse(
+  options: DoorOptions & {
+    readonly status: number;
+    readonly reason: FrameBlock;
+    readonly code?: string;
+  },
+): Response {
+  const { status, reason, code } = options;
+  const hosts = escape(JSON.stringify(options.hostOrigins));
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Not shown</title></head><body><main data-porthole-status="${status}" data-porthole-reason="${escape(reason)}"${code === undefined ? "" : ` data-porthole-code="${escape(code)}"`} data-porthole-hosts="${hosts}"></main><script>${STATUS_SCRIPT}</script></body></html>`;
+  return new Response(options.method?.toUpperCase() === "HEAD" ? null : body, {
+    status,
+    headers: doorHeaders(hashOfStatus(), options.frameAncestors ?? options.hostOrigins.join(" ")),
+  });
 }

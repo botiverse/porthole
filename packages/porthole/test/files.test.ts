@@ -221,6 +221,16 @@ describe("published paths (P081)", () => {
     ).toEqual(["collision"]);
     expect(codes(checkFileSet({ "main.html": { size: 1 } }))).toEqual(["entry"]);
     expect(checkFileSet({ "main.html": { size: 1 } }, { entry: "main.html" })).toEqual([]);
+    // The entry must be a page (P125, P124-2): a set opening at a non-page is refused.
+    expect(codes(checkFileSet({ "note.txt": { size: 1 } }, { entry: "note.txt" }))).toEqual([
+      "entry",
+    ]);
+    expect(
+      codes(
+        checkFileSet({ "index.html": { size: 1 }, "pic.svg": { size: 1 } }, { entry: "pic.svg" }),
+      ),
+    ).toEqual(["entry"]);
+    expect(checkFileSet({ "page.htm": { size: 1 } }, { entry: "page.htm" })).toEqual([]);
     expect(codes(checkFileSet({ "index.html": { size: 1 }, "../x": { size: 1 } }))).toEqual([
       "path",
     ]);

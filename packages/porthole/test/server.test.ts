@@ -30,6 +30,11 @@ const configs = {
   inlineWidget: presets.inlineWidget({ isolation: "domain", contentOrigins: [CONTENT] }),
   artifact: presets.artifact({ isolation: "domain", contentOrigins: [CONTENT] }),
   mcpApp: presets.mcpApp({ isolation: "domain", contentOrigins: [CONTENT] }),
+  artifactNested: presets.artifact({
+    isolation: "domain",
+    contentOrigins: [CONTENT],
+    nested: true,
+  }),
 };
 
 const pages: Record<string, string> = {
@@ -375,10 +380,16 @@ describe("tickets and cookies", () => {
         take: (id) => store.take(id),
       },
     });
-    const { url } = await porthole.issue(shell, { viewer: "v" });
+    const { url, door } = await porthole.issue(shell, { viewer: "v" });
     const ticket = new URL(url).searchParams.get("ticket") ?? "";
-    expect(ids).toHaveLength(1);
-    expect(ids[0]).not.toContain(ticket);
+    const doorTicket = new URL(door?.url ?? "https://x.invalid/").searchParams.get("ticket") ?? "";
+    // The content's ticket and its door's (P125), each stored by its hash alone.
+    expect(ids).toHaveLength(2);
+    expect(doorTicket).not.toBe("");
+    for (const id of ids) {
+      expect(id).not.toContain(ticket);
+      expect(id).not.toContain(doorTicket);
+    }
   });
 
   it("checks grants", async () => {
@@ -392,6 +403,126 @@ describe("tickets and cookies", () => {
     await expect(
       server().issue({ scope: "", document: shell.document }, { viewer: "v" }),
     ).rejects.toThrow(/scope/u);
+  });
+});
+
+describe("a served display's door (P125)", () => {
+  const artifact: InstanceRef = {
+    scope: "conversation-1",
+    document: { kind: "artifact", id: "page", version: "1" },
+  };
+  const proxied: InstanceRef = { scope: "app-1", document: { kind: "mcp-proxy" } };
+  const nested: InstanceRef = {
+    scope: "nest-1",
+    document: { kind: "artifact", id: "page", version: "1", preset: "artifactNested" },
+  };
+
+  const doorOf = (location: { readonly door?: { readonly url: string } }): string => {
+    expect(location.door, "a served non-nested display has a door").toBeDefined();
+    return location.door!.url;
+  };
+
+  it("issue mints a door for a shell, a page and the proxy, on the same origin, not for nested or url", async () => {
+    const porthole = server({ upstream: proxyTo({ target: () => "https://app.test" }) });
+    for (const instance of [shell, artifact, proxied]) {
+      const location = await porthole.issue(instance, { viewer: "v" });
+      const url = new URL(doorOf(location));
+      expect(url.origin).toBe(location.origin);
+      expect(url.pathname).toMatch(/^\/__porthole\/door\/[a-z2-7]{16}$/u);
+      // Its key is the instance's, as the content's address is.
+      expect(url.pathname.split("/").at(-1)).toBe(new URL(location.url).pathname.split("/").at(-1));
+    }
+    expect(
+      (await porthole.issue(nested, { viewer: "v" })).door,
+      "a nested page has no door: its shell is Porthole's own first document",
+    ).toBeUndefined();
+    const app = await porthole.issue(
+      { scope: "app-2", document: { kind: "external", url: "https://app.test/" } },
+      { viewer: "v" },
+    );
+    expect(app.door, "a url-mode app has no door").toBeUndefined();
+  });
+
+  it("the door takes its own ticket once and answers open, with its CSP and no cookie", async () => {
+    const porthole = server();
+    const location = await porthole.issue(shell, { viewer: "v" });
+    const door = doorOf(location);
+    const response = await porthole.handle(get(door));
+    expect(response?.status).toBe(200);
+    const csp = response?.headers.get("content-security-policy") ?? "";
+    expect(csp).toMatch(
+      /^default-src 'none'; script-src 'sha256-[A-Za-z0-9+/=]+'; base-uri 'none'; form-action 'none'; sandbox allow-scripts; frame-ancestors /u,
+    );
+    expect(csp).toContain(`frame-ancestors ${HOST}`);
+    expect(response?.headers.get("cache-control")).toBe("no-store");
+    expect(response?.headers.get("set-cookie"), "the door sets no cookie").toBeNull();
+    const body = (await response?.text()) ?? "";
+    expect(body).toContain("data-porthole-door");
+    expect(body).not.toContain("allow-same-origin");
+    // Used once.
+    expect((await porthole.handle(get(door)))?.status).toBe(401);
+  });
+
+  it("the door reports the host's deny with its code, and a not-found", async () => {
+    const revoked = new Set<string>();
+    const porthole = server({
+      authorize: {
+        check: ({ subject }) =>
+          subject !== undefined && revoked.has(subject)
+            ? { allow: false, code: "revoked" }
+            : { allow: true },
+      },
+    });
+    revoked.add("gone");
+    const denied = await porthole.issue(artifact, { viewer: "v", subject: "gone" });
+    const response = await porthole.handle(get(doorOf(denied)));
+    expect(response?.status).toBe(403);
+    const body = (await response?.text()) ?? "";
+    expect(body).toContain('data-porthole-reason="denied"');
+    expect(body).toContain('data-porthole-code="revoked"');
+    // A page that doesn't exist: not-found.
+    const missing = await porthole.issue(
+      { scope: "c", document: { kind: "artifact", id: "page", version: "99" } },
+      { viewer: "v" },
+    );
+    expect((await porthole.handle(get(doorOf(missing))))?.status).toBe(404);
+  });
+
+  it("the door refuses a content ticket, and the content route refuses a door ticket", async () => {
+    const porthole = server();
+    const location = await porthole.issue(shell, { viewer: "v" });
+    const contentTicket = new URL(location.url).searchParams.get("ticket") ?? "";
+    const doorUrl = new URL(doorOf(location));
+    // The door with the content's ticket: no.
+    doorUrl.searchParams.set("ticket", contentTicket);
+    expect((await porthole.handle(get(doorUrl.href)))?.status).toBe(401);
+    // The content route with the door's ticket: no (and the content still has its own ticket).
+    const other = await porthole.issue(shell, { viewer: "v" });
+    const doorTicket = new URL(doorOf(other)).searchParams.get("ticket") ?? "";
+    const contentUrl = new URL(other.url);
+    contentUrl.searchParams.set("ticket", doorTicket);
+    const refused = await porthole.handle(get(contentUrl.href));
+    expect(refused?.status).toBe(401);
+  });
+
+  it("the door answers the same block the content route would, for the same grant (Cato's check)", async () => {
+    const revoked = new Set<string>(["gone"]);
+    const porthole = server({
+      authorize: {
+        check: ({ subject }) =>
+          subject !== undefined && revoked.has(subject)
+            ? { allow: false, code: "revoked" }
+            : { allow: true },
+      },
+    });
+    const location = await porthole.issue(artifact, { viewer: "v", subject: "gone" });
+    const doorResp = await porthole.handle(get(doorOf(location)));
+    const contentResp = await porthole.handle(get(location.url));
+    expect(doorResp?.status).toBe(403);
+    expect(contentResp?.status).toBe(403);
+    for (const r of [doorResp, contentResp]) {
+      expect((await r?.text()) ?? "").toContain('data-porthole-code="revoked"');
+    }
   });
 });
 

@@ -106,6 +106,13 @@ export interface TicketRecord {
    * its files' base the shell opens (the entry page when absent).
    */
   readonly page?: string;
+  /**
+   * A door's ticket (P125): `issue` mints one beside the content's, for the same grant and as
+   * long, for a display whose frame is on its scope's origin (a served shell, a page that isn't
+   * nested, the sandbox proxy). Taken only at the door (`/__porthole/door/<key>`), never at the
+   * content's address; the door takes no other.
+   */
+  readonly door?: true;
 }
 
 /** Where tickets live between `issue` and their one use. Default: in memory (one process). */
