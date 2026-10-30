@@ -6,16 +6,27 @@ P-numbers below.
 
 ## Unreleased
 
-- **Security (P124, revisited):** the audit of 2026-10-30 found that P124 holds for a nested
-  display, or a served display with no other display of its scope on the page, not for every frame
-  that speaks. A served display that isn't nested shares its origin with its scope's others: it can
-  reach a new document of theirs before its shell runs and post a frame status there (taken, with
-  no `frame-status` error), or stop the document so the host infers `blocked: framing`; a reload it
-  puts into a running display starts a new run for it. So 0.14.5's "content always runs after
-  Porthole's own first word" holds for a display's own content only. A fix is coming (P125); until
-  then, nest several served displays of one scope on a page, or take a `blocked` outcome of one
-  whose scope has another display running as unconfirmed (THREAT_MODEL §7). Also known: a file
-  set whose entry isn't a page never speaks, so the host infers `framing` (since 0.6.0, P081).
+- **Security (P125, after the audit of 2026-10-30):** a served display that isn't nested (a served
+  shell, a page, a view through the sandbox proxy) now takes how loading went from a **door** — a
+  page of Porthole's on the display's origin, framed hidden and opaque by the host before the
+  content, that no same-scope content can reach — not from its own frame. This closes the audit's
+  P124-1: a scope's displays share one origin, so a same-scope sibling could reach another
+  display's first document before its shell ran and speak Porthole's word for it (a forged sign-in
+  with a link out), or silence it into `framing`, or reload it into a run it spoke first in. The
+  door decides (`open`, or `blocked` and why); the content frame's own frame status is never taken
+  (one `frame-status` host error a run), and its silence is a `timeout`, never a fallback. Nested
+  pages, url mode and opaque frames are unchanged.
+  - **Server/host contract:** `issue` returns `FrameLocation.door` and `/server` serves
+    `/__porthole/door/<key>` for those kinds (`doorResponse`, `doorStatusResponse`, `DOOR_PATH`
+    exported for a host's own content Worker). Additive: an old host ignores `door`. A **new** host
+    given a served non-nested location **without** a door is strict (no frame status taken, a block
+    shows as a timeout) and raises a `hostError` of a new kind `"door"`. **Deploy the server/Worker
+    before the host**, and a custom locator must pass `door` through.
+  - **A file set's entry must be a page** (P124-2): `checkFileSet`, `admitFiles` and `lintFiles`
+    refuse an entry that isn't `.html`/`.htm` (code `entry`); a set stored before this answers
+    Porthole's `not-found` status page, and the door says `not-found`.
+  - Planned, not in this release: a host-only parallel-mount variant (the door and content opened
+    together), to be measured against the sequential default.
 
 ## 0.14.5
 

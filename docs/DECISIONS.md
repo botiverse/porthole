@@ -6808,3 +6808,81 @@ own run (navigating, reloading, redirecting, history, its own frames, a nested c
 **Revisit when** a host needs a later block told in a display with files (then: start it again on a
 dropped status, its next run's first document says it), or url mode gets a shell of Porthole's on
 the app's origin.
+
+## P125 · 2026-10-30 · A served display's word comes from a door no content of its scope can reach · Accepted
+
+**Amends P040, P050, P124.** After the audit of 0.14.5 (2026-10-30): P124's "a frame status is
+the word of Porthole's pages" held against a display's own content, but not against another display
+of its scope. A scope's displays share one origin (P114), and a served display that isn't nested is
+framed there, where the scope's others run content with `allow-same-origin`. One of them reaches a
+new document of another's before its first script runs, and can speak a frame status (taken, no
+host error), or stop or rewrite it so its silence reads as `framing` (P124-1); a reload it puts into
+a running display starts a new run it can speak first in. So Porthole's word for such a display
+can't come from its own frame at all.
+
+**Decision.** For a served display that isn't nested (a served shell, a page, a view through the
+sandbox proxy), the host first makes a hidden **door**: a page of Porthole's server on the same
+origin, in a frame of the host's own that no content can reach — `sandbox="allow-scripts"` (an
+opaque origin, a fresh one each run), `allow=""`, `referrerpolicy="no-referrer"`, `aria-hidden`,
+`tabindex=-1`, `inert`, 0×0, `visibility:hidden`, and **no `name`** (nothing targets it). The door
+is at `<origin>/__porthole/door/<instance key>?ticket=<door ticket>`. Its one frame status decides:
+a new state **`open`** (not `entering`, so it never meets url mode's `loads >= 2` rule) → the host
+removes the door and makes the content frame as before; **`blocked`** (reason, status, code) → that
+is the outcome, and no content frame is made; the door `load` then `SETTLE_MS` of silence →
+`blocked: framing` (now trustworthy: only the door was ever in that frame).
+
+The content frame of such a display is then **strict**: no frame status from it is ever taken (each
+run, the first is dropped with one `frame-status` host error), and `framing` is never inferred from
+its silence — a load with no hello is a `timeout`, decided early (load + `SETTLE_MS`). Every
+reload or navigation (`navigatedAway` → `run()`) starts again with a new door, counted against
+`MAX_RESTARTS`. Nested displays (their shell is on a label of its own, P114), url mode and opaque
+frames are unchanged: a nested page's shell keeps P124's ordering rule, a url-mode app's word is
+taken as before (S6), an opaque frame's every status is the content's (rule 1).
+
+**Server.** `issue` mints the content ticket as today **plus a door ticket** (`TicketRecord.door:
+true`, same grant and TTL, a JSON field, no D1 migration) for those kinds, and returns `door: { url
+}` in the `FrameLocation`. `/__porthole/door/<key>` → `serveDoor`: takes the door ticket (single
+use, bound to label and key, `record.door === true`, refusing an entry or hop ticket), then runs
+the **same** `denied`/authorize, document and entry checks `serveDocument` runs for the same grant,
+and answers `doorPage` (`open`) or `doorStatusPage` (401 session / 403 denied+code / 404 not-found /
+500 error). Both carry `default-src 'none'; script-src 'sha256-…'; base-uri 'none'; form-action
+'none'; sandbox allow-scripts; frame-ancestors <hostOrigins>`, `no-store`, `no-referrer`, `nosniff`,
+`noindex`, and no cookie (the inline script by hash, since `'self'` is unreliable in an opaque
+document). **Invariant: the door and the content route run the same checks for the same grant** —
+`serveDocument` keeps taking its own ticket and running `authorize` and the document checks itself
+(P050, its data's wall), so the door only reports. `serveDocument` refuses a door ticket; the door
+refuses a content, entry or hop ticket; a nested page's label serves no door.
+
+**Compatibility.** `FrameLocation.door` is additive: an old host ignores it (its door ticket
+expires unused) and runs P124 as before. A **new** host given a served non-nested location
+**without** a door is strict (no frame status taken, silence → timeout) and raises a host error of a
+new kind **`door`** once per mount ("the server gives no door; upgrade it first"). No fallback to
+P124's rule, no option, no knob (PRINCIPLES 1, 8). **Deploy order: the server/Worker first, then the
+host** (a hard requirement in ADOPTING). A custom locator must pass `door` through.
+
+**Folded in.** P124-2: `checkFileSet`/`admitFiles`/`lintFiles` refuse an entry that isn't `.html`
+or `.htm` (code `entry`); a stored set whose entry isn't a page answers Porthole's `not-found`
+status page, and the door says `not-found` (so an old host, which has no door, still gets Porthole's
+word, not an inert file that says nothing). P124-3: the one `frame-status` control is split per the
+design's §4 table (`content-status`, `door-status`, `door-silence`, `frame-status-order`); the
+door's opacity (rule 1's sibling) has no gating weakening, since the door resolves within the task
+it commits, so a sibling never catches it live — it is held by the static sandbox test (the door's
+sandbox is `allow-scripts` alone, `DOOR_SANDBOX_TOKENS`) and the positive `[door-reach]` leak probe
+(a same-scope sibling reading the door gets a `SecurityError`), as P124-3 holds rule 1 by
+`test/outcome.test.ts` alone.
+
+**Costs accepted** (THREAT_MODEL S7, the premise being a scope its author controls): one extra
+request and a ~1 KB document per mount, and about one RTT of added latency (sequential). A sibling
+of a scope can still spend a display's three restarts, force it to a timeout ("This is taking too
+long", no link), deface it, and read a sandbox-proxy view's HTML once it is sent — the known costs
+of sharing a scope, not a forged sign-in with a link out.
+
+**Planned, not in this release:** a host-only **parallel-mount** variant (the door and the content
+frame opened together, the door's `blocked` winning even after `loaded`, door silence meaning
+`framing` only before a hello, content statuses still never taken), measured against the sequential
+default before either is chosen. It is a later commit; nothing of the server or the wire changes for
+it.
+
+**Revisit when** a host needs a later block told in a display with files (then: start it again on a
+dropped status, its next run's first door says it), url mode gets a shell of Porthole's on the app's
+origin, or the parallel-mount variant is measured and chosen.

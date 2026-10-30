@@ -816,15 +816,40 @@ display.on("outcome", (outcome) => {
 openButton.onclick = () => porthole.openInTab(instance);           // the clean address
 ```
 
-A `blocked` outcome is the word of Porthole's own pages, never of the content (P124): an opaque
-frame's frame status is never taken, nor one a frame says after its first word; the host hears
-those as a `hostError` of kind `"frame-status"` (log it, show nothing for it). Draw the fallback
-from `outcome` only. A url-mode app is the exception: it can say any outcome (THREAT_MODEL S6).
-Until P125 this holds for a nested page, or a served display with no other display of its scope on
-your page: one that isn't nested shares its origin with its scope's others, and can speak first in
-a new run of theirs, or silence it into `framing` (THREAT_MODEL §7). If you show several served
-displays of one scope on a page, nest them (`nested: true`), or take a `blocked` outcome of one
-whose scope has another display running as unconfirmed.
+A `blocked` outcome is the word of Porthole's own pages, never of the content (P124, P125): an
+opaque frame's frame status is never taken, nor one a frame says after its first word; the host
+hears those as a `hostError` of kind `"frame-status"` (log it, show nothing for it). Draw the
+fallback from `outcome` only. A url-mode app is the exception: it can say any outcome (THREAT_MODEL
+S6).
+
+**The door (P125).** A served display that isn't nested (a served shell, a page, a view through the
+sandbox proxy) is framed on its scope's origin, where the scope's other displays run content: its
+own frame can't be trusted for how loading went (a same-scope sibling could speak for it). So
+`createHost` first frames a **door** — a page of Porthole's on the display's origin, in a hidden
+opaque frame it can't reach — and takes the door's word (`FrameLocation.door`, which `issue` returns
+for those kinds). The content frame's own frame status is then never taken, and its silence is a
+`timeout`, never a fallback. You don't wire anything: `createHost` and `/server` do it. Two
+requirements:
+
+- **Deploy the server (or your content Worker) before the host.** The door is minted and served by
+  the server; a host that expects a door from a server that doesn't yet mint one is strict (no
+  frame status taken, a block shows as a timeout) and raises a `hostError` of kind `"door"` once per
+  mount. Upgrade the server/Worker first, then the host. This is a hard requirement, not a
+  preference.
+- **A custom locator must pass `door` through.** If you rebuild `FrameLocation` yourself (a locator
+  of your own rather than `httpLocator`), carry `door` from your issue endpoint unchanged;
+  `httpLocator` and the host kit's client already do. Dropping it makes every served non-nested
+  display strict, as above.
+
+A **content Worker of your own** (one that answers the content origins itself, instead of
+`/server`) serves the door too: `issue` mints the door ticket and returns `door: { url }`, and the
+Worker routes `DOOR_PATH + <key>` (`/__porthole/door/<key>`) on every label — take the door ticket
+(`TicketRecord.door === true`, bound to the label and key), run the same access, document and entry
+checks the content route runs for that grant, then answer `doorResponse({ hostOrigins })` (open) or
+`doorStatusResponse({ status, reason, code?, hostOrigins })` (401 `session` / 403 `denied` / 404
+`not-found` / 500 `error`). Refuse a door ticket at `/__porthole/d/`, and serve no door on a nested
+page's shell label. `DOOR_PATH`, `doorResponse` and `doorStatusResponse` are exported from
+`@botiverse/porthole/server`.
 
 `porthole.config(kind)` is the served config while frames are served, the opaque one while they
 aren't, and null until the meta is known, so a frame never starts opaque and then restarts
