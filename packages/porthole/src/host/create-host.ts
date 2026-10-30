@@ -170,6 +170,11 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
 
       const listeners = new Map<keyof DisplayEvents, Set<(detail: never) => void>>();
       const emit = <E extends keyof DisplayEvents>(event: E, detail: DisplayEvents[E]) => {
+        // An outcome ends a loading episode: the next run (a restart, a reload) gets a clock of
+        // its own (P125).
+        if (event === "outcome") {
+          episodeBegan = null;
+        }
         for (const listener of listeners.get(event) ?? []) {
           (listener as (detail: DisplayEvents[E]) => void)(detail);
         }
@@ -194,6 +199,10 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       let bridge: DisplayBridge | null = null;
       let destroyed = false;
       let restarts = 0;
+      // When the loading episode that has no outcome yet began: its first run, not each restart's
+      // (P125). However often a frame is started again (a sibling of its scope wiping or
+      // navigating it, P125 S7), the display's time runs out and it has an outcome.
+      let episodeBegan: number | null = null;
       let generation = 0;
       // The viewer's answer for this display (P079): asked once, kept across its frames; or the
       // host's refusal of them all (P080).
@@ -592,6 +601,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           } else {
             stop();
             contentError("The content kept navigating its frame away; it was stopped.");
+            // Every display ends with an outcome (P125): a frame stopped after its restarts ran out
+            // is one the host can draw a fallback for, never an empty box.
+            emit("outcome", { state: "blocked", reason: "error" });
           }
         };
         const framed = platform.createSurface(container, {
@@ -750,16 +762,24 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           return;
         }
         generation += 1;
+        if (episodeBegan === null) {
+          episodeBegan = Date.now();
+        }
+        // What is left of this episode's time: a restart doesn't start the clock again.
+        const timeLeft = Math.max(0, timeoutMs - (Date.now() - episodeBegan));
         if (config.isolation === "opaque") {
-          enter({
-            kind: "srcdoc",
-            html: compiled.shellDocument({
-              origins: [container.ownerDocument.defaultView?.location.origin ?? ""],
-              title: mount.title,
-              ...nonceOf(options.nonce),
-              ...(mount.document === undefined ? {} : { document: mount.document }),
-            }),
-          });
+          enter(
+            {
+              kind: "srcdoc",
+              html: compiled.shellDocument({
+                origins: [container.ownerDocument.defaultView?.location.origin ?? ""],
+                title: mount.title,
+                ...nonceOf(options.nonce),
+                ...(mount.document === undefined ? {} : { document: mount.document }),
+              }),
+            },
+            timeLeft,
+          );
           return;
         }
         const mine = generation;
@@ -781,7 +801,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             hostError("The host's backend didn't give a location in time", "locate");
             emit("outcome", { state: "timeout" });
           }
-        }, timeoutMs);
+        }, timeLeft);
         // A run stopped (destroyed, started again) stops its clock too.
         controller.signal.addEventListener("abort", () => clearTimeout(late), { once: true });
         locateServed(locator, instance, config, hostOrigin, controller.signal).then(
@@ -798,7 +818,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
                   locatedAt.add(each);
                 }
               }
-              enter(source, Math.max(0, timeoutMs - (Date.now() - began)));
+              enter(source, Math.max(0, timeLeft - (Date.now() - began)));
             }
           },
           (error: unknown) => {
@@ -859,6 +879,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         },
         reload() {
           restarts = 0;
+          episodeBegan = null;
           run();
         },
         focus() {

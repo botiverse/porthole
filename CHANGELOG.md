@@ -6,6 +6,10 @@ P-numbers below.
 
 ## Unreleased
 
+- **Every display ends with an outcome (P125):** a frame started again until its restarts ran out
+  is `blocked: error` (it had no outcome at all: an empty box), and restarts no longer start its
+  load timeout again — `loadTimeoutMs` covers a loading episode, from its first run until an
+  outcome (an outcome or `reload()` begins the next).
 - **Security (P125, after the audit of 2026-10-30):** a served display that isn't nested (a served
   shell, a page, a view through the sandbox proxy) now takes how loading went from a **door** — a
   page of Porthole's on the display's origin, framed hidden and opaque by the host before the

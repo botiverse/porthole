@@ -647,8 +647,12 @@ content there with `allow-same-origin`, so one reaches another's document (`top[
 P125 stops a sibling speaking Porthole's word for another display (its door says how loading went,
 unreachably), but a sibling of the scope can still, against another display of it:
 
-- spend its three restarts (`MAX_RESTARTS`) by reloading it, then stop it, so its outcome is a
-  `timeout` ("This is taking too long", no link) the person may read as the display's own;
+- spend its three restarts (`MAX_RESTARTS`) by reloading or wiping it, so its outcome is a
+  `timeout` or, once the restarts run out, `blocked: error` (a fallback, no link) the person may
+  read as the display's own. It always has an outcome: restarts don't start its clock again (one
+  `loadTimeoutMs` per loading episode, from its first run until an outcome), and a frame stopped
+  after its restarts is `blocked: error` (found by Cato on WebKit during P125: before, it was
+  stopped with no outcome at all, an empty box);
 - deface it — rewrite its document — since they share an origin;
 - read a sandbox-proxy view's HTML once the host has sent it into the view.
 

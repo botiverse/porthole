@@ -92,6 +92,20 @@ const wipeOnly = `
   seen.push({ i, wiped: true });
 `;
 
+/**
+ * An outcome only a sibling's word could have caused: A's forged block (`code: "phish"`), or a
+ * `sign-in` or `framing` block (a served display's are its door's alone, P125). A sibling may still
+ * cost B its run (wiped, restarted until its restarts run out: `blocked: error`, a timeout); that
+ * is S7's cost of sharing a scope, never A's word.
+ */
+const forged = (outcome: {
+  readonly state: string;
+  readonly reason?: string;
+  readonly code?: string;
+}) =>
+  outcome.state === "blocked" &&
+  (outcome.code === "phish" || outcome.reason === "sign-in" || outcome.reason === "framing");
+
 /** B's honest content: a marker so A (and the harness) can tell B's own document apart. */
 const BENIGN = '<p id="b">B honest content</p>';
 
@@ -271,8 +285,8 @@ test.describe("a served display's word comes from a door no sibling can reach (P
     await page.waitForTimeout(4_000);
     const record = await bHandle.read();
     expect(
-      record.outcomes.filter((each) => each.state === "blocked"),
-      `probe: no run of B was blocked by A (${JSON.stringify(record.outcomes)})`,
+      record.outcomes.filter(forged),
+      `probe: no run of B was blocked by A's word (${JSON.stringify(record.outcomes)})`,
     ).toEqual([]);
   });
 
@@ -350,16 +364,21 @@ test.describe("a served display's word comes from a door no sibling can reach (P
         );
       },
     );
-    const outcome = await outcomeOf(bHandle.read, 8_000).catch(async (error: Error) => {
-      const record = await bHandle.read();
-      throw new Error(
-        `${error.message}\nB: ${JSON.stringify({ outcomes: record.outcomes, hostErrors: record.hostErrors })}\nA saw: ${JSON.stringify(said)}`,
-      );
-    });
+    // Every display ends with an outcome (P125): loaded, or one the host can draw a fallback for.
+    await expect
+      .poll(async () => (await bHandle.read()).outcomes.length, { timeout: 8_000 })
+      .toBeGreaterThan(0)
+      .catch(async (error: Error) => {
+        const record = await bHandle.read();
+        throw new Error(
+          `${error.message}\nB: ${JSON.stringify({ outcomes: record.outcomes, hostErrors: record.hostErrors })}\nA saw: ${JSON.stringify(said)}`,
+        );
+      });
+    const { outcomes } = await bHandle.read();
     expect(
-      outcome.state !== "blocked",
-      `probe: the proxy view was never blocked by a sibling (${JSON.stringify(outcome)})`,
-    ).toBe(true);
+      outcomes.filter(forged),
+      `probe: the proxy view was never blocked by a sibling's word (${JSON.stringify(outcomes)})`,
+    ).toEqual([]);
   });
 
   test("[entry] a file set whose entry isn't a page is blocked (not-found) by the door, not framing", async ({

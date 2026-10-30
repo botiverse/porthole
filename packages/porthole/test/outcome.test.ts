@@ -727,7 +727,7 @@ describe("createHost: every restart goes through a new door, with a new ticket (
 
   const ORIGIN = "https://a-x.example-usercontent.com";
 
-  function mounted(reuse = false) {
+  function mounted(reuse = false, loadTimeoutMs?: number) {
     const doors: Driven[] = [];
     const contents: Driven[] = [];
     let located = 0;
@@ -781,10 +781,14 @@ describe("createHost: every restart goes through a new door, with a new ticket (
       },
       getBoundingClientRect: () => ({ width: 600 }),
     } as unknown as HTMLElement;
-    const config = presets.inlineWidget({
+    const preset = presets.inlineWidget({
       isolation: "domain",
       contentOrigins: ["https://*.example-usercontent.com"],
     });
+    const config =
+      loadTimeoutMs === undefined
+        ? preset
+        : { ...preset, limits: { ...preset.limits, loadTimeoutMs } };
     const outcomes: FrameOutcome[] = [];
     const shown = createHost(config, { platform, locator }).mount(container, {
       displayId: "d1",
@@ -795,8 +799,64 @@ describe("createHost: every restart goes through a new door, with a new ticket (
     shown.on("outcome", (each) => outcomes.push(each));
     const hostErrors: DisplayEvents["hostError"][] = [];
     shown.on("hostError", (each) => hostErrors.push(each));
-    return { doors, contents, outcomes, hostErrors, shown };
+    const contentErrors: DisplayEvents["contentError"][] = [];
+    shown.on("contentError", (each) => contentErrors.push(each));
+    return { doors, contents, outcomes, hostErrors, contentErrors, shown };
   }
+
+  test("a frame started again until its restarts run out ends with an outcome (blocked: error), never an empty box", async () => {
+    const { doors, contents, outcomes, contentErrors, shown } = mounted();
+    // The first run, then three restarts (MAX_RESTARTS): each content frame navigated away
+    // before it said anything, as a sibling of its scope that wipes it again and again can.
+    for (let run = 0; run < 4; run += 1) {
+      await vi.waitFor(() => expect(doors).toHaveLength(run + 1));
+      doors[run]?.say(status({ state: "open" }));
+      expect(contents).toHaveLength(run + 1);
+      expect(outcomes, `no outcome yet in run ${run + 1}`).toEqual([]);
+      contents[run]?.navigate();
+    }
+    expect(outcomes).toEqual([{ state: "blocked", reason: "error" }]);
+    expect(contentErrors).toEqual([
+      { message: "The content kept navigating its frame away; it was stopped." },
+    ]);
+    expect(doors, "no fifth run").toHaveLength(4);
+    expect(contents[3]?.destroyed).toBe(true);
+    shown.destroy();
+  });
+
+  test("restarts don't start the clock again: a display started again and again times out on its first run's time", async () => {
+    // 600 ms for the whole loading episode. Two restarts 250 ms apart, then silence: the third run
+    // has what is left (about 100 ms), not 600 ms of its own (which would end near 1100 ms).
+    const { doors, contents, outcomes, shown } = mounted(false, 600);
+    const began = Date.now();
+    for (let run = 0; run < 3; run += 1) {
+      await vi.waitFor(() => expect(doors).toHaveLength(run + 1));
+      doors[run]?.say(status({ state: "open" }));
+      if (run < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        contents[run]?.navigate();
+      }
+    }
+    await vi.waitFor(() => expect(outcomes).toEqual([{ state: "timeout" }]), { timeout: 2_000 });
+    expect(Date.now() - began, "timed out on the episode's clock").toBeLessThan(900);
+    shown.destroy();
+  });
+
+  test("an outcome ends the episode: a restart after the frame loaded gets a clock of its own", async () => {
+    const { doors, contents, outcomes, shown } = mounted(false, 400);
+    await vi.waitFor(() => expect(doors).toHaveLength(1));
+    doors[0]?.say(status({ state: "blocked", reason: "session", status: 401 }));
+    expect(outcomes).toEqual([{ state: "blocked", reason: "session", status: 401 }]);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    shown.reload();
+    await vi.waitFor(() => expect(doors).toHaveLength(2));
+    // Past the first episode's 400 ms: the new run is not timed out at once.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(outcomes, "the new run has time of its own").toHaveLength(1);
+    doors[1]?.say(status({ state: "open" }));
+    expect(contents).toHaveLength(1);
+    shown.destroy();
+  });
 
   test("a locator that gives a restart the location an earlier run used is told to the host; nothing else changes", async () => {
     const { doors, contents, hostErrors, shown } = mounted(true);

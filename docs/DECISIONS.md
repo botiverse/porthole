@@ -6838,7 +6838,11 @@ The content frame of such a display is then **strict**: no frame status from it 
 run, the first is dropped with one `frame-status` host error), and `framing` is never inferred from
 its silence — a load with no hello is a `timeout`, decided early (load + `SETTLE_MS`). Every
 reload or navigation (`navigatedAway` → `run()`) starts again with a new door, counted against
-`MAX_RESTARTS`. Nested displays (their shell is on a label of its own, P114), url mode and opaque
+`MAX_RESTARTS`. **Every display ends with an outcome** (the host's contract): a restart doesn't
+start the clock again (one `loadTimeoutMs` per loading episode, from its first run until it has an
+outcome; an outcome, or the host's `reload()`, begins a new one), and a frame stopped once its
+restarts ran out is `blocked: error` (its `contentError` as before). Before, a sibling that wiped a
+display again and again left it with no outcome and no timeout (Cato, on WebKit, 2026-10-30). Nested displays (their shell is on a label of its own, P114), url mode and opaque
 frames are unchanged: a nested page's shell keeps P124's ordering rule, a url-mode app's word is
 taken as before (S6), an opaque frame's every status is the content's (rule 1).
 
