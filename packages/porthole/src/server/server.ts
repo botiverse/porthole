@@ -1125,13 +1125,22 @@ export function createServer(options: ServerOptions): PortholeServer {
     return serveAccess(request, access, cookie, undefined, rest);
   }
 
+  /** A door that doesn't open (P125): its status, reason and the host's code, if any. */
+  const doorSays = (status: number, reason: FrameBlock, method: string, code?: string): Response =>
+    doorStatusResponse({
+      status,
+      reason,
+      ...(code === undefined ? {} : { code }),
+      hostOrigins: options.hostOrigins,
+      frameAncestors,
+      method,
+    });
+
   /**
    * A served display's door (P125): its own ticket's, taken once, for this instance on this
-   * origin, and the checks the content's address runs for the same grant (the host's check, the
-   * document, its entry), so the door says what the content's address would: `open`, or `blocked`
-   * and why. It sets no cookie and serves nothing of the content; the content's address takes its
-   * own ticket and checks again (P050), so the door only tells. No other ticket opens it, and a
-   * nested page's shell's label serves none (`serveShellLabel`).
+   * origin; then the door's answer for that ticket's grant (`answerDoor`, the one `doorAnswer`
+   * gives, P126). No other ticket opens it, and a nested page's shell's label serves none
+   * (`serveShellLabel`).
    */
   async function serveDoor(
     request: Request,
@@ -1140,20 +1149,12 @@ export function createServer(options: ServerOptions): PortholeServer {
     key: string,
   ): Promise<Response> {
     const method = request.method.toUpperCase();
-    const say = (status: number, reason: FrameBlock, code?: string): Response =>
-      doorStatusResponse({
-        status,
-        reason,
-        ...(code === undefined ? {} : { code }),
-        hostOrigins: options.hostOrigins,
-        frameAncestors,
-        method,
-      });
     if (method !== "GET" && method !== "HEAD") {
-      return say(405, "error");
+      return doorSays(405, "error", method);
     }
+    let record: TicketRecord | null;
     try {
-      const record = method === "GET" ? await take(url.searchParams.get("ticket"), label) : null;
+      record = method === "GET" ? await take(url.searchParams.get("ticket"), label) : null;
       if (
         record === null ||
         record.door !== true ||
@@ -1162,34 +1163,61 @@ export function createServer(options: ServerOptions): PortholeServer {
         keys.instanceKey(record.instance) !== key ||
         compiledFor(record.instance)?.config.nested === true
       ) {
-        return say(401, "session");
+        return doorSays(401, "session", method);
       }
-      const access: Access = {
+    } catch {
+      return doorSays(500, "error", method);
+    }
+    return answerDoor(
+      request,
+      {
         instance: record.instance,
         viewer: record.viewer,
         origin: originOfLabel(label),
         expiresAt: Date.now() + (record.sessionSeconds ?? DEFAULT_SESSION_SECONDS) * 1_000,
         ...(record.anonymous === true ? { anonymous: true } : {}),
         ...(record.subject === undefined ? {} : { subject: record.subject }),
-      };
+      },
+      isPageRest(record.page) ? record.page : undefined,
+    );
+  }
+
+  /**
+   * The door's answer for an access already admitted (P125, P126): the checks the content's
+   * address runs for the same grant (the host's check, the document, its entry, the page it opens
+   * at), so the door says what the content's address would: `open`, or `blocked` and why. It sets
+   * no cookie and serves nothing of the content; the content's address takes its own ticket and
+   * checks again (P050), so the door only tells. `serveDoor` answers with it once its ticket is
+   * taken, and `doorAnswer` for a host that admitted the request itself: one answer for both.
+   */
+  async function answerDoor(
+    request: Request,
+    access: Access,
+    /** A page below a file set's base its frame opens at (P125). */
+    below: string | undefined,
+  ): Promise<Response> {
+    const method = request.method.toUpperCase();
+    if (method !== "GET" && method !== "HEAD") {
+      return doorSays(405, "error", method);
+    }
+    try {
       const refused = await refusalOf(request, access);
       if (refused !== null) {
-        return say(403, "denied", refused.code);
+        return doorSays(403, "denied", method, refused.code);
       }
       const served = await documentOf(access.instance);
       // The same document, entry and page checks the content's address runs (`serveAccess`).
-      const below = isPageRest(record.page) ? record.page : undefined;
       if (
         served === null ||
         ("files" in served
           ? !entryIsPage(served.files) || ticketPage(served.files, below) === null
           : below !== undefined)
       ) {
-        return say(404, "not-found");
+        return doorSays(404, "not-found", method);
       }
       return doorResponse({ hostOrigins: options.hostOrigins, frameAncestors, method });
     } catch {
-      return say(500, "error");
+      return doorSays(500, "error", method);
     }
   }
 
@@ -1839,22 +1867,11 @@ export function createServer(options: ServerOptions): PortholeServer {
     return page(404, "Nothing here", "This address names no content.", method);
   }
 
-  /** A one-time ticket (or entry code) for an instance the host decided a viewer may see. */
-  async function mint(
-    instance: InstanceRef,
+  /** A grant, checked for an instance (`issue`'s rules, and `doorAnswer`'s, P126). */
+  function checkGrant(
+    clean: InstanceRef,
     grant: Grant,
-    entry?: TicketRecord["entry"],
-    /** A page below a file set's base its frame opens at (P125: a clean address's file). */
-    below?: string,
-  ): Promise<{
-    readonly clean: InstanceRef;
-    readonly key: string;
-    readonly ticket: string;
-    /** The door's own ticket (P125), for a display framed on its scope's origin. */
-    readonly door: string | null;
-  }> {
-    const clean = cleanInstance(instance);
-    check(clean);
+  ): { readonly anonymous: boolean; readonly viewer: string } {
     const anonymous = grant.anonymous === true;
     if (anonymous) {
       if (grant.viewer !== undefined) {
@@ -1876,15 +1893,33 @@ export function createServer(options: ServerOptions): PortholeServer {
     ) {
       throw new TypeError(`A grant's subject is a string of at most ${SUBJECT_MAX} characters`);
     }
+    return { anonymous, viewer: anonymous ? "" : (grant.viewer ?? "") };
+  }
+
+  /** How long a grant's session lasts, checked (`sessionSeconds`). */
+  const sessionOf = (grant: Grant): number =>
+    seconds(grant.sessionSeconds, DEFAULT_SESSION_SECONDS, MAX_SESSION_SECONDS, "sessionSeconds");
+
+  /** A one-time ticket (or entry code) for an instance the host decided a viewer may see. */
+  async function mint(
+    instance: InstanceRef,
+    grant: Grant,
+    entry?: TicketRecord["entry"],
+    /** A page below a file set's base its frame opens at (P125: a clean address's file). */
+    below?: string,
+  ): Promise<{
+    readonly clean: InstanceRef;
+    readonly key: string;
+    readonly ticket: string;
+    /** The door's own ticket (P125), for a display framed on its scope's origin. */
+    readonly door: string | null;
+  }> {
+    const clean = cleanInstance(instance);
+    check(clean);
+    const { anonymous, viewer } = checkGrant(clean, grant);
     const ttl = seconds(grant.ttlSeconds, DEFAULT_TICKET_SECONDS, MAX_TICKET_SECONDS, "ttlSeconds");
-    const sessionSeconds = seconds(
-      grant.sessionSeconds,
-      DEFAULT_SESSION_SECONDS,
-      MAX_SESSION_SECONDS,
-      "sessionSeconds",
-    );
+    const sessionSeconds = sessionOf(grant);
     const key = keys.instanceKey(clean);
-    const viewer = anonymous ? "" : grant.viewer;
     const probe = keys.sign({
       i: clean,
       w: viewer,
@@ -2006,6 +2041,38 @@ export function createServer(options: ServerOptions): PortholeServer {
         // Its door (P125): the host frames it first, and takes its word alone.
         ...(door === null ? {} : { door: { url: `${origin}${DOOR_PATH}${key}?ticket=${door}` } }),
       };
+    },
+
+    async doorAnswer(instance, grant, request, at = {}): Promise<Response> {
+      // A host that admitted the request itself (P126): no ticket here, the grant is its word.
+      const clean = cleanInstance(instance);
+      check(clean);
+      if (!hasDoor(clean)) {
+        throw new TypeError(
+          "This instance has no door (P125): a nested page's frame is its shell, a url-mode app has none",
+        );
+      }
+      const below = at.page;
+      if (below !== undefined && (!isPageRest(below) || clean.document.kind !== "artifact")) {
+        throw new TypeError(
+          "A frame's page is a relative path below an artifact's files (no . or ..)",
+        );
+      }
+      const { anonymous, viewer } = checkGrant(clean, grant);
+      const sessionSeconds = sessionOf(grant);
+      const origin = originOfLabel(labelFor(clean));
+      return answerDoor(
+        request ?? new Request(`${origin}${DOOR_PATH}${keys.instanceKey(clean)}`),
+        {
+          instance: clean,
+          viewer,
+          origin,
+          expiresAt: Date.now() + sessionSeconds * 1_000,
+          ...(anonymous ? { anonymous: true } : {}),
+          ...(grant.subject === undefined ? {} : { subject: grant.subject }),
+        },
+        below,
+      );
     },
 
     forget(filter = {}) {

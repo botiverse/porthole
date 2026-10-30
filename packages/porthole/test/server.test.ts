@@ -7,6 +7,7 @@ import {
   createServer,
   d1TicketSchema,
   d1TicketStore,
+  doorResponse,
   isHostLabel,
   memoryTicketStore,
   prefixedName,
@@ -15,6 +16,7 @@ import {
   type AuthorizeRequest,
   type D1Like,
   type D1StatementLike,
+  type Grant,
   type ServerOptions,
   type TicketRecord,
   type Upstream,
@@ -579,6 +581,196 @@ describe("a served display's door (P125)", () => {
       const { door, content } = await bothRoutes(porthole, location);
       expect(door).toEqual({ status: 404, reason: "not-found", code: undefined });
       expect(content).toEqual(door);
+    });
+  });
+
+  describe("doorAnswer: the door's answer for a grant a host admitted itself (P126)", () => {
+    const notAPage = {
+      get: () =>
+        Promise.resolve({
+          files: { "note.txt": { size: 4, sha256: "0".repeat(64) } },
+          entry: "note.txt",
+          read: () => Promise.resolve(new TextEncoder().encode("note")),
+        }),
+    };
+    const twoPages = {
+      get: () =>
+        Promise.resolve({
+          files: {
+            "index.html": { size: 4, sha256: "0".repeat(64) },
+            "b.html": { size: 4, sha256: "1".repeat(64) },
+          },
+          read: () => Promise.resolve(new TextEncoder().encode("page")),
+        }),
+    };
+    const revoking = (asked: AuthorizeRequest[] = []): Partial<ServerOptions> => ({
+      authorize: {
+        check: (request) => {
+          asked.push(request);
+          return request.subject === "gone" ? { allow: false, code: "revoked" } : { allow: true };
+        },
+      },
+    });
+
+    it("an allowed grant: open, with the door's exact CSP, no-store and no cookie", async () => {
+      const porthole = server();
+      const response = await porthole.doorAnswer(shell, { viewer: "v" });
+      expect(response.status).toBe(200);
+      const csp = response.headers.get("content-security-policy") ?? "";
+      expect(csp).toMatch(
+        new RegExp(
+          `^default-src 'none'; script-src 'sha256-[A-Za-z0-9+/=]+'; base-uri 'none'; form-action 'none'; sandbox allow-scripts; frame-ancestors ${HOST.replaceAll(".", "\\.")}$`,
+          "u",
+        ),
+      );
+      expect(csp).toBe(
+        doorResponse({ hostOrigins: [HOST] }).headers.get("content-security-policy"),
+      );
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(response.headers.get("set-cookie")).toBeNull();
+      const body = await response.text();
+      expect(body).toContain("data-porthole-door");
+      expect(body).not.toContain("allow-same-origin");
+      // No ticket is taken or needed: it answers again, as often as the host asks.
+      expect((await porthole.doorAnswer(shell, { viewer: "v" })).status).toBe(200);
+    });
+
+    it("denied, with the host's code, the host's check handed the caller's request", async () => {
+      const asked: AuthorizeRequest[] = [];
+      const porthole = server(revoking(asked));
+      const request = new Request("https://raft.example-usercontent.com/__porthole/door/_raft");
+      const response = await porthole.doorAnswer(
+        artifact,
+        { viewer: "v", subject: "gone" },
+        request,
+      );
+      expect(await wordOf(response)).toEqual({ status: 403, reason: "denied", code: "revoked" });
+      expect(response.headers.get("content-security-policy")).toContain("sandbox allow-scripts;");
+      expect(asked.at(-1)?.request).toBe(request);
+      expect(asked.at(-1)).toMatchObject({ viewer: "v", subject: "gone", anonymous: false });
+    });
+
+    it("not-found: a document that doesn't exist", async () => {
+      const response = await server().doorAnswer(
+        { scope: "c", document: { kind: "artifact", id: "page", version: "99" } },
+        { viewer: "v" },
+      );
+      expect(await wordOf(response)).toEqual({
+        status: 404,
+        reason: "not-found",
+        code: undefined,
+      });
+    });
+
+    it("not-found: a file set whose entry isn't a page", async () => {
+      const response = await server({ artifacts: notAPage }).doorAnswer(artifact, {
+        viewer: "v",
+      });
+      expect(await wordOf(response)).toEqual({
+        status: 404,
+        reason: "not-found",
+        code: undefined,
+      });
+    });
+
+    it("HEAD has no body, another method is 405", async () => {
+      const porthole = server();
+      const at = (method: string) =>
+        porthole.doorAnswer(shell, { viewer: "v" }, new Request(`${HOST}/door`, { method }));
+      const head = await at("HEAD");
+      expect(head.status).toBe(200);
+      expect(await head.text()).toBe("");
+      expect((await at("POST")).status).toBe(405);
+    });
+
+    it("throws for what issue refuses, and for an instance with no door", async () => {
+      const porthole = server({ upstream: proxyTo({ target: () => "https://app.test" }) });
+      await expect(porthole.doorAnswer(nested, { viewer: "v" })).rejects.toThrow(/no door/u);
+      await expect(
+        porthole.doorAnswer(
+          { scope: "a", document: { kind: "external", url: "https://app.test/" } },
+          { viewer: "v" },
+        ),
+      ).rejects.toThrow(/no door/u);
+      await expect(porthole.doorAnswer(shell, { viewer: "" })).rejects.toThrow(/viewer/u);
+      await expect(porthole.doorAnswer(shell, { viewer: "v", sessionSeconds: 0 })).rejects.toThrow(
+        /sessionSeconds/u,
+      );
+      await expect(
+        porthole.doorAnswer(shell, { viewer: "v" }, undefined, { page: "a.html" }),
+      ).rejects.toThrow(/page/u);
+    });
+
+    /** Every byte a door answer gives: status, each header, body. */
+    const bytesOf = async (response: Response | null) => ({
+      status: response?.status,
+      headers: [...(response?.headers ?? new Headers())].toSorted(([a], [b]) => a.localeCompare(b)),
+      body: (await response?.text()) ?? "",
+    });
+
+    it("serveDoor answers with doorAnswer: byte-identical for the same grant", async () => {
+      const cases: {
+        readonly what: string;
+        readonly options?: Partial<ServerOptions>;
+        readonly instance: InstanceRef;
+        readonly grant: Grant;
+        readonly at?: { readonly page: string };
+        readonly status: number;
+      }[] = [
+        { what: "open (a shell)", instance: shell, grant: { viewer: "v" }, status: 200 },
+        { what: "open (a page)", instance: artifact, grant: { anonymous: true }, status: 200 },
+        {
+          what: "open (the proxy)",
+          instance: proxied,
+          grant: { viewer: "v", sessionSeconds: 60 },
+          status: 200,
+        },
+        {
+          what: "denied, with a code",
+          options: revoking(),
+          instance: artifact,
+          grant: { viewer: "v", subject: "gone" },
+          status: 403,
+        },
+        {
+          what: "not-found",
+          instance: { scope: "c", document: { kind: "artifact", id: "page", version: "99" } },
+          grant: { viewer: "v" },
+          status: 404,
+        },
+        {
+          what: "not-found (an entry that isn't a page)",
+          options: { artifacts: notAPage },
+          instance: artifact,
+          grant: { viewer: "v" },
+          status: 404,
+        },
+        {
+          what: "open (a page below the base)",
+          options: { artifacts: twoPages },
+          instance: artifact,
+          grant: { viewer: "v" },
+          at: { page: "b.html" },
+          status: 200,
+        },
+        {
+          what: "not-found (a page below the base the set doesn't have)",
+          options: { artifacts: twoPages },
+          instance: artifact,
+          grant: { viewer: "v" },
+          at: { page: "none.html" },
+          status: 404,
+        },
+      ];
+      for (const { what, options, instance, grant, at, status } of cases) {
+        const porthole = server(options);
+        const served = await bytesOf(
+          await porthole.handle(get(doorOf(await porthole.issue(instance, grant, at)))),
+        );
+        const answered = await bytesOf(await porthole.doorAnswer(instance, grant, undefined, at));
+        expect(served.status, what).toBe(status);
+        expect(answered, what).toEqual(served);
+      }
     });
   });
 });
