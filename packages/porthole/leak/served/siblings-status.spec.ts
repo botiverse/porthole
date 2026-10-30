@@ -37,13 +37,23 @@ const POST_BLOCKED = `parent.postMessage({ jsonrpc: "2.0", method: "porthole/not
  */
 const hostile = (act: string, forMs = 6000): string => `<p id="a">A</p><script>
   const seen = [];
+  const firstSight = new WeakSet();
   const act = (w, d, i) => { ${act} };
   const look = () => {
     for (let i = 0; i < parent.frames.length; i += 1) {
       const w = parent.frames[i];
       if (w === window) continue;
       let d = null;
-      try { d = w.document; } catch (e) { seen.push({ i, read: "blocked: " + e.name }); continue; }
+      try { d = w.document; } catch (e) {
+        if (!firstSight.has(w)) { firstSight.add(w); seen.push({ i, first: "unreadable", at: Date.now() - started }); }
+        continue;
+      }
+      if (!firstSight.has(w)) {
+        firstSight.add(w);
+        let path = null;
+        try { path = w.location.pathname; } catch (e) {}
+        seen.push({ i, first: { readyState: d.readyState, hasB: !!d.querySelector("#b"), scripts: d.scripts.length, path }, at: Date.now() - started });
+      }
       try { act(w, d, i); } catch (e) { seen.push({ i, act: "threw: " + e.name }); }
     }
   };
@@ -145,6 +155,7 @@ test.describe("a served display's word comes from a door no sibling can reach (P
   }) => {
     const served = await harness();
     const scope = unique("inject");
+    const said = watchA(page);
     const bHandle = await mountAthenB(
       page,
       served,
@@ -173,7 +184,11 @@ test.describe("a served display's word comes from a door no sibling can reach (P
       .poll(async () => (await bHandle.read()).hostErrors.length, {
         message: "probe: the host heard A's status, as a frame-status error",
       })
-      .toBeGreaterThan(0);
+      .toBeGreaterThan(0)
+      .catch((error: Error) => {
+        // The positive control: did A reach B at all? What A saw first of each frame says why not.
+        throw new Error(`${error.message}\nA saw: ${JSON.stringify(said)}`);
+      });
     const record = await bHandle.read();
     expect(
       record.outcomes.some((each) => each.state === "blocked"),
@@ -249,7 +264,10 @@ test.describe("a served display's word comes from a door no sibling can reach (P
           timeout: 15_000,
         },
       )
-      .toBe(true);
+      .toBe(true)
+      .catch((error: Error) => {
+        throw new Error(`${error.message}\nA saw: ${JSON.stringify(said)}`);
+      });
     await page.waitForTimeout(4_000);
     const record = await bHandle.read();
     expect(
@@ -315,6 +333,7 @@ test.describe("a served display's word comes from a door no sibling can reach (P
   }) => {
     const served = await harness();
     const scope = unique("proxy");
+    const said = watchA(page);
     const bHandle = await mountAthenB(
       page,
       served,
@@ -331,7 +350,12 @@ test.describe("a served display's word comes from a door no sibling can reach (P
         );
       },
     );
-    const outcome = await outcomeOf(bHandle.read, 8_000);
+    const outcome = await outcomeOf(bHandle.read, 8_000).catch(async (error: Error) => {
+      const record = await bHandle.read();
+      throw new Error(
+        `${error.message}\nB: ${JSON.stringify({ outcomes: record.outcomes, hostErrors: record.hostErrors })}\nA saw: ${JSON.stringify(said)}`,
+      );
+    });
     expect(
       outcome.state !== "blocked",
       `probe: the proxy view was never blocked by a sibling (${JSON.stringify(outcome)})`,
