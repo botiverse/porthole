@@ -1337,18 +1337,27 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
         expect(again.status(), "probe: a used door ticket is 401 session").toBe(401);
 
         // (4) The door ticket at the content route, and the content ticket at the door, open
-        // nothing; (6) a fresh door framed from a foreign origin hears nothing (frame-ancestors).
+        // nothing: the two tickets of one issue are not interchangeable. Each is swapped into the
+        // other's own URL, each path kept as the host gave it (a host's door path need not end in
+        // its content's key, P126); (6) a fresh door framed from a foreign origin hears nothing
+        // (frame-ancestors).
         const fresh = await host.locate(await host.shell("door-cross"));
-        const freshDoor = new URL(doorOf(fresh));
-        const freshContent = new URL(fresh.url);
-        const key = freshDoor.pathname.split("/").at(-1) ?? "";
-        const doorTicket = freshDoor.searchParams.get("ticket") ?? "";
-        const contentTicket = freshContent.searchParams.get("ticket") ?? "";
-        const doorTicketAtContent = `${fresh.origin}/__porthole/d/${key}?ticket=${doorTicket}`;
-        const contentTicketAtDoor = `${fresh.origin}/__porthole/door/${key}?ticket=${contentTicket}`;
+        const doorTicketAtContent = new URL(fresh.url);
+        const contentTicketAtDoor = new URL(doorOf(fresh));
+        const doorTicket = contentTicketAtDoor.searchParams.get("ticket");
+        const contentTicket = doorTicketAtContent.searchParams.get("ticket");
+        if (doorTicket === null || contentTicket === null) {
+          info?.annotations.push({
+            type: "measured",
+            description:
+              "the location's content or door URL carries no ticket query parameter: the swap presents none",
+          });
+        }
+        doorTicketAtContent.searchParams.set("ticket", doorTicket ?? "");
+        contentTicketAtDoor.searchParams.set("ticket", contentTicket ?? "");
         for (const [what, url] of [
-          ["the door ticket at the content route", doorTicketAtContent],
-          ["the content ticket at the door", contentTicketAtDoor],
+          ["the door ticket at the content route", doorTicketAtContent.href],
+          ["the content ticket at the door", contentTicketAtDoor.href],
         ] as const) {
           const response = await page.request.get(url, { failOnStatusCode: false });
           expect(response.status(), `probe: ${what} opens nothing`).toBe(401);

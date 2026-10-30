@@ -874,6 +874,22 @@ checks the content route runs for that grant, then answer `doorResponse({ hostOr
 page's shell label. `DOOR_PATH`, `doorResponse` and `doorStatusResponse` are exported from
 `@botiverse/porthole/server`.
 
+**A host that signs its own tickets** (P126) — its server mints its own ticket for a display and its
+content Worker verifies it, so the Worker holds no Porthole ticket when the door is asked — answers
+the door with **`server.doorAnswer(instance, grant, request?)`**, on the object `createServer`
+returns. Raft's shape: the Worker routes its door path (`/__porthole/door/_raft`, say), verifies
+its own ticket (signature, single use, bound to the label and the instance, and a door's, never its
+content's), admits the request and recovers the grant it was signed for, then returns `await
+server.doorAnswer(instance, grant, request)`. The answer is exactly what `/server`'s own door route
+gives once it has taken its ticket: the host's `authorize` check (`denied` with its code), the
+document and version, a file set's entry being a page (`not-found`), `doorResponse` or
+`doorStatusResponse` with the door's CSP and no cookie. It never takes a ticket and checks nothing
+about the request but its method: **you must have authenticated the request and established the
+grant yourself**, as before `issue`. Pass the request so `authorize.check` sees it, and `{ page }`
+as the fourth argument for a frame that opens at a file set's page below its version. It throws for
+an instance with no door (a nested page, a url-mode app) and for an instance or grant `issue` would
+refuse. The content route still takes its own ticket and checks again (P050).
+
 `porthole.config(kind)` is the served config while frames are served, the opaque one while they
 aren't, and null until the meta is known, so a frame never starts opaque and then restarts
 served. The client's functions take no `this`: pass them bare

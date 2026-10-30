@@ -343,6 +343,31 @@ export interface PortholeServer {
     at?: { readonly page?: string },
   ): Promise<FrameLocation>;
   /**
+   * A served display's door answer for a grant the host has already admitted (P126): exactly the
+   * Response its door (`DOOR_PATH<key>`, P125) answers once it has taken its own ticket for that
+   * instance and grant. The content's address's checks for that grant run here: the host's
+   * `authorize` check (`denied`, with its code), the document and its version (`not-found`), a file
+   * set's entry being a page and the page `at` names (`not-found`). The answer is `doorResponse`
+   * (open) or `doorStatusResponse` (blocked: reason, status, code), with the door's CSP (`sandbox
+   * allow-scripts`, `frame-ancestors` the host origins), `no-store`, and no cookie.
+   *
+   * It is a function, not a route, and it never takes a ticket: it is for a host that signs its own
+   * tickets (a content Worker that verifies them itself) and answers its door with it. The caller
+   * must have authenticated the request and established the grant itself, as it does before
+   * `issue`; Porthole's own door route takes its door ticket and then answers with this. `request`
+   * is what `authorize.check` is handed (and gives the method: HEAD has no body, a method other
+   * than GET or HEAD is 405); default, a GET of the door on the instance's origin. Throws, as
+   * `issue` does, for an instance or grant `issue` would refuse, and for an instance with no door
+   * (a nested page, a url-mode app).
+   */
+  doorAnswer(
+    instance: InstanceRef,
+    grant: Grant,
+    request?: Request,
+    /** The page below a file set's base the frame opens at, as `issue`'s `at` (P125). */
+    at?: { readonly page?: string },
+  ): Promise<Response>;
+  /**
    * The access a request's cookie carries for a url-mode app on the request's origin, or null
    * (no good cookie, an `Origin` or `Sec-Fetch-Site` of another origin's (P101), or the host's
    * check denies it): for a host's own WebSocket upgrade path, which a fetch-style handler can't

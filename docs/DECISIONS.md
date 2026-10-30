@@ -6972,3 +6972,50 @@ it.
 **Revisit when** a host needs a later block told in a display with files (then: start it again on a
 dropped status, its next run's first door says it), url mode gets a shell of Porthole's on the app's
 origin, or the parallel-mount variant is measured and chosen.
+
+## P126 · 2026-10-30 · The door's answer for a grant: hosts that sign their own tickets · Accepted
+
+**Amends P125.** P125's door is answered by `/server` (`serveDoor`) once it takes the door's own
+ticket, or by a host's content Worker that takes that ticket itself. Raft signs its own tickets on
+its server and verifies them in its content Worker: at request time it holds no Porthole ticket, so
+it can neither present one to `serveDoor` nor reproduce the door's checks without copying them
+(Tenny and Remy, #wg-opensource, 2026-10-30).
+
+**Decision.** `PortholeServer.doorAnswer(instance, grant, request?, at?)` — a function on the
+object `createServer` returns, **not a route** — returns exactly the Response `serveDoor` answers
+for that instance and grant once its ticket step is done: the content route's checks for the grant
+(the host's `authorize` check → 403 `denied` with its code; the document and its version, a file
+set's entry being a page, the page `at` names → 404 `not-found`; a failure → 500 `error`; a method
+other than GET/HEAD → 405), answered with `doorResponse` (open) or `doorStatusResponse`, with the
+door's CSP (`sandbox allow-scripts`, `frame-ancestors` the host origins), `no-store` and no cookie.
+`serveDoor` now takes and checks its ticket (single use, bound to label and key, a door ticket,
+never an entry or hop ticket, no door on a nested page's label: all as in P125) and then answers
+through the same code (`answerDoor`), so there is one answer, not two kept in step. `doorAnswer`
+never takes a ticket; it validates the instance and grant as `issue` does, and throws for an
+instance with no door (a nested page, a url-mode app). `request` is what `authorize.check` is
+handed; default, a GET of the door on the instance's origin.
+
+**Threat.** None re-opened. The ticket is how `/server` knows a request was admitted; `doorAnswer`
+is for a caller that has authenticated the request and established the grant itself (its own
+ticket, verified in its Worker), as a host does before it calls `issue`. Nothing reaches it from
+the network that the host didn't route there, and its answer is the one `serveDoor` gives for the
+same grant, so the door says no more to its frame than P125's does. A host that calls it for a
+request it didn't admit tells a request `open` that its content route then still refuses (P050:
+the content route takes its own ticket and checks again), the same as a door ticket handed out
+wrongly would.
+
+**Conformance.** `served.domain.door`'s check (4) no longer builds a content URL from the door
+path's last segment (a host's door path need not end in the content's key: Raft's is
+`/__porthole/door/_raft`): it swaps the `ticket` parameters between one location's own `url` and
+`door.url`, each path kept, and expects both refused (401), as before.
+
+**Tested.** `test/server.test.ts` ("doorAnswer"): an allowed grant is open with the door's exact
+CSP; denied with the host's code (the check handed the caller's request); not-found for a missing
+version and for a file set whose entry isn't a page; HEAD and 405; what it throws; and `serveDoor`
+and `doorAnswer` give byte-identical status, headers and body for the same grant (open for each
+kind, denied, not-found, a page below a base). Reverse checks (2026-10-30): `serveDoor` answering
+`open` inline without the checks, and `serveDoor` running the same checks inline but answering
+with one more frame ancestor, each turn the identity test red (the second, that test alone).
+
+**Revisit when** a host needs the door's answer to differ from its content route's (it must not:
+P125's invariant), or Porthole verifies a host's own tickets itself.

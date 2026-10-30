@@ -4,6 +4,19 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **`server.doorAnswer(instance, grant, request?, at?)` (P126):** the door's answer for a grant a
+  host admitted itself, for a host that signs its own tickets and verifies them in its content
+  Worker. It returns exactly what `/__porthole/door/<key>` answers after taking its ticket (the same
+  `authorize`, document, entry and page checks; `doorResponse` or `doorStatusResponse`, the door's
+  CSP, no cookie) and never takes a ticket: call it only for a request you authenticated, with the
+  grant you established. `serveDoor` now answers through it, so the two can't drift.
+- **Conformance (P126):** `served.domain.door`'s check (4) swaps the `ticket` parameters between a
+  location's own content and door URLs instead of building `/__porthole/d/<key>` from the door
+  path, so a host whose door path ends otherwise (`/__porthole/door/_raft`) is judged by its own
+  URLs.
+
 ## 0.14.6
 
 - **Every display ends with an outcome (P125):** a frame started again until its restarts ran out
