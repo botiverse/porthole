@@ -179,9 +179,10 @@ async function requireReach(
   await new Promise((resolve) => setTimeout(resolve, 500));
   const reports = said as Record<string, unknown>[];
   const acted = reports.filter((each) => done.some((key) => each[key] !== undefined));
-  // The attack is A's word before B's own: a write into a document that had already loaded (its
-  // shell had run and spoken) lands too late to be one.
-  if (acted.some((each) => each.at !== "complete")) {
+  // The attack is A's word before B's own: only a write while B's document is still being parsed
+  // (`loading`) can come first. By `interactive` its inline shell has run and may have spoken, so a
+  // write then (or once `complete`) lands too late to be one (Tenny, P125's review).
+  if (acted.some((each) => each.at === "loading")) {
     return;
   }
   const refused = reports.filter((each) => typeof each.act === "string");
@@ -189,7 +190,7 @@ async function requireReach(
     refused.length + acted.length > 0,
     `${MEASURED_SKIP} on ${browser.browserType().name()} ${browser.version()} (measured): ` +
       `A's attack on B's loading document never landed: ${refused.length} tr${refused.length === 1 ? "y" : "ies"} threw, ` +
-      `${acted.length} only after B's document had loaded (${JSON.stringify([...refused, ...acted].slice(0, 2))}); ` +
+      `${acted.length} only after B's document had been parsed (${JSON.stringify([...refused, ...acted].slice(0, 2))}); ` +
       "retest with each engine version",
   );
   throw new Error(`positive control: A never reached B\nA saw: ${JSON.stringify(said)}`);
