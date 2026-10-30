@@ -4,6 +4,19 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **Security (P124, revisited):** the audit of 2026-10-30 found that P124 holds for a nested
+  display, or a served display with no other display of its scope on the page, not for every frame
+  that speaks. A served display that isn't nested shares its origin with its scope's others: it can
+  reach a new document of theirs before its shell runs and post a frame status there (taken, with
+  no `frame-status` error), or stop the document so the host infers `blocked: framing`; a reload it
+  puts into a running display starts a new run for it. So 0.14.5's "content always runs after
+  Porthole's own first word" holds for a display's own content only. A fix is coming (P125); until
+  then, nest several served displays of one scope on a page, or take a `blocked` outcome of one
+  whose scope has another display running as unconfirmed (THREAT_MODEL §7). Also known: a file
+  set whose entry isn't a page never speaks, so the host infers `framing` (since 0.6.0, P081).
+
 ## 0.14.5
 
 - **Security (P124, after the audit raft-security-audit#16):** any frame could say

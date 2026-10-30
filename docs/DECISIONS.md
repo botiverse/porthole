@@ -6771,6 +6771,40 @@ one PRINCIPLE 5 can't prove. Starting a display again on a dropped status, so th
 server: content could make a display start again at will (bounded by P031's count, as navigating
 away is), for a block the frame already shows.
 
+**After the audit of 0.14.5** (2026-10-30, Ferryman; Chromium's headless shell and Firefox, WebKit
+not run). Rule 2 holds against a display's own content: no route was found to a first word in its
+own run (navigating, reloading, redirecting, history, its own frames, a nested child posting to
+`top`). It doesn't hold against another display of its scope.
+- **P124-1 (P1). A served display of the same scope can speak first in another's run.** A scope's
+  displays share one origin (P114: "the scope's other displays run content there with
+  `allow-same-origin`"). A running display reaches every frame on the host's page (`top[i]`), and
+  a new display's first document is same-origin to it as soon as it commits, before its shell's
+  hello. It can add a script there that posts a frame status: the host takes it as the run's first
+  word, with the sibling's reason and code, and hears no `frame-status` host error. Or it can stop
+  or rewrite that document, so the shell never runs and the host infers `blocked: framing` from
+  silence (P040). It needn't wait for a mount: a `location.reload()` it puts into a running display
+  passes the shell's navigation guard and starts a new run (P031), up to three times. Every run, on
+  both engines.
+  - **Exposed:** any host that shows two served, non-nested displays of one scope on a page (an
+    artifact's versions in one chat, a card beside its full view, a session's widgets and files).
+    A view through the sandbox proxy is on its scope's origin too (not probed).
+  - **Not exposed:** a nested page (its shell is on the `porthole-` label, P114), and a page with
+    one display of its scope.
+  - **Until it is closed**, THREAT_MODEL §4, §6, §7 and ADOPTING say the limit, and that such a
+    host nests those displays, or takes a `blocked` outcome of one whose scope has another display
+    running as unconfirmed. P125 will close it: either nested pages gain `served.storage`,
+    `assets` and `egress.libraries` (so every served display can be nested), or a non-nested
+    display's first document is served on a label no content runs on, before its content runs.
+- **P124-2 (P2, since P081). A file set whose entry is no page never speaks.** `checkFileSet` asks
+  only that the entry is one of the set's files. An entry such as `note.txt` or `pic.svg` is served
+  inert, no shell loads, and the host infers `blocked: framing` (P040): the agent chooses one of
+  Porthole's fallbacks. Planned: the entry must be a page (`checkFileSet`, `admitFiles` and
+  `lintFiles` refuse another), and a ticket's answer for one is Porthole's status page.
+- **P124-3 (P3, tests). No leak probe sees rule 1 alone.** The opaque forger speaks after its
+  shell's hello, so rule 2 drops it already; the control `frame-status` takes out both rules at
+  once, which hides that. Rule 1 is proven by `test/outcome.test.ts` only (DESIGN's row now says
+  so). Planned: split the control in two, one per rule.
+
 **Revisit when** a host needs a later block told in a display with files (then: start it again on a
 dropped status, its next run's first document says it), or url mode gets a shell of Porthole's on
 the app's origin.
