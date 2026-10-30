@@ -845,6 +845,10 @@ requirements:
   so its door says `blocked: session` ("this link has been used"), and `createHost` tells you
   with a `hostError` of kind `"locate"`. (A sibling of the scope could force that by reloading the
   display.)
+- **A platform of your own makes the web's doors.** A `PlatformHost` that wraps
+  `webPlatform.createSurface` must also give `createDoor` (delegate to `webPlatform.createDoor`):
+  a platform without doors frames no served display that isn't nested (`blocked: locate`, a `door`
+  host error).
 - **The door sits in the display's container while it decides**, a hidden 0×0 frame
   (`data-porthole-door`), removed once it says its word. Code that grabs
   `container.querySelector("iframe")` just after mounting may get the door: select

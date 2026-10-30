@@ -237,6 +237,9 @@ const DISPLAYS = defineDisplays({
   preview: { preset: "url" },
 });
 
+/** How many locations the views' frame endpoint issued: each gets tickets of its own. */
+let issued = 0;
+
 function renderViews(spec: ViewsSpec): void {
   const client = portholeClient({
     displays: DISPLAYS,
@@ -246,19 +249,27 @@ function renderViews(spec: ViewsSpec): void {
       frameSources: [],
       health: null,
     },
-    fetch: async (_input: RequestInfo | URL, init?: RequestInit) =>
-      spec.frames === "ok"
-        ? Response.json({
-            // A shell instance gets a served shell; an app, the running app.
-            url: (typeof init?.body === "string" ? init.body : "").includes('"shell"')
-              ? `${APP_ORIGIN}/leak/host/served-shell.html`
-              : `${APP_ORIGIN}/leak/host/app.html`,
-            origin: APP_ORIGIN,
-          })
-        : Response.json(
-            { error: { code: "forbidden", message: "You can't see this" } },
-            { status: 403 },
-          ),
+    fetch: async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (spec.frames !== "ok") {
+        return Response.json(
+          { error: { code: "forbidden", message: "You can't see this" } },
+          { status: 403 },
+        );
+      }
+      // A shell instance gets a served shell, with its door (P125: a door ticket of its own each
+      // time, as a server issues one per run); an app, the running app (url mode has none).
+      const shell = (typeof init?.body === "string" ? init.body : "").includes('"shell"');
+      issued += 1;
+      return Response.json({
+        url: shell
+          ? `${APP_ORIGIN}/leak/host/served-shell.html?ticket=t${issued}`
+          : `${APP_ORIGIN}/leak/host/app.html`,
+        origin: APP_ORIGIN,
+        ...(shell
+          ? { door: { url: `${APP_ORIGIN}/__porthole/door/aaaaaaaaaaaaaaaa?ticket=d${issued}` } }
+          : {}),
+      });
+    },
   });
   root.render(
     h(

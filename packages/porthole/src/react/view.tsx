@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -11,8 +12,10 @@ import {
 } from "react";
 import type { ColorScheme } from "../config/schema.ts";
 import { frameFallback, type FrameFallback, type PortholeClient } from "../host/client.ts";
+import { oneShot } from "../host/locator.ts";
+import { originMatchesSource } from "../isolation/served.ts";
 import type { FrameOutcome } from "../host/types.ts";
-import type { InstanceRef } from "../isolation/types.ts";
+import type { FrameLocation, InstanceRef } from "../isolation/types.ts";
 import {
   PortholeFrame,
   PortholeContext,
@@ -110,13 +113,42 @@ export function PortholeView(props: PortholeViewProps): ReactElement | null {
   );
 }
 
+/**
+ * Whether `address` may be offered as a fallback's "open in a new tab": a clean address on the
+ * served content domain (`contentSource`, its scheme and port), not Porthole's own paths. Anything
+ * else (another site, a typo the server answered 404 for elsewhere) gets no link.
+ */
+export function tabLinkOf(
+  address: string,
+  contentSource: string | null | undefined,
+): string | null {
+  if (contentSource === null || contentSource === undefined) {
+    return null;
+  }
+  try {
+    const url = new URL(address);
+    return originMatchesSource(url.origin, contentSource) &&
+      !url.pathname.startsWith("/__porthole/")
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /** A clean address's view (P125): resolved first; its instance's view, or the answer's fallback. */
 function AddressView(props: PortholeViewProps & { readonly address: string }): ReactElement | null {
   const client = useClient();
+  const page = useContext(PortholeContext);
+  const meta = useMeta(client);
   const { address, fallback, pending, onOutcome } = props;
   const [state, setState] = useState<
     | { readonly kind: "resolving" }
-    | { readonly kind: "instance"; readonly instance: InstanceRef }
+    | {
+        readonly kind: "instance";
+        readonly instance: InstanceRef;
+        readonly location: FrameLocation;
+      }
     | { readonly kind: "refused"; readonly said: FrameFallback }
   >({ kind: "resolving" });
   const [generation, setGeneration] = useState(0);
@@ -142,7 +174,7 @@ function AddressView(props: PortholeViewProps & { readonly address: string }): R
           );
           return;
         }
-        setState({ kind: "instance", instance: resolved.instance });
+        setState({ kind: "instance", instance: resolved.instance, location: resolved.location });
       },
       () => {
         if (controller.signal.aborted) {
@@ -164,15 +196,40 @@ function AddressView(props: PortholeViewProps & { readonly address: string }): R
     // The address and a retry decide; a new onOutcome doesn't resolve it again.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [client, address, generation]);
+  // This view's own locator (P125): its frame's first run takes the location it resolved, once;
+  // every later run issues afresh. No other view of the instance can take it.
+  const located = state.kind === "instance" ? state.location : null;
+  const own = useMemo(() => {
+    if (located === null) {
+      return null;
+    }
+    const locator = oneShot(located, { locate: (each, signal) => client.locate(each, signal) });
+    return {
+      ...page,
+      locate: (each: InstanceRef, signal?: AbortSignal) => locator.locate(each, signal),
+    };
+  }, [page, located, client]);
   if (state.kind === "resolving") {
     return <>{pending ?? null}</>;
   }
   if (state.kind === "refused") {
-    // The clean address is the "open in a new tab": a tab is where it opens.
-    return <>{(fallback ?? DefaultFallback)({ ...state.said, link: address, retry })}</>;
+    // The clean address is the "open in a new tab" only where it is one: on the content domain.
+    return (
+      <>
+        {(fallback ?? DefaultFallback)({
+          ...state.said,
+          link: tabLinkOf(address, meta?.contentSource),
+          retry,
+        })}
+      </>
+    );
   }
   const { address: _address, ...rest } = props;
-  return <InstanceView {...rest} instance={state.instance} />;
+  return (
+    <PortholeContext.Provider value={own ?? page}>
+      <InstanceView {...rest} instance={state.instance} />
+    </PortholeContext.Provider>
+  );
 }
 
 function InstanceView(props: PortholeViewProps): ReactElement | null {

@@ -67,9 +67,9 @@ export interface PortholeClient<N extends string = string> extends InstanceLocat
   configFor(this: void, instance: InstanceRef): PortholeConfig | null;
   /**
    * What a clean address names, for this viewer (P125): its instance and an issued location (a
-   * door, a ticket), which the instance's first frame then uses; or the outcome the frame endpoint
-   * answered instead (signed out, denied, not found), with no frame built. A clean address is for
-   * a tab: never frame one directly (`checkFrameLocation` refuses it).
+   * door, a ticket) for the caller's own first frame (`oneShot(location, locator)`), or the outcome
+   * the frame endpoint answered instead (signed out, denied, not found), with no frame built. A
+   * clean address is for a tab: never frame one directly (`checkFrameLocation` refuses it).
    */
   resolve(this: void, address: string, signal?: AbortSignal): Promise<Resolved>;
   /** An instance's clean address (`entry.pathOf` on the server), or null. */
@@ -206,10 +206,6 @@ export function portholeClient<N extends string>(
     }
   };
 
-  // A location `resolve` already got for an instance (P125): its first frame uses it, so the
-  // clean address is asked about once; every later run issues afresh, by instance.
-  const resolved = new Map<string, FrameLocation>();
-
   const askFrames = async (body: Record<string, unknown>, signal?: AbortSignal) => {
     const headers = headersNow();
     headers.set("content-type", "application/json");
@@ -241,11 +237,6 @@ export function portholeClient<N extends string>(
 
   const issue = async (instance: InstanceRef, signal?: AbortSignal): Promise<FrameLocation> => {
     const key = keyOf(instance);
-    const first = resolved.get(key);
-    if (first !== undefined) {
-      resolved.delete(key);
-      return first;
-    }
     const { status, data } = await askFrames({ instance }, signal);
     const location = located(status, data);
     links.set(key, isRecord(data) && typeof data.link === "string" ? data.link : null);
@@ -280,9 +271,9 @@ export function portholeClient<N extends string>(
     }
     const found = instance as unknown as InstanceRef;
     const location = located(status, data);
-    const key = keyOf(found);
-    resolved.set(key, location);
-    links.set(key, isRecord(data) && typeof data.link === "string" ? data.link : null);
+    // The location is the caller's, for its own first frame only (`oneShot`): never kept here,
+    // where another view of the same instance could take it.
+    links.set(keyOf(found), isRecord(data) && typeof data.link === "string" ? data.link : null);
     return { instance: found, location };
   };
 

@@ -7,7 +7,7 @@ import {
   portholeClient,
   type InstanceRef,
 } from "../src/index.ts";
-import { httpLocator, outcomeOfRefusal } from "../src/host/locator.ts";
+import { httpLocator, oneShot, outcomeOfRefusal } from "../src/host/locator.ts";
 import { nodeServer } from "../src/node/index.ts";
 import {
   contentHostFor,
@@ -529,11 +529,15 @@ describe("the client", () => {
     }
     expect(resolved.instance).toEqual(page("abc"));
     expect(resolved.location.door?.url).toMatch(/\/__porthole\/door\/[a-z2-7]{16}\?ticket=/u);
-    // The instance's first frame takes that location, once; every later run issues afresh.
-    expect(await ada.locate(page("abc"))).toEqual(resolved.location);
-    const again = await ada.locate(page("abc"));
-    expect(again.url).not.toBe(resolved.location.url);
-    expect(again.door?.url).not.toBe(resolved.location.door?.url);
+    // The location is the caller's alone: the client keeps none, so another view of the instance
+    // locating it issues afresh (P125). A view binds it to its own first frame with `oneShot`.
+    const other = await ada.locate(page("abc"));
+    expect(other.url).not.toBe(resolved.location.url);
+    expect(other.door?.url).not.toBe(resolved.location.door?.url);
+    const mine = oneShot(resolved.location, ada);
+    expect(await mine.locate(page("abc"))).toEqual(resolved.location);
+    const next = await mine.locate(page("abc"));
+    expect(next.url, "its next run issues afresh").not.toBe(resolved.location.url);
     // Refused: the outcome, with no location (no frame is ever made for it).
     expect(await client().resolve(`${origin("abc")}/`)).toEqual({
       outcome: { state: "blocked", reason: "sign-in", status: 401 },
@@ -550,6 +554,10 @@ describe("the client", () => {
     for (const answer of [
       () => new Response(JSON.stringify({ error: { code: "failed" } }), { status: 500 }),
       () => new Response("{}", { status: 201 }),
+      // A bare 401, 403 or 404 from a router or a firewall in front of the endpoint: not its answer.
+      () => new Response("Unauthorized", { status: 401 }),
+      () => new Response("<h1>Forbidden</h1>", { status: 403 }),
+      () => new Response(JSON.stringify({ error: { code: "nope" } }), { status: 404 }),
     ]) {
       const client = portholeClient({
         displays,

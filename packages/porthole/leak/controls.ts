@@ -380,11 +380,14 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       [
         "a revoked subject's ticket opens nothing: a page and an app are denied, and the host is told",
         "in a tab of its own, a revoked app and page are denied from the next request on",
+        // A framed page's next run goes through a door with a fresh ticket (P125), on every engine:
+        // without the host's check that door opens, WebKit included.
+        FRAMED_PAGE,
       ],
-      // WebKit keeps no cookie in a cross-site frame (P025): no framed session to revoke.
+      // WebKit keeps no cookie in a cross-site frame (P025): a framed app has no session to revoke.
       {
-        chromium: [FRAMED_APP, FRAMED_PAGE],
-        firefox: [FRAMED_APP, FRAMED_PAGE],
+        chromium: [FRAMED_APP],
+        firefox: [FRAMED_APP],
       },
     ),
   },

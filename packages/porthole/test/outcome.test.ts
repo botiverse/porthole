@@ -652,6 +652,11 @@ describe("createHost: the host's issue endpoint refused, before any frame (P125)
   test("a 500, a network failure or a malformed answer is the host's own failure (locate), never denied", async () => {
     for (const locate of [
       refused(500, "failed"),
+      // A bare 401, 403 or 404 (a router's, a firewall's): no code of the issue endpoint's own.
+      refused(401, "failed"),
+      refused(403, "failed"),
+      refused(404, "failed"),
+      refused(403, "unauthenticated"),
       refused(503, "not-served"),
       refused(429, "rate-limited"),
       () => Promise.reject(new TypeError("Failed to fetch")),

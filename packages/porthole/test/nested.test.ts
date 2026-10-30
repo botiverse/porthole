@@ -163,6 +163,27 @@ describe("the sandbox (P111): never allow-same-origin on a nested page", () => {
       .map((line) => line.replace(/\/\/.*$/u, "").replace(/^\s*(\/\*\*|\*).*$/u, ""))
       .join("\n");
     expect(code, "the door sets no name attribute").not.toMatch(/setAttribute\(\s*["']name["']/u);
+    // Every platform in the source makes its doors with the web platform's own (P125, P125-6): a
+    // platform that wraps createSurface without them would refuse every served display, and one
+    // with doors of its own would escape the checks above.
+    const platforms = files.filter((file) => {
+      const text = readFileSync(file, "utf8");
+      // A platform's own createSurface (a method with a body), never a call or the interface's.
+      return (
+        /(?<![.\w])createSurface\(container[^)]*\)\s*(?::\s*\w+\s*)?\{/u.test(text) &&
+        !file.endsWith("platform/web.ts")
+      );
+    });
+    expect(
+      platforms.map((file) => path.relative(root, file)),
+      "the platforms that wrap the web's",
+    ).toEqual(["check/page.ts"]);
+    for (const file of platforms) {
+      expect(
+        readFileSync(file, "utf8"),
+        `${path.relative(root, file)} makes the web's doors`,
+      ).toMatch(/createDoor: \(container, spec\) => webPlatform\.createDoor!\(container, spec\)/u);
+    }
     expect(code, "the door sets no name property").not.toMatch(/\.name\s*=(?!=)/u);
   });
 });

@@ -1134,10 +1134,13 @@ test("a view served: located through the client; its fallback, worded, when the 
   await expect(
     page.locator('[data-view="p"] iframe').contentFrame().locator("html"),
   ).toHaveAttribute("data-app", "ready");
+  // The frame endpoint refuses (403 forbidden): since P125 a refusal from the host's own issue
+  // endpoint is the display's outcome, `blocked: denied`, drawn in its own words, with no frame.
   await views(page, { served: true, frames: "fail", views: [{ id: "q", display: "preview" }] });
   await expect(page.locator('[data-view="q"] [data-porthole-fallback]')).toContainText(
-    "This couldn't be shown",
+    "You can't open this anymore",
   );
+  await expect(page.locator('[data-view="q"] iframe')).toHaveCount(0);
 });
 
 test("the provider's scheme flip and new themeKey re-theme every frame in place, opaque, served and url (#9)", async ({

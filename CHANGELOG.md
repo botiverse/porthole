@@ -41,6 +41,12 @@ P-numbers below.
     P068's in-frame sign-in page and the transport's host-origin channel (`also`) are removed. A
     locator must issue anew for every run: a reused location's door says `blocked: session`, and
     `createHost` raises a `locate` host error naming the fix.
+  - A `PlatformHost` of a host's own must give `createDoor` (delegate to `webPlatform.createDoor`):
+    without doors no served non-nested display is framed (`/check`'s own platform now does).
+    A refusal maps to an outcome only in the issue endpoint's own shape (`{ error: { code } }`, code
+    `unauthenticated`, `forbidden` or `not-found`): a bare 401, 403 or 404 from a proxy stays
+    `blocked: locate`. `<PortholeView address>` offers the address as its fallback's tab link only
+    on the served content domain, and binds its resolved location to its own first frame.
   - Leak suite: the `door-opaque` control (the door made non-opaque and heard from the content
     origin: a sibling rewrites the live door into Porthole's own status page) and Ferryman's
     `[sibling-reload]` probe (held by `door-status` and `content-status`).

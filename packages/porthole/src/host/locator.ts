@@ -47,16 +47,19 @@ export function outcomeOfRefusal(error: unknown): FrameOutcome | null {
   }
   const code =
     error.reason !== undefined && REASON_CODE.test(error.reason) ? { code: error.reason } : {};
-  switch (error.status) {
-    case 401:
-      return { state: "blocked", reason: "sign-in", status: 401 };
-    case 403:
-      return { state: "blocked", reason: "denied", status: 403, ...code };
-    case 404:
-      return { state: "blocked", reason: "not-found", status: 404 };
-    default:
-      return null;
+  // Only the issue endpoint's own refusal, by its shape (`{ error: { code } }` with the code that
+  // goes with its status): a bare 401, 403 or 404 from a router or a firewall in front of it is no
+  // answer of the host's, so it stays the host's own failure (`locate`).
+  if (error.status === 401 && error.code === "unauthenticated") {
+    return { state: "blocked", reason: "sign-in", status: 401 };
   }
+  if (error.status === 403 && error.code === "forbidden") {
+    return { state: "blocked", reason: "denied", status: 403, ...code };
+  }
+  if (error.status === 404 && error.code === "not-found") {
+    return { state: "blocked", reason: "not-found", status: 404 };
+  }
+  return null;
 }
 
 export interface HttpLocatorOptions {
@@ -189,6 +192,22 @@ export function httpLocator(url: string, options: HttpLocatorOptions = {}): Inst
 export type Resolved =
   | { readonly instance: InstanceRef; readonly location: FrameLocation }
   | { readonly outcome: FrameOutcome };
+
+/**
+ * A locator whose first call answers `location` (one a `resolve` got), once, and every later one
+ * asks `then` (P125): bound to the one display that resolved it, so no other view of the same
+ * instance can take its tickets, and every run after the first issues afresh.
+ */
+export function oneShot(location: FrameLocation, then: InstanceLocator): InstanceLocator {
+  let first: FrameLocation | null = location;
+  return {
+    locate(instance, signal) {
+      const given = first;
+      first = null;
+      return given === null ? then.locate(instance, signal) : Promise.resolve(given);
+    },
+  };
+}
 
 /** Whether a value is an instance as an issue endpoint gives it back: `{ scope, document }`. */
 const isInstance = (value: unknown): value is InstanceRef =>
