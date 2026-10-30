@@ -78,6 +78,8 @@ const STALL_RULE =
 const FILES = "leak/served/files.spec.ts";
 const SERVED = "leak/served/served.spec.ts";
 const TAB = "leak/served/tab.spec.ts";
+const OUTCOME = "leak/served/outcome.spec.ts";
+const SIBLINGS_STATUS = "leak/served/siblings-status.spec.ts";
 const ANNOTATE = "leak/annotate.spec.ts";
 
 /** The keyboard's probes (P109). */
@@ -601,16 +603,36 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "clearSelection takes the page's selection away and tells nothing back; marks and drafts stay, the next selection is told (P115)",
     ),
   },
-  // A nested page's shell keeps its own namespace (P111): a page that says the shell's words, just
-  // before a call of its own, has its comments.open believed.
-  // Who may say how loading went (P124): without the rule, every forger's frame status is an
-  // outcome.
-  "frame-status": {
-    specs: ["leak/served/outcome.spec.ts"],
+  // Who may say how loading went (P124, P125). The rule split per the audit of 2026-10-30: a
+  // served display that isn't nested takes no frame status from its frame at all (its door told);
+  // a nested page's shell keeps the ordering rule; an opaque frame's rule 1 is proven by
+  // test/outcome.test.ts alone (P124-3), with no leak probe of its own.
+  // Content's own word taken again: a served non-nested display's frame status is an outcome,
+  // whether its own content's (the two P124 outcome cases) or a sibling's (inject, reload, proxy).
+  "content-status": {
+    specs: [OUTCOME, SIBLINGS_STATUS],
     fails: all(
       "a served shell's content that says it is blocked is told nothing and shown nothing (P124)",
       "a served artifact page that says it is blocked as it loads is told nothing and shown nothing (P124)",
-      "an opaque widget that says it is blocked is told nothing and shown nothing (P124)",
+      "[sibling-inject]",
+      "[proxy]",
+    ),
+  },
+  // P124's first-word rule in place of the door: a sibling that speaks first in a served
+  // non-nested display's frame (its own, or the sandbox proxy's) is taken.
+  "door-status": {
+    specs: [SIBLINGS_STATUS],
+    fails: all("[sibling-inject]", "[proxy]"),
+  },
+  // A served non-nested display's silence read as `framing` again: a sibling that wipes it.
+  "door-silence": {
+    specs: [SIBLINGS_STATUS],
+    fails: all("[sibling-wipe]"),
+  },
+  // The ordering rule taken out for a nested page's shell: a page's word after its hello taken.
+  "frame-status-order": {
+    specs: [OUTCOME],
+    fails: all(
       "a nested page that says it is blocked, through its shell or past it, is told nothing and shown nothing (P124)",
     ),
   },

@@ -450,6 +450,7 @@ const DOMAIN_CASES = [
   "served.domain.self-navigation",
   ...TAB_CASES,
   "served.domain.frame-ancestors",
+  "served.domain.door",
   "served.domain.egress",
 ];
 

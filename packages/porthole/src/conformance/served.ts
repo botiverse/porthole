@@ -1258,6 +1258,101 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
     );
 
     define(
+      "served.domain.door",
+      "a served display's door is on its own origin, opaque, says open from null, is taken once, and refuses the wrong ticket (P125)",
+      async ({ page }) => {
+        const doorOf = (location: Awaited<ReturnType<typeof host.locate>>): string => {
+          expect(
+            location.door,
+            "probe: the server gives a door for a served display",
+          ).toBeDefined();
+          return location.door!.url;
+        };
+        // Land on a host-origin page first, so the door (framed by it) is within frame-ancestors.
+        await host.show(page, await host.shell("door-nav"), { content: SHELL_CONTENT });
+        // (1) The door is on the display's own origin, at Porthole's door path.
+        const first = await host.locate(await host.shell("door-shape"));
+        const door = new URL(doorOf(first));
+        expect(door.origin, "probe: the door is on the display's origin").toBe(first.origin);
+        expect(door.pathname, "probe: the door is at /__porthole/door/<key>").toMatch(
+          /^\/__porthole\/door\/[A-Za-z0-9_-]+$/u,
+        );
+
+        // (2) Framed opaque (sandbox allow-scripts), it says `open` from the opaque origin within
+        // SETTLE_MS; (5) and a door on a tab of its own is an opaque origin too.
+        const said = await page.evaluate(
+          async ({ url, settle }) => {
+            const frame = document.createElement("iframe");
+            // Opaque: scripts only (the probe frames the door as the host does, P125).
+            frame.sandbox.add("allow-scripts");
+            const got = new Promise<{ origin: string; data: unknown } | null>((resolve) => {
+              const onMessage = (event: MessageEvent) => {
+                if (event.source === frame.contentWindow) {
+                  window.removeEventListener("message", onMessage);
+                  resolve({ origin: event.origin, data: event.data });
+                }
+              };
+              window.addEventListener("message", onMessage);
+              setTimeout(() => resolve(null), settle);
+            });
+            frame.src = url;
+            document.body.append(frame);
+            const message = await got;
+            frame.remove();
+            return message;
+          },
+          { url: door.href, settle: SETTLE_MS + 2_000 },
+        );
+        expect(said, "probe: the door said nothing when framed opaque").not.toBeNull();
+        expect(said?.origin, "probe: the door spoke from an opaque origin").toBe("null");
+        expect(
+          (said?.data as { method?: unknown } | null)?.method,
+          "probe: the door spoke a frame status",
+        ).toBe("porthole/notifications/frame-status");
+        expect(
+          (said?.data as { params?: { state?: unknown } } | null)?.params?.state,
+          "probe: the door said open",
+        ).toBe("open");
+
+        // (3) The same door ticket again opens nothing: a used ticket is `session`.
+        const again = await page.request.get(door.href, { failOnStatusCode: false });
+        expect(again.status(), "probe: a used door ticket is 401 session").toBe(401);
+
+        // (4) The door ticket at the content route, and the content ticket at the door, open
+        // nothing; (6) a fresh door framed from a foreign origin hears nothing (frame-ancestors).
+        const fresh = await host.locate(await host.shell("door-cross"));
+        const freshDoor = new URL(doorOf(fresh));
+        const freshContent = new URL(fresh.url);
+        const key = freshDoor.pathname.split("/").at(-1) ?? "";
+        const doorTicket = freshDoor.searchParams.get("ticket") ?? "";
+        const contentTicket = freshContent.searchParams.get("ticket") ?? "";
+        const doorTicketAtContent = `${fresh.origin}/__porthole/d/${key}?ticket=${doorTicket}`;
+        const contentTicketAtDoor = `${fresh.origin}/__porthole/door/${key}?ticket=${contentTicket}`;
+        for (const [what, url] of [
+          ["the door ticket at the content route", doorTicketAtContent],
+          ["the content ticket at the door", contentTicketAtDoor],
+        ] as const) {
+          const response = await page.request.get(url, { failOnStatusCode: false });
+          expect(response.status(), `probe: ${what} opens nothing`).toBe(401);
+        }
+
+        // (6) A fresh door from a foreign origin: frame-ancestors refuses it, so it says nothing.
+        const foreignDoor = await host.locate(await host.shell("door-foreign"));
+        await host.frameFromForeignOrigin(page, doorOf(foreignDoor));
+        await page.waitForTimeout(SETTLE_MS);
+        for (const frame of page.frames().slice(1)) {
+          const reached = await Promise.race([
+            frame
+              .evaluate(() => document.querySelector("[data-porthole-door]") !== null)
+              .catch(() => false),
+            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 2_000)),
+          ]);
+          expect(reached, "probe: a foreign origin framed the door").toBe(false);
+        }
+      },
+    );
+
+    define(
       "served.domain.egress",
       "the CSP in the document's headers closes egress; only what the config opens to any https site (images, media) reaches it",
       async ({ page }) => {
