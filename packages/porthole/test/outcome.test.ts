@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { UNTRUSTED_FRAME_STATUS, watchOutcome } from "../src/host/outcome.ts";
 import type { DisplayEvents, FrameOutcome } from "../src/host/types.ts";
 import { createHost, presets, type PlatformHost, type PortholeConfig } from "../src/index.ts";
-import { NO_DOOR } from "../src/host/create-host.ts";
+import { NO_DOOR, REUSED_LOCATION } from "../src/host/create-host.ts";
 import { LocateError } from "../src/host/locator.ts";
 import { FRAME_STATUS_METHOD, type FrameSource } from "../src/isolation/types.ts";
 import type { Surface } from "../src/platform/types.ts";
@@ -722,7 +722,7 @@ describe("createHost: every restart goes through a new door, with a new ticket (
 
   const ORIGIN = "https://a-x.example-usercontent.com";
 
-  function mounted() {
+  function mounted(reuse = false) {
     const doors: Driven[] = [];
     const contents: Driven[] = [];
     let located = 0;
@@ -760,7 +760,8 @@ describe("createHost: every restart goes through a new door, with a new ticket (
     // A host's locator issues afresh on every run: a new content ticket and a new door ticket.
     const locator = {
       locate: () => {
-        located += 1;
+        // A locator that memoizes (`reuse`): every run gets the first run's location.
+        located = reuse ? 1 : located + 1;
         return Promise.resolve({
           url: `${ORIGIN}/__porthole/d/aaaaaaaaaaaaaaaa?ticket=content-${located}`,
           origin: ORIGIN,
@@ -787,8 +788,25 @@ describe("createHost: every restart goes through a new door, with a new ticket (
       instance: { scope: "s", document: { kind: "shell", preset: "inlineWidget" } },
     });
     shown.on("outcome", (each) => outcomes.push(each));
-    return { doors, contents, outcomes, shown };
+    const hostErrors: DisplayEvents["hostError"][] = [];
+    shown.on("hostError", (each) => hostErrors.push(each));
+    return { doors, contents, outcomes, hostErrors, shown };
   }
+
+  test("a locator that gives a restart the location an earlier run used is told to the host; nothing else changes", async () => {
+    const { doors, contents, hostErrors, shown } = mounted(true);
+    await vi.waitFor(() => expect(doors).toHaveLength(1));
+    doors[0]?.say(status({ state: "open" }));
+    expect(hostErrors, "a first run is no reuse").toEqual([]);
+    contents[0]?.navigate();
+    await vi.waitFor(() => expect(doors).toHaveLength(2));
+    expect(hostErrors).toEqual([{ message: REUSED_LOCATION, kind: "locate" }]);
+    // The run goes on as it would: the same door address, whose word is the server's.
+    expect(doors[1]?.url).toBe(doors[0]?.url);
+    doors[1]?.say(status({ state: "blocked", reason: "session", status: 401 }));
+    expect(contents).toHaveLength(1);
+    shown.destroy();
+  });
 
   test("a restart (the frame's second load) makes a new door frame with the new ticket, and no content frame before it opens", async () => {
     const { doors, contents, shown } = mounted();

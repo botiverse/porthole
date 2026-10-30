@@ -615,6 +615,7 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "a served shell's content that says it is blocked is told nothing and shown nothing (P124)",
       "a served artifact page that says it is blocked as it loads is told nothing and shown nothing (P124)",
       "[sibling-inject]",
+      "[sibling-reload]",
       "[proxy]",
     ),
   },
@@ -622,12 +623,18 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   // non-nested display's frame (its own, or the sandbox proxy's) is taken.
   "door-status": {
     specs: [SIBLINGS_STATUS],
-    fails: all("[sibling-inject]", "[proxy]"),
+    fails: all("[sibling-inject]", "[sibling-reload]", "[proxy]"),
   },
   // A served non-nested display's silence read as `framing` again: a sibling that wipes it.
   "door-silence": {
     specs: [SIBLINGS_STATUS],
     fails: all("[sibling-wipe]"),
+  },
+  // The door not opaque, heard from the location's origin (displays still work): a sibling reads
+  // the live door and rewrites it into Porthole's own status page, which speaks for the display.
+  "door-opaque": {
+    specs: [SIBLINGS_STATUS],
+    fails: all("[door-reach]"),
   },
   // The ordering rule taken out for a nested page's shell: a page's word after its hello taken.
   "frame-status-order": {

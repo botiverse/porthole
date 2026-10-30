@@ -842,7 +842,13 @@ requirements:
   every served non-nested display, as above. And `locate` is called again on every run (a reload,
   a restart after the content navigated its frame away): answer each call with a fresh issue (a new
   ticket, a new door ticket). A location reused from an earlier run carries tickets already taken,
-  so its door says `blocked: session` ("this link has been used").
+  so its door says `blocked: session` ("this link has been used"), and `createHost` tells you
+  with a `hostError` of kind `"locate"`. (A sibling of the scope could force that by reloading the
+  display.)
+- **The door sits in the display's container while it decides**, a hidden 0×0 frame
+  (`data-porthole-door`), removed once it says its word. Code that grabs
+  `container.querySelector("iframe")` just after mounting may get the door: select
+  `iframe:not([data-porthole-door])`.
 - **A clean address is for a tab.** Never give `createHost` a clean address (`urlOf`, `link`) as a
   frame's location: it has no door, so it is refused before any frame, as above, and the content
   origin answers it in a frame with a page that has no script and goes nowhere. To frame what a

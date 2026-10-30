@@ -6916,12 +6916,31 @@ rule that reads "the first load" as "the first document" re-opens P124-1.
 or `.htm` (code `entry`); a stored set whose entry isn't a page answers Porthole's `not-found`
 status page, and the door says `not-found` (so an old host, which has no door, still gets Porthole's
 word, not an inert file that says nothing). P124-3: the one `frame-status` control is split per the
-design's §4 table (`content-status`, `door-status`, `door-silence`, `frame-status-order`); the
-door's opacity (rule 1's sibling) has no gating weakening, since the door resolves within the task
-it commits, so a sibling never catches it live — it is held by the static sandbox test (the door's
-sandbox is `allow-scripts` alone, `DOOR_SANDBOX_TOKENS`) and the positive `[door-reach]` leak probe
-(a same-scope sibling reading the door gets a `SecurityError`), as P124-3 holds rule 1 by
-`test/outcome.test.ts` alone.
+design's §4 table (`content-status`, `door-status`, `door-silence`, `door-opaque`,
+`frame-status-order`).
+
+**What holds the door (after the audit of P125, Ferryman).** A sibling of the scope does get the
+live door's `WindowProxy` while it loads (`top[i]`): it can read its `length` and post to it
+(nothing listens). The wall is three things, each measured: reading the door's document throws a
+`SecurityError` (it is opaque: the frame's `sandbox` attribute and the door answer's CSP `sandbox`
+each make it so on its own); setting or replacing its `location` throws a `SecurityError` (the
+sibling's own sandbox sets the sandboxed navigation flag: it navigates no frame that isn't its own);
+and the door has no name, so `window.open(url, name)`, a link's or a form's `target` reach nothing.
+Behind them, the host takes the door's word from the opaque origin (`"null"`) alone. One slip
+changes nothing: removing one sandbox token leaves the other; removing both makes every served
+display `framing` (the honest door then speaks from the content origin, which the host doesn't hear:
+fail closed). Only opacity and the `"null"` check removed together let displays work while a sibling
+reads the live door and rewrites it into Porthole's own status page, which then says `blocked:
+session` from the door's window: that is the `door-opaque` control, and `[door-reach]` (which does
+exactly that, with a lingering door) fails under it. An earlier draft of this entry said a sibling
+never meets a live door; it does. `[sibling-reload]` is Ferryman's reload probe (a sibling reloads a
+loaded display and speaks first in its next run), red under `door-status` and `content-status`.
+
+**A locator issues anew for every run.** A door ticket opens one door. A host whose locator returns
+the same location every run used to restart through the session cookie; now its restart's door says
+`blocked: session`, and a sibling could force that by reloading the display. `createHost` tells the
+host (`hostError` kind `locate`, "a locator must issue anew for every run") when a run is located at
+an address an earlier run used; the outcome is unchanged, the server's word (ADOPTING, CHANGELOG).
 
 **Costs accepted** (THREAT_MODEL S7, the premise being a scope its author controls): one extra
 request and a ~1 KB document per mount, and about one RTT of added latency (sequential). A sibling

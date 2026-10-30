@@ -22,9 +22,11 @@ import type { FrameOutcome } from "./types.ts";
  * while it parses never fires `load`, so no host may read a frame's first load as its first
  * document. The door's "load, then `SETTLE_MS` of silence: framing" doesn't rest on that: no content
  * ever runs in the door (its one script is Porthole's, by its hash, under `default-src 'none'`),
- * so nothing navigates it from inside; and a sibling of its scope can't reach it from outside (it
- * is opaque, so reading it or setting its `location` throws, and it has no name, so `window.open`
- * and a link's or a form's `target` find nothing): `[door-reach]` and `door-opaque` hold that.
+ * so nothing navigates it from inside; and a sibling of its scope, which does get its `WindowProxy`
+ * while it loads, can't reach in: reading it throws (it is opaque), setting or replacing its
+ * `location` throws (the sibling's own sandbox navigates no frame not its own), and it has no
+ * name, so `window.open` and a link's or a form's `target` find nothing. The host hears it from
+ * `"null"` alone. `[door-reach]` and the `door-opaque` control hold that.
  */
 
 export interface DoorWatch {

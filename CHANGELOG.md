@@ -39,7 +39,11 @@ P-numbers below.
     and answers `{ ...location, instance }`). In a frame the content origin answers a clean address
     (and the app's authorize route answers itself) with a page that has no script and goes nowhere:
     P068's in-frame sign-in page and the transport's host-origin channel (`also`) are removed. A
-    locator must issue anew for every run: a reused location's door says `blocked: session`.
+    locator must issue anew for every run: a reused location's door says `blocked: session`, and
+    `createHost` raises a `locate` host error naming the fix.
+  - Leak suite: the `door-opaque` control (the door made non-opaque and heard from the content
+    origin: a sibling rewrites the live door into Porthole's own status page) and Ferryman's
+    `[sibling-reload]` probe (held by `door-status` and `content-status`).
   - Planned, not in this release: a host-only parallel-mount variant (the door and content opened
     together), to be measured against the sequential default.
 

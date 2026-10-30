@@ -108,8 +108,9 @@ export const STORAGE_USED_METHOD = "porthole/storage-used";
 
 /**
  * Turns an instance into the URL its frame loads. Implemented by the host, usually by asking its
- * own backend (which authenticates the viewer and calls `PortholeServer.issue`). Called on every
- * mount: a ticket is good once.
+ * own backend (which authenticates the viewer and calls `PortholeServer.issue`). Called for every
+ * run (a mount, a reload, a restart after the content navigated away): answer each with a fresh
+ * issue, since a ticket and a door ticket are each good once (P125).
  */
 export interface InstanceLocator {
   locate(instance: InstanceRef, signal?: AbortSignal): Promise<FrameLocation>;

@@ -16,6 +16,7 @@ const SHELL_ADAPTER = "src/protocol/shell-adapter.ts";
 const MCP_ADAPTER = "src/mcp/adapter.ts";
 const REQUESTS = "src/runtime/requests.ts";
 const OUTCOME = "src/host/outcome.ts";
+const WEB = "src/platform/web.ts";
 const MAY_BE_PORTHOLE =
   '  const mayBePorthole = () => source.kind === "url" && (!speaks || (nested && !spoke));';
 /**
@@ -662,6 +663,24 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
     },
   ],
   // A served display's silence read as `framing` again, as P040 had it before its door.
+  // The door not opaque (P125): its frame keeps its origin (`allow-same-origin`), the served harness
+  // strips the sandbox from its answers' header, and the host hears it from the location's origin
+  // instead of "null", so displays still work. A sibling of the scope then reads the live door and
+  // rewrites it into Porthole's own status page, which speaks for the display (Ferryman's probe).
+  "door-opaque": [
+    {
+      file: POLICY,
+      find: 'export const DOOR_SANDBOX_TOKENS: readonly string[] = ["allow-scripts"];',
+      replace:
+        'export const DOOR_SANDBOX_TOKENS: readonly string[] = ["allow-scripts", "allow-same-origin"];',
+    },
+    {
+      file: WEB,
+      find: '    const transport = postMessageTransport(() => frame.contentWindow, "null", view);',
+      replace:
+        "    const transport = postMessageTransport(() => frame.contentWindow, new URL(spec.url).origin, view);",
+    },
+  ],
   "door-silence": [
     {
       file: OUTCOME,

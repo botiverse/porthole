@@ -35,21 +35,21 @@ const POST_BLOCKED = `parent.postMessage({ jsonrpc: "2.0", method: "porthole/not
  * the gap between its commit and its own shell's first script), doing `act` to each readable
  * same-origin frame that isn't itself. What it saw goes over the console (`__A`).
  */
-const hostile = (act: string): string => `<p id="a">A</p><script>
+const hostile = (act: string, forMs = 6000): string => `<p id="a">A</p><script>
   const seen = [];
-  const act = (w, d) => { ${act} };
+  const act = (w, d, i) => { ${act} };
   const look = () => {
     for (let i = 0; i < parent.frames.length; i += 1) {
       const w = parent.frames[i];
       if (w === window) continue;
       let d = null;
       try { d = w.document; } catch (e) { seen.push({ i, read: "blocked: " + e.name }); continue; }
-      try { act(w, d); } catch (e) { seen.push({ i, act: "threw: " + e.name }); }
+      try { act(w, d, i); } catch (e) { seen.push({ i, act: "threw: " + e.name }); }
     }
   };
   const channel = new MessageChannel();
   const started = Date.now();
-  channel.port1.onmessage = () => { look(); if (Date.now() - started < 6000) channel.port2.postMessage(0); };
+  channel.port1.onmessage = () => { look(); if (Date.now() - started < ${forMs}) channel.port2.postMessage(0); };
   channel.port2.postMessage(0);
   setInterval(() => { if (seen.length > 0) console.log("__A " + JSON.stringify(seen.splice(0))); }, 200);
 </script>`;
@@ -188,43 +188,74 @@ test.describe("a served display's word comes from a door no sibling can reach (P
   test("[sibling-reload] a sibling that reloads a loaded B and speaks first in the new run moves nothing", async ({
     page,
   }) => {
+    // After Ferryman's probe (the audit of P125): honest B loads; hostile A, of B's scope, mounted
+    // after, puts `location.reload()` into B (a reload passes the shell's guard, and the host starts
+    // B again, P031, through a new door and a new frame). In the new run A acts on B's first
+    // readable document: it wipes it and writes one that posts a block, its first word. A also sends
+    // every window it can't read (the new door) to a page that speaks a block.
     const served = await harness();
     const scope = unique("reload");
-    // A lets B's first document load, then reloads B and speaks first in the new run (wipes it,
-    // posts a block). B's shell renders #b only after its handshake, so A counts B's documents on
-    // the shared scope origin instead: the first it lets load, the second it wipes.
+    const id = unique("reloadpage");
+    served.pages.set(`${id}@1`, `<!doctype html><html><body>${BENIGN}</body></html>`);
+    const instance = artifact(scope, id);
+    const bHandle = await mount(
+      page,
+      served.hostOrigin,
+      presetWithTimeout(served.configs.artifact as PortholeConfig),
+      await served.porthole.issue(instance, { viewer: "probe" }),
+      instance,
+    );
+    expect(await outcomeOf(bHandle.read), "B's first run loaded").toEqual({ state: "loaded" });
+    const said = watchA(page);
     const act = `
-      if (d.querySelector("[data-a]") || ${PORTHOLE_PAGE}) return;
-      const m = d.createElement("meta"); m.setAttribute("data-a", "");
-      (d.head || d.documentElement).appendChild(m);
-      const n = Number(localStorage.getItem("docs") || "0") + 1;
-      localStorage.setItem("docs", String(n));
-      if (n === 1) { setTimeout(() => { try { w.location.reload(); } catch (e) {} }, 500); seen.push({ i, run: 1 }); return; }
+      if (window.__kicked === undefined) { window.__kicked = new Set(); window.__done = new Set(); }
+      if (window.__done.has(w) || ${PORTHOLE_PAGE}) return;
+      if (d.readyState === "complete" && !window.__kicked.has(w) && window.__kicked.size < 3) {
+        window.__kicked.add(w);
+        const s = d.createElement("script"); s.textContent = "location.reload()";
+        (d.documentElement || d).appendChild(s);
+        seen.push({ i, kicked: true });
+        return;
+      }
+      if (window.__kicked.has(w)) return;
+      window.__done.add(w);
       d.open();
-      d.write('<!doctype html><body><scr' + 'ipt>' + ${JSON.stringify(POST_BLOCKED)} + '</scr' + 'ipt>');
+      d.write("<!doctype html><body><scr" + "ipt>" + ${JSON.stringify(POST_BLOCKED)} + "</scr" + "ipt>");
       d.close();
-      seen.push({ i, run: n, wrote: true });
+      seen.push({ i, spokeFirst: d.readyState });
     `;
-    const bHandle = await mountAthenB(page, served, scope, hostile(act), async () => {
-      const instance = shell(scope);
-      return mount(
-        page,
-        served.hostOrigin,
-        presetWithTimeout(served.configs.inlineWidget as PortholeConfig),
-        await served.porthole.issue(instance, { viewer: "probe" }),
-        instance,
-        { content: BENIGN },
-      );
-    });
-    expect(await outcomeOf(bHandle.read), "probe: B's first run loaded").toEqual({
-      state: "loaded",
-    });
-    await page.waitForTimeout(3_000);
+    const aInstance = shell(scope);
+    const shownA = await mount(
+      page,
+      served.hostOrigin,
+      served.configs.inlineWidget as PortholeConfig,
+      await served.porthole.issue(aInstance, { viewer: "probe" }),
+      aInstance,
+      { content: hostile(act, 15_000) },
+    );
+    expect(await outcomeOf(shownA.read), "A loaded").toEqual({ state: "loaded" });
+    // A restart happened (the positive control), and A spoke first in a new run of B's.
+    await expect
+      .poll(async () => (await bHandle.read()).outcomes.length, {
+        message: "A's reload started B again",
+        timeout: 15_000,
+      })
+      .toBeGreaterThan(1);
+    await expect
+      .poll(
+        () => said.some((each) => (each as { spokeFirst?: unknown }).spokeFirst !== undefined),
+        {
+          message: "A spoke first in a new run of B's",
+          timeout: 15_000,
+        },
+      )
+      .toBe(true);
+    await page.waitForTimeout(4_000);
     const record = await bHandle.read();
     expect(
-      record.outcomes.some((each) => each.state === "blocked"),
+      record.outcomes.filter((each) => each.state === "blocked"),
       `probe: no run of B was blocked by A (${JSON.stringify(record.outcomes)})`,
-    ).toBe(false);
+    ).toEqual([]);
   });
 
   test("[sibling-stop] a sibling that stops B's first document never makes it blocked: a timeout at worst", async ({
@@ -360,17 +391,39 @@ test.describe("a served display's word comes from a door no sibling can reach (P
     const doorUrl = location.door?.url ?? "";
     const act = `
       const isDoor = (() => { try { return !!d.querySelector("[data-porthole-door]") || w.location.pathname.indexOf("/__porthole/door/") === 0; } catch (e) { return false; } })();
-      if (isDoor) {
+      if (isDoor && !window.__doorDone) {
+        // Readable only if the door isn't opaque (\`door-opaque\`): A rewrites it into Porthole's
+        // own status page for that door (a used ticket), which then says blocked: session from
+        // the door's own window (Ferryman's probe). Under P125 A never gets here.
+        window.__doorDone = true;
         seen.push({ i, reachedDoor: true });
-        try { d.open(); d.write("<p>A wiped the door</p>"); d.close(); } catch (e) {}
-        try { w.location = "about:blank"; } catch (e) {}
+        try {
+          const at = w.location.pathname + "?ticket=nope";
+          d.open(); d.write('<meta http-equiv="refresh" content="0;url=' + at + '">'); d.close();
+        } catch (e) { seen.push({ i, rewrite: "threw: " + e.name }); }
       }
       try { parent.postMessage({ jsonrpc: "2.0", method: "porthole/notifications/frame-status", params: { state: "open" } }, "*"); } catch (e) {}
       try { parent.postMessage({ jsonrpc: "2.0", method: "porthole/notifications/frame-status", params: { state: "blocked", reason: "sign-in", status: 401, code: "phish" } }, "*"); } catch (e) {}
     `;
     const target = `<script>
       let tries = 0;
+      const forged = "data:text/html," + encodeURIComponent("<scr" + "ipt>" + ${JSON.stringify(POST_BLOCKED)} + "</scr" + "ipt>");
+      const navigated = new Set();
       const tryAll = () => {
+        // By reference: every window A can't read (B's door while it lingers) sent to a page that
+        // speaks a block, once each. A's own sandbox stops it navigating a frame not its own.
+        for (let i = 0; i < top.length; i += 1) {
+          const w = top[i];
+          if (w === window || navigated.has(w)) continue;
+          let readable = true;
+          try { void w.document.readyState; } catch (e) { readable = false; }
+          if (readable) continue;
+          navigated.add(w);
+          const r = { nav: i };
+          try { w.location.href = forged; r.href = "no throw"; } catch (e) { r.href = e.name; }
+          try { w.location.replace(forged); r.replace = "no throw"; } catch (e) { r.replace = e.name; }
+          console.log("__A " + JSON.stringify([r]));
+        }
         for (const name of ["porthole-door", "door", ""]) {
           let got;
           try { got = window.open(${JSON.stringify(doorUrl)}, name) !== null; } catch (e) { got = "threw: " + e.name; }

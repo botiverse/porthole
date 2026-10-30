@@ -1314,6 +1314,24 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
           "probe: the door said open",
         ).toBe("open");
 
+        // (5) The door's own answer is sandboxed in its header too (opaque on a tab, and in a frame a
+        // host's platform forgot to sandbox): scripts alone, never its origin, and no cookie.
+        const headered = await host.locate(await host.shell("door-header"));
+        const doorAnswer = await page.request.get(doorOf(headered), { failOnStatusCode: false });
+        const doorCsp = doorAnswer.headers()["content-security-policy"] ?? "";
+        expect(doorAnswer.status(), "probe: a fresh door ticket opens the door").toBe(200);
+        expect(
+          doorCsp
+            .split(";")
+            .map((each) => each.trim())
+            .filter((each) => each.startsWith("sandbox")),
+          "probe: the door's header sandboxes it with scripts alone, keeping no origin of its own",
+        ).toEqual(["sandbox allow-scripts"]);
+        expect(
+          doorAnswer.headers()["set-cookie"],
+          "probe: the door sets no cookie",
+        ).toBeUndefined();
+
         // (3) The same door ticket again opens nothing: a used ticket is `session`.
         const again = await page.request.get(door.href, { failOnStatusCode: false });
         expect(again.status(), "probe: a used door ticket is 401 session").toBe(401);

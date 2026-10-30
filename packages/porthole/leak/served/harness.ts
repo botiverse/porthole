@@ -618,6 +618,16 @@ async function start(): Promise<Harness> {
       if (weakened.includes("permissions-policy")) {
         answer = withoutPermissionsPolicy(answer);
       }
+      // The door's own sandbox (P125), taken out of its answers' header with its frame's
+      // (`door-opaque`): the server runs in this process, unweakened, so the harness does it.
+      if (weakened.includes("door-opaque") && isDoor) {
+        const headers = new Headers(answer.headers);
+        headers.set(
+          "content-security-policy",
+          (headers.get("content-security-policy") ?? "").replace(/; sandbox [^;]*/u, ""),
+        );
+        answer = new Response(answer.body, { status: answer.status, headers });
+      }
       // A silent door (P125, `door-reach`): it loads but says nothing, so its frame lingers while
       // A tries to read it. The one inline script becomes a no-op; its hash is recomputed. By the
       // door's instance key, so a sibling's own door is unaffected.

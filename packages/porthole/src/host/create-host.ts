@@ -64,6 +64,14 @@ const MAX_RESTARTS = 3;
 export const NO_DOOR =
   "A served display needs a door from issue (FrameLocation.door, P125), and this location has none, so no frame was made: upgrade the server (or content Worker) that issues it, and pass the door on from a locator of your own. A clean address is for a tab: to frame what it names, resolve it with client.resolve(address) or <PortholeView address>";
 
+/**
+ * What the host is told when its locator gives a run the location an earlier run had (P125): its
+ * tickets were taken by that run, so its door says `blocked: session`. A locator issues anew for
+ * every run (a reload, a restart after the content navigated away).
+ */
+export const REUSED_LOCATION =
+  "The locator gave this run a location an earlier run of this display already used (P125): its tickets are taken, so its door answers that the link has been used. A locator must issue anew for every run (InstanceLocator.locate is called for each one)";
+
 /** What the host is told when its platform makes no doors (P125): no served frame is made. */
 export const NO_DOOR_PLATFORM =
   "This platform makes no door frames (PlatformHost.createDoor, P125), so no served display that isn't nested is framed on it";
@@ -196,6 +204,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       let abort: AbortController | null = null;
       let outcomeWatch: OutcomeWatch | null = null;
       let door: { readonly frame: DoorSurface; readonly watch: DoorWatch } | null = null;
+      // The addresses earlier runs were located at (P125): a ticket opens once, so a run given one
+      // again is told to the host (its outcome is the server's word, unchanged).
+      const locatedAt = new Set<string>();
       let themeFrame: number | null = null;
       const view = container.ownerDocument.defaultView;
       // The adapter's own operations, the last call of each, replayed into every new frame.
@@ -778,6 +789,15 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             clearTimeout(late);
             if (!settled && mine === generation && !destroyed) {
               settled = true;
+              if (source.kind === "url") {
+                const seen = [source.url, ...(source.door === undefined ? [] : [source.door])];
+                if (seen.some((each) => locatedAt.has(each))) {
+                  hostError(REUSED_LOCATION, "locate");
+                }
+                for (const each of seen) {
+                  locatedAt.add(each);
+                }
+              }
               enter(source, Math.max(0, timeoutMs - (Date.now() - began)));
             }
           },
