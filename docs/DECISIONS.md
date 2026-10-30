@@ -6843,9 +6843,10 @@ start the clock again (one `loadTimeoutMs` per loading episode, from its first r
 outcome; an outcome, or the host's `reload()`, begins a new one), and a frame stopped once its
 restarts ran out is `blocked: error` (its `contentError` as before). Before, a sibling that wiped a
 display again and again left it with no outcome and no timeout (Cato, on WebKit, 2026-10-30). **On
-WebKit the sibling probes' attack can't be made:** it refuses a sibling's write into another
-display's loading document (each `document.open` A tries throws; measured in CI on 2026-10-30,
-every attempt of three runs). `[sibling-inject]`, `[sibling-reload]`, `[sibling-wipe]` and `[proxy]`
+WebKit the sibling probes' attack can't be made as they make it:** a sibling's `document.open`
+into another display's loading document throws (measured in CI on 2026-10-30, every attempt of
+three runs; a script appended to a loaded document still runs, and other ways into a loading one
+are not measured). `[sibling-inject]`, `[sibling-reload]`, `[sibling-wipe]` and `[proxy]`
 measure their positive control on every run (`requireReach`) and skip there with the measurement,
 never pass; their controls hold on WebKit for that reason (`leak/controls.ts`). P125's rule doesn't
 depend on it — no frame status of a served non-nested frame is taken on any engine — and the

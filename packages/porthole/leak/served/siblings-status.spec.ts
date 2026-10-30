@@ -182,7 +182,7 @@ async function requireReach(
   test.skip(
     refused.length > 0,
     `precondition doesn't hold on ${browser.browserType().name()} ${browser.version()} (measured): ` +
-      `every write A tried into B's document threw (${refused.length}×, ${JSON.stringify(refused.slice(0, 2))}); ` +
+      `the attack A tried on B's document threw every time (${refused.length}×, ${JSON.stringify(refused.slice(0, 2))}); ` +
       "retest with each engine version",
   );
   throw new Error(`positive control: A never reached B\nA saw: ${JSON.stringify(said)}`);
