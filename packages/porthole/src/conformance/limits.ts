@@ -732,6 +732,6 @@ export const LIMIT_CHECKS: { readonly [Id in LimitId]: readonly string[] } = {
   sound: ["14.sound"],
   address: ["14.address", "served.domain.address"],
   // A page's own frames, where the config opts in (P128): what loads, and what still doesn't.
-  shell: ["14.shell", "4.document-write", "4.light-dom", "4.own-srcdoc", "4.own-external"],
+  shell: ["14.shell", "4.document-write", "4.light-dom", "4.own-external"],
   storage: ["14.storage", "served.domain.storage-scope"],
 };

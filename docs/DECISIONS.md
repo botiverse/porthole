@@ -7143,17 +7143,18 @@ option reaches its served and opaque configs), `test/shell.test.ts` (`OWN_FRAME`
 case; the plan), `test/files.test.ts` (a set's page frames its version's path only; served, its
 files' `frame-ancestors` and the ticket's; `lintFiles`), `test/check.test.ts` (the lint),
 `test/agreement.test.ts` (shell ↔ CSP ↔ manual, for a Raft-shaped and an inline config). Browser:
-probes `4.own-srcdoc` (a srcdoc frame made by script, by `innerHTML` and in markup runs),
-`4.own-external` (another site, a relative `src` with no files, `data:`, a plugin, an empty iframe:
+probes `4.own-external` (another site, a relative `src` with no files, `data:`, a plugin, an empty iframe:
 none stays, the canary hears nothing), `4.own-turned` (a kept frame turned elsewhere by a setter,
 an attribute, a map, `toggleAttribute` leaves), `4.own-default` (the same frames, without the
 option: none runs), and `leak/served/files.spec.ts`'s "a page's own frames" (its own file, with its
 shell, a srcdoc and a frame it made run; another site, `/`, `/__porthole/d/…`, `../../`, plugins
 stay out; by default none). Negative control `own-frame-rule` (the rule keeps every iframe) fails
 `4.own-external`, `4.own-turned` and the served case; `frame-guard,sync-guard` fails the three
-probes that need a frame removed. Unmeasured until then: whether every engine loads a `srcdoc`
-child under an opaque frame's own `frame-src 'none'` (P033 measured the embedding page's, on
-Chromium and WebKit); `4.own-srcdoc` says.
+probes that need a frame removed. Measured (CI, all three engines): under an opaque inline widget
+a `srcdoc` child's scripts don't run (it inherits the frame's nonce policy), so there the option
+keeps only frames that stay inert; on a served page (Raft's Artifacts) a `srcdoc` frame and a frame
+of its own files load and run. Navigate-guard and file-self also hold the served case's
+other-path frame (their controls fail it).
 
 **Revisit when** a host asks for frames of other origins (an allowlist, with its own channel
 accepted), a nested page (P111) needs frames of its own, Claude's Artifacts change their rule, or

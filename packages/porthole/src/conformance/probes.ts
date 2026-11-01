@@ -761,40 +761,9 @@ export const PROBES: readonly Probe[] = [
   // ── 4, opted in: a page's own frames (P128) ────────────────────────────────────────────────
   // A host that sets `nestedFrames: "own"` lets srcdoc frames (and, served, frames of the page's
   // own files: leak/served/files.spec.ts) load and run; every other frame stays out. These run
-  // under an opaque inline widget, which has no files: only srcdoc is the content's own there.
-  {
-    id: "4.own-srcdoc",
-    item: 4,
-    title: "a page's own frames, opted in (P128): a srcdoc frame loads and its script runs",
-    async run(context) {
-      const display = await context.launch({
-        config: inline({ nestedFrames: "own" }),
-        content: attack(
-          `
-    r.ran = [];
-    window.addEventListener("message", (event) => { if (event.data && event.data.tag === "own-child-ran" && r.ran.indexOf(event.data.from) === -1) r.ran.push(event.data.from); });
-    const made = document.createElement("iframe");
-    made.srcdoc = ${js(ownChild("script"))};
-    document.body.append(made);
-    const holder = document.createElement("div");
-    holder.innerHTML = '<iframe srcdoc="' + ${js(ownChild("innerHTML"))}.replace(/"/g, "&quot;") + '"></iframe>';
-    document.body.append(holder);
-    await wait(1500);
-    r.ran.sort();
-    r.frames = document.querySelectorAll("iframe").length;`,
-          `<iframe srcdoc="${ownChild("markup").replace(/"/gu, "&quot;")}"></iframe>`,
-        ),
-      });
-      const verdict = await context.result(display, 15_000);
-      expect(verdict.error, "the content's own code failed").toBeUndefined();
-      expect(verdict.ran, "probe: a srcdoc frame of the content's own didn't run").toEqual([
-        "innerHTML",
-        "markup",
-        "script",
-      ]);
-      expect(verdict.frames, "probe: a srcdoc frame of the content's own was removed").toBe(3);
-    },
-  },
+  // under an opaque inline widget, where they check what stays out. A srcdoc frame's scripts don't
+  // run there (measured, all three engines: the child inherits the frame's nonce policy), so that
+  // a kept frame runs is the served case's to show.
   {
     id: "4.own-external",
     item: 4,
