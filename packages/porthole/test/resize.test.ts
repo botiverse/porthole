@@ -54,7 +54,7 @@ function show() {
     },
     getBoundingClientRect: () => ({ width: 600 }),
   } as unknown as HTMLElement;
-  const display = createHost(presets.liveWidget(), { platform }).mount(container, {
+  const display = createHost(presets.inlineWidget(), { platform }).mount(container, {
     displayId: "d1",
     title: "Chart",
     scheme: "light",
