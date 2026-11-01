@@ -1026,15 +1026,11 @@ describe("a page's own frames, linted with its files (P128)", () => {
       }),
     ).toEqual([]);
     const missing = lintFiles(own, { "index.html": '<iframe src="chart.html"></iframe>' });
-    expect(missing.map((each) => [each.rule, each.path])).toEqual([
-      ["missing-file", "index.html"],
-    ]);
+    expect(missing.map((each) => [each.rule, each.path])).toEqual([["missing-file", "index.html"]]);
     const outside = lintFiles(own, {
       "index.html": '<iframe src="https://www.example.org/"></iframe>',
     });
-    expect(outside.map((each) => [each.severity, each.rule])).toEqual([
-      ["error", "nested-frame"],
-    ]);
+    expect(outside.map((each) => [each.severity, each.rule])).toEqual([["error", "nested-frame"]]);
   });
 });
 

@@ -129,7 +129,7 @@ describe("lintContent", () => {
     expect(generateGuide(presets.artifact())).not.toContain("Plotly:");
   });
 
-  it("under nestedFrames: \"own\", errors only on frames that never load (P128)", () => {
+  it('under nestedFrames: "own", errors only on frames that never load (P128)', () => {
     const served = presets.artifact({
       isolation: "domain",
       contentOrigins: ["https://*.example-usercontent.com"],
