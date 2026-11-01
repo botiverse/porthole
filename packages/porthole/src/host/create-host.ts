@@ -494,8 +494,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         };
       };
 
-      // A frame's size is taken at most once an animation frame, and only when it changed (P127):
-      // `resize` has no gate, and each one would reflow the host's page and tell its listeners.
+      // A frame's size is taken at most once an animation frame after its run's first, and only
+      // when it changed (P127): `resize` has no gate, and each one would reflow the host's page and
+      // tell its listeners.
       let sizeFrame: number | null = null;
       let pendingSize: DisplayEvents["resize"] | null = null;
       let shownSize: DisplayEvents["resize"] | null = null;
@@ -526,7 +527,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
               height: next,
               ...(event.width === undefined ? {} : { width: event.width }),
             };
-            if (view === null) {
+            // A run's first size at once: until then its frame has no height of its own.
+            if (view === null || shownSize === null) {
               applySize();
             } else if (sizeFrame === null) {
               sizeFrame = view.requestAnimationFrame(applySize);

@@ -3,8 +3,8 @@ import { createHost, presets, type DisplayHandle, type PlatformHost } from "../s
 
 /**
  * P127 (audit 2026-10-29, C-1): `resize` has no gate, so the host takes a frame's size at most once
- * an animation frame, and only when it changed. On `createHost` over a stand-in platform whose
- * animation frames the test runs.
+ * an animation frame after its run's first, and only when it changed. On `createHost` over a
+ * stand-in platform whose animation frames the test runs.
  */
 
 const mounted: DisplayHandle[] = [];
@@ -86,18 +86,18 @@ function show() {
 }
 
 describe("a frame's size (P127)", () => {
-  test("many sizes in one animation frame are one: the last", async () => {
+  test("the first size at once; many after it in one frame are one: the last", async () => {
     const t = show();
     for (let each = 0; each < 1_000; each += 1) {
       t.size(100 + (each % 2) * 300);
     }
     t.size(240, 300);
     await t.settle();
-    expect(t.resized).toEqual([]);
+    expect(t.resized).toEqual([{ height: 100 }]);
     expect(t.frames.size).toBe(1);
     t.nextFrame();
-    expect(t.resized).toEqual([{ height: 240, width: 300 }]);
-    expect(t.heights).toEqual([240]);
+    expect(t.resized).toEqual([{ height: 100 }, { height: 240, width: 300 }]);
+    expect(t.heights).toEqual([100, 240]);
   });
 
   test("a size the same as the last one shown is dropped; a new one is taken", async () => {

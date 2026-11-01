@@ -6,11 +6,11 @@ P-numbers below.
 
 ## Unreleased
 
-- **A frame's size, at most once an animation frame (P127, audit 2026-10-29 C-1):** the host takes
-  the last `size-changed` a frame sent on the next animation frame, and drops a size the same as the
-  last one taken, so content sending sizes as fast as it can no longer reflows the host's page and
-  fires `resize` (`onResize`) for each. `resize` now arrives on the next animation frame, not during
-  the message.
+- **A frame's size, at most once an animation frame (P127, audit 2026-10-29 C-1):** after a run's
+  first size (taken at once, as before), the host takes the last `size-changed` a frame sent on the
+  next animation frame, and drops a size the same as the last one taken, so content sending sizes as
+  fast as it can no longer reflows the host's page and fires `resize` (`onResize`) for each. A size
+  after the first now arrives on the next animation frame, not during the message.
 
 ## 0.14.7
 
