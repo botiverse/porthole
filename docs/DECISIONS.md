@@ -7019,3 +7019,27 @@ with one more frame ancestor, each turn the identity test red (the second, that 
 
 **Revisit when** a host needs the door's answer to differ from its content route's (it must not:
 P125's invariant), or Porthole verifies a host's own tickets itself.
+
+## P127 · 2026-11-01 · A frame's size is taken at most once an animation frame after its first, and only when it changed · Accepted
+
+From the audit of 2026-10-29 (C-1): `resize` has no gate (`capabilities.ts`), and the host applied
+every `size-changed` a frame sent: `setHeight` (a reflow of the host's page, for a display not in
+fill mode) and a `resize` to its listeners (the React binding re-renders on each). Porthole's shell
+already measures once an animation frame and only when the height changed; content that speaks the
+protocol itself need not, and could send thousands a second. Its reach is the tab showing it: it
+reads nothing and touches no other display, but it can make that tab slow.
+
+**Decision.** A run's first size is taken at once (until then its frame has no height of its own:
+waiting a frame for it left the frame 0 px tall a frame longer than before, which the leak suite saw
+on WebKit). After it, the host keeps the last size a frame sent and takes it on the next animation
+frame of the container's window (at once where there is none): one `setHeight` and one `resize` an
+animation frame at most, and none for a size the same as the last one taken (height and width). A
+run started again drops a size still waiting and takes the new run's first size at once. Not a rate:
+a rate would refuse an honest page's sizes during an animation, where taking the last one per frame
+loses nothing a person can see.
+
+**Threat.** None re-opened; a gate added. `resize` still has no `defaultGates`: what bounds it is the
+host, for every config.
+
+**Revisit when** a host needs every intermediate size (none does: the frame's height is all the host
+draws), or `resize` gets a gate of its own.

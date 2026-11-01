@@ -4,6 +4,14 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **A frame's size, at most once an animation frame (P127, audit 2026-10-29 C-1):** after a run's
+  first size (taken at once, as before), the host takes the last `size-changed` a frame sent on the
+  next animation frame, and drops a size the same as the last one taken, so content sending sizes as
+  fast as it can no longer reflows the host's page and fires `resize` (`onResize`) for each. A size
+  after the first now arrives on the next animation frame, not during the message.
+
 ## 0.14.7
 
 - **`server.doorAnswer(instance, grant, request?, at?)` (P126):** the door's answer for a grant a
