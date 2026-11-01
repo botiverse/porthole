@@ -494,6 +494,27 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         };
       };
 
+      // A frame's size is taken at most once an animation frame, and only when it changed (P127):
+      // `resize` has no gate, and each one would reflow the host's page and tell its listeners.
+      let sizeFrame: number | null = null;
+      let pendingSize: DisplayEvents["resize"] | null = null;
+      let shownSize: DisplayEvents["resize"] | null = null;
+      const applySize = () => {
+        sizeFrame = null;
+        const size = pendingSize;
+        pendingSize = null;
+        if (
+          size === null ||
+          (shownSize !== null && size.height === shownSize.height && size.width === shownSize.width)
+        ) {
+          return;
+        }
+        shownSize = size;
+        height = size.height;
+        surface?.setHeight(size.height);
+        emit("resize", size);
+      };
+
       const onBridge = (event: BridgeEvent) => {
         switch (event.type) {
           case "resize": {
@@ -501,12 +522,15 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
               config.limits.maxHeightPx,
               Math.max(config.limits.minHeightPx, Math.ceil(event.height)),
             );
-            height = next;
-            surface?.setHeight(next);
-            emit("resize", {
+            pendingSize = {
               height: next,
               ...(event.width === undefined ? {} : { width: event.width }),
-            });
+            };
+            if (view === null) {
+              applySize();
+            } else if (sizeFrame === null) {
+              sizeFrame = view.requestAnimationFrame(applySize);
+            }
             return;
           }
           case "navigationBlocked":
@@ -544,6 +568,13 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         bridge?.close();
         bridge = null;
         handshaken = false;
+        // The next run's frame tells its own size, the same as this one's or not.
+        if (sizeFrame !== null) {
+          view?.cancelAnimationFrame(sizeFrame);
+          sizeFrame = null;
+        }
+        pendingSize = null;
+        shownSize = null;
         abort?.abort();
         abort = null;
         outcomeWatch?.stop();
