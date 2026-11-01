@@ -59,13 +59,6 @@ async function rtcSendsHere(context: ProbeContext, udp: UdpOracle): Promise<bool
 const childDocument = (stun: string): string =>
   `<script>parent.postMessage({ tag: "child-ran" }, "*"); try { const p = new RTCPeerConnection({ iceServers: [{ urls: ${js(stun)} }], iceCandidatePoolSize: 4 }); p.createDataChannel("x"); p.createOffer().then((o) => p.setLocalDescription(o)); } catch (e) {}</script>`;
 
-/**
- * A page's own srcdoc child (P128): it says it ran, again and again, so its parent hears it
- * whenever it starts listening (a frame in the content's markup runs before the content's script).
- */
-const ownChild = (from: string): string =>
-  `<script>setInterval(() => parent.postMessage({ tag: "own-child-ran", from: ${js(from)} }, "*"), 50);</script>`;
-
 /** The verdict of a nested-frame attack: the child never ran, and nothing reached the oracle. */
 async function expectNoChild(
   context: ProbeContext,
