@@ -476,7 +476,8 @@ describe("a page's own frames in its CSP (P128)", () => {
     expect(page.headers.get("content-security-policy")).toMatch(
       new RegExp(`; frame-ancestors ${HOST}$`, "u"),
     );
-    expect(await page.text()).not.toContain("nestedFrames");
+    // The shell's own code names the option; the plan carries it only when opted in.
+    expect(await page.text()).not.toContain('"nestedFrames":"own"');
   });
 });
 
