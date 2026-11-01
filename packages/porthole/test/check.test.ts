@@ -129,6 +129,66 @@ describe("lintContent", () => {
     expect(generateGuide(presets.artifact())).not.toContain("Plotly:");
   });
 
+  it("under nestedFrames: \"own\", errors only on frames that never load (P128)", () => {
+    const served = presets.artifact({
+      isolation: "domain",
+      contentOrigins: ["https://*.example-usercontent.com"],
+      nestedFrames: "own",
+    });
+    const page = (body: string) => `<!doctype html><html><head></head><body>${body}</body></html>`;
+    // The page's own files and srcdoc load: nothing to say, a srcdoc holding markup included.
+    for (const body of [
+      '<iframe src="chart.html"></iframe>',
+      "<iframe src='./pages/table.html' title=t></iframe>",
+      "<iframe src=sub/x.html></iframe>",
+      '<iframe srcdoc="<p>hi</p><script>parent.x = 1</script>"></iframe>',
+      '<iframe srcdoc="<b>a</b>" src="https://elsewhere.example"></iframe>',
+      '<script>const f = document.createElement("iframe"); f.srcdoc = "<p>x</p>";</script>',
+    ]) {
+      expect(lintContent(served, page(body)), body).toEqual([]);
+    }
+    // What never loads: another site, any scheme, the origin's root, no address, plugins.
+    for (const [body, said] of [
+      ['<iframe src="https://www.youtube.com/embed/x"></iframe>', /frames of other sites/u],
+      ["<iframe src=//evil.example/x></iframe>", /frames of other sites/u],
+      ['<iframe src="data:text/html,<p>x</p>"></iframe>', /frames of other sites/u],
+      ['<iframe src="javascript:void(0)"></iframe>', /frames of other sites/u],
+      ['<iframe src="/other/page.html"></iframe>', /another path of the address/u],
+      ["<iframe></iframe>", /neither src nor srcdoc/u],
+      ['<iframe src="  "></iframe>', /neither src nor srcdoc/u],
+      ['<object data="x.pdf"></object>', /<frame>, <object> and <embed> are taken out/u],
+      ['<embed src="x.swf">', /<frame>, <object> and <embed> are taken out/u],
+      ['<frameset><frame src="a.html"></frameset>', /<frame>, <object> and <embed> are taken out/u],
+    ] as const) {
+      const findings = lintContent(served, page(body));
+      expect(rules(findings), body).toEqual(["error nested-frame"]);
+      expect(findings[0]?.message, body).toMatch(said);
+      expect(findings[0]?.message, body).toContain("srcdoc does");
+    }
+    // The first that never loads is the one said, past the page's own.
+    const mixed = lintContent(
+      served,
+      page('<iframe src="a.html"></iframe>\n<iframe src="https://x.example/"></iframe>'),
+    );
+    expect(mixed.map((each) => each.line)).toEqual([2]);
+    // With no files to frame (an opaque page, an inline widget), only srcdoc loads.
+    for (const config of [
+      presets.artifact({ nestedFrames: "own" }),
+      presets.inlineWidget({ nestedFrames: "own" }),
+    ]) {
+      expect(lintContent(config, '<iframe srcdoc="<p>x</p>"></iframe>')).toEqual([]);
+      const relative = lintContent(config, '<iframe src="chart.html"></iframe>');
+      expect(rules(relative)).toEqual(["error nested-frame"]);
+      expect(relative[0]?.message).toMatch(/an <iframe> with srcdoc does\.$/u);
+    }
+    // By default every frame is one: the rule says so as before.
+    for (const body of ['<iframe src="chart.html"></iframe>', '<iframe srcdoc="x"></iframe>']) {
+      const strict = lintContent(presets.artifact(), page(body));
+      expect(rules(strict)).toEqual(["error nested-frame"]);
+      expect(strict[0]?.message).toMatch(/nested frames and plugins are taken out/u);
+    }
+  });
+
   it("takes a whole document sent as a widget as its body", () => {
     const content =
       "<!doctype html><html><head><style>p{color:red}</style></head><body><p>hi</p></body></html>";

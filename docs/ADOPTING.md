@@ -586,6 +586,22 @@ entry: {
   })` to run it, and the manual's Files section where a kind serves files. Show a set served: an
   opaque frame has no origin to serve its files from.
 
+### A page's own nested frames (opt-in)
+
+By default the shell removes every nested frame content makes. `nestedFrames: "own"` (P128) on a
+kind's `options` lets a page keep an `<iframe>` of one of its version's own files (a relative
+`src`, served kinds) or with `srcdoc` (every kind), as Claude's Artifacts do; frames of other
+sites, `<object>` and `<embed>` stay out, and the manual and the lint say so:
+
+```ts
+artifact: { preset: "artifact", options: { layout: { kind: "fill" }, nestedFrames: "own" } },
+```
+
+It is a weakening: a nested frame is a realm of its own where the shell's defenses never ran, so
+content there has WebRTC (a way out past `connect-src`) and can put text on the clipboard from a
+click, with no notice. The CSP still governs every frame's loads and navigations. Not for url mode,
+nested pages or live widgets (refused). Turn it on only where your product accepts that.
+
 ### Nested pages: the page below Porthole's shell
 
 `nested: true` (P111) on an artifact kind served by the host kit puts the page in a frame of its

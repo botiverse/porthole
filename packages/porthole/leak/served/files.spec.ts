@@ -2,6 +2,7 @@ import { expect, test, type Frame, type Page } from "@playwright/test";
 import type { PortholeConfig } from "../../src/index.ts";
 import { LATE_NOTICE_MS } from "../../src/host/pages-of-set.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
+import { OWN_FRAMES_ELSEWHERE } from "../controls.ts";
 import { storedFiles, startTabHost, viteFixture } from "./files.ts";
 import { harness } from "./harness.ts";
 import { mount, outcomeOf, type Mounted } from "./porthole-host.ts";
@@ -30,19 +31,26 @@ async function publish(
   served.fileSets.set(`${id}@${version}`, storedFiles(files, options));
 }
 
-/** Mounts `id@version` in a frame on the harness's host page; its frame once it has loaded. */
+/**
+ * Mounts `id@version` in a frame on the harness's host page (under `preset`'s config, the
+ * harness's `artifact` by default); its frame once it has loaded.
+ */
 async function showFiles(
   page: Page,
   id: string,
   version: string,
+  preset = "artifact",
 ): Promise<{ frame: Frame; shown: Mounted; origin: string }> {
   const served = await harness();
-  const instance: InstanceRef = { scope: id, document: { kind: "artifact", id, version } };
+  const instance: InstanceRef = {
+    scope: id,
+    document: { kind: "artifact", id, version, ...(preset === "artifact" ? {} : { preset }) },
+  };
   const location = await served.porthole.issue(instance, { viewer: "probe" });
   const shown = await mount(
     page,
     served.hostOrigin,
-    served.configs.artifact as PortholeConfig,
+    served.configs[preset] as PortholeConfig,
     location,
     instance,
   );
@@ -440,6 +448,110 @@ s.onerror = () => { document.documentElement.dataset.script = "refused"; }; docu
       image: "refused",
     });
     await elsewhere.close();
+  });
+});
+
+test.describe("a page's own frames (P128)", () => {
+  /** A page that frames a file of its own, a srcdoc and a file it adds by script. */
+  const OWN = {
+    "index.html": `<!doctype html><title>Frames</title><main id="here">here</main>
+<iframe id="own" src="child.html"></iframe>
+<iframe id="inline" srcdoc="<script>parent.document.documentElement.dataset.srcdoc = 'ran';</script>"></iframe>
+<script>
+const made = document.createElement("iframe");
+made.src = "./sub/made.html";
+document.body.append(made);
+</script>`,
+    // A page of the set is served in the shell, its hardening with it: no WebRTC there.
+    "child.html":
+      '<!doctype html><title>Child</title><main id="child">child</main><script>parent.document.documentElement.dataset.child = typeof RTCPeerConnection;</script>',
+    "sub/made.html":
+      '<!doctype html><title>Made</title><script>parent.document.documentElement.dataset.made = "ran";</script>',
+  };
+
+  test("a page's own frames, opted in (P128): a frame of one of its files, with its shell, and a srcdoc frame load and run", async ({
+    page,
+  }) => {
+    const id = unique("own-frames");
+    await publish(id, "1", OWN);
+    const { frame, shown } = await showFiles(page, id, "1", "artifactFrames");
+    await expect
+      .poll(() => flag(frame, "child"), { message: "probe: the page's own file didn't run" })
+      .toBe("undefined");
+    await expect
+      .poll(() => flag(frame, "srcdoc"), { message: "probe: its srcdoc frame didn't run" })
+      .toBe("ran");
+    await expect
+      .poll(() => flag(frame, "made"), { message: "probe: a frame it made of a file didn't run" })
+      .toBe("ran");
+    await expect(frame.locator("iframe"), "probe: its own frames were removed").toHaveCount(3);
+    // The frame's own document stays, and its frames' loads are none of the host's.
+    await expect(frame.locator("#here")).toHaveText("here");
+    const record = await shown.read();
+    expect(record.outcomes, "probe: the display went on, loaded once").toEqual([
+      { state: "loaded" },
+    ]);
+    expect(record.navigationsBlocked, "probe: the host blocked no navigation").toEqual([]);
+  });
+
+  test(OWN_FRAMES_ELSEWHERE, async ({ page }) => {
+    const served = await harness();
+    const id = unique("own-elsewhere");
+    const away = `${served.foreignOrigin}/canary/${id}`;
+    await publish(id, "1", {
+      "index.html": `<!doctype html><title>Elsewhere</title><main id="here">here</main>
+<iframe src="${away}?markup"></iframe>
+<iframe src="/"></iframe>
+<iframe src="/__porthole/d/aaaaaaaaaaaaaaaa"></iframe>
+<iframe src="../../"></iframe>
+<object data="${away}?object" type="text/html"></object>
+<embed src="${away}?embed" type="text/html">
+<script>
+for (const src of [${JSON.stringify(`${away}?script`)}, "/?script", "data:text/html,<p>x</p>"]) {
+  const made = document.createElement("iframe");
+  made.src = src;
+  document.body.append(made);
+}
+const turned = document.createElement("iframe");
+turned.srcdoc = "<p>kept</p>";
+document.body.append(turned);
+turned.src = ${JSON.stringify(`${away}?turned`)};
+turned.removeAttribute("srcdoc");
+</script>`,
+    });
+    const before = served.requests.length;
+    const { frame, shown } = await showFiles(page, id, "1", "artifactFrames");
+    await page.waitForTimeout(1_500);
+    await expect(frame.locator("#here"), "the page is there").toHaveText("here");
+    await expect(
+      frame.locator("iframe, object, embed"),
+      "probe: a frame that isn't the page's own is in the tree",
+    ).toHaveCount(0);
+    expect(served.hits.get(id) ?? 0, "probe: a frame reached the other site").toBe(0);
+    const elsewhere = served.requests
+      .slice(before)
+      .map((each) => new URL(each).pathname)
+      .filter(
+        (each) => each === "/" || each === "/__porthole/" || each.startsWith("/__porthole/d/"),
+      );
+    expect(elsewhere, "probe: a frame loaded another path of the origin").toEqual([]);
+    expect((await shown.read()).outcomes, "probe: the display went on, loaded once").toEqual([
+      { state: "loaded" },
+    ]);
+  });
+
+  test("a page's frames by default (P128): its own files' and srcdoc's alike are removed, and none runs", async ({
+    page,
+  }) => {
+    const id = unique("own-default");
+    await publish(id, "1", OWN);
+    const { frame } = await showFiles(page, id, "1");
+    await page.waitForTimeout(1_500);
+    await expect(frame.locator("#here")).toHaveText("here");
+    await expect(frame.locator("iframe"), "probe: a nested frame is in the tree").toHaveCount(0);
+    for (const name of ["child", "srcdoc", "made"]) {
+      expect(await flag(frame, name), `probe: a nested frame ran (${name})`).toBe("");
+    }
   });
 });
 

@@ -22,7 +22,10 @@ person, not the page, pressed in it (§7 "The keyboard", `comments`); and P112's
 additions for a host's comment modes (hints, as every report is, §7). 0.14.1: P114
 (porthole#56) serves a nested page's shell on a label of its own, on which nothing but nested
 pages' shells, their pages, those pages' files and status pages is ever served, so no other
-display of the scope is same-origin with the shell (S3).
+display of the scope is same-origin with the shell (S3). Unreleased: P128 lets a host opt a config
+into a page's own nested frames (`nestedFrames: "own"`, off by default): its `srcdoc` frames and
+frames of its own files load and run, in realms the shell's hardening never reaches (WebRTC, the
+clipboard's guards: S1, S3); frames of other sites stay out.
 
 ## 1. Two layers
 
@@ -77,7 +80,9 @@ the agent, but it is not a wall.
    Isolation doesn't stop content from sending out what it was given, or from drawing a fake. So:
    - its network is closed by default: the frame's CSP, the shell's defenses for channels a CSP
      doesn't cover (WebRTC, nested frames, resource hints), and the embedding page's `frame-src`
-     against the frame navigating itself away;
+     against the frame navigating itself away. A host that opts into a page's own frames
+     (`nestedFrames: "own"`, P128) gives up the shell's defenses inside them: there, the CSP alone
+     closes the network;
    - everything beyond drawing is a host function the config declares, behind gates: a user
      gesture, a person's confirmation, consent, a rate;
    - the host draws its confirmations and consent outside the frame, where content can't draw over
@@ -231,7 +236,10 @@ Whatever the use:
   capability or the egress config names an origin), `form-action 'none'`, `frame-src 'none'`,
   `base-uri 'none'`, `object-src 'none'` and `webrtc 'block'`, and no `'self'` anywhere. Before
   content runs, the shell removes the `RTC*` constructors, drops nested frames, plugins and
-  resource hints as they are inserted, and makes `document.open` and `write` throw.
+  resource hints as they are inserted, and makes `document.open` and `write` throw. Where the host
+  opts into the content's own frames (`nestedFrames: "own"`, P128; off by default), the shell keeps
+  `srcdoc` iframes (an inline widget has no files of its own) and drops every other frame and
+  plugin as before, a kept frame included once a change would point it elsewhere.
 - While it streams, drafts are drawn inert (no scripts, handlers or navigation); the whole runs
   once.
 - Only the host functions the config declares exist, each behind its default gates:
@@ -278,6 +286,11 @@ Whatever the use:
 **Not guaranteed**
 
 - On a page without that `frame-src`, a widget can send out whatever it was shown.
+- With `nestedFrames: "own"` (P128, the host's choice), a widget's `srcdoc` frame is a realm where
+  none of the shell's defenses ran: it has WebRTC (a way out past `connect-src`, closed only where
+  an engine honors `webrtc 'block'`), resource hints, `document.write`, and `execCommand("copy")`
+  and copy listeners from a click in it (text the person didn't choose on their clipboard, with no
+  notice). The frame's CSP, which it inherits, still holds for everything else.
 - `copyText` needs only a gesture, not a confirmation: a widget can put text the person didn't
   choose on their clipboard when they click in it (pastejacking). The notice above is what tells
   them.
@@ -360,10 +373,17 @@ encrypted into the path, since WebKit keeps no cookie in a frame (P083).
   no other label can set; the entered mark names its label. A session names its scope, signed, so
   another label's session is never read as this one's, under https or on loopback (P101).
 - Pages, files and status pages carry their CSP in headers and `X-Robots-Tag: noindex`, and
-  `frame-ancestors` names the app's origins only.
+  `frame-ancestors` names the app's origins only (with `nestedFrames: "own"`, P128, a file set's
+  files below its base name the page's own origin too, so its pages frame them).
 - Files: from the version's manifest only, typed by Porthole's table, `nosniff`; files other than
   pages are `Cross-Origin-Resource-Policy: same-origin`; a file set never registers a service
   worker; a page's CSP opens its own version's path, not its whole origin.
+- A page's nested frames are removed, a `srcdoc` one and one of its own files alike, unless the
+  host opts in (`nestedFrames: "own"`, P128). Then an iframe of one of its version's own files or
+  with `srcdoc` loads and runs (a page of the set with its own shell), and every other frame
+  (another site, another path of the origin, a scheme, an empty one) and plugin is removed: the
+  page's `frame-src` opens its version's path alone, which also governs every navigation of its
+  frames. Not for a nested page (refused).
 - With a per-request check (`authorize`), the host decides again on every request; a deny is a
   403 that says `denied`.
 - A nested page (`nested: true`, P111): the framed address answers Porthole's shell alone, its
@@ -444,6 +464,11 @@ encrypted into the path, since WebKit keeps no cookie in a frame (P083).
 - A revocation reaches the next request. It doesn't reach a page already running, an open
   WebSocket, pinned files the browser cached (immutable for a year), or assets in bearer mode
   (§7).
+- With `nestedFrames: "own"` (P128), a page has WebRTC: every iframe it keeps starts as an
+  `about:blank` of its own origin, which it reaches before anything loads there, and a `srcdoc`
+  frame runs none of the shell's defenses (resource hints, `document.write`, and a click's
+  `execCommand("copy")` and copy listeners, which put text on the clipboard with no notice). Its
+  frames can't navigate out of its version's path, and their sandbox is the page's.
 
 ### S4. Public links, and pages that are apps
 

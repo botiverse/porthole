@@ -56,6 +56,11 @@ export interface ShellPlan {
   /** The most text `copyText` carries. */
   readonly maxCopyChars: number;
   readonly protocolVersion: string;
+  /**
+   * `own` where the config lets content frame its own files and `srcdoc` (P128): the shell keeps
+   * those iframes and removes every other frame-like element. Absent: it removes them all.
+   */
+  readonly nestedFrames?: "own";
 }
 
 export function shellPlan(config: PortholeConfig): ShellPlan | null {
@@ -103,5 +108,7 @@ export function shellPlan(config: PortholeConfig): ShellPlan | null {
     maxPromptChars: config.limits.maxPromptChars,
     maxCopyChars: MAX_COPY_CHARS,
     protocolVersion: MCP_APPS_PROTOCOL_VERSION,
+    // Only where opted into (P128): every other plan is the same as before it.
+    ...(config.nestedFrames === "own" ? { nestedFrames: "own" as const } : {}),
   };
 }

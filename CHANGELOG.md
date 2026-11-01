@@ -11,6 +11,22 @@ P-numbers below.
   next animation frame, and drops a size the same as the last one taken, so content sending sizes as
   fast as it can no longer reflows the host's page and fires `resize` (`onResize`) for each. A size
   after the first now arrives on the next animation frame, not during the message.
+- **A page's own nested frames, opt-in (P128):** `nestedFrames: "own"` (a preset's option, a
+  display kind's `options`; default `"none"`, which changes nothing) lets content keep an
+  `<iframe>` of one of its version's own files (a relative `src`) or with `srcdoc`, which load and
+  run, as in Claude's Artifacts. Frames of other sites, of another path of the origin, `data:`,
+  `blob:` and empty ones, `<frame>`, `<object>` and `<embed>` are still removed, and a kept frame
+  is removed before a change would point it elsewhere. A file set's page opens `frame-src` to its
+  version's path (`fileSetDirectives(config)`, and `fileSetCspDirectives` takes the directives to
+  open), and its files' `frame-ancestors` name its own origin. Opaque frames keep `srcdoc` ones
+  only. Refused for url mode, nested pages and `presets.liveWidget`. The `nested-frame` lint then
+  names only frames that never load; `lintFiles` looks a frame's `src` up in the set.
+- **Security (P128): opting in is a weakening.** A nested frame is a realm of its own where the
+  shell's hardening never ran: content there has WebRTC (a way out past `connect-src`), resource
+  hints, `document.write`, and a click's `execCommand("copy")` and copy listeners (pastejacking,
+  with no notice). Child frames still can't navigate outside the version's path, and inherit the
+  sandbox. Leave it off unless your product accepts that; nothing changes for a host that doesn't
+  set it.
 
 ## 0.14.7
 

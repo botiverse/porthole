@@ -7043,3 +7043,118 @@ host, for every config.
 
 **Revisit when** a host needs every intermediate size (none does: the frame's height is all the host
 draws), or `resize` gets a gate of its own.
+
+## P128 · 2026-11-01 · A page's own nested frames, opted into: `nestedFrames: "own"` · Accepted
+
+xxchan (product owner, Raft #proj-workspace:04df2a51, message 14100c19, 2026-11-01): Raft's
+Artifacts should let a page have nested frames of its own, as Claude's Artifacts do. That means an
+`<iframe>` of a file of the same artifact (the same version's files, by a relative address) and a
+`srcdoc` frame load and run; frames of other sites stay blocked. He accepted the trade-off below
+(a nested frame is a realm of its own that the shell's hardening never reaches, so WebRTC is
+there; Claude has the same). It weakens a security default, so it is **opt-in per config**, and
+every other host keeps today's behaviour without changing anything. Amends P006 (the shell's
+defenses for channels a CSP doesn't cover: nested frames), P030 (guarded elements) and P082 (a set
+page's `frame-src`), for configs that opt in only.
+
+**Decision.**
+- **The switch.** `PortholeConfig.nestedFrames: "none" | "own"` (`presets.*({ nestedFrames })`,
+  a display kind's `options`). Absent or `"none"` is the default: the plan, the CSPs, the manual
+  and the lint are the same as before. `"own"` is refused for url mode (no shell), for a nested page
+  (`nested: true`, P111: its page is an opaque origin, which no `frame-ancestors` source matches, so
+  none of its own files could be framed; not measured), and by `presets.liveWidget` (P079: no
+  network of its own, and a child frame has WebRTC).
+- **The shell** (`plan.nestedFrames: "own"`, step 3 of the runtime) keeps an `<iframe>` (HTML
+  namespace) with a `srcdoc` attribute (which wins over any `src`), or whose `src`, resolved by the
+  platform's URL parser against the document's base, is under the version's own files' address
+  (`plan.files.base`, P082). Everything else is removed as before: `frame`, `frameset`, `object`,
+  `embed`, `portal`, `fencedframe`; an iframe without `src` or `srcdoc` (its `about:blank`), or of
+  another path of the origin, another origin, `data:`, `blob:` or `javascript:`. The rule is one
+  pure function (`OWN_FRAME`, spliced into the runtime as `HELD_BACK` is) that uses no prototype
+  method content could replace, given the attributes and the base through the platform's own
+  getters, kept before content runs. A frame that is kept can't become one that isn't: a change to
+  it (an attribute, an IDL setter such as `src`, an attribute node or map, `toggleAttribute`) that
+  would make it so first takes it out of the document, synchronously, as P030 does for a link or
+  meta; the observer watches `src` and `srcdoc` as the backstop. Opaque frames and single pages
+  have no files: there only `srcdoc` frames are kept.
+- **The CSP.** The frame's own policy is unchanged (`frame-src 'none'`): a `srcdoc` frame needs no
+  source (P033 measured it loads under the embedding page's `frame-src 'none'`). A page of a file
+  set opens `frame-src` to its version's files, the same source its scripts load from
+  (`fileSetDirectives(config)`, `fileSetCspDirectives(…, opened)`): never another origin, never
+  `'self'`, and not `child-src` (every engine Porthole supports reads frames from `frame-src`,
+  P038). The embedding page's `frame-src` is unchanged.
+- **The server.** Below a file set's base, `frame-ancestors` names the page's own origin before
+  the app's, so the set's pages frame its files (`frame-ancestors` names every ancestor). The
+  ticket's answer, the shell's own pages and every other display keep the app's origins alone.
+  Every page of a set is served in the shell (P081), so a page of the set in a child frame has its
+  own shell, hardened: it takes messages only from the host origins, which its parent isn't.
+- **The lint.** `nested-frame` stays an error; under `"own"` it names only what never loads: a
+  `<frame>`, `<object>` or `<embed>`, an iframe of another site (any scheme, `//`), of the origin's
+  root (`/`), or with neither `src` nor `srcdoc`, and one with a relative `src` where there are no
+  files. Its message says what does load. `lintFiles` looks an iframe's `src` up in the set.
+- **The manual** says which frames load ("an <iframe> of one of the page's own files (a relative
+  src) or with srcdoc loads, set before it is added"), from the same config
+  (`test/agreement.test.ts`).
+- **Raft** opts in on its artifact kind: `defineDisplays({ artifact: { preset: "artifact",
+  options: { …, nestedFrames: "own" } } })` (`raftContentDisplays.ts` in the content Worker, and
+  the web's `RAFT_ARTIFACT_DISPLAYS`, kept equal).
+
+**Threat it re-opens** (for a config that opts in; accepted by xxchan).
+- **A child frame is a realm of its own, where the shell never ran** (steps 1, 2, 5 and 6 of the
+  runtime): in a `srcdoc` frame, and in the `about:blank` document every new iframe starts with
+  (which a same-origin page reaches in the task that added it), the WebRTC constructors are there,
+  so content can reach any STUN or TURN server outside `connect-src` and carry what it holds out
+  (`webrtc 'block'` stops it only in an engine that honors it); resource hints there are not
+  removed (a `dns-prefetch` or `preconnect` reaches any host); `document.write` works. In a served
+  page (`allow-same-origin`), its kept frames are its own origin, so it reaches their realms
+  directly; in an opaque frame, a child is a new opaque origin (the sandbox is inherited) whose own
+  script still runs. In short: a page that opts in has WebRTC, and egress is closed only as far as
+  CSP closes it (P006's other walls are the CSP's, and they hold in the child: it inherits its
+  parent's policy, or, a page of the set, is served with its own).
+- **The clipboard** (P051): the frame's `allow` denies `clipboard-read` and `clipboard-write`,
+  and a child's features are its parent's at most, so the async Clipboard API stays closed. But
+  the shell's guards don't run there: `execCommand("copy")` from a click in the child, and its
+  copy and cut listeners, can put text the person didn't select on their clipboard
+  (pastejacking), without `copyText` and the host's notice.
+- **Navigation.** A child frame's navigations, its own or its parent's of it, are governed by its
+  embedding document's `frame-src` (the page's): a set's page frames only its version's path, an
+  opaque frame nothing. So a child carries data out by navigating only to its own version's path,
+  which reaches the host's content server, as a fetch there does (P082, P084). A child that
+  navigates the page itself is stopped by the page's navigation guard and the app's `frame-src`,
+  as before (P079). The sandbox is inherited: no popups, forms, downloads, modals or top
+  navigation in a child.
+- **No new reach into the host.** A child is on the content's origin (or an opaque one); a
+  file set's files now name that origin in `frame-ancestors`, which is the page's own: anything on
+  it is already same-origin with the page.
+
+**Why.** Pages people make with agents frame their own pages (a slide in a deck, a chart page in a
+report) and draw demos in `srcdoc` frames, which Claude's Artifacts run; removing them breaks those
+pages in Raft. Frames of other sites stay out: each would be a channel to its site.
+
+**Rejected.** On by default (CLAUDE.md: never weaken a default silently; other hosts keep the
+strict rule). Running Porthole's shell in `srcdoc` children: the page reaches a child's realm
+before any script of ours could (its `about:blank`), so it would cost the page its frames' markup
+and buy nothing against content that wants out. An allowlist of other origins (as MCP Apps'
+`frameDomains`): not asked for, and each origin is a channel out.
+
+**Tested** (written 2026-11-01, not yet run: run `pnpm check`, `pnpm test:leak` on Chromium, WebKit
+and Firefox, and `test:controls own-frame-rule` and `frame-guard,sync-guard` before release).
+Unit: `test/config.test.ts` (default off in every preset and plan; the refusals; a display kind's
+option reaches its served and opaque configs), `test/shell.test.ts` (`OWN_FRAME`'s rule, case by
+case; the plan), `test/files.test.ts` (a set's page frames its version's path only; served, its
+files' `frame-ancestors` and the ticket's; `lintFiles`), `test/check.test.ts` (the lint),
+`test/agreement.test.ts` (shell ↔ CSP ↔ manual, for a Raft-shaped and an inline config). Browser:
+probes `4.own-srcdoc` (a srcdoc frame made by script, by `innerHTML` and in markup runs),
+`4.own-external` (another site, a relative `src` with no files, `data:`, a plugin, an empty iframe:
+none stays, the canary hears nothing), `4.own-turned` (a kept frame turned elsewhere by a setter,
+an attribute, a map, `toggleAttribute` leaves), `4.own-default` (the same frames, without the
+option: none runs), and `leak/served/files.spec.ts`'s "a page's own frames" (its own file, with its
+shell, a srcdoc and a frame it made run; another site, `/`, `/__porthole/d/…`, `../../`, plugins
+stay out; by default none). Negative control `own-frame-rule` (the rule keeps every iframe) fails
+`4.own-external`, `4.own-turned` and the served case; `frame-guard,sync-guard` fails the three
+probes that need a frame removed. Unmeasured until then: whether every engine loads a `srcdoc`
+child under an opaque frame's own `frame-src 'none'` (P033 measured the embedding page's, on
+Chromium and WebKit); `4.own-srcdoc` says.
+
+**Revisit when** a host asks for frames of other origins (an allowlist, with its own channel
+accepted), a nested page (P111) needs frames of its own, Claude's Artifacts change their rule, or
+every engine closes WebRTC through CSP in every realm (then the trade-off is the clipboard's only).

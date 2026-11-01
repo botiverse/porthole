@@ -8,7 +8,9 @@ import {
   checkFileSet,
   fileLimits,
   filePathProblem,
+  FILE_SET_DIRECTIVES,
   fileSetCspDirectives,
+  fileSetDirectives,
   fileTypeOf,
   lintFiles,
   lookupFile,
@@ -92,14 +94,17 @@ const DOMAIN = "example-usercontent.com";
 const CONTENT = `https://*.${DOMAIN}`;
 const secret = new Uint8Array(32).fill(9);
 
-function frames(store = fileStore({ "site@1": SET("1"), "site@2": SET("2") })) {
+function frames(
+  store = fileStore({ "site@1": SET("1"), "site@2": SET("2") }),
+  artifact: PortholeConfig = presets.artifact({ isolation: "domain", contentOrigins: [CONTENT] }),
+) {
   const checks: string[] = [];
   const revoked = new Set<string>();
   const server = createServer({
     content: { domain: DOMAIN, scheme: "https" },
     secret,
     hostOrigins: [HOST],
-    configs: { artifact: presets.artifact({ isolation: "domain", contentOrigins: [CONTENT] }) },
+    configs: { artifact },
     artifacts: store,
     authorize: {
       check: ({ subject, request }) => {
@@ -399,6 +404,79 @@ describe("the CSP of a set's page (P082)", () => {
     expect(directives.get("default-src")).toEqual(["'none'"]);
     // The config's own CSP is unchanged: opaque frames and single pages keep P022 whole.
     expect(compile(config).csp).not.toContain(DOMAIN);
+  });
+});
+
+describe("a page's own frames in its CSP (P128)", () => {
+  const source = `https://a.${DOMAIN}/v/3/`;
+  const directivesOf = (config: PortholeConfig) =>
+    new Map(
+      fileSetCspDirectives(compile(config).cspDirectives, source, fileSetDirectives(config)).map(
+        ([name, ...sources]) => [name, sources],
+      ),
+    );
+
+  it("by default frames nothing: a set's page keeps frame-src 'none'", () => {
+    const config = presets.artifact({ isolation: "domain", contentOrigins: [CONTENT] });
+    expect(fileSetDirectives(config)).toEqual(FILE_SET_DIRECTIVES);
+    expect(directivesOf(config).get("frame-src")).toEqual(["'none'"]);
+  });
+
+  it("opted in, frames the version's own path and nothing else: no origin, no 'self', no scheme", () => {
+    const config = presets.artifact({
+      isolation: "domain",
+      contentOrigins: [CONTENT],
+      nestedFrames: "own",
+    });
+    expect(fileSetDirectives(config)).toEqual([...FILE_SET_DIRECTIVES, "frame-src"]);
+    const directives = directivesOf(config);
+    expect(directives.get("frame-src")).toEqual([source]);
+    // Frames only: plugins, child-src's fallback, forms and <base> are as they were.
+    expect(directives.get("object-src")).toEqual(["'none'"]);
+    expect(directives.get("child-src")).toEqual(["blob:"]);
+    expect(directives.get("form-action")).toEqual(["'none'"]);
+    expect(directives.get("base-uri")).toEqual(["'none'"]);
+    for (const [name, sources] of directives) {
+      expect(sources, name).not.toContain("'self'");
+    }
+    // The frame's own CSP (an opaque frame's, a single page's) frames nothing: srcdoc needs none.
+    expect(compile(config).csp).toContain("frame-src 'none'");
+    expect(compile(presets.artifact({ nestedFrames: "own" })).csp).toContain("frame-src 'none'");
+    // The embedding page's frame-src, the frame's sandbox and allow are as before.
+    const strict = compile(presets.artifact({ isolation: "domain", contentOrigins: [CONTENT] }));
+    expect(compile(config).embedderFrameSources).toEqual(strict.embedderFrameSources);
+    expect(compile(config).sandbox).toBe(strict.sandbox);
+    expect(compile(config).allow).toBe(strict.allow);
+  });
+
+  it("served opted in: a page's files are framed by its own origin too; the ticket's answer by the app's alone", async () => {
+    const app = frames(
+      undefined,
+      presets.artifact({ isolation: "domain", contentOrigins: [CONTENT], nestedFrames: "own" }),
+    );
+    const { answer, base, location } = await framed(app, site("1"));
+    expect(answer.headers.get("content-security-policy")).toContain(
+      `frame-src ${location.origin}/__porthole/f/`,
+    );
+    expect(answer.headers.get("content-security-policy")).toMatch(
+      new RegExp(`; frame-ancestors ${HOST}$`, "u"),
+    );
+    const child = await fetchAt(app, `${base}about.html`, navigate);
+    expect(child.status).toBe(200);
+    const csp = child.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain(`frame-src ${location.origin}/__porthole/f/;`);
+    expect(csp).toMatch(new RegExp(`; frame-ancestors ${location.origin} ${HOST}$`, "u"));
+    // A page of the set is in the shell, which keeps its own frames.
+    expect(await child.text()).toContain('"nestedFrames":"own"');
+    // Not opted in: as before.
+    const strict = frames();
+    const before = await framed(strict, site("1"));
+    const page = await fetchAt(strict, `${before.base}about.html`, navigate);
+    expect(page.headers.get("content-security-policy")).toContain("frame-src 'none'");
+    expect(page.headers.get("content-security-policy")).toMatch(
+      new RegExp(`; frame-ancestors ${HOST}$`, "u"),
+    );
+    expect(await page.text()).not.toContain("nestedFrames");
   });
 });
 
@@ -930,6 +1008,33 @@ describe("the agent's side: a page with files, linted and admitted (P081)", () =
       admitFiles(served, { "index.html": '<script src="/x.js"></script>' }, { refuseOn: "never" })
         .ok,
     ).toBe(true);
+  });
+});
+
+describe("a page's own frames, linted with its files (P128)", () => {
+  const own = presets.artifact({
+    isolation: "domain",
+    contentOrigins: [CONTENT],
+    nestedFrames: "own",
+  });
+
+  it("looks up a frame's file in the set, and says nothing of one that is there", () => {
+    expect(
+      lintFiles(own, {
+        "index.html": '<iframe src="chart.html"></iframe><iframe srcdoc="<p>x</p>"></iframe>',
+        "chart.html": "<p>chart</p>",
+      }),
+    ).toEqual([]);
+    const missing = lintFiles(own, { "index.html": '<iframe src="chart.html"></iframe>' });
+    expect(missing.map((each) => [each.rule, each.path])).toEqual([
+      ["missing-file", "index.html"],
+    ]);
+    const outside = lintFiles(own, {
+      "index.html": '<iframe src="https://www.example.org/"></iframe>',
+    });
+    expect(outside.map((each) => [each.severity, each.rule])).toEqual([
+      ["error", "nested-frame"],
+    ]);
   });
 });
 

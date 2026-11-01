@@ -505,6 +505,12 @@ async function start(): Promise<Harness> {
       capabilities: { copyText: {}, readData: {}, subscribeData: {} },
     }),
     url: presets.url({ contentOrigins: [contentSource] }),
+    // A page's own nested frames, opted into (P128): its files' frames and srcdoc load and run.
+    artifactFrames: presets.artifact({
+      isolation: "domain",
+      contentOrigins: [contentSource],
+      nestedFrames: "own",
+    }),
     // A nested page (P111): Porthole's shell at the framed address, the page its opaque child.
     artifactNested: presets.artifact({
       isolation: "domain",

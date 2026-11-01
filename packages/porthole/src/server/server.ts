@@ -1303,6 +1303,9 @@ export function createServer(options: ServerOptions): PortholeServer {
     const ancestors = nested ? nestedAncestors(access.origin, frameAncestors) : frameAncestors;
     if ("files" in served) {
       if (at !== undefined) {
+        // A page's own frames (P128): its files below the base are framed by its own pages too,
+        // on this origin (`frame-ancestors` names every ancestor). Never another origin's.
+        const own = served.compiled.config.nestedFrames === "own";
         return serveFile({
           request,
           set: served.files,
@@ -1314,7 +1317,7 @@ export function createServer(options: ServerOptions): PortholeServer {
           source: at.source,
           compiled: served.compiled,
           hostOrigins: options.hostOrigins,
-          frameAncestors: ancestors,
+          frameAncestors: own ? `${access.origin} ${ancestors}` : ancestors,
           ...versionOf(access.instance),
         });
       }

@@ -159,6 +159,9 @@ const MARKER_TAP =
   "a tap on a marker is reported on every engine, and the content hears none of it (P105)";
 const HONEST_SCROLL =
   "an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second";
+/** A served page's own frames (P128): a frame of another site stays out (files.spec.ts). */
+export const OWN_FRAMES_ELSEWHERE =
+  "a page's own frames, opted in (P128): a frame of another site, of another path of its origin, or a plugin stays out and loads nothing";
 const IN_SET_LINKS = [
   "a link to another page of the set opens it in the frame; the display goes on",
   "a link to another page of the set opens it in the frame when the leaving page's notice is dropped (P098)",
@@ -207,9 +210,18 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
         "[4.template-clone]",
         "[7.base-plugins]",
         "[14.shell]",
+        "[4.own-external]",
+        "[4.own-turned]",
+        "[4.own-default]",
       ],
       { webkit: ["[8.preconnect]"] },
     ),
+  },
+  // A page's own frames (P128): the rule that keeps them keeps every iframe. The frame's CSP still
+  // stops each request (frame-src), so what fails is the frame left in the tree.
+  "own-frame-rule": {
+    specs: [LEAK, FILES],
+    fails: all("[4.own-external]", "[4.own-turned]", OWN_FRAMES_ELSEWHERE),
   },
   "attach-shadow,sync-guard": {
     specs: [LEAK],

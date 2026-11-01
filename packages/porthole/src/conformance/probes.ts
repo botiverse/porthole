@@ -59,6 +59,13 @@ async function rtcSendsHere(context: ProbeContext, udp: UdpOracle): Promise<bool
 const childDocument = (stun: string): string =>
   `<script>parent.postMessage({ tag: "child-ran" }, "*"); try { const p = new RTCPeerConnection({ iceServers: [{ urls: ${js(stun)} }], iceCandidatePoolSize: 4 }); p.createDataChannel("x"); p.createOffer().then((o) => p.setLocalDescription(o)); } catch (e) {}</script>`;
 
+/**
+ * A page's own srcdoc child (P128): it says it ran, again and again, so its parent hears it
+ * whenever it starts listening (a frame in the content's markup runs before the content's script).
+ */
+const ownChild = (from: string): string =>
+  `<script>setInterval(() => parent.postMessage({ tag: "own-child-ran", from: ${js(from)} }, "*"), 50);</script>`;
+
 /** The verdict of a nested-frame attack: the child never ran, and nothing reached the oracle. */
 async function expectNoChild(
   context: ProbeContext,
@@ -745,6 +752,142 @@ export const PROBES: readonly Probe[] = [
         content: attack(
           `${childSetup(udp.stun)}\n    await wait(1200);\n    r.frames = document.querySelectorAll("iframe, object, embed").length;`,
           `<iframe srcdoc="${child}"></iframe><div><template shadowrootmode="closed"><iframe srcdoc="${child}"></iframe></template></div>`,
+        ),
+      });
+      await expectNoChild(context, display, udp);
+    },
+  },
+
+  // ── 4, opted in: a page's own frames (P128) ────────────────────────────────────────────────
+  // A host that sets `nestedFrames: "own"` lets srcdoc frames (and, served, frames of the page's
+  // own files: leak/served/files.spec.ts) load and run; every other frame stays out. These run
+  // under an opaque inline widget, which has no files: only srcdoc is the content's own there.
+  {
+    id: "4.own-srcdoc",
+    item: 4,
+    title: "a page's own frames, opted in (P128): a srcdoc frame loads and its script runs",
+    async run(context) {
+      const display = await context.launch({
+        config: inline({ nestedFrames: "own" }),
+        content: attack(
+          `
+    r.ran = [];
+    window.addEventListener("message", (event) => { if (event.data && event.data.tag === "own-child-ran" && r.ran.indexOf(event.data.from) === -1) r.ran.push(event.data.from); });
+    const made = document.createElement("iframe");
+    made.srcdoc = ${js(ownChild("script"))};
+    document.body.append(made);
+    const holder = document.createElement("div");
+    holder.innerHTML = '<iframe srcdoc="' + ${js(ownChild("innerHTML"))}.replace(/"/g, "&quot;") + '"></iframe>';
+    document.body.append(holder);
+    await wait(1500);
+    r.ran.sort();
+    r.frames = document.querySelectorAll("iframe").length;`,
+          `<iframe srcdoc="${ownChild("markup").replace(/"/gu, "&quot;")}"></iframe>`,
+        ),
+      });
+      const verdict = await context.result(display, 15_000);
+      expect(verdict.error, "the content's own code failed").toBeUndefined();
+      expect(verdict.ran, "probe: a srcdoc frame of the content's own didn't run").toEqual([
+        "innerHTML",
+        "markup",
+        "script",
+      ]);
+      expect(verdict.frames, "probe: a srcdoc frame of the content's own was removed").toBe(3);
+    },
+  },
+  {
+    id: "4.own-external",
+    item: 4,
+    title:
+      "a page's own frames, opted in (P128): a frame of another site, a plugin, a frame with no document of its own: none stays or loads",
+    async run(context) {
+      const canary = await context.http();
+      const c = canary.origin;
+      const display = await context.launch({
+        config: inline({ nestedFrames: "own" }),
+        content: attack(
+          `
+    const away = document.createElement("iframe");
+    away.src = ${js(`${c}/made.html?d=secret`)};
+    document.body.append(away);
+    const blank = document.createElement("iframe");
+    document.body.append(blank);
+    const holder = document.createElement("div");
+    holder.innerHTML = ${js(`<iframe src="${c}/parsed.html?d=secret"></iframe><iframe src="parsed-relative.html"></iframe><object data="${c}/object.html" type="text/html"></object><embed src="${c}/embed.html" type="text/html"><iframe src="data:text/html,<p>x</p>"></iframe>`)};
+    document.body.append(holder);
+    await wait(1200);
+    r.blankKept = blank.isConnected;
+    r.frames = document.querySelectorAll("iframe, object, embed").length;`,
+          `<iframe src="${c}/markup.html?d=secret"></iframe>`,
+        ),
+      });
+      const verdict = await context.result(display, 15_000);
+      await settle(1_000);
+      expect(verdict.error, "the content's own code failed").toBeUndefined();
+      expect(verdict.frames, "probe: a frame that isn't the content's own is in the tree").toBe(0);
+      expect(verdict.blankKept, "probe: a frame with no document of its own was kept").toBe(false);
+      expect(canary.requests(), "probe: a frame reached the canary").toEqual([]);
+      expect(context.requestsTo(c), "probe: the page requested the canary").toEqual([]);
+    },
+  },
+  {
+    id: "4.own-turned",
+    item: 4,
+    title:
+      "a page's own frames, opted in (P128): a kept frame turned to another site leaves before it goes",
+    async run(context) {
+      const canary = await context.http();
+      const c = canary.origin;
+      const display = await context.launch({
+        config: inline({ nestedFrames: "own" }),
+        content: attack(`
+    const make = () => { const f = document.createElement("iframe"); f.srcdoc = "<p>kept</p>"; document.body.append(f); return f; };
+    const dropped = make();
+    const attribute = make();
+    const named = make();
+    r.kept = document.querySelectorAll("iframe").length;
+    // Its srcdoc wins while it has one: a src alone changes nothing.
+    dropped.src = ${js(`${c}/dropped.html?d=secret`)};
+    r.keptWithSrc = dropped.isConnected;
+    dropped.removeAttribute("srcdoc");
+    attribute.setAttribute("src", ${js(`${c}/attribute.html?d=secret`)});
+    attribute.attributes.removeNamedItem("srcdoc");
+    named.toggleAttribute("srcdoc");
+    named.setAttribute("src", ${js(`${c}/named.html?d=secret`)});
+    await wait(1200);
+    r.frames = document.querySelectorAll("iframe").length;`),
+      });
+      const verdict = await context.result(display, 15_000);
+      await settle(1_000);
+      expect(verdict.error, "the content's own code failed").toBeUndefined();
+      expect(verdict.kept, "the content's own srcdoc frames were kept").toBe(3);
+      expect(verdict.keptWithSrc, "a srcdoc frame given a src was kept").toBe(true);
+      expect(verdict.frames, "probe: a frame turned to another site is in the tree").toBe(0);
+      expect(canary.requests(), "probe: a turned frame reached the canary").toEqual([]);
+      expect(context.requestsTo(c), "probe: the page requested the canary").toEqual([]);
+    },
+  },
+  {
+    id: "4.own-default",
+    item: 4,
+    title:
+      'no nested frame runs by default (P128): what nestedFrames "own" would keep is removed without it',
+    async run(context) {
+      const udp = await context.udp();
+      const child = childDocument(udp.stun).replace(/"/gu, "&quot;");
+      const display = await context.launch({
+        config: inline(),
+        content: attack(
+          `${childSetup(udp.stun)}
+    const made = document.createElement("iframe");
+    made.srcdoc = child;
+    document.body.append(made);
+    const relative = document.createElement("iframe");
+    relative.src = "page.html";
+    document.body.append(relative);
+    await wait(1200);
+    r.frames = document.querySelectorAll("iframe").length;`,
+          `<iframe srcdoc="${child}"></iframe><iframe src="page.html"></iframe>`,
         ),
       });
       await expectNoChild(context, display, udp);

@@ -197,6 +197,7 @@ export {
   assetCspDirectives,
   FILE_SET_DIRECTIVES,
   fileSetCspDirectives,
+  fileSetDirectives,
   INERT_FILE_CSP,
   type CspDirective,
   type EgressKind,

@@ -2,6 +2,7 @@ import type { CompiledConfig } from "../compile/compile.ts";
 import {
   assetCspDirectives,
   fileSetCspDirectives,
+  fileSetDirectives,
   INERT_FILE_CSP,
   servedDocumentCsp,
   servedPermissionsPolicy,
@@ -268,10 +269,15 @@ export async function serveFile(serving: FileServing): Promise<Response> {
     serving.compiled.config.capabilities.assets !== undefined
       ? "same-origin"
       : "no-referrer";
-  // Its version's files (P082), and its artifact's assets where the config serves them (P089).
+  // Its version's files (P082), frames of them where the config opts in (P128), and its
+  // artifact's assets where the config serves them (P089).
   const directives = assetCspDirectives(
     serving.compiled.config,
-    fileSetCspDirectives(serving.compiled.cspDirectives, serving.source),
+    fileSetCspDirectives(
+      serving.compiled.cspDirectives,
+      serving.source,
+      fileSetDirectives(serving.compiled.config),
+    ),
     serving.origin,
   );
   // A page and a script (a worker's policy is its script's) get the page's CSP, a page with its
