@@ -25,6 +25,17 @@ const MAY_BE_PORTHOLE =
  */
 export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp" | "harness">> = {
   "frame-guard": [{ file: RUNTIME, find: "  guardRoot(document);\n", replace: "\n" }],
+  // A page's own frames (P128): a set's page's `frame-src` opened to anywhere, not its version's
+  // path. The served pages' CSP is made in the harness's process, so the harness rewrites the header.
+  "own-frame-src": "harness",
+  // A page's own frames (P128): under nestedFrames "own", every iframe is kept as its own.
+  "own-frame-rule": [
+    {
+      file: RUNTIME,
+      find: '      return ownFrame(callOf(hasAttributeIn, element, ["srcdoc"]) === true, callOf(getAttributeIn, element, ["src"]), filesBase, resolveHere);',
+      replace: "      return true;",
+    },
+  ],
   webrtc: [{ file: RUNTIME, find: "      lock(window, name, undefined);", replace: "" }],
   // The shell's navigation guard (P079): the frame's own navigations to another document go on.
   "navigate-guard": [
@@ -82,7 +93,7 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "sync-guard": [
     {
       file: RUNTIME,
-      find: "    if (node.nodeType === 1 && node.matches(GUARDED)) {\n      return false;\n    }\n    strip(node);\n    return true;",
+      find: "    if (node.nodeType === 1 && guarded(node)) {\n      return false;\n    }\n    strip(node);\n    return true;",
       replace: "    return true;",
     },
     {
@@ -92,7 +103,7 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
     },
     {
       file: RUNTIME,
-      find: "    if (copy.matches(GUARDED)) {\n      element.remove();\n    }",
+      find: "    if (guarded(copy)) {\n      element.remove();\n    }",
       replace: "",
     },
   ],
@@ -771,6 +782,8 @@ const SERVED = [
   "link-rule",
   "window-open",
   "device-locks",
+  // A page's own frames (P128): the shell's rule that keeps them, in a served page's shell.
+  "own-frame-rule",
   // A nested page's shell (P111), made in the harness's process like the documents' shells.
   "shell-namespace",
   "nested-shell-origin",

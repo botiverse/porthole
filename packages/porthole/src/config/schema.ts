@@ -269,6 +269,19 @@ export interface PortholeConfig {
    * page has no storage of its own (an in-memory stand-in) and fetches nothing with a cookie.
    */
   readonly nested?: true;
+  /**
+   * Which nested frames content may make (P128). `none` (default, and absent): the shell removes
+   * every frame-like element content adds, and the CSP's `frame-src` is `'none'`. `own`: an
+   * `<iframe>` of one of the page's own files (its `src` under its version's own address, P082)
+   * and a `srcdoc` one load and run; frames of other sites, `<frame>`, `<object>` and `<embed>`
+   * are still removed, and a served file set's `frame-src` opens its version's own path only.
+   * A weakening, opted into: a child frame is a realm of its own, where the shell's WebRTC
+   * removal, clipboard guards and navigation cancel never ran (a page of the set framed there has
+   * its own shell; a `srcdoc` frame, or the `about:blank` a new frame starts as, has none), so
+   * content reaches WebRTC and the clipboard's events there. Not for url mode, a live widget
+   * (no network of its own, P079) or a nested page (P111).
+   */
+  readonly nestedFrames?: "none" | "own";
 }
 
 export interface StorageConfig {

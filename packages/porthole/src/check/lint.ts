@@ -6,8 +6,10 @@ import {
   librarySources,
 } from "../compile/policy.ts";
 import type { PortholeConfig } from "../config/schema.ts";
+import { servesFiles } from "../files/paths.ts";
 import { sizeWords } from "../guide/limits.ts";
 import { originMatchesSource } from "../isolation/served.ts";
+import { attributesOf } from "./markup.ts";
 import { scrollLock } from "./scroll.ts";
 
 /**
@@ -124,6 +126,72 @@ const OWN_CDN: readonly {
   { name: "Plotly", host: /^https:\/\/cdn\.plot\.ly\/plotly/u, pinned: /\d+\.\d+\.\d+/u },
 ];
 
+/** The most of a tag's text a frame's attributes are read from: a `srcdoc` may hold markup. */
+const MOST_TAG_CHARS = 65_536;
+
+/** The most frame-like tags read for `strayFrame`: past them, the rest isn't looked at. */
+const MOST_FRAMES = 200;
+
+/**
+ * A tag's attributes' text, from just past its name to its closing `>` outside any quoted value
+ * (a `srcdoc` holds `<` and `>`), read at most `MOST_TAG_CHARS` far: linear in what it reads.
+ */
+function tagText(content: string, from: number): string {
+  const end = Math.min(content.length, from + MOST_TAG_CHARS);
+  let quote = "";
+  for (let at = from; at < end; at += 1) {
+    const char = content[at];
+    if (quote !== "") {
+      if (char === quote) {
+        quote = "";
+      }
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === ">") {
+      return content.slice(from, at);
+    }
+  }
+  return content.slice(from, end);
+}
+
+/**
+ * Under `nestedFrames: "own"` (P128), the first frame-like element that never loads, and why: a
+ * `<frame>`, `<object>` or `<embed>`; an `<iframe>` of another site (any scheme, `//`), of the
+ * origin's root (`/`), or with neither `src` nor `srcdoc`; one with a relative `src` where there
+ * are no files to frame (`relative`: false). Null where every frame is the page's own.
+ */
+function strayFrame(
+  content: string,
+  relative: boolean,
+): { readonly tag: string; readonly src: string; readonly index: number } | null {
+  let read = 0;
+  for (const match of content.matchAll(/<(iframe|frame|object|embed)\b/giu)) {
+    read += 1;
+    if (read > MOST_FRAMES) {
+      break;
+    }
+    const tag = (match[1] ?? "").toLowerCase();
+    if (tag !== "iframe") {
+      return { tag, src: "", index: match.index };
+    }
+    const attributes = attributesOf(tagText(content, match.index + match[0].length));
+    if (attributes.some((each) => each.name === "srcdoc")) {
+      continue;
+    }
+    const src = (attributes.find((each) => each.name === "src")?.value ?? "").trim();
+    const elsewhere =
+      src === "" ||
+      /^[a-z][a-z0-9+.-]*:/iu.test(src) ||
+      src.startsWith("/") ||
+      src.startsWith("\\") ||
+      !relative;
+    if (elsewhere) {
+      return { tag, src, index: match.index };
+    }
+  }
+  return null;
+}
+
 export function lintContent(config: PortholeConfig, content: string): Finding[] {
   return lintPage(config, content, { scrollLock: true });
 }
@@ -179,14 +247,35 @@ export function lintPage(
       }
     }
   }
-  const frame = /<(iframe|frame|object|embed)\b/iu.exec(content);
-  if (frame !== null) {
-    add(
-      "nested-frame",
-      "error",
-      `Remove the <${frame[1]?.toLowerCase()}>: nested frames and plugins are taken out of a ${it} and never run. Draw it inline instead.`,
-      frame.index,
-    );
+  if (config.nestedFrames === "own") {
+    // A page's own frames load (P128): only what never does is said.
+    const files = servesFiles(config);
+    const own = files
+      ? 'an <iframe> of one of its own files (a relative src, src="chart.html") or with srcdoc does'
+      : "an <iframe> with srcdoc does";
+    const stray = strayFrame(content, files);
+    if (stray !== null) {
+      add(
+        "nested-frame",
+        "error",
+        stray.tag !== "iframe"
+          ? `Remove the <${stray.tag}>: <frame>, <object> and <embed> are taken out of a ${it} and never run; ${own}.`
+          : stray.src === ""
+            ? `This <iframe> has neither src nor srcdoc, and is taken out of the ${it}: ${own}.`
+            : `Remove the <iframe src="${stray.src.slice(0, 200)}">: ${files ? "frames of other sites (or of another path of the address) are" : "frames of an address are"} taken out of a ${it} and never load; ${own}.`,
+        stray.index,
+      );
+    }
+  } else {
+    const frame = /<(iframe|frame|object|embed)\b/iu.exec(content);
+    if (frame !== null) {
+      add(
+        "nested-frame",
+        "error",
+        `Remove the <${frame[1]?.toLowerCase()}>: nested frames and plugins are taken out of a ${it} and never run. Draw it inline instead.`,
+        frame.index,
+      );
+    }
   }
   const write = /\bdocument\s*\.\s*write(?:ln)?\s*\(/u.exec(content);
   if (write !== null) {

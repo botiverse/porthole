@@ -1,7 +1,7 @@
 import { runInNewContext, Script } from "node:vm";
 import { describe, expect, test } from "vitest";
 import { compile, MCP_APPS_METHODS, presets, resolveTheme, DEFAULT_THEME } from "../src/index.ts";
-import { HELD_BACK, SHELL_RUNTIME } from "../src/shell/runtime.ts";
+import { HELD_BACK, OWN_FRAME, SHELL_RUNTIME } from "../src/shell/runtime.ts";
 
 const ORIGIN = "https://host.example.com";
 
@@ -53,6 +53,87 @@ describe("the shell runtime", () => {
     expect(SHELL_RUNTIME).toContain(`const heldBack = ${HELD_BACK};`);
     expect(SHELL_RUNTIME.match(/heldBack\(/gu)).toHaveLength(1);
     expect(SHELL_RUNTIME).toContain('parseInert(heldBack(String(input.html || "")))');
+  });
+});
+
+describe("a page's own frames, as the shell keeps them (P128)", () => {
+  type Rule = (
+    hasSrcdoc: boolean,
+    src: string | null,
+    filesBase: string | null,
+    resolve: (text: string) => string,
+  ) => boolean;
+  const ownFrame = runInNewContext(OWN_FRAME) as Rule;
+  const BASE = "https://a-x.example-usercontent.com/__porthole/f/sealed123/";
+  const PAGE = `${BASE}index.html`;
+  const resolve = (text: string) => new URL(text, PAGE).href;
+
+  test("keeps a srcdoc frame, whatever its src, and with no files to frame", () => {
+    expect(ownFrame(true, null, BASE, resolve)).toBe(true);
+    expect(ownFrame(true, "https://elsewhere.example/", BASE, resolve)).toBe(true);
+    expect(ownFrame(true, null, null, resolve)).toBe(true);
+  });
+
+  test("keeps a frame of the version's own files, by the platform's reading of its address", () => {
+    for (const src of [
+      "chart.html",
+      "./chart.html",
+      "pages/table.html?x=1#y",
+      " chart.html ",
+      "a/../chart.html",
+      `${BASE}chart.html`,
+    ]) {
+      expect(ownFrame(false, src, BASE, resolve), src).toBe(true);
+    }
+  });
+
+  test("removes every other frame: no address, the origin's other paths, other origins, schemes", () => {
+    for (const src of [
+      null,
+      "",
+      "   ",
+      "\n\t",
+      "/other.html",
+      "../other/",
+      "%2e%2e/%2e%2e/",
+      "\\..\\..\\x",
+      "/__porthole/f/other/",
+      "https://a-x.example-usercontent.com/",
+      "https://a-y.example-usercontent.com/__porthole/f/sealed123/x.html",
+      "//evil.example/__porthole/f/sealed123/",
+      "https://evil.example/",
+      "data:text/html,<p>x</p>",
+      "blob:https://a-x.example-usercontent.com/uuid",
+      "javascript:parent.x=1",
+      "about:blank",
+    ]) {
+      expect(ownFrame(false, src, BASE, resolve), String(src)).toBe(false);
+    }
+    // Without the page's files (an opaque frame, a single page), only srcdoc.
+    expect(ownFrame(false, "chart.html", null, resolve)).toBe(false);
+    // A base that isn't a directory's address is no base.
+    expect(ownFrame(false, "chart.html", BASE.slice(0, -1), resolve)).toBe(false);
+    // An address the parser refuses is removed, not thrown.
+    expect(
+      ownFrame(false, "x", BASE, () => {
+        throw new TypeError("Invalid URL");
+      }),
+    ).toBe(false);
+  });
+
+  test("is the runtime's own rule, read through the platform's getters, and only where opted in", () => {
+    expect(SHELL_RUNTIME).toContain(`const ownFrame = ${OWN_FRAME};`);
+    expect(SHELL_RUNTIME).toContain('const ownFrames = plan.nestedFrames === "own";');
+    expect(() => new Script(SHELL_RUNTIME.replace("__PLAN__", "{}"))).not.toThrow();
+    const strict = compile(presets.artifact());
+    const own = compile(presets.artifact({ nestedFrames: "own" }));
+    const strictPlan = planIn(strict.shellDocument({ origins: [ORIGIN] }));
+    const ownPlan = planIn(own.shellDocument({ origins: [ORIGIN] }));
+    expect(strictPlan).not.toHaveProperty("nestedFrames");
+    expect(ownPlan).toMatchObject({ nestedFrames: "own" });
+    // Everything else the shell does is the same.
+    const { nestedFrames: _own, ...rest } = ownPlan;
+    expect(rest).toEqual(strictPlan);
   });
 });
 

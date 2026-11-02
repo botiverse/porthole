@@ -325,6 +325,7 @@ export function validateConfig(
       "errors",
       "runtime",
       "nested",
+      "nestedFrames",
     ],
     "config",
   );
@@ -707,6 +708,21 @@ export function validateConfig(
     }
     if (isObject(config.egress) && config.egress.libraries === true) {
       fail("config.nested", "a nested page can't load Porthole's libraries from its origin yet");
+    }
+  }
+
+  // A page's own nested frames (P128): opted into, never a default.
+  if (config.nestedFrames !== undefined) {
+    if (config.nestedFrames !== "none" && config.nestedFrames !== "own") {
+      fail("config.nestedFrames", 'must be "none" or "own", or left out');
+    }
+    if (config.nestedFrames === "own" && config.mode === "url") {
+      fail("config.nestedFrames", "url mode has no shell: its app's frames are its own");
+    }
+    // A nested page's frames have an opaque ancestor, which no frame-ancestors source matches:
+    // none of its own files would load in one. Not measured yet.
+    if (config.nestedFrames === "own" && config.nested === true) {
+      fail("config.nestedFrames", 'a nested page (P111) has no "own" frames yet: leave it out');
     }
   }
 

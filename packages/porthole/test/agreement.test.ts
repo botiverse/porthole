@@ -21,7 +21,11 @@ import {
 } from "../src/index.ts";
 import { composedRuntime } from "../src/shell/document.ts";
 import { runtimeEntryPrefix } from "../src/guide/runtime.ts";
-import { assetCspDirectives } from "../src/compile/policy.ts";
+import {
+  assetCspDirectives,
+  fileSetCspDirectives,
+  fileSetDirectives,
+} from "../src/compile/policy.ts";
 import { RUNTIME_TYPES } from "../src/runtime/types.generated.ts";
 import { familyOf, methodGates, offeredCapabilities } from "../src/runtime/contract.ts";
 import { sizeWords } from "../src/guide/limits.ts";
@@ -160,6 +164,19 @@ const CASES: Record<string, PortholeConfig> = {
     runtime: "1",
     capabilities: { setModelContext: { gates: ["confirm", "show"] } },
   }),
+  // A page's own nested frames, opted into (P128): Raft's Artifacts' shape.
+  "artifact page, served, its own frames (P128)": presets.artifact({
+    isolation: "domain",
+    contentOrigins: ["https://*.example-usercontent.com"],
+    egress: LIBRARY_CDNS,
+    runtime: "1",
+    capabilities: { annotate: {}, comments: {}, copyText: {}, openLink: {} },
+    layout: { kind: "fill" },
+    errors: "host",
+    storage: { scope: "this artifact, across its versions" },
+    nestedFrames: "own",
+  }),
+  "inline widget, srcdoc frames of its own (P128)": presets.inlineWidget({ nestedFrames: "own" }),
 };
 
 /** Every manual text the agent can see: all topics and the tool description. */
@@ -459,6 +476,23 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
     expect([...denied].sort()).toEqual(
       FRAME_DENIED_FEATURES.filter((feature) => !granted.includes(feature)).sort(),
     );
+  });
+
+  test("the manual says which frames load exactly as the shell keeps them and the CSP frames them (P128)", () => {
+    const own = config.nestedFrames === "own";
+    const files = config.mode === "artifact" && config.isolation === "domain";
+    expect(plan?.nestedFrames, "the shell keeps a page's own frames").toBe(own ? "own" : undefined);
+    expect(text.includes("nested frames (iframe, object, embed) are removed")).toBe(!own);
+    expect(text.includes("with srcdoc loads")).toBe(own);
+    expect(text.includes("own files (a relative src)")).toBe(own && files);
+    // The frame's own CSP frames nothing (srcdoc needs no source); a set's page, its own files.
+    const frameSrc = (directives: readonly (readonly string[])[]) =>
+      directives.find(([name]) => name === "frame-src")?.slice(1);
+    expect(frameSrc(compiled.cspDirectives)).toEqual(["'none'"]);
+    const source = "https://a.example-usercontent.com/__porthole/f/";
+    expect(
+      frameSrc(fileSetCspDirectives(compiled.cspDirectives, source, fileSetDirectives(config))),
+    ).toEqual(own ? [source] : ["'none'"]);
   });
 
   test("the manual states the config's limits and theme event", () => {

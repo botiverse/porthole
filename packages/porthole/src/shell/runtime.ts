@@ -9,6 +9,46 @@ export const HELD_BACK = String.raw`(html) => {
   }`;
 
 /**
+ * Which `<iframe>` the shell keeps under `nestedFrames: "own"` (P128), spliced into the runtime:
+ * one with a `srcdoc` attribute (which wins over any `src`), or one whose `src`, resolved by the
+ * platform's own URL parser (`resolve`, which normalizes `..`, `%2e` and backslashes), is under the
+ * version's own files' address (`filesBase`, ending in `/`). Nothing else: no `src` or a blank one
+ * (`about:blank`), another path of the origin, another origin, `data:`, `blob:`, `javascript:`.
+ * Only comparisons and indexing, which content can't replace (no String.prototype method).
+ */
+export const OWN_FRAME = String.raw`(hasSrcdoc, src, filesBase, resolve) => {
+    if (hasSrcdoc === true) {
+      return true;
+    }
+    if (typeof src !== "string" || typeof filesBase !== "string" || filesBase.length === 0 || filesBase[filesBase.length - 1] !== "/") {
+      return false;
+    }
+    let blank = true;
+    for (let i = 0; i < src.length && blank; i += 1) {
+      const c = src[i];
+      blank = c === " " || c === "\t" || c === "\n" || c === "\f" || c === "\r";
+    }
+    if (blank) {
+      return false;
+    }
+    let target = null;
+    try {
+      target = resolve(src);
+    } catch (_) {
+      return false;
+    }
+    if (typeof target !== "string" || target.length < filesBase.length) {
+      return false;
+    }
+    for (let i = 0; i < filesBase.length; i += 1) {
+      if (target[i] !== filesBase[i]) {
+        return false;
+      }
+    }
+    return true;
+  }`;
+
+/**
  * The shell's runtime: the code that runs first in the frame, before any content. Plain ES2020,
  * no imports and no build step, so every engine (a browser frame now, a native web view later)
  * runs it as it is. `__PLAN__` is replaced with the frame's plan (`ShellPlan` plus the origins it
@@ -21,7 +61,11 @@ export const HELD_BACK = String.raw`(html) => {
  * 3. removes every frame-like element content adds, wherever it adds it (the document, any shadow
  *    root), since a nested frame runs in a fresh realm where step 2 never happened (and not every
  *    engine enforces `frame-src 'none'` for `srcdoc`/`about:blank` children); and the resource
- *    hints and refreshes a CSP doesn't govern;
+ *    hints and refreshes a CSP doesn't govern. Where the config opts in (`nestedFrames: "own"`,
+ *    P128), an `<iframe>` of the page's own files or with `srcdoc` is kept (`OWN_FRAME`), and
+ *    one that is kept leaves the document before a change would make it any other; in such a
+ *    child realm steps 1, 2, 5 and 6 never ran (a page of the set has its own shell there), which
+ *    the host accepted by opting in;
  * 4. closes the parser entry points that could build a shadow root step 3 can't see (declarative
  *    shadow DOM through `setHTMLUnsafe`, `parseHTMLUnsafe`, `document.write`);
  * 5. keeps content off the clipboard: the async Clipboard API refuses, `execCommand` won't copy or
@@ -462,22 +506,51 @@ export const SHELL_RUNTIME = String.raw`(() => {
 
   // No nested frames (each would be a fresh realm with WebRTC intact), no resource hints and no
   // refreshes (they reach the network outside the CSP's fetch directives). Removed as they are
-  // added: a mutation observer's microtask runs before a child frame's document loads.
+  // added: a mutation observer's microtask runs before a child frame's document loads. Under
+  // nestedFrames "own" (P128), a page's own iframes stay (keptFrame, below).
   const FRAMES = "iframe,frame,frameset,object,embed,portal,fencedframe";
   const HINTS = 'link[rel~="dns-prefetch" i],link[rel~="preconnect" i],link[rel~="prefetch" i],link[rel~="prerender" i],script[type="speculationrules" i],meta[http-equiv="refresh" i],meta[http-equiv="x-dns-prefetch-control" i]';
   const GUARDED = FRAMES + "," + HINTS;
+  // A page's own frames (P128), where the config opts in: an iframe of its version's files, or a
+  // srcdoc one, read through the platform's own getters (kept now) and OWN_FRAME's rule. Every
+  // other frame-like element is removed as before; the CSP's frame-src is the wall behind this.
+  const ownFrames = plan.nestedFrames === "own";
+  const ownFrame = ${OWN_FRAME};
+  const localNameOf = getterOf(Element.prototype, "localName");
+  const namespaceOf = getterOf(Element.prototype, "namespaceURI");
+  const baseOf = getterOf(Node.prototype, "baseURI");
+  const hasAttributeIn = Element.prototype.hasAttribute;
+  const getAttributeIn = Element.prototype.getAttribute;
+  const resolveHere = (text) => callOf(urlHref, new NativeURL(NativeString(text), callOf(baseOf, document, [])), []);
+  const keptFrame = (element) => {
+    if (!ownFrames || localNameOf === null || namespaceOf === null || baseOf === null) {
+      return false;
+    }
+    try {
+      if (callOf(localNameOf, element, []) !== "iframe" || callOf(namespaceOf, element, []) !== "http://www.w3.org/1999/xhtml") {
+        return false;
+      }
+      return ownFrame(callOf(hasAttributeIn, element, ["srcdoc"]) === true, callOf(getAttributeIn, element, ["src"]), filesBase, resolveHere);
+    } catch (_) {
+      return false;
+    }
+  };
+  const matchesIn = Element.prototype.matches;
+  const guarded = (element) => callOf(matchesIn, element, [GUARDED]) && !keptFrame(element);
   const guardedRoots = new WeakSet();
   let guardRoot = null;
   const strip = (node) => {
     if (node === null || (node.nodeType !== 1 && node.nodeType !== 9 && node.nodeType !== 11)) {
       return;
     }
-    if (node.nodeType === 1 && node.matches(GUARDED)) {
+    if (node.nodeType === 1 && guarded(node)) {
       node.remove();
       return;
     }
     for (const element of Array.from(node.querySelectorAll(GUARDED))) {
-      element.remove();
+      if (!keptFrame(element)) {
+        element.remove();
+      }
     }
     // Open shadow roots made without attachShadow (declarative ones the parser built elsewhere).
     if (node.nodeType === 1 && node.shadowRoot) {
@@ -491,18 +564,27 @@ export const SHELL_RUNTIME = String.raw`(() => {
   };
   const frameGuard = new MutationObserver((records) => {
     for (const record of records) {
+      // A kept frame whose src or srcdoc changed another way (P128): the backstop of the
+      // synchronous guard below (beforeChange), as the rest of this observer is.
+      if (record.type === "attributes") {
+        if (record.target.isConnected && guarded(record.target)) {
+          record.target.remove();
+        }
+        continue;
+      }
       for (const node of Array.from(record.addedNodes)) {
         strip(node);
       }
     }
   });
+  const observed = ownFrames ? { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "srcdoc"] } : { childList: true, subtree: true };
   guardRoot = (root) => {
     if (guardedRoots.has(root)) {
       return;
     }
     guardedRoots.add(root);
     strip(root);
-    frameGuard.observe(root, { childList: true, subtree: true });
+    frameGuard.observe(root, observed);
   };
   guardRoot(document);
 
@@ -595,7 +677,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
     if (node === null || typeof node !== "object" || typeof node.nodeType !== "number") {
       return true;
     }
-    if (node.nodeType === 1 && node.matches(GUARDED)) {
+    if (node.nodeType === 1 && guarded(node)) {
       return false;
     }
     strip(node);
@@ -733,7 +815,9 @@ export const SHELL_RUNTIME = String.raw`(() => {
 
   // A connected link or meta can't become a guarded one: the change is tried on a detached copy
   // first, and if the copy would be guarded, the element leaves the document before it changes.
-  const watched = (element) => element && element.nodeType === 1 && (element.localName === "link" || element.localName === "meta");
+  // Nor can a kept iframe (P128) become one that isn't the page's own (a src elsewhere, its
+  // srcdoc dropped).
+  const watched = (element) => element && element.nodeType === 1 && (element.localName === "link" || element.localName === "meta" || (ownFrames && localNameOf !== null && callOf(localNameOf, element, []) === "iframe"));
   const beforeChange = (element, change) => {
     if (!watched(element) || !element.isConnected) {
       return;
@@ -744,7 +828,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
     } catch (_) {
       return;
     }
-    if (copy.matches(GUARDED)) {
+    if (guarded(copy)) {
       element.remove();
     }
   };
@@ -812,6 +896,8 @@ export const SHELL_RUNTIME = String.raw`(() => {
   for (const proto of [
     typeof HTMLLinkElement === "function" ? HTMLLinkElement.prototype : null,
     typeof HTMLMetaElement === "function" ? HTMLMetaElement.prototype : null,
+    // A kept iframe's src and srcdoc, set through their properties (P128).
+    ownFrames && typeof HTMLIFrameElement === "function" ? HTMLIFrameElement.prototype : null,
   ]) {
     remember(proto, "relList");
     for (const name of Object.getOwnPropertyNames(proto || {})) {

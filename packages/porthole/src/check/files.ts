@@ -75,6 +75,8 @@ const REFERENCE_ATTRIBUTES: Readonly<Record<string, readonly string[]>> = {
   audio: ["src"],
   track: ["src"],
   embed: ["src"],
+  // A page's own frame (P128, `nestedFrames: "own"`): a file of the set, looked up as the rest.
+  iframe: ["src"],
   input: ["src"],
   link: ["href"],
   a: ["href"],

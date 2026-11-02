@@ -3,6 +3,7 @@ import {
   compile,
   ConfigError,
   createHost,
+  defineDisplays,
   isOriginSource,
   originSourceProblem,
   presets,
@@ -422,5 +423,69 @@ describe("0.1.1: what a host may change", () => {
     expect(refusal(withField({ limits: { ...base.limits, loadTimeoutMs: 0 } }))).toMatch(
       /loadTimeoutMs/u,
     );
+  });
+});
+
+describe("a page's own nested frames (P128)", () => {
+  const DOMAIN = "https://*.example-usercontent.com";
+
+  test("are off unless a host opts in: no preset says nestedFrames, and every plan keeps them all out", () => {
+    for (const config of [
+      presets.inlineWidget(),
+      presets.liveWidget(),
+      presets.artifact(),
+      presets.artifact({ isolation: "domain", contentOrigins: [DOMAIN] }),
+      presets.mcpApp(),
+    ]) {
+      expect(config.nestedFrames).toBeUndefined();
+      expect(compile(config).shell?.nestedFrames).toBeUndefined();
+    }
+    // "none" is the default said out loud: the same plan.
+    expect(compile(presets.artifact({ nestedFrames: "none" })).shell).toEqual(
+      compile(presets.artifact()).shell,
+    );
+  });
+
+  test('a host opts in with nestedFrames: "own", and the shell\'s plan says so', () => {
+    const own = presets.artifact({
+      isolation: "domain",
+      contentOrigins: [DOMAIN],
+      nestedFrames: "own",
+    });
+    expect(own.nestedFrames).toBe("own");
+    expect(compile(own).shell?.nestedFrames).toBe("own");
+    // Opaque (srcdoc only: there are no files to frame) and inline widgets may opt in too.
+    expect(compile(presets.artifact({ nestedFrames: "own" })).shell?.nestedFrames).toBe("own");
+    expect(compile(presets.inlineWidget({ nestedFrames: "own" })).shell?.nestedFrames).toBe("own");
+  });
+
+  test("refuses another value, url mode, a nested page and a live widget", () => {
+    expect(refusal(withField({ nestedFrames: "all" }))).toMatch(/config\.nestedFrames/u);
+    expect(refusal(withField({ nestedFrames: true }))).toMatch(/config\.nestedFrames/u);
+    expect(
+      refusal({
+        ...presets.url({ contentOrigins: ["https://*.preview.example.com"] }),
+        nestedFrames: "own",
+      }),
+    ).toMatch(/url mode has no shell/u);
+    expect(() =>
+      presets.artifact({
+        isolation: "domain",
+        contentOrigins: [DOMAIN],
+        nested: true,
+        nestedFrames: "own",
+      }),
+    ).toThrow(/nested page/u);
+    expect(() => presets.liveWidget({ nestedFrames: "own" })).toThrow(/no network of its own/u);
+    // A live widget's own default, said out loud, stays.
+    expect(presets.liveWidget({ nestedFrames: "none" }).nestedFrames).toBe("none");
+  });
+
+  test("a display kind's option reaches both its served and its opaque config", () => {
+    const displays = defineDisplays({
+      artifact: { preset: "artifact", options: { nestedFrames: "own", layout: { kind: "fill" } } },
+    });
+    expect(displays.served(DOMAIN)?.artifact.nestedFrames).toBe("own");
+    expect(displays.opaque("artifact").nestedFrames).toBe("own");
   });
 });

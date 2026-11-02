@@ -98,6 +98,25 @@ export function withSelfForFiles(response: Response): Response {
   return new Response(response.body, { status: response.status, headers });
 }
 
+/** The `own-frame-src` control (P128): a file set's page whose `frame-src` allows any frame. */
+export function withOpenFrameSrc(response: Response): Response {
+  const csp = response.headers.get("content-security-policy");
+  if (csp === null || !/(^|;)\s*frame-src\s/u.test(csp)) {
+    return response;
+  }
+  const headers = new Headers(response.headers);
+  headers.set(
+    "content-security-policy",
+    csp
+      .split(";")
+      .map((directive) =>
+        directive.trim().split(/\s+/u)[0] === "frame-src" ? " frame-src *" : directive,
+      )
+      .join(";"),
+  );
+  return new Response(response.body, { status: response.status, headers });
+}
+
 /** The `file-corp` control: a file without its `Cross-Origin-Resource-Policy`. */
 export function withoutResourcePolicy(response: Response): Response {
   if (!response.headers.has("cross-origin-resource-policy")) {
@@ -161,6 +180,9 @@ export function withoutPermissionsPolicy(response: Response): Response {
 /** The controls this file's hosts apply to a served answer, in turn. */
 async function weakenAnswer(answer: Response): Promise<Response> {
   let out = weakened.includes("file-self") ? withSelfForFiles(answer) : answer;
+  if (weakened.includes("own-frame-src")) {
+    out = withOpenFrameSrc(out);
+  }
   if (weakened.includes("tab-sandbox")) {
     out = withoutDocumentSandbox(out);
   }

@@ -190,9 +190,16 @@ export function manualLimits(config: PortholeConfig, network: string): ManualLim
       ? `The ${it}'s address is about:srcdoc: it has no query string or hash to read.`
       : `The ${it}'s address is its own (with Porthole's one-time ticket), never the app's: read no parameters from it.`,
   );
+  // A page's own frames (P128): what loads, as the shell keeps it; the rest is removed.
+  const frames =
+    config.nestedFrames !== "own"
+      ? "nested frames (iframe, object, embed) are removed"
+      : config.mode === "artifact" && config.isolation === "domain"
+        ? `an <iframe> of one of the ${it}'s own files (a relative src) or with srcdoc loads, set before it is added; other iframes, object, embed and frame are removed`
+        : "an <iframe> with srcdoc loads, set before it is added; other iframes, object, embed and frame are removed";
   add(
     "shell",
-    `document.write and document.open throw; nested frames (iframe, object, embed) are removed; full screen and the clipboard are closed${globals.has("copyText") ? " (copy buttons call copyText)" : config.runtime !== undefined && declared.has("copyText") ? " (copy buttons call clipboard.copy)" : ""}.`,
+    `document.write and document.open throw; ${frames}; full screen and the clipboard are closed${globals.has("copyText") ? " (copy buttons call copyText)" : config.runtime !== undefined && declared.has("copyText") ? " (copy buttons call clipboard.copy)" : ""}.`,
   );
   add(
     "storage",

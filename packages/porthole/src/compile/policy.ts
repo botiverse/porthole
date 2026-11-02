@@ -140,19 +140,36 @@ export const FILE_SET_DIRECTIVES = [
 ] as const;
 
 /**
+ * The directives a page of a file set opens to its version's own files under `config` (P082):
+ * `FILE_SET_DIRECTIVES`, and `frame-src` too where the config lets content frame its own files
+ * (`nestedFrames: "own"`, P128). Never `child-src`: every engine Porthole supports reads frames
+ * from `frame-src` (P038), and `child-src` is only its fallback (and workers', which have
+ * `worker-src`).
+ */
+export function fileSetDirectives(config: PortholeConfig): readonly string[] {
+  return config.nestedFrames === "own"
+    ? [...FILE_SET_DIRECTIVES, "frame-src"]
+    : FILE_SET_DIRECTIVES;
+}
+
+/**
  * A served page's CSP when it comes with files (P082): the frame's, with its version's own files
- * opened for each kind that loads (`FILE_SET_DIRECTIVES`), by `source`, the files' path on the
- * content origin (`https://a-x.example-usercontent.com/v/3/`). Never `'self'`: the origin's other
- * paths (other versions, Porthole's own) stay closed, and frames, plugins, forms and `<base>` stay
- * `'none'`. Opaque frames have no files, and keep P022's rule whole.
+ * opened for each kind that loads (`opened`: `FILE_SET_DIRECTIVES` by default, a server's
+ * `fileSetDirectives(config)`), by `source`, the files' path on the content origin
+ * (`https://a-x.example-usercontent.com/v/3/`).
+ * Never `'self'`: the origin's other paths (other versions, Porthole's own) stay closed, and
+ * plugins, forms and `<base>` stay `'none'`, frames too unless the config opts into its own
+ * (P128: `frame-src` its version's path, never another origin). Opaque frames have no files, and
+ * keep P022's rule whole.
  */
 export function fileSetCspDirectives(
   directives: readonly CspDirective[],
   source: string,
+  opened: readonly string[] = FILE_SET_DIRECTIVES,
 ): CspDirective[] {
-  const opened = new Set<string>(FILE_SET_DIRECTIVES);
+  const open = new Set<string>(opened);
   return directives.map(([name, ...sources]) => {
-    if (!opened.has(name)) {
+    if (!open.has(name)) {
       return [name, ...sources];
     }
     const kept = sources.filter((each) => each !== "'none'");

@@ -58,6 +58,12 @@ export interface PresetOptions {
   readonly runtime?: RuntimeVersion;
   /** Domain isolation, artifact pages: the page in an opaque child of Porthole's shell (P111). */
   readonly nested?: true;
+  /**
+   * `own` (P128): an `<iframe>` of one of the page's own files (a relative `src`) or a `srcdoc`
+   * one loads and runs, in a realm of its own that the shell's hardening doesn't reach
+   * (`PortholeConfig.nestedFrames`). `none` (default): every nested frame is removed.
+   */
+  readonly nestedFrames?: "none" | "own";
 }
 
 /** What a live widget may say about a capability (P103): anything but origins of its own. */
@@ -244,6 +250,7 @@ function build(
     ...(options.errors === undefined ? {} : { errors: options.errors }),
     ...(options.runtime === undefined ? {} : { runtime: options.runtime }),
     ...(options.nested === undefined ? {} : { nested: options.nested }),
+    ...(options.nestedFrames === undefined ? {} : { nestedFrames: options.nestedFrames }),
   });
 }
 
@@ -269,6 +276,14 @@ export const presets = {
       throw new ConfigError(
         "options.egress",
         "a live widget has no network of its own: its egress stays closed (P079)",
+      );
+    }
+    // A child frame is a realm the shell's WebRTC removal never reached (P128): a network of its
+    // own, which a live widget never has.
+    if (options.nestedFrames === "own") {
+      throw new ConfigError(
+        "options.nestedFrames",
+        "a live widget has no network of its own: its frames stay removed (P079, P128)",
       );
     }
     // A capability's own origins join the CSP as egress does (P103): none for a live widget.
