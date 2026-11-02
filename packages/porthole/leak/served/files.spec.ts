@@ -2,7 +2,7 @@ import { expect, test, type Frame, type Page } from "@playwright/test";
 import type { PortholeConfig } from "../../src/index.ts";
 import { LATE_NOTICE_MS } from "../../src/host/pages-of-set.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
-import { OWN_FRAMES_ELSEWHERE } from "../controls.ts";
+import { OWN_FRAMES_ELSEWHERE, OWN_FRAMES_ELSEWHERE_LOAD } from "../controls.ts";
 import { storedFiles, startTabHost, viteFixture } from "./files.ts";
 import { harness } from "./harness.ts";
 import { mount, outcomeOf, type Mounted } from "./porthole-host.ts";
@@ -494,7 +494,11 @@ document.body.append(made);
     expect(record.navigationsBlocked, "probe: the host blocked no navigation").toEqual([]);
   });
 
-  test(OWN_FRAMES_ELSEWHERE, async ({ page }) => {
+  /**
+   * A page that frames elsewhere every way it can (another site, other paths of its origin, a
+   * plugin, a frame it makes, a srcdoc frame turned elsewhere), shown under `own`; what loaded.
+   */
+  async function framesElsewhere(page: Page) {
     const served = await harness();
     const id = unique("own-elsewhere");
     const away = `${served.foreignOrigin}/canary/${id}`;
@@ -523,20 +527,35 @@ turned.removeAttribute("srcdoc");
     const { frame, shown } = await showFiles(page, id, "1", "artifactFrames");
     await page.waitForTimeout(1_500);
     await expect(frame.locator("#here"), "the page is there").toHaveText("here");
+    expect((await shown.read()).outcomes, "probe: the display went on, loaded once").toEqual([
+      { state: "loaded" },
+    ]);
+    return {
+      frame,
+      reachedAway: served.hits.get(id) ?? 0,
+      // Marked with this test's id: another test's requests to the same origin aren't this page's frames.
+      elsewhere: served.requests
+        .slice(before)
+        .filter((each) => new URL(each).searchParams.get("own") === id)
+        .map((each) => new URL(each).pathname),
+    };
+  }
+
+  // Two walls, a control for each (P128): the shell's rule takes the frames out of the tree
+  // (`own-frame-rule` fails the first), and the page's frame-src stops what a frame left there
+  // would load (`own-frame-rule,own-frame-src` fails both; the rule alone out, the second holds).
+  test(OWN_FRAMES_ELSEWHERE, async ({ page }) => {
+    const { frame } = await framesElsewhere(page);
     await expect(
       frame.locator("iframe, object, embed"),
       "probe: a frame that isn't the page's own is in the tree",
     ).toHaveCount(0);
-    expect(served.hits.get(id) ?? 0, "probe: a frame reached the other site").toBe(0);
-    // Marked with this test's id: another test's requests to the same origin aren't this page's frames.
-    const elsewhere = served.requests
-      .slice(before)
-      .filter((each) => new URL(each).searchParams.get("own") === id)
-      .map((each) => new URL(each).pathname);
+  });
+
+  test(OWN_FRAMES_ELSEWHERE_LOAD, async ({ page }) => {
+    const { reachedAway, elsewhere } = await framesElsewhere(page);
+    expect(reachedAway, "probe: a frame reached the other site").toBe(0);
     expect(elsewhere, "probe: a frame loaded another path of the origin").toEqual([]);
-    expect((await shown.read()).outcomes, "probe: the display went on, loaded once").toEqual([
-      { state: "loaded" },
-    ]);
   });
 
   test("a page's frames by default (P128): its own files' and srcdoc's alike are removed, and none runs", async ({

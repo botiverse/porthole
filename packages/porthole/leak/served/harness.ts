@@ -38,6 +38,7 @@ import {
 } from "../weakenings.ts";
 import {
   asServiceWorkerAllowed,
+  withOpenFrameSrc,
   withoutDocumentSandbox,
   withoutFileSandbox,
   withoutPermissionsPolicy,
@@ -614,6 +615,9 @@ async function start(): Promise<Harness> {
       }
       if (weakened.includes("file-corp")) {
         answer = withoutResourcePolicy(answer);
+      }
+      if (weakened.includes("own-frame-src")) {
+        answer = withOpenFrameSrc(answer);
       }
       if (weakened.includes("tab-sandbox")) {
         answer = withoutDocumentSandbox(answer);

@@ -7153,12 +7153,15 @@ stay out; by default none). Negative control `own-frame-rule` (the rule keeps ev
 probes that need a frame removed. Measured (CI, all three engines): under an opaque inline widget
 a `srcdoc` child's scripts don't run (it inherits the frame's nonce policy), so there the option
 keeps only frames that stay inert; on a served page (Raft's Artifacts) a `srcdoc` frame and a frame
-of its own files load and run. The served case's frames of elsewhere stay out with any one of
-`own-frame-rule`, `navigate-guard` or `file-self` weakened alone (measured, all three engines):
-more than one wall holds them (an earlier count of requests on the shared test origin made those
-three look as if they failed it). The walls are the shell's rule and the page's `frame-src`
-(its version's path; a `srcdoc` child inherits it): control `own-frame-rule,own-frame-src` takes
-both out and fails the case; `own-frame-src` alone leaves the rule holding it.
+of its own files load and run. The served case's frames of elsewhere stand on two walls, each
+with its control: the shell's rule takes them out of the tree (`own-frame-rule` fails "stays out
+of the tree"), and the page's `frame-src` (its version's path; a `srcdoc` child inherits it)
+stops what a frame left there would load (`own-frame-rule,own-frame-src` fails "loads nothing"
+too; the rule alone out, `frame-src` holds it). A served page's shell and CSP are made in the
+served harness's process, so the two weakenings reach it there (the rule in `SERVED`, the header
+rewritten by the harness): an earlier run edited only the sources the browser loads, so neither
+reached a served page and the case looked held by "more than one wall" (CI, 9843f99: the combined
+control blind on Chromium). `navigate-guard` and `file-self` alone leave it held, by the rule.
 
 Also accepted (Tenny's review): a same-origin `srcdoc` child has its own realm's untouched natives
 (`Document.prototype.write`, `Element.prototype.setHTMLUnsafe`, …) and can call them on the
