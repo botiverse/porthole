@@ -225,6 +225,12 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     // three engines, once the case counted only its own page's requests): more than one wall holds them.
     fails: all("[4.own-external]", "[4.own-turned]"),
   },
+  // The served case's frames of elsewhere: the shell's rule and the page's frame-src, both out (Tenny:
+  // name every wall it stands on). Alone, frame-src out leaves the rule holding them.
+  "own-frame-rule,own-frame-src": {
+    specs: [FILES],
+    fails: all(OWN_FRAMES_ELSEWHERE),
+  },
   "attach-shadow,sync-guard": {
     specs: [LEAK],
     fails: each(["[4.closed-shadow]", "[4.shadow-nested]"], { webkit: ["[8.preconnect]"] }),

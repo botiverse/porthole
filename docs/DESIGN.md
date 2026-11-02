@@ -1428,6 +1428,7 @@ control the tables above name to the registry):
 | `sync-guard` | `leak.spec.ts` | nothing | WebKit: `[8.preconnect]` | on Chromium and Firefox the observer removes what the synchronous guard would, and no preconnect opens even unsandboxed (measured) (`frame-guard,sync-guard`) |
 | `frame-guard,sync-guard` | `leak.spec.ts` | `[4.light-dom]`, `[4.sync-realm]`, `[4.plugins]`, `[4.foreign-object]`, `[4.template-clone]`, `[7.base-plugins]`, `[14.shell]`, `[4.own-external]`, `[4.own-turned]`, `[4.own-default]` | WebKit: `[8.preconnect]` | — |
 | `own-frame-rule` | `leak.spec.ts`, `served/files.spec.ts` | `[4.own-external]`, `[4.own-turned]` | — | — |
+| `own-frame-rule,own-frame-src` | `served/files.spec.ts` | `a page's own frames, opted in (P128): a frame of another site, of another path of its origin, or a plugin stays out and loads nothing` | — | — |
 | `attach-shadow,sync-guard` | `leak.spec.ts` | `[4.closed-shadow]`, `[4.shadow-nested]` | WebKit: `[8.preconnect]` | — |
 | `declarative-shadow` | `leak.spec.ts` | `[4.declarative-shadow]` | — | — |
 | `parser-entry-points` | `leak.spec.ts` | `[4.document-write]`, `[14.shell]` | — | — |

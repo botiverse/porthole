@@ -25,6 +25,15 @@ const MAY_BE_PORTHOLE =
  */
 export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp" | "harness">> = {
   "frame-guard": [{ file: RUNTIME, find: "  guardRoot(document);\n", replace: "\n" }],
+  // A page's own frames (P128): a set's page's `frame-src` opened to anywhere, not its version's path.
+  "own-frame-src": [
+    {
+      file: POLICY,
+      find: "    if (!open.has(name)) {\n      return [name, ...sources];\n    }\n    const kept = sources.filter((each) => each !== \"'none'\");\n    return [name, ...kept, source];",
+      replace:
+        '    if (!open.has(name)) {\n      return [name, ...sources];\n    }\n    const kept = sources.filter((each) => each !== "\'none\'");\n    return [name, ...kept, name === "frame-src" ? "*" : source];',
+    },
+  ],
   // A page's own frames (P128): under nestedFrames "own", every iframe is kept as its own.
   "own-frame-rule": [
     {

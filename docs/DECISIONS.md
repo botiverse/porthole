@@ -7155,9 +7155,19 @@ a `srcdoc` child's scripts don't run (it inherits the frame's nonce policy), so 
 keeps only frames that stay inert; on a served page (Raft's Artifacts) a `srcdoc` frame and a frame
 of its own files load and run. The served case's frames of elsewhere stay out with any one of
 `own-frame-rule`, `navigate-guard` or `file-self` weakened alone (measured, all three engines):
-more than one wall holds them, and no single control fails that case yet; a combined control
-that names its walls is a follow-up (an earlier count of requests on the shared test origin made
-those three look as if they failed it).
+more than one wall holds them (an earlier count of requests on the shared test origin made those
+three look as if they failed it). The walls are the shell's rule and the page's `frame-src`
+(its version's path; a `srcdoc` child inherits it): control `own-frame-rule,own-frame-src` takes
+both out and fails the case; `own-frame-src` alone leaves the rule holding it.
+
+Also accepted (Tenny's review): a same-origin `srcdoc` child has its own realm's untouched natives
+(`Document.prototype.write`, `Element.prototype.setHTMLUnsafe`, …) and can call them on the
+parent's document, so the parent shell's own hooks (the `document.write` lock, the declarative
+shadow DOM check) can be bypassed too, not only absent in the child. The CSP still closes the
+network the same way, so no way out is added beyond those named above, but "the parent page's
+guards stay whole" does not hold under `"own"`. A host's content origin must be the artifact's
+alone (Raft: `w-<uuid>.<content domain>`, one per artifact), since a file set's `frame-ancestors`
+names it.
 
 **Revisit when** a host asks for frames of other origins (an allowlist, with its own channel
 accepted), a nested page (P111) needs frames of its own, Claude's Artifacts change their rule, or
