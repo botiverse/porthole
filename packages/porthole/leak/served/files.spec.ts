@@ -501,13 +501,13 @@ document.body.append(made);
     await publish(id, "1", {
       "index.html": `<!doctype html><title>Elsewhere</title><main id="here">here</main>
 <iframe src="${away}?markup"></iframe>
-<iframe src="/"></iframe>
-<iframe src="/__porthole/d/aaaaaaaaaaaaaaaa"></iframe>
-<iframe src="../../"></iframe>
+<iframe src="/?own=${id}"></iframe>
+<iframe src="/__porthole/d/aaaaaaaaaaaaaaaa?own=${id}"></iframe>
+<iframe src="../../?own=${id}"></iframe>
 <object data="${away}?object" type="text/html"></object>
 <embed src="${away}?embed" type="text/html">
 <script>
-for (const src of [${JSON.stringify(`${away}?script`)}, "/?script", "data:text/html,<p>x</p>"]) {
+for (const src of [${JSON.stringify(`${away}?script`)}, ${JSON.stringify(`/?script&own=${id}`)}, "data:text/html,<p>x</p>"]) {
   const made = document.createElement("iframe");
   made.src = src;
   document.body.append(made);
@@ -528,12 +528,11 @@ turned.removeAttribute("srcdoc");
       "probe: a frame that isn't the page's own is in the tree",
     ).toHaveCount(0);
     expect(served.hits.get(id) ?? 0, "probe: a frame reached the other site").toBe(0);
+    // Marked with this test's id: another test's requests to the same origin aren't this page's frames.
     const elsewhere = served.requests
       .slice(before)
-      .map((each) => new URL(each).pathname)
-      .filter(
-        (each) => each === "/" || each === "/__porthole/" || each.startsWith("/__porthole/d/"),
-      );
+      .filter((each) => new URL(each).searchParams.get("own") === id)
+      .map((each) => new URL(each).pathname);
     expect(elsewhere, "probe: a frame loaded another path of the origin").toEqual([]);
     expect((await shown.read()).outcomes, "probe: the display went on, loaded once").toEqual([
       { state: "loaded" },
