@@ -7149,12 +7149,15 @@ an attribute, a map, `toggleAttribute` leaves), `4.own-default` (the same frames
 option: none runs), and `leak/served/files.spec.ts`'s "a page's own frames" (its own file, with its
 shell, a srcdoc and a frame it made run; another site, `/`, `/__porthole/d/…`, `../../`, plugins
 stay out; by default none). Negative control `own-frame-rule` (the rule keeps every iframe) fails
-`4.own-external`, `4.own-turned` and the served case; `frame-guard,sync-guard` fails the three
+`4.own-external` and `4.own-turned`; `frame-guard,sync-guard` fails the three
 probes that need a frame removed. Measured (CI, all three engines): under an opaque inline widget
 a `srcdoc` child's scripts don't run (it inherits the frame's nonce policy), so there the option
 keeps only frames that stay inert; on a served page (Raft's Artifacts) a `srcdoc` frame and a frame
-of its own files load and run. Navigate-guard and file-self also hold the served case's
-other-path frame (their controls fail it).
+of its own files load and run. The served case's frames of elsewhere stay out with any one of
+`own-frame-rule`, `navigate-guard` or `file-self` weakened alone (measured, all three engines):
+more than one wall holds them, and no single control fails that case yet; a combined control
+that names its walls is a follow-up (an earlier count of requests on the shared test origin made
+those three look as if they failed it).
 
 **Revisit when** a host asks for frames of other origins (an allowlist, with its own channel
 accepted), a nested page (P111) needs frames of its own, Claude's Artifacts change their rule, or

@@ -221,7 +221,9 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   // stops each request (frame-src), so what fails is the frame left in the tree.
   "own-frame-rule": {
     specs: [LEAK, FILES],
-    fails: all("[4.own-external]", "[4.own-turned]", OWN_FRAMES_ELSEWHERE),
+    // The served case's frames of elsewhere stay out with this rule weakened alone (measured, all
+    // three engines, once the case counted only its own page's requests): more than one wall holds them.
+    fails: all("[4.own-external]", "[4.own-turned]"),
   },
   "attach-shadow,sync-guard": {
     specs: [LEAK],
@@ -441,8 +443,6 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       ...IN_SET_LINKS,
       "a page opens nothing else: not a file that isn't a page, not another path of its origin",
       "no report, content error or blocked navigation names the frame's sealed address (P083)",
-      // A kept frame pointed at another path of its origin is held by the same guard (measured).
-      OWN_FRAMES_ELSEWHERE,
     ),
   },
   // A served page on a tab of its own (P099): its CSP's sandbox is the wall for links and forms
@@ -536,8 +536,6 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     fails: all(
       "a page loads no other version's files, though the browser may open both (P082)",
       "a file outside the set is a 404, and so is every spelling of a way out",
-      // A kept frame of another path is out by the file set's own path too (measured).
-      OWN_FRAMES_ELSEWHERE,
     ),
   },
   // The capability runtime (P085-P091).
