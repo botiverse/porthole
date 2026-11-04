@@ -214,12 +214,19 @@ describe("the host's checks", () => {
     expect(parseFindResult({ total: 0, active: 0, extra: "<b>" })).toEqual({ total: 0, active: 0 });
     expect(
       parseFindResult({
-        total: 2,
+        total: FIND_LIMITS.matches,
         active: 1,
         capped: true,
         rect: { x: 1, y: 2, width: 3, height: 4 },
       }),
-    ).toEqual({ total: 2, active: 1, capped: true, rect: { x: 1, y: 2, width: 3, height: 4 } });
+    ).toEqual({
+      total: FIND_LIMITS.matches,
+      active: 1,
+      capped: true,
+      rect: { x: 1, y: 2, width: 3, height: 4 },
+    });
+    // Capped only at the limit: fewer matches were all of them.
+    expect(parseFindResult({ total: 2, active: 1, capped: true })).toBeNull();
     expect(parseFindResult({ total: 2, active: 1, capped: false })).toEqual({
       total: 2,
       active: 1,
