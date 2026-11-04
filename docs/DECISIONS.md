@@ -7340,7 +7340,10 @@ through the guarded insertion methods (**Drawing**, below).
     viewport once it was scrolled into view. A new query makes current the first match at or after
     the viewport's top (`prev`: the one before it); the same query with `next` or `prev` moves on
     from the current one by its place, wrapping; `none` keeps it. An empty query (or only spaces)
-    clears and answers `{ total: 0, active: 0 }`.
+    clears and answers `{ total: 0, active: 0 }`. A query that a later query or a clear
+    superseded before the shell ran it is answered with an error (`-32800`, "superseded by a later
+    query"), which the host makes `"unsupported"` as it does any error (**Only the latest**,
+    below).
   - `porthole/find.clear`, host → frame: highlights gone, query forgotten.
   - `porthole/find.handled { handled }`, host → frame: whether the host draws its own find bar.
   - `porthole/find.requested {}`, frame → host: the person pressed the shortcut (below).
@@ -7365,6 +7368,17 @@ through the guarded insertion methods (**Drawing**, below).
   current match is brought into view, centred, in its scrolling ancestors first (innermost first,
   `overflow` auto, scroll or overlay that overflows), then in the window; instantly. The selection
   is never touched (annotations would report it as the person's).
+- **Only the latest** (`FIND_LATEST`, one pure function spliced into the runtime, unit-tested). A
+  search is synchronous, and on a large page long (measured: 150-730 ms on a page of 30,000
+  spans), so a bar that asks at every key queued a search per key (50 queries at once took 14-22
+  s). A query that comes while none waits, and not within 16 ms of the end of the last one run, is
+  run at once, answered before any content's listener could answer it, as before. Otherwise it
+  waits for the next task, after the messages already queued; a later query supersedes it, and a
+  clear drops it, each answering it with the superseded error at once. A burst is so at most two
+  searches: the one running and the latest. What a waiting query will search is read from the
+  host's message when it comes (each field once, as an own property) and kept as those values,
+  never read from the message again (P129). The host sends only the latest of the queries asked
+  while a frame loads, and answers the others `"unsupported"`.
 - **Built-ins and insertion (P129, P130).** Every built-in the find runtime and the text index call
   once content may have run is captured before content runs and called only through `callOf`:
   `createRange`, `createTreeWalker` and the walker's `nextNode`, the `nodeType`, `localName`,
@@ -7399,15 +7413,24 @@ through the guarded insertion methods (**Drawing**, below).
   fallback now leaves `porthole/find.query` to the find runtime where it is declared), a malformed
   answer, or none within `FIND_LIMITS.timeoutMs` (3 s) of the frame running (asked before, the
   load's time too). A query too long, or options that aren't these, reject with a `TypeError`.
-  `clear()`; `takeShortcut(take)` sends `handled`. The query shown and the shortcut are kept and
-  given to every frame the display runs; a query asked and not answered goes to the next frame, and
-  a new frame with no query waiting finds the one shown again, its numbers told as `findUpdated`.
+  `clear()`; `takeShortcut(take)` sends `handled`. The shortcut is kept and given to every frame
+  the display runs. The query holds only for the content it was asked of: every new run (a
+  `reload()`, a restart after the content navigated its frame away, so a new location) and other
+  content (`setContent` with content that doesn't continue what was given; more of a streamed
+  page does) forget it, answer what waits `"unsupported"` and, for other content, clear the frame
+  running now. A new page is so never searched with the last one's query (not even unheard: the
+  shell's scrolling and its layer would tell the page which of its words matched) unless the host
+  asks again; the host clears its find bar then (ADOPTING).
   Events: `findRequested` (taken only while the host takes the shortcut and the platform says the
   page's focus is in the frame, or can't tell) and `findUpdated` (taken only while a query is
   shown); both checked (`parseFindReport`) and through the bridge's rate.
 - **React**: the handle (`PortholeFrameHandle`, P118) adds `find(query, options)` and
-  `clearFind()`: with no display running, `"unsupported"`, and the query is kept for a display
-  made later, which finds it again and tells `onFindUpdated`; a refused query is `onHostError`
+  `clearFind()`: with no display running, `"unsupported"`, and the query is kept, with what the
+  frame showed when it was asked (`findScopeOf`: the config, instance with its version,
+  declaration, viewer and generation by value, the document, the content). A display made later
+  that shows the same (the frame neared the screen again; the content continued) finds it again
+  and tells `onFindUpdated`; any other (`sameFindScope` false: another source, document, version
+  or config, a new generation, content that doesn't continue it) forgets it. A refused query is `onHostError`
   (kind `"find"`) and `"unsupported"`, never a rejection. `onFindRequested`, given, makes the
   frame's shortcut the host's (`takeShortcut(true)`); `onFindUpdated` hears updates.
 
@@ -7421,6 +7444,15 @@ can call, nothing of the host's it can read. But:
 2. The shell carries nothing the config doesn't declare (PRINCIPLE 4): a host that upgrades gets
    no new listener or message in its existing displays.
 3. What the frame says unasked goes through the bridge, with a rate, as annotations' reports do.
+
+**Accepted exposure.** The page can read every query the host sends it: the search runs in the
+page's document, so the query is in the page's realm (and, without reading the message, the
+shell's scrolling and its layer show the page which of its words matched). This was accepted by
+the product owner, with hosts sending queries on a pause or Enter rather than at every key, which
+limits what the page sees of the person's typing (ADOPTING).
+Accepted by xxchan (product owner, Raft #proj-workspace:e56d96e4, message 3d68e461, 2026-11-04):
+the page can read the queries sent to it; hosts send them on a pause or Enter, only while their
+find bar is open.
 
 **Threat.** No wall moves: no CSP, sandbox, `allow`, egress or storage changes, nothing secret
 enters the frame, and annotations behave as before (the text index moved into a shared constant,
@@ -7441,7 +7473,8 @@ boundary:
   event, which leaves the browser's find to open), patch built-ins to reach the closed shadow root
   (as annotations' layer, P105), or make the search dear by its size (linear in its text, bounded
   by the limits above; found again at most once a second while it changes; in an opaque frame that
-  shares the host's process that time is the host's too, as annotations' is, §5).
+  shares the host's process that time is the host's too, as annotations' is, §5); a burst of
+  queries costs at most two searches (**Only the latest**).
 
 **Rejected.**
 - The CSS Custom Highlight API (as P053 and P104 rejected it for marks): `CSS.highlights` is the
@@ -7469,7 +7502,9 @@ page's: the host's bar closes and moves on from its own UI.
 test:controls find-requested-focus` before merging). Unit, `test/find.test.ts`: the matching
 (case, Unicode folding, spacing, literal syntax, no overlaps, the limits, `keep`, ten times the most
 looked at), the shortcut rule, the host's checks (`parseFindResult`, `parseFindReport`,
-`checkFindQuery`), the shell (the runtime only where declared, beside annotations' with the text
+`checkFindQuery`), only the latest query (`FIND_LATEST`: at once when nothing is queued, a burst
+of fifty as two searches with the rest answered superseded, a clear dropping what waits, its
+splice reading a request once), the shell (the runtime only where declared, beside annotations' with the text
 index in both, a plain script, the built-ins taken before the message listener, no live call or
 replaceable prototype method in the find runtime or the text index and the layer inserted through
 the guarded methods (P129, P130), the same layer style, no Highlight API, the fallback leaving the
@@ -7477,9 +7512,14 @@ request alone), `createHost` over a stand-in
 platform (asked once the frame ran, its own id only, the box clamped; `-32601`, malformed and no
 answer are `"unsupported"`; nothing without `find`; an empty query clears; a query too long
 rejects; the shortcut sent to every frame, `requested` only while taken and with the page's focus;
-`updated` only while a query is shown; a reload finds the query again; a query cleared before the
-frame ran answers nothing; a waiting query goes to the next frame; a destroyed display answers
-`"unsupported"`), and the bridge (an event, a refusal, the rate). `test/agreement.test.ts`: a case
+`updated` only while a query is shown; a reload, a restart after a navigation away and other
+content forget the query, content continued keeps it; a query cleared before the frame ran
+answers nothing; a query waiting when its frame stops is `"unsupported"` and never sent to the
+next frame; of the queries asked while the frame loads only the latest is sent; a superseded
+answer is `"unsupported"`; a destroyed display answers `"unsupported"`), the React handle's scope
+(`findScopeOf`, `sameFindScope`: the same content again or continued, by value, versus another
+generation, content, document, config, viewer, source or version), and the bridge (an event, a
+refusal, the rate). `test/agreement.test.ts`: a case
 with `find`, and Raft's shape with it. `test/react-ssr.test.ts`: the handle's and props' types.
 Browser, `leak/find.spec.ts` (three engines): highlights in the closed layer, next and previous into
 view (a scrolling box too), the box, case, clear; a change found again and told; a page's own query

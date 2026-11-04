@@ -237,8 +237,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       // The mark the host follows (P112), and when it took each `tracked` in the last second.
       let tracking: string | null = null;
       const trackedTimes: number[] = [];
-      // Find in page (P131): the query shown (kept for every frame the display runs), whether the
-      // host takes the shortcut, and the queries asked and not yet answered.
+      // Find in page (P131): the query shown (for the content it was asked of only: a new run or
+      // other content forgets it), whether the host takes the shortcut (kept for every frame the
+      // display runs), and the queries asked and not yet answered.
       const finds = config.capabilities.find !== undefined;
       let findShown: { readonly query: string; readonly caseSensitive: boolean } | null = null;
       let takesShortcut = false;
@@ -290,9 +291,10 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           sendFind(id, params);
         });
       /**
-       * A new frame's find (after its handshake): the shortcut, the queries still waiting (in the
-       * order asked), or, where none waits, the query shown found again, its numbers told as
-       * `findUpdated`. A query cleared since it was asked is answered as nothing found, unasked.
+       * A new frame's find (after its handshake): the shortcut, and the latest of the queries
+       * asked while it loaded (those it superseded answered `"unsupported"`, never sent). A query
+       * cleared since it was asked is answered as nothing found, unasked. The query shown before
+       * this run is never given again: a run's frame may show other content (forgetFind).
        */
       const giveFind = () => {
         if (!finds) {
@@ -307,24 +309,36 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           }
           return;
         }
-        if (findsAsked.size > 0) {
-          for (const [id, asked] of findsAsked) {
-            clearTimeout(asked.timer);
-            asked.timer = setTimeout(() => settleFind(id, "unsupported"), FIND_LIMITS.timeoutMs);
-            sendFind(id, asked.params);
-          }
+        const waiting = [...findsAsked];
+        for (const [id] of waiting.slice(0, -1)) {
+          settleFind(id, "unsupported");
+        }
+        const last = waiting.at(-1);
+        if (last !== undefined) {
+          const [id, asked] = last;
+          clearTimeout(asked.timer);
+          asked.timer = setTimeout(() => settleFind(id, "unsupported"), FIND_LIMITS.timeoutMs);
+          sendFind(id, asked.params);
+        }
+      };
+      /**
+       * The content the query was asked of is gone (P131): a new run (a reload, a restart after
+       * the content navigated away, a new location) or other content. The query is forgotten and
+       * what waits is answered `"unsupported"`, so a new page is never searched with the last
+       * one's query unless the host asks it again; `clearFrame` also clears the frame running now.
+       */
+      const forgetFind = (clearFrame: boolean) => {
+        if (!finds) {
           return;
         }
-        const shown = findShown;
-        void askFind({
-          query: shown.query,
-          direction: "none",
-          caseSensitive: shown.caseSensitive,
-        }).then((result) => {
-          if (result !== "unsupported" && findShown === shown) {
-            emit("findUpdated", result);
-          }
-        });
+        const had = findShown !== null || findsAsked.size > 0;
+        findShown = null;
+        for (const id of findsAsked.keys()) {
+          settleFind(id, "unsupported");
+        }
+        if (clearFrame && had) {
+          toFrame(FIND_METHODS.clear, {});
+        }
       };
       const giveAnnotations = () => {
         if (marks.length > 0) {
@@ -986,6 +1000,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
 
       const run = () => {
         stop();
+        // Each run is a new frame, maybe of other content: it starts with no query (P131).
+        forgetFind(false);
         if (destroyed) {
           return;
         }
@@ -1130,6 +1146,10 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         get(target, key, receiver) {
           if (typeof key === "string" && !(key in target) && !BASE_KEYS.has(key)) {
             return (...args: unknown[]) => {
+              // Other content (not the content so far, continued): the query was the last one's.
+              if (key === "setContent" && !continues(replay.get(key)?.[0], args[0])) {
+                forgetFind(true);
+              }
               replay.delete(key);
               replay.set(key, args);
               const operation = (connection as unknown as Record<string, unknown> | null)?.[key];
@@ -1143,6 +1163,17 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       }) as unknown as DisplayHandle<C>;
     },
   };
+}
+
+/**
+ * Whether `next` is the content `before` was, continued (P131): the same, or more of it (the next
+ * part of a streamed page). Nothing given before: anything continues it.
+ */
+function continues(before: unknown, next: unknown): boolean {
+  return (
+    before === undefined ||
+    (typeof before === "string" && typeof next === "string" && next.startsWith(before))
+  );
 }
 
 /** The host's nonce option, read now (`HostOptions.nonce`). */

@@ -11,14 +11,19 @@ P-numbers below.
   direction, caseSensitive })` finds the query in the page's text (case-insensitive, any spacing,
   what is drawn only, at most 1,000), highlights every match and the current one in a layer of the
   shell's own, brings the current one into view, and resolves with `{ total, active, capped?,
-  rect? }` or `"unsupported"` (no `find`, an older shell, no answer in 3 s); `clear()`;
+  rect? }` or `"unsupported"` (no `find`, an older shell, no answer in 3 s, superseded by a later
+  query: the shell searches only the latest of a burst); `clear()`;
   `takeShortcut(true)` makes Cmd+F or Ctrl+F in the frame open the host's bar (`findRequested`)
   instead of the browser's, unless the page handles the key itself. `findUpdated` tells new numbers
-  when the page changes. React: `onFindRequested`, `onFindUpdated`, and `find`/`clearFind` on the
-  frame's handle. New exports: `FIND_METHODS`, `FIND_LIMITS`, `parseFindResult`,
-  `parseFindReport` and their types. The manual tells the agent people may search the page's words.
-- **Security (P131):** the page reads every query the host sends, so declare `find` only where it
-  may learn what the person searches for. What the frame says back is the page's word; the host
+  when the page changes. A query holds only for the content it was asked of: a reload, a restart
+  after a navigation away, or other content forgets it (clear the host's find bar then), as does
+  the React handle for another `content`, `generation`, `document`, `instance` or `config`. Hosts
+  should send queries on a pause or Enter, not at every key (ADOPTING). React: `onFindRequested`,
+  `onFindUpdated`, and `find`/`clearFind` on the frame's handle. New exports: `FIND_METHODS`,
+  `FIND_LIMITS`, `parseFindResult`, `parseFindReport` and their types. The manual tells the agent people may search the page's words.
+- **Security (P131):** the page reads every query the host sends (the search runs in its
+  document), so declare `find` only where it may learn what the person searches for; P131 records
+  that exposure as accepted. What the frame says back is the page's word; the host
   takes `findRequested` only with the page's focus in the frame (negative control
   `find-requested-focus`). No CSP, sandbox or egress changes. A host must upgrade its content
   server (the shell) for find to work; an older one answers `"unsupported"`. The find runtime and

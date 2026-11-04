@@ -49,8 +49,8 @@ export type FindReport =
    */
   | { readonly type: "requested" }
   /**
-   * The matches changed while a query is shown, without the host asking: the content changed, or
-   * a new frame of the display (a reload) found the query again. At most once a second.
+   * The matches changed while a query is shown, without the host asking: the content changed
+   * (more of it, or the page's own changes). At most once a second.
    */
   | ({ readonly type: "updated" } & FindResult);
 
@@ -58,7 +58,9 @@ export type FindReport =
 export const FIND_METHODS = {
   /**
    * Host → frame, a request: `{ query, direction?, caseSensitive? }`, answered with a
-   * `FindResult`. An empty query (or only spaces) clears, and answers no matches.
+   * `FindResult`. An empty query (or only spaces) clears, and answers no matches. One that a later
+   * query or a clear superseded before the shell ran it is answered with an error (code -32800,
+   * "superseded by a later query"; the host's `"unsupported"`): only the latest is searched.
    */
   query: "porthole/find.query",
   /** Host → frame: remove the highlights and forget the query. */

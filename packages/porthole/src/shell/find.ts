@@ -80,6 +80,61 @@ export const FIND_SHORTCUT = String.raw`(apple, key, code, meta, ctrl, alt, shif
       }`;
 
 /**
+ * Only the latest query (P131), spliced into the find runtime: what the shell does with each
+ * query the host asks. A search is synchronous and, on a large page, long (hundreds of ms), so a
+ * bar that asks at every key builds a queue of messages behind it. A query that comes while none
+ * waits, and not within `quiet` ms of the end of the last one run, is run at once (answered
+ * before any content's listener could answer it). Otherwise it waits for the next task, after the
+ * messages already queued: a later query (or a clear, `drop`) supersedes it, and the one it
+ * superseded is answered `superseded(id)` at once (an error; the host makes it `"unsupported"`).
+ * So a burst is at most the query running and the latest, never each in turn.
+ *
+ * `later(run, wait)` and `time()` are the shell's kept timers and clock, `run(id, request)` runs
+ * and answers a query; `request` is what the runtime read from the host's message when it came
+ * (read once, never again). Comparisons and its own closures only.
+ */
+export const FIND_LATEST = String.raw`(later, time, quiet, run, superseded) => {
+        let waiting = null;
+        let scheduled = false;
+        let ended = null;
+        const runNow = (id, request) => {
+          run(id, request);
+          ended = time();
+        };
+        const runWaiting = () => {
+          scheduled = false;
+          const next = waiting;
+          waiting = null;
+          if (next !== null) {
+            runNow(next.id, next.request);
+          }
+        };
+        return {
+          ask: (id, request) => {
+            if (waiting === null && !scheduled && (ended === null || time() - ended >= quiet)) {
+              runNow(id, request);
+              return;
+            }
+            if (waiting !== null) {
+              superseded(waiting.id);
+            }
+            waiting = { id, request };
+            if (!scheduled) {
+              scheduled = true;
+              later(runWaiting, 0);
+            }
+          },
+          drop: () => {
+            if (waiting !== null) {
+              const gone = waiting.id;
+              waiting = null;
+              superseded(gone);
+            }
+          },
+        };
+      }`;
+
+/**
  * The style of the shell's layers over the content (annotations' and find's): inline and
  * important, so the content's own style sheets can't hide, shrink or move it by accident (its
  * scripts can, P104). The annotation runtime carries the same text (a test holds them equal).
@@ -101,7 +156,8 @@ export const LAYER_STYLE =
  *   Highlight API, which content can read and rewrite: P053, P104), the current one apart, again
  *   at each scroll, resize and change of the content; the answer is how many and which, and the
  *   current one's box once it was scrolled into view (its scrolling ancestors first, then the
- *   window, centred);
+ *   window, centred); only the latest of a burst is searched, the ones it superseded answered
+ *   with an error (`FIND_LATEST`);
  * - a change of the content while a query is shown: found again once it settles (at most a
  *   second late), the current match kept by its place, and the host told when the count or the
  *   current one changed, at most once a second;
@@ -124,7 +180,8 @@ export const LAYER_STYLE =
  */
 export const FIND_RUNTIME = String.raw`if (declared("find")) {
     (() => {
-      const LIMIT = { query: 256, matches: 1000, boxes: 50, drawn: 2000 };
+      // quiet: a query this soon (ms) after the last search ended may have others queued behind it.
+      const LIMIT = { query: 256, matches: 1000, boxes: 50, drawn: 2000, quiet: 16 };
       const M = {
         query: "porthole/find.query",
         clear: "porthole/find.clear",
@@ -253,6 +310,7 @@ export const FIND_RUNTIME = String.raw`if (declared("find")) {
       ${TEXT_INDEX}
       const findMatches = ${FIND_MATCH};
       const isShortcut = ${FIND_SHORTCUT};
+      const keepLatest = ${FIND_LATEST};
 
       // The shell's own layer, over the content, apart from annotations' (P053): a match is a
       // light warm fill with a thin edge, the current one stronger with a ring, so both read on a
@@ -556,16 +614,25 @@ export const FIND_RUNTIME = String.raw`if (declared("find")) {
         tellTimer = 0;
         draw();
       };
-      // A query: its matches found (again, for the same words), the current one chosen, brought
-      // into view when it moved or isn't in view, and drawn; answered with where they stand. Each
-      // of the request's fields is read once, as its own property; only a string is a query.
-      const query = (params) => {
+      // What the host asked, read when its message comes: each of the request's fields once, as
+      // its own property; only a string is a query. Kept as these values (a query that waits is
+      // never read from the message again).
+      const requestOf = (params) => {
         const asked = own(params, "query");
         const askedCase = own(params, "caseSensitive");
         const askedDirection = own(params, "direction");
-        const words = typeof asked === "string" ? callOf(sliceOf, asked, [0, LIMIT.query]) : "";
-        const caseSensitive = askedCase === true;
-        const direction = askedDirection === "next" || askedDirection === "prev" ? askedDirection : "none";
+        return {
+          words: typeof asked === "string" ? callOf(sliceOf, asked, [0, LIMIT.query]) : "",
+          caseSensitive: askedCase === true,
+          direction: askedDirection === "next" || askedDirection === "prev" ? askedDirection : "none",
+        };
+      };
+      // A query: its matches found (again, for the same words), the current one chosen, brought
+      // into view when it moved or isn't in view, and drawn; answered with where they stand.
+      const query = (request) => {
+        const words = request.words;
+        const caseSensitive = request.caseSensitive;
+        const direction = request.direction;
         // No words at all clears: nothing drawn, nothing followed.
         if (callOf(execOf, BLANK, [words]) !== null) {
           clear();
@@ -584,6 +651,21 @@ export const FIND_RUNTIME = String.raw`if (declared("find")) {
         told = keyOfResult();
         return resultOf(true);
       };
+      // Only the latest query: one the person moved past before it ran is answered as superseded
+      // (an error the host makes "unsupported"), never searched (FIND_LATEST).
+      const latest = keepLatest(
+        later,
+        time,
+        LIMIT.quiet,
+        (id, request) => {
+          try {
+            answer(id, "result", query(request));
+          } catch (_) {
+            answer(id, "error", { code: -32603, message: "find failed" });
+          }
+        },
+        (id) => answer(id, "error", { code: -32800, message: "superseded by a later query" }),
+      );
 
       // The shortcut, after the page's own listeners (on the window, as the event bubbles): one
       // the page took (preventDefault) is the page's own find. Read through the platform's
@@ -625,19 +707,17 @@ export const FIND_RUNTIME = String.raw`if (declared("find")) {
         const params = sent !== null && typeof sent === "object" ? sent : bare(null);
         switch (method) {
           case M.query: {
-            // A request: answered at once, before any content's listener could answer it.
+            // A request: read now; answered at once, before any content's listener could answer
+            // it, unless a burst of queries is queued behind a long search (then the latest only).
             const id = own(data, "id");
             if (typeof id !== "string" && typeof id !== "number") {
               return;
             }
-            try {
-              answer(id, "result", query(params));
-            } catch (_) {
-              answer(id, "error", { code: -32603, message: "find failed" });
-            }
+            latest.ask(id, requestOf(params));
             break;
           }
           case M.clear:
+            latest.drop();
             clear();
             break;
           case M.handled:

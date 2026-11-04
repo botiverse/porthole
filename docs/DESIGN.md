@@ -1199,13 +1199,16 @@ A host's own find bar over a display (P131), where the config declares `find`:
   [insertion-entry-points.md](insertion-entry-points.md) § The shell's own layers).
 - **Host API.** `display.find.query(query, { direction, caseSensitive })` → `{ total, active,
   capped?, rect? }` or `"unsupported"` (no `find`, an older shell's `-32601`, a malformed answer, no
-  answer in `FIND_LIMITS.timeoutMs`), `clear()`, `takeShortcut(take)`; events `findRequested`
+  answer in `FIND_LIMITS.timeoutMs`, a query superseded by a later one: the shell searches only the
+  latest of a burst, `FIND_LATEST`), `clear()`, `takeShortcut(take)`; the query holds only for the
+  content it was asked of (a new run or other content forgets it); events `findRequested`
   (only while taken, with the page's focus in the frame) and `findUpdated` (only while a query is
   shown), checked and rate-limited through the bridge. React: `onFindRequested`, `onFindUpdated`,
   and the handle's `find` and `clearFind`.
 - **Trust.** The page reads every query; what it says back is a find bar's numbers. Tests:
   `test/find.test.ts` (the matching and its limits, the shortcut rule, the checks, the shell's
-  splice and built-ins, `createHost`'s requests, answers, replays and gates); `leak/find.spec.ts`
+  splice and built-ins, only the latest query, `createHost`'s requests, answers, forgetting and
+  gates, the React handle's scope); `leak/find.spec.ts`
   on three engines (highlights, next and previous into view, a scrolling box, a change found again,
   the shortcut the host's only while taken and the page's own find keeping it, and a hostile page's
   `requested` while the person types in the host's composer dropped: `find-requested-focus`).

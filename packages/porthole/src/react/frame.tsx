@@ -16,7 +16,6 @@ import {
   type CSSProperties,
   type ReactElement,
   type ReactNode,
-  type RefObject,
   type Ref,
 } from "react";
 import type { AnnotateMode, AnnotationMark, AnnotationReport } from "../annotate/types.ts";
@@ -500,19 +499,67 @@ export interface PortholeFrameHandle {
   clearSelection(): void;
   /**
    * Finds `query` in the frame and highlights it (`find.query`, P131): where the matches stand,
-   * or `"unsupported"` (a config without `find`, an older shell, no answer in time, or no display
-   * running now). The query is kept: a display made later (the frame ran again, or neared the
-   * screen) finds it again and tells `onFindUpdated`. A query too long, or options that aren't
-   * these: `onHostError`, kind `"find"`, and `"unsupported"` (never a rejection). An empty query
-   * clears.
+   * or `"unsupported"` (a config without `find`, an older shell, no answer in time, a later
+   * query superseded it, or no display running now). The query is kept for the content the frame
+   * shows now only: a display made later for the same content (the frame neared the screen again)
+   * finds it again and tells `onFindUpdated`; other content (another `content` that doesn't
+   * continue it, `document`, `instance`, `config`, `declaration` or `viewer`, a new `generation`)
+   * forgets it, and nothing is found there until `find` is called again (clear your find bar
+   * then). A query too long, or options that aren't these: `onHostError`, kind `"find"`, and
+   * `"unsupported"` (never a rejection). An empty query clears.
    */
   find(query: string, options?: FindOptions): Promise<FindResult | "unsupported">;
   /** Removes the highlights and forgets the query (`find.clear`): the host's find bar closed. */
   clearFind(): void;
 }
 
-/** The query a frame's handle last found (P131), for a display made after it. */
-type FindShown = { readonly query: string; readonly caseSensitive: boolean } | null;
+/**
+ * The query a frame's handle last found (P131), and what the frame showed when it was asked: a
+ * display made after it finds it again only where the frame still shows that (`sameFindScope`).
+ */
+type FindShown = {
+  readonly query: string;
+  readonly caseSensitive: boolean;
+  readonly scope: FindScope;
+} | null;
+
+/** What a frame shows, as its handle's query holds it (P131). */
+export interface FindScope {
+  /** The config, instance (its version too), declaration, viewer and generation, by value. */
+  readonly shows: string;
+  readonly document: string | undefined;
+  readonly content: string | undefined;
+}
+
+/** What the frame shows with these props, for its handle's query (P131). */
+export function findScopeOf(props: PortholeFrameProps): FindScope {
+  return {
+    shows: JSON.stringify([
+      props.config,
+      props.instance ?? null,
+      props.declaration ?? null,
+      props.viewer ?? null,
+      props.generation ?? 0,
+    ]),
+    document: props.document,
+    content: props.content,
+  };
+}
+
+/**
+ * Whether a frame showing `now` still shows what a query was asked of (`asked`, P131): the same
+ * config, instance, declaration, viewer, generation and document, and the content as it was or
+ * continued (more of a streamed page; asked before any content: whatever came). Otherwise the
+ * query was the last page's, and a new one is never searched with it.
+ */
+export function sameFindScope(asked: FindScope, now: FindScope): boolean {
+  return (
+    asked.shows === now.shows &&
+    asked.document === now.document &&
+    (asked.content === undefined ||
+      (now.content !== undefined && now.content.startsWith(asked.content)))
+  );
+}
 
 export interface PortholeFrameProps {
   /** A preset's config. Keep it stable (module scope or memoized): a new one remounts the frame. */
@@ -743,8 +790,18 @@ export function PortholeFrame(props: PortholeFrameProps): ReactElement {
   useLayoutEffect(() => {
     own.current = props;
   });
-  // The query the handle last found (P131): a display made after it finds it again.
+  // The query the handle last found (P131): a display made after it, for the same content, finds
+  // it again.
   const findShown = useRef<FindShown>(null);
+  // The query kept for what a display shows (`scope`), else forgotten: null.
+  const findFor = useCallback((scope: FindScope): FindShown => {
+    const kept = findShown.current;
+    if (kept !== null && !sameFindScope(kept.scope, scope)) {
+      findShown.current = null;
+      return null;
+    }
+    return kept;
+  }, []);
   useImperativeHandle(
     handleRef,
     (): PortholeFrameHandle => ({
@@ -763,7 +820,11 @@ export function PortholeFrame(props: PortholeFrameProps): ReactElement {
         }
         findShown.current = blankQuery(query)
           ? null
-          : { query, caseSensitive: options?.caseSensitive === true };
+          : {
+              query,
+              caseSensitive: options?.caseSensitive === true,
+              scope: findScopeOf(own.current),
+            };
         const now = display.current;
         return now === null
           ? Promise.resolve("unsupported")
@@ -848,7 +909,7 @@ export function PortholeFrame(props: PortholeFrameProps): ReactElement {
           frame={props}
           page={page}
           running={running}
-          findShown={findShown}
+          findFor={findFor}
           initialHeightPx={height}
           placeholder={placeholder}
           run={run}
@@ -865,8 +926,11 @@ interface MountProps {
   readonly page: PageState;
   /** Tells the frame which display runs now (null: none), for its handle. */
   readonly running: (display: DisplayHandle | null) => void;
-  /** The query the frame's handle last found (P131): a new display finds it again. */
-  readonly findShown: RefObject<FindShown>;
+  /**
+   * The query the frame's handle last found, where it was asked of what `scope` shows (P131): a
+   * new display for its content finds it again. Otherwise it is forgotten, and null.
+   */
+  readonly findFor: (scope: FindScope) => FindShown;
   readonly initialHeightPx: number;
   readonly placeholder: (props: PlaceholderProps) => ReactNode;
   readonly run: () => void;
@@ -879,7 +943,7 @@ function Mount({
   frame,
   page,
   running,
-  findShown,
+  findFor,
   initialHeightPx,
   placeholder,
   run,
@@ -1130,16 +1194,17 @@ function Mount({
       }, first);
     }
     // Find (P131): the shortcut is the host's where it listens for it; the handle's query, found
-    // again in this display (its numbers told as an update: nobody awaits them).
+    // again in this display where it shows what the query was asked of (its numbers told as an
+    // update: nobody awaits them), else forgotten: another page is never searched with it.
     if (first.onFindRequested !== undefined) {
       display.find.takeShortcut(true);
     }
-    const shownQuery = findShown.current;
+    const shownQuery = findFor(findScopeOf(first));
     if (shownQuery !== null) {
       void display.find
         .query(shownQuery.query, { caseSensitive: shownQuery.caseSensitive })
         .then((result) => {
-          if (result !== "unsupported" && findShown.current === shownQuery) {
+          if (result !== "unsupported" && findFor(findScopeOf(latest())) === shownQuery) {
             latest().onFindUpdated?.(result);
           }
         });
@@ -1175,14 +1240,17 @@ function Mount({
     locate,
     nonce,
     running,
-    findShown,
+    findFor,
   ]);
 
   useEffect(() => {
     if (content !== undefined) {
       handle.current?.setContent(content, { partial: partial === true });
     }
-  }, [content, partial]);
+    // Other content: the handle's query was the last one's, forgotten (the display forgot it too,
+    // P131).
+    findFor(findScopeOf(latest()));
+  }, [content, partial, findFor]);
   // Annotations follow their props (a new display gets them all when it is made, above).
   const annotates = config.capabilities.annotate !== undefined;
   const { annotating } = frame;

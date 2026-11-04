@@ -874,7 +874,10 @@ read and rewrite). It shares its realm with the content, so:
   whether the host draws its own bar (`porthole/find.handled`). The query is the person's words,
   typed in the host's own UI: a page with a way out (an MCP App's `connectDomains`, S5; egress a
   host opened; a carrier such as `db`, `mayPassOn`) can send what the person searched for to its
-  author. That is why `find` is a capability a config declares, in no preset by default.
+  author. That is why `find` is a capability a config declares, in no preset by default; accepted
+  by the product owner, with hosts sending queries on a pause or Enter rather than at every key
+  (P131). A query holds only for the content it was asked of: a new run or other content forgets
+  it, so another page is never searched with it (it would learn the words from what matched).
 - *What content can say.* Any count and current match (bounded: at most 1,000, whole numbers, the
   current one among them), any box inside its frame (clamped to the frame's viewport, as
   annotations' boxes, P104), and an `updated` while a query is shown. The host takes an answer only
@@ -892,7 +895,8 @@ read and rewrite). It shares its realm with the content, so:
 - *What content can always do.* Hide, cover or move the layer, change its words so the count
   changes, reach the layer through built-ins it patched (as annotations' layer, P105), or make the
   search dear: linear in its text, at most 1,000 matches kept and 10,000 looked at, a query of 256
-  characters, found again at most once a second while the content changes; in an opaque frame that
+  characters, found again at most once a second while the content changes, and of a burst of
+  queries only the latest searched (the others answered superseded); in an opaque frame that
   shares the host's process that time is the host's too ([§5](#5-out-of-scope)).
 
 **The keyboard** (P109). Any display, of any kind and any version, can move the keyboard into its

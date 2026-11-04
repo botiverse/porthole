@@ -17,7 +17,14 @@ import {
   parseFindResult,
 } from "../src/find/validate.ts";
 import { ANNOTATE_RUNTIME } from "../src/shell/annotate.ts";
-import { FIND_MATCH, FIND_RUNTIME, FIND_SHORTCUT, LAYER_STYLE } from "../src/shell/find.ts";
+import { findScopeOf, sameFindScope, type PortholeFrameProps } from "../src/react/frame.tsx";
+import {
+  FIND_LATEST,
+  FIND_MATCH,
+  FIND_RUNTIME,
+  FIND_SHORTCUT,
+  LAYER_STYLE,
+} from "../src/shell/find.ts";
 import { SHELL_RUNTIME } from "../src/shell/runtime.ts";
 import { TEXT_INDEX } from "../src/shell/text.ts";
 
@@ -208,6 +215,117 @@ describe("the find shortcut", () => {
   });
 });
 
+describe("only the latest query", () => {
+  type Latest = {
+    ask: (id: string, request: string) => void;
+    drop: () => void;
+  };
+  /** The rule, in a realm of its own, over a clock and a timer queue the test drives. */
+  const latestOf = (quiet = 16) => {
+    let now = 1_000;
+    const timers: (() => void)[] = [];
+    const ran: string[] = [];
+    const superseded: string[] = [];
+    const keep = runInNewContext(`(${FIND_LATEST})`) as (
+      later: (run: () => void, wait: number) => void,
+      time: () => number,
+      quiet: number,
+      run: (id: string, request: string) => void,
+      superseded: (id: string) => void,
+    ) => Latest;
+    const latest = keep(
+      (run) => void timers.push(run),
+      () => now,
+      quiet,
+      (id, request) => {
+        ran.push(`${id}:${request}`);
+        // A search on a large page: hundreds of ms.
+        now += 300;
+      },
+      (id) => void superseded.push(id),
+    );
+    const tick = () => {
+      for (const run of timers.splice(0)) {
+        run();
+      }
+    };
+    const wait = (ms: number) => {
+      now += ms;
+    };
+    return { latest, ran, superseded, tick, wait, timers };
+  };
+
+  test("a query with none before it runs at once, and so does one long after the last", () => {
+    const t = latestOf();
+    t.latest.ask("1", "r");
+    expect(t.ran).toEqual(["1:r"]);
+    expect(t.timers).toHaveLength(0);
+    t.wait(500);
+    t.latest.ask("2", "re");
+    expect(t.ran).toEqual(["1:r", "2:re"]);
+    expect(t.superseded).toEqual([]);
+  });
+
+  test("a burst behind a long search: the latest only, the others answered superseded at once", () => {
+    const t = latestOf();
+    t.latest.ask("1", "r");
+    // 49 more came while the first ran: dispatched just after it ended.
+    for (let i = 2; i <= 50; i += 1) {
+      t.latest.ask(String(i), `q${i}`);
+    }
+    expect(t.ran, "none of them run yet").toEqual(["1:r"]);
+    expect(t.superseded).toEqual(Array.from({ length: 48 }, (_, i) => String(i + 2)));
+    expect(t.timers, "one run is scheduled, not one per query").toHaveLength(1);
+    t.tick();
+    expect(t.ran).toEqual(["1:r", "50:q50"]);
+    // Two searches for fifty queries; every query answered once.
+    expect(t.ran.length + t.superseded.length).toBe(50);
+  });
+
+  test("a clear drops what waits (answered superseded); nothing runs after it", () => {
+    const t = latestOf();
+    t.latest.ask("1", "r");
+    t.latest.ask("2", "re");
+    t.latest.drop();
+    expect(t.superseded).toEqual(["2"]);
+    t.tick();
+    expect(t.ran).toEqual(["1:r"]);
+    // Nothing waits: a drop says nothing.
+    t.latest.drop();
+    expect(t.superseded).toEqual(["2"]);
+  });
+
+  test("a query that comes while one waits to run waits too, behind it, never before it", () => {
+    const t = latestOf();
+    t.latest.ask("1", "r");
+    t.latest.ask("2", "re");
+    t.wait(100);
+    t.latest.ask("3", "rev");
+    expect(t.superseded).toEqual(["2"]);
+    t.tick();
+    expect(t.ran).toEqual(["1:r", "3:rev"]);
+    // Within the quiet after the last run: waits for the next task, still the latest only.
+    t.latest.ask("4", "reve");
+    expect(t.ran).toHaveLength(2);
+    t.tick();
+    expect(t.ran.at(-1)).toBe("4:reve");
+  });
+
+  test("is spliced into the runtime, which reads a request once when it comes and drops what waits on a clear", () => {
+    expect(FIND_RUNTIME).toContain(`const keepLatest = ${FIND_LATEST};`);
+    // Read when the message comes (P129's read-once): what waits is the values, never the message.
+    expect(FIND_RUNTIME).toContain("latest.ask(id, requestOf(params));");
+    expect(FIND_RUNTIME).toContain(
+      "case M.clear:\n            latest.drop();\n            clear();",
+    );
+    expect(FIND_RUNTIME).toContain(
+      '(id) => answer(id, "error", { code: -32800, message: "superseded by a later query" }),',
+    );
+    // The kept timers and clock, through callOf.
+    expect(FIND_RUNTIME).toMatch(/keepLatest\(\s*later,\s*time,\s*LIMIT\.quiet,/u);
+  });
+});
+
 describe("the host's checks", () => {
   test("an answer is whole numbers within the limits, its current one among them", () => {
     expect(parseFindResult({ total: 12, active: 3 })).toEqual({ total: 12, active: 3 });
@@ -364,7 +482,7 @@ describe("the shell", () => {
   test("calls only built-ins it took before content ran, through callOf, and inserts through the guarded methods (P129, P130)", () => {
     // As the shell's guards (P129): no live call, apply or bind, no replaceable Array or Object
     // method, no DOM method or accessor reached as a member of an object the page can reach.
-    for (const source of [FIND_RUNTIME, TEXT_INDEX]) {
+    for (const source of [FIND_RUNTIME, TEXT_INDEX, FIND_LATEST]) {
       for (const live of [
         ".call(",
         ".apply(",
@@ -475,7 +593,13 @@ describe("find on createHost over a stand-in platform", () => {
     }
   });
   /** A display whose frames' messages are kept, each frame's handshake and answers by hand. */
-  const mount = (given: { find?: boolean; focused?: () => boolean | undefined } = {}) => {
+  const mount = (
+    given: {
+      find?: boolean;
+      focused?: () => boolean | undefined;
+      onNavigated?: (listener: () => void) => void;
+    } = {},
+  ) => {
     const sent: { id?: unknown; method?: unknown; params?: unknown }[] = [];
     let listeners = new Set<(message: unknown) => void>();
     const platform: PlatformHost = {
@@ -498,7 +622,10 @@ describe("find on createHost over a stand-in platform", () => {
           userActivation: () => undefined,
           viewport: () => ({ width: 600, height: 400 }),
           ...(given.focused === undefined ? {} : { focused: given.focused }),
-          onNavigated: () => () => {},
+          onNavigated: (listener) => {
+            given.onNavigated?.(listener);
+            return () => {};
+          },
           onLoad: () => () => {},
           destroy: () => {},
         };
@@ -668,7 +795,7 @@ describe("find on createHost over a stand-in platform", () => {
     expect(t.requested).toHaveLength(2);
   });
 
-  test("an update is taken only while a query is shown, checked; a new frame finds the query again", async () => {
+  test("an update is taken only while a query is shown, checked; a reload forgets the query", async () => {
     const t = mount();
     t.handshake();
     const update = (params: unknown) =>
@@ -686,14 +813,21 @@ describe("find on createHost over a stand-in platform", () => {
     await settle();
     expect(t.updated).toHaveLength(1);
     expect(t.refused).toEqual(["find:invalid"]);
-    // A new frame (a reload): the query shown is found again, and its numbers told as an update.
+    // A new frame (a reload) may show other content: the query isn't given to it, and its
+    // updates aren't taken until the host asks again.
+    const before = t.asked().length;
     t.display.reload();
     t.handshake();
-    const again = t.asked().at(-1);
-    expect(again?.params).toEqual({ query: "revenue", direction: "none", caseSensitive: true });
-    t.answer(again?.id, { result: { total: 5, active: 2 } });
+    expect(t.asked()).toHaveLength(before);
+    update({ total: 5, active: 2 });
     await settle();
-    expect(t.updated.at(-1)).toEqual({ total: 5, active: 2 });
+    expect(t.updated).toHaveLength(1);
+    const asked = t.display.find.query("revenue");
+    t.answer(t.asked().at(-1)?.id, { result: { total: 5, active: 2 } });
+    await asked;
+    update({ total: 6, active: 2 });
+    await settle();
+    expect(t.updated.at(-1)).toEqual({ total: 6, active: 2 });
     // Cleared: nothing more is taken.
     t.display.find.clear();
     update({ total: 1, active: 1 });
@@ -710,16 +844,93 @@ describe("find on createHost over a stand-in platform", () => {
     expect(t.asked()).toEqual([]);
   });
 
-  test("a query waiting when its frame stops goes to the next frame", async () => {
+  test("a query waiting when its frame stops is answered unsupported, never sent to the next frame", async () => {
     const t = mount();
     t.handshake();
     const asked = t.display.find.query("revenue");
     const first = t.asked().at(-1)?.id;
     t.display.reload();
+    expect(await asked).toBe("unsupported");
     t.handshake();
-    expect(t.asked().at(-1)?.id).toBe(first);
+    expect(t.asked().map((each) => each.id)).toEqual([first]);
+    // The old frame's late answer is no answer now.
     t.answer(first, { result: { total: 1, active: 1 } });
-    expect(await asked).toEqual({ total: 1, active: 1 });
+    await settle();
+    expect(t.asked()).toHaveLength(1);
+  });
+
+  test("a restart after the content navigated its frame away forgets the query too", async () => {
+    let away: (() => void) | undefined;
+    const t = mount({ onNavigated: (listener) => (away = listener) });
+    t.handshake();
+    const shown = t.display.find.query("revenue");
+    t.answer(t.asked().at(-1)?.id, { result: { total: 2, active: 1 } });
+    await shown;
+    away?.();
+    t.handshake();
+    expect(t.asked(), "nothing asked of the new page").toHaveLength(1);
+    t.say({ jsonrpc: "2.0", method: "porthole/find.updated", params: { total: 1, active: 1 } });
+    await settle();
+    expect(t.updated).toEqual([]);
+  });
+
+  test("other content forgets the query and clears the frame; the same content continued keeps it", async () => {
+    const t = mount();
+    t.handshake();
+    t.display.setContent("<p>alpha", { partial: true });
+    const shown = t.display.find.query("alpha");
+    t.answer(t.asked().at(-1)?.id, { result: { total: 1, active: 1 } });
+    await shown;
+    // More of the same page (streamed), then the whole of it: the query holds.
+    t.display.setContent("<p>alpha beta", { partial: true });
+    t.display.setContent("<p>alpha beta</p>");
+    expect(t.finds().map((each) => each.method)).toEqual(["porthole/find.query"]);
+    const update = {
+      jsonrpc: "2.0",
+      method: "porthole/find.updated",
+      params: { total: 2, active: 1 },
+    };
+    t.say(update);
+    await settle();
+    expect(t.updated).toEqual([{ total: 2, active: 1 }]);
+    // Another page: forgotten, the frame cleared, what waits answered unsupported.
+    const waiting = t.display.find.query("beta");
+    t.display.setContent("<p>another page</p>");
+    expect(await waiting).toBe("unsupported");
+    expect(t.finds().at(-1)?.method).toBe("porthole/find.clear");
+    t.say(update);
+    await settle();
+    expect(t.updated).toHaveLength(1);
+    // And the next run of it doesn't get it either.
+    const before = t.asked().length;
+    t.display.reload();
+    t.handshake();
+    expect(t.asked()).toHaveLength(before);
+  });
+
+  test("queries asked while the frame loads: only the latest is sent, the others unsupported", async () => {
+    const t = mount();
+    const early = ["r", "re", "rev"].map((query) => t.display.find.query(query));
+    t.handshake();
+    expect(t.asked().map((each) => (each.params as { query: string }).query)).toEqual(["rev"]);
+    t.answer(t.asked()[0]?.id, { result: { total: 3, active: 1 } });
+    expect(await Promise.all(early)).toEqual([
+      "unsupported",
+      "unsupported",
+      { total: 3, active: 1 },
+    ]);
+  });
+
+  test("a query the shell answers as superseded by a later one is unsupported; the later one's answer stands", async () => {
+    const t = mount();
+    t.handshake();
+    const first = t.display.find.query("r");
+    const second = t.display.find.query("re");
+    const [one, two] = t.asked();
+    t.answer(one?.id, { error: { code: -32800, message: "superseded by a later query" } });
+    t.answer(two?.id, { result: { total: 4, active: 1 } });
+    expect(await first).toBe("unsupported");
+    expect(await second).toEqual({ total: 4, active: 1 });
   });
 
   test("a destroyed display answers what waits: unsupported", async () => {
@@ -728,6 +939,68 @@ describe("find on createHost over a stand-in platform", () => {
     const asked = t.display.find.query("revenue");
     t.display.destroy();
     expect(await asked).toBe("unsupported");
+  });
+});
+
+describe("the React handle's query holds for the content it was asked of", () => {
+  const base: PortholeFrameProps = {
+    config: presets.artifact({ capabilities: { find: {} } }),
+    displayId: "d1",
+    title: "Notes",
+    content: "<p>alpha beta</p>",
+  };
+  // The same props without content (a served display's, or before any came).
+  const { content: _content, ...empty } = base;
+  const asked = findScopeOf(base);
+  const now = (change: Partial<PortholeFrameProps>) =>
+    sameFindScope(asked, findScopeOf({ ...base, ...change }));
+
+  test("the same content, again or continued, or other props alike: found again", () => {
+    expect(now({})).toBe(true);
+    // By value: an inline config or instance equal to the last is the same.
+    expect(now({ config: presets.artifact({ capabilities: { find: {} } }) })).toBe(true);
+    // A streamed page's next part, and props the content doesn't depend on.
+    expect(now({ content: "<p>alpha beta</p><p>gamma" })).toBe(true);
+    expect(now({ displayId: "d2", title: "Renamed", scheme: "dark" })).toBe(true);
+    // Asked before any content came: whatever came is what it was asked of.
+    expect(
+      sameFindScope(findScopeOf(empty), findScopeOf({ ...base, content: "<p>first</p>" })),
+    ).toBe(true);
+  });
+
+  test("another page in the same frame: forgotten, never found there", () => {
+    // The reviewer's case: the frame run again (a new generation) with other content.
+    expect(now({ generation: 1, content: "<p>another page</p>" })).toBe(false);
+    // Each part alone.
+    expect(now({ generation: 1 }), "a reload").toBe(false);
+    expect(now({ content: "<p>another page</p>" }), "other content").toBe(false);
+    expect(sameFindScope(asked, findScopeOf(empty)), "no content").toBe(false);
+    expect(now({ document: "<!doctype html><p>app</p>" }), "another document").toBe(false);
+    expect(now({ config: presets.artifact() }), "another config").toBe(false);
+    expect(now({ viewer: { level: "view" } }), "another viewer").toBe(false);
+    const instance = { scope: "s", document: { kind: "artifact", id: "a", version: "1" } } as const;
+    const served = findScopeOf({ ...empty, instance });
+    expect(sameFindScope(served, findScopeOf({ ...empty, instance }))).toBe(true);
+    expect(
+      sameFindScope(
+        served,
+        findScopeOf({
+          ...empty,
+          instance: { ...instance, document: { ...instance.document, version: "2" } },
+        }),
+      ),
+      "a new version",
+    ).toBe(false);
+    expect(
+      sameFindScope(
+        served,
+        findScopeOf({
+          ...empty,
+          instance: { ...instance, document: { ...instance.document, id: "b" } },
+        }),
+      ),
+      "another source",
+    ).toBe(false);
   });
 });
 

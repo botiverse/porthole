@@ -395,28 +395,56 @@ With `find` declared (`capabilities: { find: {} }`), your own find bar searches 
 ([P131](DECISIONS.md)): the shell finds the query in the page's text (case-insensitive by default,
 any spacing), highlights every match it can see and the current one apart, brings the current one
 into view (its scrolling box too), and answers where they stand. The page reads every query you
-send: declare `find` only where the page may learn what the person searches for (not a
-third-party app with egress, unless you accept that), and send a query when the person pauses or
-presses Enter rather than at every key if that matters to you.
+send (the search runs in the page's document): declare `find` only where the page may learn what
+the person searches for (not a third-party app with egress, unless you accept that).
+
+Send a query when the person pauses (a debounce of a few hundred ms) or presses Enter, not at
+every key. Each query you send is posted into the page, so a bar that searches at every key shows
+the page each prefix of what the person types and the rhythm of their typing; one that waits for
+a pause shows it the words they settled on. It also spares a large page a search per key (the
+shell searches only the latest of a burst, below).
 
 ```js
 display.find.takeShortcut(true); // Cmd+F / Ctrl+F in the frame opens your bar, not the browser's
 display.on("findRequested", () => bar.open()); // the page's word too: open the bar, nothing more
 // "unsupported", or `${active}/${total}` ("+" after the total where `capped`).
 bar.showResult = (result) => bar.show(result === "unsupported" ? "Not available here" : result);
-// A new query: the first match in view becomes current.
-bar.onInput((query) => display.find.query(query).then(bar.showResult));
-bar.onNext(() => display.find.query(bar.query, { direction: "next" }).then(bar.showResult));
-bar.onPrevious(() => display.find.query(bar.query, { direction: "prev" }).then(bar.showResult));
+// Only the answer to the latest query is shown: an earlier one may come back "unsupported".
+let asked = 0;
+const ask = (query, options) => {
+  const mine = ++asked;
+  void display.find.query(query, options).then((result) => mine === asked && bar.showResult(result));
+};
+// A new query once the person pauses or presses Enter: the first match in view becomes current.
+let pause;
+bar.onInput((query) => {
+  clearTimeout(pause);
+  pause = setTimeout(() => ask(query), 300);
+});
+bar.onEnter((query) => (clearTimeout(pause), ask(query)));
+bar.onNext(() => ask(bar.query, { direction: "next" }));
+bar.onPrevious(() => ask(bar.query, { direction: "prev" }));
 display.on("findUpdated", bar.showResult); // the page changed: new numbers
 bar.onClose(() => display.find.clear()); // Escape in your bar: highlights gone
+// The display forgot the query: its content navigated away (it runs again). Reset your bar here,
+// and wherever you reload() it or give it other content.
+display.on("navigated", () => bar.reset());
 ```
 
 - **`"unsupported"`**: the config doesn't declare `find`, the frame's shell is older than your
   host (it answers that it doesn't know the request: upgrade the content server first), or no
-  answer came within `FIND_LIMITS.timeoutMs` (3 s) of the frame running. A query asked before the
-  frame ran waits for it. An empty query clears and answers `{ total: 0, active: 0 }`; one longer
-  than `FIND_LIMITS.query` (256) rejects with a `TypeError`.
+  answer came within `FIND_LIMITS.timeoutMs` (3 s) of the frame running. Also for a query that a
+  later one superseded before it ran (the shell searches only the latest of a burst; queries asked
+  before the frame ran: the latest is sent), and for one waiting when the content it was asked of
+  went (below): show the answer to your latest query only. A query asked before the frame ran
+  waits for it. An empty query clears and answers `{ total: 0, active: 0 }`; one longer than
+  `FIND_LIMITS.query` (256) rejects with a `TypeError`.
+- **A query is for the content it was asked of.** A new run (`reload()`, a restart after the
+  content navigated its frame away, `navigated`) or other content (`setContent` with content that
+  doesn't continue what you gave: more of a streamed page keeps it) forgets the query: nothing is
+  highlighted or searched there until you call `find.query` again, so another page never sees the
+  last one's search. Clear your find bar's state (its query, "3/12") whenever the display shows
+  other content, then search again if the person asks. The shortcut (`takeShortcut`) is kept.
 - **The numbers are the page's word**: at most 1,000 matches (`capped: true`: there may be
   more), the current one from 1. `rect` is the current match's box in the frame's CSS px, clamped
   to its viewport: a display that grows with its content (not `layout: "fill"`) doesn't scroll
@@ -430,8 +458,12 @@ bar.onClose(() => display.find.clear()); // Escape in your bar: highlights gone
   images or a canvas, and words split across cells with no space between them.
 - **React**: `onFindRequested` (given, the shortcut is yours) and `onFindUpdated` are props; the
   handle holds `find(query, options)` and `clearFind()` beside `clearSelection()`. With no display
-  running, `find` answers `"unsupported"` and keeps the query: a display made later finds it again
-  and tells `onFindUpdated`. A refused query reaches `onHostError`, kind `"find"`.
+  running, `find` answers `"unsupported"` and keeps the query for the content the frame shows: a
+  display made later for it (the frame nears the screen again) finds it again and tells
+  `onFindUpdated`. Other content forgets it: another `content` that doesn't continue it, a new
+  `generation`, `document`, `instance` (another artifact or version), `config`, `declaration` or
+  `viewer`. Reset your find bar when you change those. A refused query reaches `onHostError`,
+  kind `"find"`.
 
   ```tsx
   const frame = useRef<PortholeFrameHandle>(null);

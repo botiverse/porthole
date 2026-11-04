@@ -251,8 +251,8 @@ export interface DisplayEvents {
   readonly findRequested: undefined;
   /**
    * The matches of the query shown changed without the host asking (`find`, P131): the content
-   * changed, or a new frame of the display (a reload) found it again. At most once a second, from
-   * an honest shell. The content's word: a find bar's numbers.
+   * changed (more of it, or the page's own changes). At most once a second, from an honest shell.
+   * The content's word: a find bar's numbers.
    */
   readonly findUpdated: FindResult;
 }
@@ -261,7 +261,11 @@ export interface DisplayEvents {
  * Find in page on a display whose config declares `find` (P131): the host draws the find bar,
  * the frame finds and highlights. The query is posted into the frame, where the content can read
  * it. Where the config doesn't declare `find`, `query` answers `"unsupported"` and the rest do
- * nothing. The query shown and the shortcut are kept and given to every frame the display runs.
+ * nothing. The shortcut is kept and given to every frame the display runs. The query holds only for
+ * the content it was asked of: a new run (`reload()`, a restart after the content navigated away,
+ * a new location) or other content (`setContent` with content that doesn't continue what was
+ * given) forgets it and answers what waits `"unsupported"`, and nothing is found there until the
+ * host asks again: clear your find bar then.
  */
 export interface FindControls {
   /**
@@ -270,7 +274,9 @@ export interface FindControls {
    * with `direction`), scrolls it into view, and answers where they stand. An empty query (or
    * only spaces) clears, and answers no matches. `"unsupported"` where the frame can't find: the
    * config doesn't declare `find`, the frame's shell is older (it answered that it doesn't know
-   * the request), it failed, or it didn't answer in `FIND_LIMITS.timeoutMs` once it ran. Rejects
+   * the request), it failed, it didn't answer in `FIND_LIMITS.timeoutMs` once it ran, a later
+   * query superseded it before it ran (only the latest is searched: show the answer to your latest
+   * query only), or the content it was asked of is gone (a new run, other content). Rejects
    * with a `TypeError` for a query longer than `FIND_LIMITS.query`, or options that aren't these.
    */
   query(query: string, options?: FindOptions): Promise<FindResult | "unsupported">;
