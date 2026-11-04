@@ -137,6 +137,68 @@ describe("a page's own frames, as the shell keeps them (P128)", () => {
   });
 });
 
+describe("the frame guard and its observer call only built-ins captured before content runs", () => {
+  // The portion of the runtime that walks and prunes content-controlled subtrees: the synchronous
+  // guard, the mutation observer, the before-change backstop, and the insertion wrappers. A page
+  // can replace any prototype method or getter it names (and the global Array.from) before it
+  // inserts a subtree, so the guard must read none of them live off the nodes it inspects.
+  const between = (from: string, to: string): string => {
+    const start = SHELL_RUNTIME.indexOf(from);
+    const end = SHELL_RUNTIME.indexOf(to, start);
+    expect(start, from).toBeGreaterThanOrEqual(0);
+    expect(end, to).toBeGreaterThan(start);
+    return SHELL_RUNTIME.slice(start, end + to.length);
+  };
+  const guardSource =
+    between("const guarded = (element) =>", "guardRoot(document);") +
+    between("const admit = (node) =>", 'wrapInsert(Range.prototype, "surroundContents", [0]);') +
+    between("const watched = (element) =>", "const guardMethod = (proto, name, change) =>");
+
+  test("captures each DOM built-in it uses, once, before content runs", () => {
+    for (const capture of [
+      'const nodeTypeOf = getterOf(Node.prototype, "nodeType");',
+      'const isConnectedOf = getterOf(Node.prototype, "isConnected");',
+      'const shadowRootOfNode = getterOf(Element.prototype, "shadowRoot");',
+      "const removeIn = Element.prototype.remove;",
+      "const cloneNodeIn = Node.prototype.cloneNode;",
+      "const queryAllElement = Element.prototype.querySelectorAll;",
+      "const queryAllDocument = Document.prototype.querySelectorAll;",
+      "const queryAllFragment = DocumentFragment.prototype.querySelectorAll;",
+      'const nodeListLengthOf = getterOf(NodeList.prototype, "length");',
+      "const weakSetHas = WeakSet.prototype.has;",
+      "const weakSetAdd = WeakSet.prototype.add;",
+      "const observeIn = MutationObserver.prototype.observe;",
+      "const makeText = Document.prototype.createTextNode;",
+      'const addedNodesOf = getterOf(recordProto, "addedNodes");',
+      'const recordTypeOf = getterOf(recordProto, "type");',
+      'const recordTargetOf = getterOf(recordProto, "target");',
+    ]) {
+      expect(SHELL_RUNTIME, capture).toContain(capture);
+    }
+  });
+
+  test("never calls a live DOM method or the global Array.from on the nodes it inspects", () => {
+    // Reached only through the captured references (callOf), never as a member call on content's
+    // own node; the captures themselves end in `;`, so `(` marks a live call.
+    for (const live of [
+      ".querySelectorAll(",
+      ".remove()",
+      "Array.from(",
+      ".cloneNode(",
+      ".isConnected",
+      "document.createTextNode(",
+    ]) {
+      expect(guardSource, live).not.toContain(live);
+    }
+    // It does reach them, through the captured table.
+    expect(guardSource).toContain("callOf(removeIn,");
+    expect(guardSource).toContain("callOf(observeIn, frameGuard,");
+    expect(guardSource).toContain("callOf(weakSetHas, guardedRoots,");
+    expect(guardSource).toContain("callOf(weakSetAdd, guardedRoots,");
+    expect(guardSource).toContain("callOf(cloneNodeIn, element,");
+  });
+});
+
 describe("the shell document", () => {
   const compiled = compile(presets.inlineWidget({ capabilities: { sendPrompt: {} } }));
   const html = compiled.shellDocument({ origins: [ORIGIN], title: 'A "chart" </title><script>' });

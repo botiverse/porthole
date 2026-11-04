@@ -537,54 +537,113 @@ export const SHELL_RUNTIME = String.raw`(() => {
   };
   const matchesIn = Element.prototype.matches;
   const guarded = (element) => callOf(matchesIn, element, [GUARDED]) && !keptFrame(element);
+  // The built-ins step 3's guard and its observer use, captured before content runs and called
+  // only through these references (as the rule above reads matches, localName, namespaceURI,
+  // baseURI, src and srcdoc): a page that replaces a prototype method, a getter, or the global
+  // Array.from can't make the guard or its observer walk past a frame they must remove.
+  const nodeTypeOf = getterOf(Node.prototype, "nodeType");
+  const isConnectedOf = getterOf(Node.prototype, "isConnected");
+  const parentNodeOf = getterOf(Node.prototype, "parentNode");
+  const shadowRootOfNode = getterOf(Element.prototype, "shadowRoot");
+  const removeIn = Element.prototype.remove;
+  const cloneNodeIn = Node.prototype.cloneNode;
+  const queryAllElement = Element.prototype.querySelectorAll;
+  const queryAllDocument = Document.prototype.querySelectorAll;
+  const queryAllFragment = DocumentFragment.prototype.querySelectorAll;
+  const nodeListLengthOf = getterOf(NodeList.prototype, "length");
+  const weakSetHas = WeakSet.prototype.has;
+  const weakSetAdd = WeakSet.prototype.add;
+  const observeIn = MutationObserver.prototype.observe;
+  const makeText = Document.prototype.createTextNode;
+  const recordProto = typeof MutationRecord === "function" ? MutationRecord.prototype : null;
+  const addedNodesOf = getterOf(recordProto, "addedNodes");
+  const recordTypeOf = getterOf(recordProto, "type");
+  const recordTargetOf = getterOf(recordProto, "target");
+  const ownerElementOf = getterOf(typeof Attr === "function" ? Attr.prototype : null, "ownerElement");
+  // A node's type (and whether it is connected), read through the kept getters; anything that
+  // isn't a node reads as -1 / false, never throws, so the insertion guards can ask of any value.
+  const typeOf = (node) => {
+    if (node === null || typeof node !== "object" || nodeTypeOf === null) {
+      return -1;
+    }
+    try {
+      return callOf(nodeTypeOf, node, []);
+    } catch (_) {
+      return -1;
+    }
+  };
+  const connected = (node) => {
+    if (isConnectedOf === null) {
+      return false;
+    }
+    try {
+      return callOf(isConnectedOf, node, []) === true;
+    } catch (_) {
+      return false;
+    }
+  };
+  const countOf = (list) => (nodeListLengthOf === null ? 0 : callOf(nodeListLengthOf, list, []));
+  const shadowOf = (element) => (shadowRootOfNode === null ? null : callOf(shadowRootOfNode, element, []));
+  const queryAllOf = (node, type, selector) => callOf(type === 1 ? queryAllElement : type === 9 ? queryAllDocument : queryAllFragment, node, [selector]);
   const guardedRoots = new WeakSet();
   let guardRoot = null;
   const strip = (node) => {
-    if (node === null || (node.nodeType !== 1 && node.nodeType !== 9 && node.nodeType !== 11)) {
+    const type = typeOf(node);
+    if (type !== 1 && type !== 9 && type !== 11) {
       return;
     }
-    if (node.nodeType === 1 && guarded(node)) {
-      node.remove();
+    if (type === 1 && guarded(node)) {
+      callOf(removeIn, node, []);
       return;
     }
-    for (const element of Array.from(node.querySelectorAll(GUARDED))) {
+    const framed = queryAllOf(node, type, GUARDED);
+    for (let i = 0, n = countOf(framed); i < n; i += 1) {
+      const element = framed[i];
       if (!keptFrame(element)) {
-        element.remove();
+        callOf(removeIn, element, []);
       }
     }
     // Open shadow roots made without attachShadow (declarative ones the parser built elsewhere).
-    if (node.nodeType === 1 && node.shadowRoot) {
-      guardRoot(node.shadowRoot);
+    if (type === 1) {
+      const root = shadowOf(node);
+      if (root) {
+        guardRoot(root);
+      }
     }
-    for (const element of Array.from(node.querySelectorAll("*"))) {
-      if (element.shadowRoot) {
-        guardRoot(element.shadowRoot);
+    const all = queryAllOf(node, type, "*");
+    for (let i = 0, n = countOf(all); i < n; i += 1) {
+      const root = shadowOf(all[i]);
+      if (root) {
+        guardRoot(root);
       }
     }
   };
   const frameGuard = new MutationObserver((records) => {
-    for (const record of records) {
+    for (let i = 0; i < records.length; i += 1) {
+      const record = records[i];
       // A kept frame whose src or srcdoc changed another way (P128): the backstop of the
       // synchronous guard below (beforeChange), as the rest of this observer is.
-      if (record.type === "attributes") {
-        if (record.target.isConnected && guarded(record.target)) {
-          record.target.remove();
+      if ((recordTypeOf === null ? record.type : callOf(recordTypeOf, record, [])) === "attributes") {
+        const target = recordTargetOf === null ? record.target : callOf(recordTargetOf, record, []);
+        if (connected(target) && guarded(target)) {
+          callOf(removeIn, target, []);
         }
         continue;
       }
-      for (const node of Array.from(record.addedNodes)) {
-        strip(node);
+      const added = addedNodesOf === null ? record.addedNodes : callOf(addedNodesOf, record, []);
+      for (let j = 0, n = countOf(added); j < n; j += 1) {
+        strip(added[j]);
       }
     }
   });
   const observed = ownFrames ? { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "srcdoc"] } : { childList: true, subtree: true };
   guardRoot = (root) => {
-    if (guardedRoots.has(root)) {
+    if (callOf(weakSetHas, guardedRoots, [root])) {
       return;
     }
-    guardedRoots.add(root);
+    callOf(weakSetAdd, guardedRoots, [root]);
     strip(root);
-    frameGuard.observe(root, observed);
+    callOf(observeIn, frameGuard, [root, observed]);
   };
   guardRoot(document);
 
@@ -674,23 +733,27 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // node drops guarded elements first, synchronously, and a connected link or meta can't be
   // changed into one. The observer stays as the backstop for anything these miss.
   const admit = (node) => {
-    if (node === null || typeof node !== "object" || typeof node.nodeType !== "number") {
+    const type = typeOf(node);
+    if (type === -1) {
       return true;
     }
-    if (node.nodeType === 1 && guarded(node)) {
+    if (type === 1 && guarded(node)) {
       return false;
     }
     strip(node);
     return true;
   };
-  const admitted = (args) => args.map((arg) => (admit(arg) ? arg : document.createTextNode("")));
   const wrapInsert = (proto, name, positions) => {
     const original = proto && proto[name];
     if (typeof original !== "function") {
       return;
     }
     lock(proto, name, function (...args) {
-      const checked = positions === "all" ? admitted(args) : args.map((arg, index) => (positions.indexOf(index) !== -1 && !admit(arg) ? document.createTextNode("") : arg));
+      const checked = [];
+      for (let i = 0; i < args.length; i += 1) {
+        const check = positions === "all" || positions.indexOf(i) !== -1;
+        checked[i] = check && !admit(args[i]) ? callOf(makeText, document, [""]) : args[i];
+      }
       return original.apply(this, checked);
     });
   };
@@ -742,11 +805,14 @@ export const SHELL_RUNTIME = String.raw`(() => {
       enumerable: descriptor.enumerable,
       get: descriptor.get,
       set(html) {
-        if (this.nodeType === 1 && this.localName === "template") {
+        // Which branch runs is read through the kept getters, so a replaced nodeType or localName
+        // can't route a connected element past parseIn (and its strip) by posing as a template
+        // whose markup goes in inert.
+        if (typeOf(this) === 1 && localNameOf !== null && callOf(localNameOf, this, []) === "template") {
           descriptor.set.call(this, html);
           return;
         }
-        this.replaceChildren(...parseIn(this.nodeType === 11 ? this.host || null : this, html));
+        this.replaceChildren(...parseIn(typeOf(this) === 11 ? this.host || null : this, html));
       },
     });
   });
@@ -757,12 +823,12 @@ export const SHELL_RUNTIME = String.raw`(() => {
       enumerable: outer.enumerable,
       get: outer.get,
       set(html) {
-        const parent = this.parentNode;
-        if (parent === null || parent.nodeType === 9) {
+        const parent = parentNodeOf === null ? this.parentNode : callOf(parentNodeOf, this, []);
+        if (parent === null || typeOf(parent) === 9) {
           outer.set.call(this, html);
           return;
         }
-        this.replaceWith(...parseIn(parent.nodeType === 1 ? parent : null, html));
+        this.replaceWith(...parseIn(typeOf(parent) === 1 ? parent : null, html));
       },
     });
   }
@@ -817,19 +883,25 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // first, and if the copy would be guarded, the element leaves the document before it changes.
   // Nor can a kept iframe (P128) become one that isn't the page's own (a src elsewhere, its
   // srcdoc dropped).
-  const watched = (element) => element && element.nodeType === 1 && (element.localName === "link" || element.localName === "meta" || (ownFrames && localNameOf !== null && callOf(localNameOf, element, []) === "iframe"));
+  const watched = (element) => {
+    if (typeOf(element) !== 1 || localNameOf === null) {
+      return false;
+    }
+    const name = callOf(localNameOf, element, []);
+    return name === "link" || name === "meta" || (ownFrames && name === "iframe");
+  };
   const beforeChange = (element, change) => {
-    if (!watched(element) || !element.isConnected) {
+    if (!watched(element) || !connected(element)) {
       return;
     }
-    const copy = element.cloneNode(false);
+    const copy = callOf(cloneNodeIn, element, [false]);
     try {
       change(copy);
     } catch (_) {
       return;
     }
     if (guarded(copy)) {
-      element.remove();
+      callOf(removeIn, element, []);
     }
   };
   const guardMethod = (proto, name, change) => {
@@ -858,9 +930,10 @@ export const SHELL_RUNTIME = String.raw`(() => {
       enumerable: descriptor.enumerable,
       get: descriptor.get,
       set(value) {
-        if (this.nodeType === 2 && this.ownerElement) {
+        const owner = typeOf(this) === 2 && ownerElementOf !== null ? callOf(ownerElementOf, this, []) : null;
+        if (owner !== null) {
           const attribute = this;
-          beforeChange(attribute.ownerElement, (copy) => copy.setAttributeNS(attribute.namespaceURI, attribute.name, String(value)));
+          beforeChange(owner, (copy) => copy.setAttributeNS(attribute.namespaceURI, attribute.name, String(value)));
         }
         descriptor.set.call(this, value);
       },

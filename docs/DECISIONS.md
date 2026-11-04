@@ -7175,3 +7175,40 @@ names it.
 **Revisit when** a host asks for frames of other origins (an allowlist, with its own channel
 accepted), a nested page (P111) needs frames of its own, Claude's Artifacts change their rule, or
 every engine closes WebRTC through CSP in every realm (then the trade-off is the clipboard's only).
+
+## P129 · 2026-11-04 · The shell's guards call only built-ins captured before content runs · Accepted
+
+**Decision.** Step 3's frame guard and its MutationObserver, the before-change backstop, and the
+synchronous insertion and HTML-parse guards (`strip`, `admit`, the insertion wrappers, `watched`,
+`beforeChange`, the `innerHTML`/`outerHTML`/attribute-value setter routing) read every DOM method
+and getter they use through references captured before any content runs, and call them only through
+`callOf` — the DOM `nodeType`, `isConnected`, `parentNode`, `shadowRoot`, `localName`,
+`namespaceURI`, `baseURI` getters; `querySelectorAll` (by node type), `remove`, `cloneNode`,
+`createTextNode`; the `NodeList` `length` getter; `WeakSet` `has`/`add`; `MutationObserver.observe`;
+the `MutationRecord` `addedNodes`/`type`/`target` getters; `Attr.ownerElement` — and walk live
+collections with indexed loops using the captured length getter, never `Array.from` or `for…of`.
+This extends P128's rule (which already read `matches`, `OWN_FRAME`'s inputs and the navigation
+getters this way) and P030's guard to every built-in the guard touches. Default behaviour is
+unchanged; no config, CSP, plan or manual moves.
+
+**Why.** The guard inspects objects content controls, so it must not depend on anything content can
+replace first; otherwise a page could make the guard overlook a frame-like element it must remove.
+The invariant — **the shell's guards call only built-ins captured before content runs** — is the
+property the fix establishes, and `test/shell.test.ts` asserts it generically (the guard captures
+each built-in once and its source makes no live `.querySelectorAll(`, `.remove()`, `Array.from(`,
+`.cloneNode(` or `document.createTextNode(` call on the nodes it inspects).
+
+**Rejected.** Capturing only `matches` (P128's extent): the rest of the guard still read replaceable
+built-ins. Leaving the walk on `Array.from`/`for…of`: `Array.from` and `Array.prototype[Symbol.
+iterator]` are replaceable too.
+
+**Tested** (written 2026-11-04; run `pnpm check` and `pnpm test:leak` on Chromium, WebKit and
+Firefox before release). Unit: `test/shell.test.ts` (the capture table and the no-live-call
+invariant). The leak suite's frame and hint probes (item 4, the served "own" cases) stand as the
+behavioural check; a probe that replaces each captured built-in before inserting a nested frame,
+with its negative control, belongs with the leak suite when the egress-probe harness is next
+extended.
+
+**Revisit when** a new built-in is used anywhere in the guard or a new guarded channel is added
+(capture it the same way and extend the invariant test), or the leak suite gains the
+per-built-in replacement probe.
