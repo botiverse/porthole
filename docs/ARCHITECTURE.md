@@ -278,9 +278,10 @@ several displays on one page are in [THREAT_MODEL.md](THREAT_MODEL.md).
 4. **Message boundary.** Every message crossing the frame is validated against a
    schema and checked for sender identity before use; the shell accepts messages
    only from its host, and the host only from its frame. What the frame says about
-   itself (its size, its errors, an annotation's anchor and where it is) is the
-   content's word even when the shell says it, since they share a realm: the host
-   bounds it and uses it as a UI hint, never as a permission (P053).
+   itself (its size, its errors, an annotation's anchor and where it is, how many
+   matches find found) is the content's word even when the shell says it, since they
+   share a realm: the host bounds it and uses it as a UI hint, never as a permission
+   (P053, P131). What the host sends in (a mark, a find query) the content can read.
    A nested page (P111) is the one place they don't: the shell is a document of its
    own, the page's parent, on another origin than the page's (opaque), so the page
    reaches nothing of the shell's realm. Nor does any other content: the shell's
@@ -328,6 +329,12 @@ several displays on one page are in [THREAT_MODEL.md](THREAT_MODEL.md).
   comments (P053). A mark may carry a count, drawn as a clickable marker whose click
   the host hears and answers with its own UI outside the frame (P104), and may be a
   draft, its author's unposted comment, drawn apart with a hollow marker (P107).
+- **Find in page** (`find`): the host draws its own find bar and asks the shell for
+  a query (`porthole/find.query`, a request: how many matches, which is current);
+  the shell finds it in the same text index annotations read, highlights it in a layer
+  of its own, and says when the person pressed Cmd+F or Ctrl+F in the frame, where the
+  host takes the shortcut (P131). An older shell answers "isn't offered here", and the
+  host calls find unsupported there.
 - **Served content.** A host plugs its own policy and infrastructure into `/server`:
   who may see what (`authorize`), where tickets live (`TicketStore`: memory, D1),
   how origins are named (`content.name`, other servers' `reserved` namespaces),

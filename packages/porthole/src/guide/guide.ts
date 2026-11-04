@@ -444,6 +444,8 @@ const ENTRIES: { readonly [N in CapabilityName]: (c: Context, gates: readonly Ga
         : `- Copying: the request porthole/copy-text with { text } (at most ${MAX_COPY_CHARS.toLocaleString("en-US")} characters) copies text to the person's clipboard, and the app shows them what was copied; nothing else in the ${c.noun} can write the clipboard. ${gateWords(gates, "the text")}`,
     annotate: (c) =>
       `- Comments: the person may point at parts of the ${c.noun} to comment on them. Give headings and the parts that matter stable ids (id="revenue"), so comments stay on them when the ${c.noun} is written again.`,
+    find: (c) =>
+      `- Find: the person may search the ${c.noun}'s words with the app's own find bar (Cmd+F or Ctrl+F), which highlights them where they are. Keep the words they would look for as text (not in images or a canvas). A ${c.noun} that handles Cmd+F or Ctrl+F itself (preventDefault) keeps the key.`,
     reportError: (c) =>
       `- ${manualLimits(c.config, "").find((limit) => limit.id === "errors")?.text ?? ""}`,
     resize: () => "",
@@ -456,7 +458,7 @@ const ENTRIES: { readonly [N in CapabilityName]: (c: Context, gates: readonly Ga
   };
 
 /** The shell's own capabilities, which content never calls by name: taught as they are. */
-const SHELL_OWN: readonly CapabilityName[] = ["annotate", "reportError", "resize"];
+const SHELL_OWN: readonly CapabilityName[] = ["annotate", "find", "reportError", "resize"];
 
 function interactive(c: Context): string {
   const { config, noun } = c;

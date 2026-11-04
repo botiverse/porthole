@@ -1,4 +1,5 @@
 import type { AnnotateMode, AnnotationMark, AnnotationReport } from "../annotate/types.ts";
+import type { FindOptions, FindResult } from "../find/types.ts";
 import type { Refused } from "../bridge/refusal.ts";
 import type {
   Confirm,
@@ -126,6 +127,8 @@ export type HostErrorKind =
   | "mount"
   /** An annotation call was refused (an invalid mark, an unknown id). */
   | "annotations"
+  /** A find call was refused (a query too long, options that aren't these: P131). */
+  | "find"
   /**
    * A frame status (`porthole/notifications/frame-status`) the host didn't take, since it came
    * from the frame's content, not from a page of Porthole's server (P124): never shown, never an
@@ -238,6 +241,53 @@ export interface DisplayEvents {
    * content's word: UI hints, never permissions.
    */
   readonly annotation: AnnotationReport;
+  /**
+   * The person pressed Cmd+F (Apple) or Ctrl+F (elsewhere) with the keyboard in the frame (`find`,
+   * P131): open the host's find bar. Only while the host takes the shortcut
+   * (`find.takeShortcut(true)`, which stops the browser's own find there) and the page's focus is
+   * in the frame (where the platform can tell). The content's word: it can say it without the key,
+   * or keep the key; open the bar, nothing more.
+   */
+  readonly findRequested: undefined;
+  /**
+   * The matches of the query shown changed without the host asking (`find`, P131): the content
+   * changed (more of it, or the page's own changes). At most once a second, from an honest shell.
+   * The content's word: a find bar's numbers.
+   */
+  readonly findUpdated: FindResult;
+}
+
+/**
+ * Find in page on a display whose config declares `find` (P131): the host draws the find bar,
+ * the frame finds and highlights. The query is posted into the frame, where the content can read
+ * it. Where the config doesn't declare `find`, `query` answers `"unsupported"` and the rest do
+ * nothing. The shortcut is kept and given to every frame the display runs. The query holds only for
+ * the content it was asked of: a new run (`reload()`, a restart after the content navigated away,
+ * a new location) or other content (`setContent` with content that doesn't continue what was
+ * given) forgets it and answers what waits `"unsupported"`, and nothing is found there until the
+ * host asks again: clear your find bar then.
+ */
+export interface FindControls {
+  /**
+   * Finds `query` in the content's text (case-insensitive by default, any spacing), highlights
+   * every match, makes one current (the first in view for a new query; the next or previous one
+   * with `direction`), scrolls it into view, and answers where they stand. An empty query (or
+   * only spaces) clears, and answers no matches. `"unsupported"` where the frame can't find: the
+   * config doesn't declare `find`, the frame's shell is older (it answered that it doesn't know
+   * the request), it failed, it didn't answer in `FIND_LIMITS.timeoutMs` once it ran, a later
+   * query superseded it before it ran (only the latest is searched: show the answer to your latest
+   * query only), or the content it was asked of is gone (a new run, other content). Rejects
+   * with a `TypeError` for a query longer than `FIND_LIMITS.query`, or options that aren't these.
+   */
+  query(query: string, options?: FindOptions): Promise<FindResult | "unsupported">;
+  /** Removes the highlights and forgets the query (the find bar closed). */
+  clear(): void;
+  /**
+   * Whether the host draws its own find bar for this display (default no): while it does, Cmd+F
+   * or Ctrl+F in the frame doesn't open the browser's own find, and the display says
+   * `findRequested` instead. A page that handles the key itself keeps it.
+   */
+  takeShortcut(take: boolean): void;
 }
 
 /**
@@ -285,6 +335,8 @@ export interface DisplayControls {
   ): () => void;
   /** Annotations (`annotate`): throws on use where the config doesn't declare it. */
   readonly annotations: AnnotationControls;
+  /** Find in page (`find`, P131): `"unsupported"` where the config doesn't declare it. */
+  readonly find: FindControls;
   /** Runs the content again from the start, in a new frame. */
   reload(): void;
   /**

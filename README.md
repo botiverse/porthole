@@ -36,6 +36,12 @@ config, so the sandbox, the shell and the manual never drift apart.
   page's button puts in the host's composer for the person to post or not (0.12–0.13, P108,
   P109), and what a host's comment modes need (0.14, P112: Escape, a followed mark, document
   order, hold on touch, `mayPassOn`).
+- **Find in page** (P131, `find`): a host's own find bar over a display: the shell finds the
+  person's query in the content, highlights every match and the current one in a layer of its
+  own, brings it into view, and answers "3/12"; Cmd+F or Ctrl+F in the frame opens the host's
+  bar where the host takes it. The query is the page's to read: declare `find` where it may be,
+  and send queries on a pause or Enter, not each key. A query holds for the content it was asked
+  of: a reload or other content forgets it, so clear the host's find bar then.
 - **Nested pages** (0.14, P111, `nested: true`): a served artifact's frame loads Porthole's shell
   alone, and the page runs in its child frame with an opaque origin, so it reaches nothing of the
   shell's realm. The host trusts the shell's own word on the person's press and focus there (for
@@ -110,7 +116,8 @@ Adopting it in an app: [docs/ADOPTING.md](docs/ADOPTING.md), and before you open
 the network, [Choosing egress](docs/ADOPTING.md#choosing-egress): the three levels, what each
 opens and the risk it re-opens; for content that reads your data,
 [Live widgets](docs/ADOPTING.md#live-widgets-content-that-reads-your-data); for comments,
-[Annotations](docs/ADOPTING.md#annotations-comments-on-a-display); for the page below the shell,
+[Annotations](docs/ADOPTING.md#annotations-comments-on-a-display); for a find bar,
+[Find in page](docs/ADOPTING.md#find-in-page-the-hosts-find-bar); for the page below the shell,
 [Nested pages](docs/ADOPTING.md#nested-pages-the-page-below-portholes-shell). Before you show
 content that matters, the [threat model](docs/THREAT_MODEL.md)'s section for your use says what
 is left to you.

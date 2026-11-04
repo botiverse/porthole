@@ -634,6 +634,15 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "",
     },
   ],
+  // Find in page (P131): the host takes the page's word for the find shortcut whatever has the
+  // page's focus, so a page brings the host's find bar up while the person types beside it.
+  "find-requested-focus": [
+    {
+      file: "src/host/create-host.ts",
+      find: "          if (!takesShortcut || inFrame === false) {",
+      replace: "          if (!takesShortcut) {",
+    },
+  ],
   // The host's clearSelection (P115) through the page's own Selection, and the shell keeps the
   // selection it told: a page that patched the way out keeps its selection, and the clear is told
   // back as an `unselected`.

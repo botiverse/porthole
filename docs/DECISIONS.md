@@ -6260,7 +6260,7 @@ Tested: `test/shell.test.ts` (`<`, `</`, `</di`, inside an attribute, and whole 
 unchanged); `leak/react.spec.ts` "content streams through props…" (a draft cut after `</` and
 after `<` draws neither).
 
-## P118 · 2026-10-28 · React: `trackedAnnotation` and a handle with `clearSelection` · Accepted
+## P118 · 2026-10-28 · React: `trackedAnnotation` and a handle with `clearSelection` · Accepted; amended by P131
 
 **Context.** Raft's web app (Kirby) shows displays through `PortholeFrame` and `PortholeView`,
 which hold the display handle inside: it could not follow a mark (`annotations.track`, P112) or
@@ -7313,3 +7313,221 @@ as the guard holding, and record it ("refused at creation"); with the refusal ta
 **Revisit when** an engine adds an insertion or parsing entry point (add it to the list, the
 runtime and the test), the default configuration is to allow frames, or the leak suite's probes
 cover each row.
+
+## P131 · 2026-11-04 · Find in page: the host's find bar, the shell's matches in a layer of its own (`find`) · Accepted
+
+Raft's task: an Artifact viewer's find bar, like the thread panel's "search this thread": a query
+box, previous and next, a "3/12" count, highlights, Escape closes. The host can't read a display's
+text (its frame is another origin, opaque or the content's own), and the browser's own find gives
+it no count, no UI of its own and no say over Cmd+F. Only the shell, in the frame, can find the
+words and draw over them, so Porthole provides that part; the bar is the host's. Amends P118: the
+React handle holds `find` and `clearFind` beside `clearSelection`. Holds to P129 and P130: the find
+runtime calls only built-ins captured before content runs, and its layer's nodes go in only
+through the guarded insertion methods (**Drawing**, below).
+
+**Decision.**
+- **A capability, `find`**, declared per config (`capabilities: { find: {} }`; in no preset by
+  default; Raft opts in on its artifact kind). Served as an event, as `annotate` is; its default
+  gate is a rate (120 a minute) on what the frame says unasked. The manual's entry tells the agent
+  the person may search the page's words with the app's find bar (keep them as text) and that a
+  page handling Cmd+F itself keeps the key (`test/agreement.test.ts` covers it). A url-mode app has
+  no shell and declares no capability: find there is the browser's.
+- **The protocol** (own-prefixed, P002; `FIND_METHODS`):
+  - `porthole/find.query`, host → frame, a **request**: `{ query, direction?: "next" | "prev" |
+    "none", caseSensitive?: boolean }`, answered with `{ total, active, capped?: true, rect? }`:
+    how many matches (at most `FIND_LIMITS.matches`, 1,000; `capped`: it stopped looking, there may
+    be more), the current one from 1 (0 for none), and the current one's box in the frame's
+    viewport once it was scrolled into view. A new query makes current the first match at or after
+    the viewport's top (`prev`: the one before it); the same query with `next` or `prev` moves on
+    from the current one by its place, wrapping; `none` keeps it. An empty query (or only spaces)
+    clears and answers `{ total: 0, active: 0 }`. A query that a later query or a clear
+    superseded before the shell ran it is answered with an error (`-32800`, "superseded by a later
+    query"), which the host makes `"unsupported"` as it does any error (**Only the latest**,
+    below).
+  - `porthole/find.clear`, host → frame: highlights gone, query forgotten.
+  - `porthole/find.handled { handled }`, host → frame: whether the host draws its own find bar.
+  - `porthole/find.requested {}`, frame → host: the person pressed the shortcut (below).
+  - `porthole/find.updated { total, active, capped? }`, frame → host: the matches changed while a
+    query is shown (the content changed), at most once a second.
+- **Matching** (`FIND_MATCH`, one pure function spliced into the runtime, unit-tested): over
+  annotations' text index (`TEXT_INDEX`, moved out of the annotation runtime and spliced into both:
+  the body's text nodes, without scripts, styles, noscript and templates; the same text and
+  offsets as before, now read through built-ins captured before content runs, P129).
+  Case-insensitive unless asked (`RegExp` with `iu`: Unicode simple case folding, offsets kept),
+  loose about spacing as annotations' `squash` is (trimmed; a run of white space in the query
+  matches any run in the text), every other character literal (no pattern syntax reaches the
+  expression). A match counts only if it has a box (text that is drawn: not `display: none`, not
+  a closed `<details>`). At most 1,000 kept, 10,000 looked at, a query of at most 256 code units
+  (the host refuses longer, the shell cuts).
+- **Drawing**: a layer of the shell's own, a closed shadow root over the content with the same
+  forced inline style as annotations' layer (one constant, a test holds them equal), apart from
+  it; a match is a light warm fill with a thin edge, the current one stronger with a ring (neither
+  looks like a comment's yellow underline). Boxes from `Range.getClientRects`, only for matches in
+  view, redrawn at each scroll and resize (an animation frame), and found again once a run of
+  changes settles (150 ms quiet, at most a second late), the current match kept by its place. The
+  current match is brought into view, centred, in its scrolling ancestors first (innermost first,
+  `overflow` auto, scroll or overlay that overflows), then in the window; instantly. The selection
+  is never touched (annotations would report it as the person's).
+- **Only the latest** (`FIND_LATEST`, one pure function spliced into the runtime, unit-tested). A
+  search is synchronous, and on a large page long (measured: 150-730 ms on a page of 30,000
+  spans), so a bar that asks at every key queued a search per key (50 queries at once took 14-22
+  s). A query that comes while none waits, and not within 16 ms of the end of the last one run, is
+  run at once, answered before any content's listener could answer it, as before. Otherwise it
+  waits for the next task, after the messages already queued; a later query supersedes it, and a
+  clear drops it, each answering it with the superseded error at once. A burst is so at most two
+  searches: the one running and the latest. What a waiting query will search is read from the
+  host's message when it comes (each field once, as an own property) and kept as those values,
+  never read from the message again (P129). The host sends only the latest of the queries asked
+  while a frame loads, and answers the others `"unsupported"`.
+- **Built-ins and insertion (P129, P130).** Every built-in the find runtime and the text index call
+  once content may have run is captured before content runs and called only through `callOf`:
+  `createRange`, `createTreeWalker` and the walker's `nextNode`, the `nodeType`, `localName`,
+  `nodeValue`, `parentElement`, `body` and `documentElement` getters, `Range`'s `setStart`,
+  `setEnd`, `collapse`, `comparePoint`, `startContainer` and boxes, `DOMRectList`'s and `DOMRect`'s
+  getters, the sizes, `getComputedStyle` and `getPropertyValue`, `scrollBy`, the `style` getter and
+  `cssText` accessors, the `className` and `nonce` setters, `Map`'s `set`/`get`/`has`, `RegExp` and
+  its `exec`, the timers, `postMessage`, `MutationObserver.observe` and the `MutationRecord`
+  getters, the `MessageEvent` `data`/`origin`/`source` getters, `KeyboardEvent`'s getters, and the
+  platform's `preventDefault`. No live `.call`, `.apply` or `.bind`, no `Array`/`Object` prototype
+  method (`map`, `concat`, `indexOf`, `push`, `for…of`, `Object.assign`) and no `Math` function:
+  its lists are the shell's prototype-less ones (`listOf`, `pushTo`, also given to `FIND_MATCH`),
+  its lookups and answers objects with no prototype. What it reads from the host's message (the
+  event's fields, the request's own properties) is read once, and only a string, number or boolean
+  is acted on; a box's numbers are read once and only numbers are used. The layer's nodes are made
+  and inserted only through the shell's guarded methods, which step 3 wrapped before the find
+  runtime runs (it is spliced after the guard and takes them then): `createElement` (A21 of
+  [insertion-entry-points.md](insertion-entry-points.md)), `attachShadow` (A19), `appendChild`
+  (A1), `replaceChildren` on an element and a shadow root (A2), and the `textContent` setter
+  (A5). It inserts nothing into the content's own trees, and its inline styles go through CSSOM
+  (`cssText`), not a `style` attribute.
+- **The shortcut**: Cmd+F on Apple's platforms (`navigator.platform`, read before content runs),
+  Ctrl+F elsewhere, no Alt or Shift (`FIND_SHORTCUT`, unit-tested; on a layout whose letters aren't
+  Latin, the key in F's place). Read in a listener on the window as the key bubbles, after the
+  page's own: only while the host said `handled`, only a trusted key, and only one the page didn't
+  take (`defaultPrevented`: a page with a find of its own keeps its key). Then the shell cancels
+  the browser's find and says `requested`. Otherwise the key is left alone: a host without its own
+  bar keeps the browser's.
+- **The host** (`display.find`): `query(query, { direction, caseSensitive })` resolves with the
+  checked answer (its box clamped to the frame's viewport, P104) or `"unsupported"`: a config
+  without `find`, an error (an older shell answers `-32601`, "isn't offered here"; the shell's own
+  fallback now leaves `porthole/find.query` to the find runtime where it is declared), a malformed
+  answer, or none within `FIND_LIMITS.timeoutMs` (3 s) of the frame running (asked before, the
+  load's time too). A query too long, or options that aren't these, reject with a `TypeError`.
+  `clear()`; `takeShortcut(take)` sends `handled`. The shortcut is kept and given to every frame
+  the display runs. The query holds only for the content it was asked of: every new run (a
+  `reload()`, a restart after the content navigated its frame away, so a new location) and other
+  content (`setContent` with content that doesn't continue what was given; more of a streamed
+  page does) forget it, answer what waits `"unsupported"` and, for other content, clear the frame
+  running now. A new page is so never searched with the last one's query (not even unheard: the
+  shell's scrolling and its layer would tell the page which of its words matched) unless the host
+  asks again; the host clears its find bar then (ADOPTING).
+  Events: `findRequested` (taken only while the host takes the shortcut and the platform says the
+  page's focus is in the frame, or can't tell) and `findUpdated` (taken only while a query is
+  shown); both checked (`parseFindReport`) and through the bridge's rate.
+- **React**: the handle (`PortholeFrameHandle`, P118) adds `find(query, options)` and
+  `clearFind()`: with no display running, `"unsupported"`, and the query is kept, with what the
+  frame showed when it was asked (`findScopeOf`: the config, instance with its version,
+  declaration, viewer and generation by value, the document, the content). A display made later
+  that shows the same (the frame neared the screen again; the content continued) finds it again
+  and tells `onFindUpdated`; any other (`sameFindScope` false: another source, document, version
+  or config, a new generation, content that doesn't continue it) forgets it. A refused query is `onHostError`
+  (kind `"find"`) and `"unsupported"`, never a rejection. `onFindRequested`, given, makes the
+  frame's shortcut the host's (`takeShortcut(true)`); `onFindUpdated` hears updates.
+
+**Why a capability, gated per config** (THREAT_MODEL §7). Find gives content no power: nothing it
+can call, nothing of the host's it can read. But:
+1. The query is the person's words, typed in the host's own UI, and it is posted into the content's
+   realm, where the page can read it (each keystroke, for a bar that searches as the person
+   types). A page with a way out (an MCP App's `connectDomains`, S5; egress a host opened; the
+   runtime's `db` and other carriers, `mayPassOn`) can send what the person searched for to its
+   author. A host opts in per config, knowing which displays may learn that.
+2. The shell carries nothing the config doesn't declare (PRINCIPLE 4): a host that upgrades gets
+   no new listener or message in its existing displays.
+3. What the frame says unasked goes through the bridge, with a rate, as annotations' reports do.
+
+**Accepted exposure.** The page can read every query the host sends it: the search runs in the
+page's document, so the query is in the page's realm (and, without reading the message, the
+shell's scrolling and its layer show the page which of its words matched). This was accepted by
+the product owner, with hosts sending queries on a pause or Enter rather than at every key, which
+limits what the page sees of the person's typing (ADOPTING).
+Accepted by xxchan (product owner, Raft #proj-workspace:e56d96e4, message 3d68e461, 2026-11-04):
+the page can read the queries sent to it; hosts send them on a pause or Enter, only while their
+find bar is open.
+
+**Threat.** No wall moves: no CSP, sandbox, `allow`, egress or storage changes, nothing secret
+enters the frame, and annotations behave as before (the text index moved into a shared constant,
+spliced in the same place, and now reads through captured built-ins, P129). New on the message
+boundary:
+- *What content learns*: the query, whether it is case-sensitive, each move (next, previous), when
+  the bar opens and closes, and whether the host draws its own bar.
+- *What content can say*: any count, any current match, any box inside its frame (clamped), and
+  `updated` while a query is shown. All of it the content's word: a find bar's numbers, never a
+  fact about the content. `requested` it can say at will, but the host takes it only with the
+  page's focus in the frame (the web platform's focus guard: a press on the frame or a Tab put it
+  there, P109). Without that rule a page could open the host's bar, which takes focus, while the
+  person types in the host's composer, and their next keys would go into the bar, and so into the
+  frame as queries. With the person already in the frame, the page has their keys anyway, and a bar
+  opening moves the keyboard out of it. Negative control `find-requested-focus`.
+- *What content can always do*: hide, cover or move the layer, change its words so the count
+  changes, keep the key from the shell (its own `preventDefault`, as intended; or stopping the
+  event, which leaves the browser's find to open), patch built-ins to reach the closed shadow root
+  (as annotations' layer, P105), or make the search dear by its size (linear in its text, bounded
+  by the limits above; found again at most once a second while it changes; in an opaque frame that
+  shares the host's process that time is the host's too, as annotations' is, §5); a burst of
+  queries costs at most two searches (**Only the latest**).
+
+**Rejected.**
+- The CSS Custom Highlight API (as P053 and P104 rejected it for marks): `CSS.highlights` is the
+  content's registry, to read, clear or restyle; the shell's drawing must be its own.
+- `window.find()` or the browser's find: non-standard or out of reach, no count, and it moves the
+  selection, which annotations report as the person's.
+- Always on, ungated: every display's page would get the person's search terms after an upgrade, a
+  third-party MCP App's (S5) included.
+- A find bar drawn in the frame: the content could cover or fake it; the host's own UI is the
+  point.
+- Taking Cmd+F wherever `find` is declared: a host without a bar of its own would lose the
+  browser's find. And a notification only (no request): an older shell couldn't say it doesn't
+  know it, and the host would wait out a timeout for every query.
+- The host searching text the page sends it: a new channel for the page's words into the host's
+  UI, and its word of its own text anyway.
+
+**Not covered** (each a gap a host may hear about): text in open shadow roots, in a page's own
+nested frames (P128) or in form fields' values, words in images or a canvas (the manual says to keep
+them as text), and words split across elements with no space between in the text (a table's
+cells: "foo bar" doesn't find `<td>foo</td><td>bar</td>`). Escape and Cmd+G in the frame are the
+page's: the host's bar closes and moves on from its own UI.
+
+**Tested** (written 2026-11-04, not yet run: the authoring machine runs no tests; run `pnpm check`,
+`pnpm test:leak` on Chromium, WebKit and Firefox, and `pnpm --filter @botiverse/porthole
+test:controls find-requested-focus` before merging). Unit, `test/find.test.ts`: the matching
+(case, Unicode folding, spacing, literal syntax, no overlaps, the limits, `keep`, ten times the most
+looked at), the shortcut rule, the host's checks (`parseFindResult`, `parseFindReport`,
+`checkFindQuery`), only the latest query (`FIND_LATEST`: at once when nothing is queued, a burst
+of fifty as two searches with the rest answered superseded, a clear dropping what waits, its
+splice reading a request once), the shell (the runtime only where declared, beside annotations' with the text
+index in both, a plain script, the built-ins taken before the message listener, no live call or
+replaceable prototype method in the find runtime or the text index and the layer inserted through
+the guarded methods (P129, P130), the same layer style, no Highlight API, the fallback leaving the
+request alone), `createHost` over a stand-in
+platform (asked once the frame ran, its own id only, the box clamped; `-32601`, malformed and no
+answer are `"unsupported"`; nothing without `find`; an empty query clears; a query too long
+rejects; the shortcut sent to every frame, `requested` only while taken and with the page's focus;
+`updated` only while a query is shown; a reload, a restart after a navigation away and other
+content forget the query, content continued keeps it; a query cleared before the frame ran
+answers nothing; a query waiting when its frame stops is `"unsupported"` and never sent to the
+next frame; of the queries asked while the frame loads only the latest is sent; a superseded
+answer is `"unsupported"`; a destroyed display answers `"unsupported"`), the React handle's scope
+(`findScopeOf`, `sameFindScope`: the same content again or continued, by value, versus another
+generation, content, document, config, viewer, source or version), and the bridge (an event, a
+refusal, the rate). `test/agreement.test.ts`: a case
+with `find`, and Raft's shape with it. `test/react-ssr.test.ts`: the handle's and props' types.
+Browser, `leak/find.spec.ts` (three engines): highlights in the closed layer, next and previous into
+view (a scrolling box too), the box, case, clear; a change found again and told; a page's own query
+message ignored; the shortcut the browser's until taken, then the host's, a page's own find keeping
+it; and the hostile page's `requested` while the person types in the host's composer (the control's
+probe, with its positive control: taken with the person in the frame).
+
+**Revisit when** a host needs matches in open shadow roots or a page's own frames, the person's
+Escape or Cmd+G in the frame should reach the host's bar, a host searches as the person types and
+wants the page not to see each keystroke (debounce in the host first), or engines give a frame a
+highlight registry content can't reach.

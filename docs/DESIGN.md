@@ -1181,6 +1181,38 @@ a selection away from a page that patched `Selection.prototype.removeAllRanges`,
 nothing back, leaves marks and drafts found, and the same words selected again are told
 (`clear-selection`).
 
+### Find in page
+
+A host's own find bar over a display (P131), where the config declares `find`:
+
+- **Shell.** `FIND_RUNTIME` (`src/shell/find.ts`), spliced in as the annotation runtime is, before
+  content runs. It finds a query (`porthole/find.query`, a request) in annotations' text index
+  (`TEXT_INDEX`, `src/shell/text.ts`, shared), case-insensitive and loose about spacing
+  (`FIND_MATCH`), only matches that are drawn, at most 1,000; draws them in a layer of its own (a
+  closed shadow root, annotations' layer style), the current one apart, redrawn on scroll and
+  resize and found again as the content changes (`porthole/find.updated`, at most once a second);
+  brings the current one into view through its scrolling ancestors and the window; and, while the
+  host says it draws its own bar (`porthole/find.handled`), cancels the browser's find on Cmd+F or
+  Ctrl+F a page didn't take (`FIND_SHORTCUT`) and says `porthole/find.requested`. Like the guards
+  (P129), it and the text index call only built-ins captured before content runs, through
+  `callOf`; its layer goes in through the guarded insertion methods (P130,
+  [insertion-entry-points.md](insertion-entry-points.md) § The shell's own layers).
+- **Host API.** `display.find.query(query, { direction, caseSensitive })` → `{ total, active,
+  capped?, rect? }` or `"unsupported"` (no `find`, an older shell's `-32601`, a malformed answer, no
+  answer in `FIND_LIMITS.timeoutMs`, a query superseded by a later one: the shell searches only the
+  latest of a burst, `FIND_LATEST`), `clear()`, `takeShortcut(take)`; the query holds only for the
+  content it was asked of (a new run or other content forgets it); events `findRequested`
+  (only while taken, with the page's focus in the frame) and `findUpdated` (only while a query is
+  shown), checked and rate-limited through the bridge. React: `onFindRequested`, `onFindUpdated`,
+  and the handle's `find` and `clearFind`.
+- **Trust.** The page reads every query; what it says back is a find bar's numbers. Tests:
+  `test/find.test.ts` (the matching and its limits, the shortcut rule, the checks, the shell's
+  splice and built-ins, only the latest query, `createHost`'s requests, answers, forgetting and
+  gates, the React handle's scope); `leak/find.spec.ts`
+  on three engines (highlights, next and previous into view, a scrolling box, a change found again,
+  the shortcut the host's only while taken and the page's own find keeping it, and a hostile page's
+  `requested` while the person types in the host's composer dropped: `find-requested-focus`).
+
 ## The shell runtime
 
 The runtime (`src/shell/runtime.ts`, plain ES2020, no build) runs first in every
@@ -1514,6 +1546,7 @@ control the tables above name to the registry):
 | `blob-trusted` | `served/runtime.spec.ts` | `a script asset runs as code only if an admin uploaded it where uploads are the admins'` | — | — |
 | `blob-script,blob-trusted` | `served/runtime.spec.ts` | `a script asset runs as code only if an admin uploaded it where uploads are the admins'`, `scripts load from /_blob/ only where uploads are the admins' (a tab, its session)` | — | — |
 | `blob-inert` | `served/runtime.spec.ts` | `an asset opened on its own runs nothing, on a tab with the artifact's session` | — | — |
+| `find-requested-focus` | `find.spec.ts` | `a hostile page says the find shortcut was pressed while the person types in the host's composer: the host's find bar stays shut (P131)` | — | — |
 
 ## Milestones
 
