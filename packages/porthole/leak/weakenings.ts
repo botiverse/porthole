@@ -72,8 +72,8 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "attach-shadow": [
     {
       file: RUNTIME,
-      find: "    const root = attachShadow.call(this, init);\n    guardRoot(root);",
-      replace: "    const root = attachShadow.call(this, init);",
+      find: "    const root = callOf(attachShadow, this, [init]);\n    guardRoot(root);",
+      replace: "    const root = callOf(attachShadow, this, [init]);",
     },
   ],
   "parser-entry-points": [
@@ -86,7 +86,7 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "declarative-shadow": [
     {
       file: RUNTIME,
-      find: '      lock(proto, "setHTMLUnsafe", function (html) {\n        this.innerHTML = String(html);\n      });',
+      find: '      lock(proto, "setHTMLUnsafe", function (html) {\n        this.innerHTML = NativeString(html);\n      });',
       replace: "",
     },
   ],
@@ -98,8 +98,8 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
     },
     {
       file: RUNTIME,
-      find: "    setInner.call(box, String(html));\n    strip(box);",
-      replace: "    setInner.call(box, String(html));",
+      find: "    callOf(setInner, box, [NativeString(html)]);\n    strip(box);",
+      replace: "    callOf(setInner, box, [NativeString(html)]);",
     },
     {
       file: RUNTIME,

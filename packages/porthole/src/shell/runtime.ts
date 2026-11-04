@@ -90,6 +90,11 @@ export const OWN_FRAME = String.raw`(hasSrcdoc, src, filesBase, resolve) => {
 export const SHELL_RUNTIME = String.raw`(() => {
   "use strict";
   const plan = __PLAN__;
+  // Every built-in a guard calls is called through callOf, which is Reflect.apply itself, kept
+  // now, before any content runs: a direct call of it never reads Function.prototype's call,
+  // apply or bind, so nothing content later puts there sees what the shell calls or with what.
+  const callOf = Reflect.apply;
+  const hasOwn = Object.prototype.hasOwnProperty;
   // A page that came with files, answered at its ticket's address (P083): its own address first,
   // before anything loads, so its relative addresses are its files' (and the ticket leaves).
   if (plan.files && typeof plan.files.address === "string" && location.href !== plan.files.address) {
@@ -100,7 +105,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // The embedding page's nonce, where it gave one (a srcdoc frame inherits its policy): every
   // script the shell runs for the content carries it.
   const nonce = document.currentScript && document.currentScript.nonce ? document.currentScript.nonce : "";
-  const declared = (name) => Object.prototype.hasOwnProperty.call(plan.capabilities, name);
+  const declared = (name) => callOf(hasOwn, plan.capabilities, [name]);
   // Fixed in place: content can neither restore what is removed nor replace what is wrapped. A
   // property something fixed before the shell ran (an extension, an engine's own) can't be: each
   // such name goes on the shell's own script element (data-porthole-unfixed, for a test or a
@@ -199,7 +204,6 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // The platform's own string and URL functions, kept now (P099): the rules that decide where this
   // document may go must read an address as the platform does, whatever content later puts on
   // String.prototype, URL or Reflect.
-  const callOf = Reflect.apply;
   const NativeString = String;
   const NativeURL = URL;
   const urlHref = Object.getOwnPropertyDescriptor(URL.prototype, "href").get;
@@ -242,7 +246,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
     navigationApi.addEventListener("navigate", (event) => {
       const destination = applyOf(destinationOf, event, []);
       if (!applyOf(sameDocumentOf, destination, []) && applyOf(navigationTypeOf, event, []) !== "reload") {
-        const url = urlOf === null ? "" : String(applyOf(urlOf, destination, []));
+        const url = urlOf === null ? "" : NativeString(applyOf(urlOf, destination, []));
         if (ownPage(url)) {
           navigating(url);
           return;
@@ -545,6 +549,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
   const isConnectedOf = getterOf(Node.prototype, "isConnected");
   const parentNodeOf = getterOf(Node.prototype, "parentNode");
   const shadowRootOfNode = getterOf(Element.prototype, "shadowRoot");
+  const childNodesOf = getterOf(Node.prototype, "childNodes");
   const removeIn = Element.prototype.remove;
   const cloneNodeIn = Node.prototype.cloneNode;
   const queryAllElement = Element.prototype.querySelectorAll;
@@ -559,7 +564,36 @@ export const SHELL_RUNTIME = String.raw`(() => {
   const addedNodesOf = getterOf(recordProto, "addedNodes");
   const recordTypeOf = getterOf(recordProto, "type");
   const recordTargetOf = getterOf(recordProto, "target");
-  const ownerElementOf = getterOf(typeof Attr === "function" ? Attr.prototype : null, "ownerElement");
+  const attrProto = typeof Attr === "function" ? Attr.prototype : null;
+  const ownerElementOf = getterOf(attrProto, "ownerElement");
+  const attrNameOf = getterOf(attrProto, "name");
+  const attrNamespaceOf = getterOf(attrProto, "namespaceURI");
+  const attrValueOf = getterOf(attrProto, "value");
+  const setAttributeNSIn = Element.prototype.setAttributeNS;
+  const removeAttributeIn = Element.prototype.removeAttribute;
+  const createIn = Document.prototype.createElement;
+  const createNSIn = Document.prototype.createElementNS;
+  const weakMapGet = WeakMap.prototype.get;
+  const weakMapSet = WeakMap.prototype.set;
+  // A list the shell builds (arguments to pass on, nodes to move): an object with no prototype,
+  // so neither writing nor reading an index or its length reaches anything on Array.prototype or
+  // Object.prototype. callOf takes it as its arguments.
+  const bare = Object.create;
+  const listOf = () => {
+    const list = bare(null);
+    list.length = 0;
+    return list;
+  };
+  const pushTo = (list, value) => {
+    list[list.length] = value;
+    list.length += 1;
+  };
+  // An attribute's name, namespace and value, read through the kept getters.
+  const attrParts = (attribute) => ({
+    namespace: callOf(attrNamespaceOf, attribute, []),
+    name: callOf(attrNameOf, attribute, []),
+    value: callOf(attrValueOf, attribute, []),
+  });
   // A node's type (and whether it is connected), read through the kept getters; anything that
   // isn't a node reads as -1 / false, never throws, so the insertion guards can ask of any value.
   const typeOf = (node) => {
@@ -659,9 +693,10 @@ export const SHELL_RUNTIME = String.raw`(() => {
       return { init, closed: false };
     }
     const copy = { mode: "open" };
-    for (const key of ["delegatesFocus", "slotAssignment", "clonable", "serializable", "customElementRegistry", "referenceTarget"]) {
-      if (init[key] !== undefined) {
-        copy[key] = init[key];
+    const keys = ["delegatesFocus", "slotAssignment", "clonable", "serializable", "customElementRegistry", "referenceTarget"];
+    for (let i = 0; i < keys.length; i += 1) {
+      if (init[keys[i]] !== undefined) {
+        copy[keys[i]] = init[keys[i]];
       }
     }
     return { init: copy, closed: true };
@@ -669,7 +704,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
   lock(Element.prototype, "attachShadow", function (init) {
     const asked = shadowInit(init);
     init = asked.init;
-    const root = attachShadow.call(this, init);
+    const root = callOf(attachShadow, this, [init]);
     guardRoot(root);
     if (asked.closed) {
       callOf(addShown, shownOpen, [root]);
@@ -707,14 +742,14 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // a closed one is out of the guard's reach. Fragment parsing doesn't build them, so the entry
   // points that would are given fragment parsing's behavior, and a document can't be rewritten.
   const parseInert = (html) => {
-    const template = document.createElement("template");
-    template.innerHTML = String(html);
+    const template = callOf(createIn, document, ["template"]);
+    template.innerHTML = NativeString(html);
     return template.content;
   };
   for (const proto of [Element.prototype, typeof ShadowRoot === "function" ? ShadowRoot.prototype : null]) {
     if (proto !== null && "setHTMLUnsafe" in proto) {
       lock(proto, "setHTMLUnsafe", function (html) {
-        this.innerHTML = String(html);
+        this.innerHTML = NativeString(html);
       });
     }
   }
@@ -748,13 +783,21 @@ export const SHELL_RUNTIME = String.raw`(() => {
     if (typeof original !== "function") {
       return;
     }
-    lock(proto, name, function (...args) {
-      const checked = [];
-      for (let i = 0; i < args.length; i += 1) {
-        const check = positions === "all" || positions.indexOf(i) !== -1;
-        checked[i] = check && !admit(args[i]) ? callOf(makeText, document, [""]) : args[i];
+    // Which arguments are nodes to check, decided now (before content runs), as a lookup that has
+    // no prototype: nothing content later puts on Array.prototype takes part in the decision.
+    const all = positions === "all";
+    const checks = bare(null);
+    if (!all) {
+      for (let i = 0; i < positions.length; i += 1) {
+        checks[positions[i]] = true;
       }
-      return original.apply(this, checked);
+    }
+    lock(proto, name, function (...args) {
+      const checked = listOf();
+      for (let i = 0; i < args.length; i += 1) {
+        pushTo(checked, (all || checks[i] === true) && !admit(args[i]) ? callOf(makeText, document, [""]) : args[i]);
+      }
+      return callOf(original, this, checked);
     });
   };
   for (const proto of [Node.prototype]) {
@@ -775,30 +818,48 @@ export const SHELL_RUNTIME = String.raw`(() => {
   wrapInsert(Element.prototype, "insertAdjacentElement", [1]);
   wrapInsert(Range.prototype, "insertNode", [0]);
   wrapInsert(Range.prototype, "surroundContents", [0]);
+  // The insertion methods the HTML-parse wrappers below call: the locked wrappers just installed
+  // (admit runs inside them), taken now so an element can't shadow them with an own property and
+  // no spread reads a replaceable array iterator; each is given a prototype-less argument list.
+  const replaceChildrenElIn = Element.prototype.replaceChildren;
+  const replaceChildrenFragIn = DocumentFragment.prototype.replaceChildren;
+  const replaceWithIn = Element.prototype.replaceWith;
+  const beforeIn = Element.prototype.before;
+  const afterIn = Element.prototype.after;
+  const prependIn = Element.prototype.prepend;
+  const appendIn = Element.prototype.append;
 
   // Markup parsed in place: parsed first in a detached element of the same kind (so it parses as it
   // would in place, and nothing in it is connected yet), guarded, then moved in.
   const accessor = (proto, name) => (proto ? Object.getOwnPropertyDescriptor(proto, name) : undefined);
   const contextFor = (element) => {
-    if (element === null || element.nodeType !== 1) {
-      return document.createElement("div");
+    if (typeOf(element) !== 1 || localNameOf === null || namespaceOf === null) {
+      return callOf(createIn, document, ["div"]);
     }
     // A fresh element of the same kind; a custom element's own class is not run again.
-    const name = element.localName.indexOf("-") === -1 ? element.localName : "div";
-    return document.createElementNS(element.namespaceURI, name);
+    const local = callOf(localNameOf, element, []);
+    const name = callOf(indexIn, local, ["-"]) === -1 ? local : "div";
+    return callOf(createNSIn, document, [callOf(namespaceOf, element, []), name]);
   };
   const innerHTMLs = [accessor(Element.prototype, "innerHTML"), accessor(typeof ShadowRoot === "function" ? ShadowRoot.prototype : null, "innerHTML")];
   const setInner = (innerHTMLs[0] || innerHTMLs[1]).set;
   const parseIn = (contextElement, html) => {
     const box = contextFor(contextElement);
-    setInner.call(box, String(html));
+    callOf(setInner, box, [NativeString(html)]);
     strip(box);
-    return Array.from(box.childNodes);
+    const children = childNodesOf === null ? box.childNodes : callOf(childNodesOf, box, []);
+    const nodes = listOf();
+    for (let i = 0, n = countOf(children); i < n; i += 1) {
+      pushTo(nodes, children[i]);
+    }
+    return nodes;
   };
-  [Element.prototype, typeof ShadowRoot === "function" ? ShadowRoot.prototype : null].forEach((proto, index) => {
+  const innerHTMLProtos = [Element.prototype, typeof ShadowRoot === "function" ? ShadowRoot.prototype : null];
+  for (let index = 0; index < innerHTMLProtos.length; index += 1) {
+    const proto = innerHTMLProtos[index];
     const descriptor = innerHTMLs[index];
     if (!proto || !descriptor || !descriptor.set) {
-      return;
+      continue;
     }
     Object.defineProperty(proto, "innerHTML", {
       configurable: false,
@@ -809,13 +870,14 @@ export const SHELL_RUNTIME = String.raw`(() => {
         // can't route a connected element past parseIn (and its strip) by posing as a template
         // whose markup goes in inert.
         if (typeOf(this) === 1 && localNameOf !== null && callOf(localNameOf, this, []) === "template") {
-          descriptor.set.call(this, html);
+          callOf(descriptor.set, this, [html]);
           return;
         }
-        this.replaceChildren(...parseIn(typeOf(this) === 11 ? this.host || null : this, html));
+        const forFragment = typeOf(this) === 11;
+        callOf(forFragment ? replaceChildrenFragIn : replaceChildrenElIn, this, parseIn(forFragment ? this.host || null : this, html));
       },
     });
-  });
+  }
   const outer = accessor(Element.prototype, "outerHTML");
   if (outer && outer.set) {
     Object.defineProperty(Element.prototype, "outerHTML", {
@@ -825,40 +887,52 @@ export const SHELL_RUNTIME = String.raw`(() => {
       set(html) {
         const parent = parentNodeOf === null ? this.parentNode : callOf(parentNodeOf, this, []);
         if (parent === null || typeOf(parent) === 9) {
-          outer.set.call(this, html);
+          callOf(outer.set, this, [html]);
           return;
         }
-        this.replaceWith(...parseIn(typeOf(parent) === 1 ? parent : null, html));
+        callOf(replaceWithIn, this, parseIn(typeOf(parent) === 1 ? parent : null, html));
       },
     });
   }
   const insertAdjacentHTML = Element.prototype.insertAdjacentHTML;
   lock(Element.prototype, "insertAdjacentHTML", function (position, html) {
-    insertAdjacentHTML.call(this, position, "");
-    const where = String(position).toLowerCase();
+    callOf(insertAdjacentHTML, this, [position, ""]);
+    const where = callOf(lowerOf, NativeString(position), []);
     const outside = where === "beforebegin" || where === "afterend";
     const nodes = parseIn(outside ? this.parentElement : this, html);
     if (where === "beforebegin") {
-      this.before(...nodes);
+      callOf(beforeIn, this, nodes);
     } else if (where === "afterbegin") {
-      this.prepend(...nodes);
+      callOf(prependIn, this, nodes);
     } else if (where === "beforeend") {
-      this.append(...nodes);
+      callOf(appendIn, this, nodes);
     } else {
-      this.after(...nodes);
+      callOf(afterIn, this, nodes);
     }
   });
   if (typeof Element.prototype.setHTML === "function") {
     lock(Element.prototype, "setHTML", function (html) {
-      this.innerHTML = String(html);
+      this.innerHTML = NativeString(html);
     });
   }
   // insertHTML parses markup outside these guards; copy, cut and paste reach the clipboard (P051).
   const REFUSED_COMMANDS = ["inserthtml", "copy", "cut", "paste"];
   const execCommand = Document.prototype.execCommand;
   if (typeof execCommand === "function") {
+    const refused = bare(null);
+    for (let i = 0; i < REFUSED_COMMANDS.length; i += 1) {
+      refused[REFUSED_COMMANDS[i]] = true;
+    }
     lock(Document.prototype, "execCommand", function (command, ...rest) {
-      return REFUSED_COMMANDS.indexOf(String(command).toLowerCase()) !== -1 ? false : execCommand.call(this, command, ...rest);
+      if (refused[callOf(lowerOf, NativeString(command), [])] === true) {
+        return false;
+      }
+      const args = listOf();
+      pushTo(args, command);
+      for (let i = 0; i < rest.length; i += 1) {
+        pushTo(args, rest[i]);
+      }
+      return callOf(execCommand, this, args);
     });
   }
 
@@ -911,14 +985,17 @@ export const SHELL_RUNTIME = String.raw`(() => {
     }
     lock(proto, name, function (...args) {
       beforeChange(this, (copy) => change(copy, args, original));
-      return original.apply(this, args);
+      return callOf(original, this, args);
     });
   };
   for (const name of ["setAttribute", "setAttributeNS", "toggleAttribute", "removeAttribute", "removeAttributeNS"]) {
-    guardMethod(Element.prototype, name, (copy, args, original) => original.apply(copy, args));
+    guardMethod(Element.prototype, name, (copy, args, original) => callOf(original, copy, args));
   }
   for (const name of ["setAttributeNode", "setAttributeNodeNS"]) {
-    guardMethod(Element.prototype, name, (copy, args) => copy.setAttributeNS(args[0].namespaceURI, args[0].name, args[0].value));
+    guardMethod(Element.prototype, name, (copy, args) => {
+      const part = attrParts(args[0]);
+      callOf(setAttributeNSIn, copy, [part.namespace, part.name, part.value]);
+    });
   }
   for (const [proto, name] of [[Attr.prototype, "value"], [Node.prototype, "nodeValue"], [Node.prototype, "textContent"]]) {
     const descriptor = accessor(proto, name);
@@ -932,10 +1009,10 @@ export const SHELL_RUNTIME = String.raw`(() => {
       set(value) {
         const owner = typeOf(this) === 2 && ownerElementOf !== null ? callOf(ownerElementOf, this, []) : null;
         if (owner !== null) {
-          const attribute = this;
-          beforeChange(owner, (copy) => copy.setAttributeNS(attribute.namespaceURI, attribute.name, String(value)));
+          const part = attrParts(this);
+          beforeChange(owner, (copy) => callOf(setAttributeNSIn, copy, [part.namespace, part.name, NativeString(value)]));
         }
-        descriptor.set.call(this, value);
+        callOf(descriptor.set, this, [value]);
       },
     });
   }
@@ -950,17 +1027,17 @@ export const SHELL_RUNTIME = String.raw`(() => {
       configurable: false,
       enumerable: descriptor.enumerable,
       get() {
-        const value = descriptor.get.call(this);
+        const value = callOf(descriptor.get, this, []);
         if (value !== null && typeof value === "object") {
-          owners.set(value, this);
+          callOf(weakMapSet, owners, [value, this]);
         }
         return value;
       },
       // relList = "…" forwards to the list's value, natively: guarded here instead.
       set: descriptor.set
         ? function (value) {
-            beforeChange(this, (copy) => descriptor.set.call(copy, value));
-            descriptor.set.call(this, value);
+            beforeChange(this, (copy) => callOf(descriptor.set, copy, [value]));
+            callOf(descriptor.set, this, [value]);
           }
         : undefined,
     });
@@ -981,8 +1058,8 @@ export const SHELL_RUNTIME = String.raw`(() => {
           enumerable: descriptor.enumerable,
           get: descriptor.get,
           set(value) {
-            beforeChange(this, (copy) => descriptor.set.call(copy, value));
-            descriptor.set.call(this, value);
+            beforeChange(this, (copy) => callOf(descriptor.set, copy, [value]));
+            callOf(descriptor.set, this, [value]);
           },
         });
       }
@@ -993,15 +1070,17 @@ export const SHELL_RUNTIME = String.raw`(() => {
     if (typeof original !== "function") {
       continue;
     }
+    const isSet = callOf(indexIn, name, ["set"]) === 0;
     lock(NamedNodeMap.prototype, name, function (...args) {
-      beforeChange(owners.get(this), (copy) => {
-        if (name.indexOf("set") === 0) {
-          copy.setAttributeNS(args[0].namespaceURI, args[0].name, args[0].value);
+      beforeChange(callOf(weakMapGet, owners, [this]), (copy) => {
+        if (isSet) {
+          const part = attrParts(args[0]);
+          callOf(setAttributeNSIn, copy, [part.namespace, part.name, part.value]);
         } else {
-          copy.removeAttribute(args[args.length - 1]);
+          callOf(removeAttributeIn, copy, [args[args.length - 1]]);
         }
       });
-      return original.apply(this, args);
+      return callOf(original, this, args);
     });
   }
   const tokens = typeof DOMTokenList === "function" ? DOMTokenList.prototype : null;
@@ -1009,9 +1088,9 @@ export const SHELL_RUNTIME = String.raw`(() => {
     const original = tokens && tokens[name];
     if (typeof original === "function") {
       lock(tokens, name, function (...args) {
-        const element = owners.get(this);
-        beforeChange(element, (copy) => original.apply(copy.relList, args));
-        return original.apply(this, args);
+        const element = callOf(weakMapGet, owners, [this]);
+        beforeChange(element, (copy) => callOf(original, copy.relList, args));
+        return callOf(original, this, args);
       });
     }
   }
@@ -1022,8 +1101,8 @@ export const SHELL_RUNTIME = String.raw`(() => {
       enumerable: tokenValue.enumerable,
       get: tokenValue.get,
       set(value) {
-        beforeChange(owners.get(this), (copy) => tokenValue.set.call(copy.relList, value));
-        tokenValue.set.call(this, value);
+        beforeChange(callOf(weakMapGet, owners, [this]), (copy) => callOf(tokenValue.set, copy.relList, [value]));
+        callOf(tokenValue.set, this, [value]);
       },
     });
   }

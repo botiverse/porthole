@@ -7180,27 +7180,40 @@ every engine closes WebRTC through CSP in every realm (then the trade-off is the
 
 **Decision.** Step 3's frame guard and its MutationObserver, the before-change backstop, and the
 synchronous insertion and HTML-parse guards (`strip`, `admit`, the insertion wrappers, `watched`,
-`beforeChange`, the `innerHTML`/`outerHTML`/attribute-value setter routing) read every DOM method
-and getter they use through references captured before any content runs, and call them only through
-`callOf` — the DOM `nodeType`, `isConnected`, `parentNode`, `shadowRoot`, `localName`,
-`namespaceURI`, `baseURI` getters; `querySelectorAll` (by node type), `remove`, `cloneNode`,
-`createTextNode`; the `NodeList` `length` getter; `WeakSet` `has`/`add`; `MutationObserver.observe`;
-the `MutationRecord` `addedNodes`/`type`/`target` getters; `Attr.ownerElement` — and walk live
-collections with indexed loops using the captured length getter, never `Array.from` or `for…of`.
-This extends P128's rule (which already read `matches`, `OWN_FRAME`'s inputs and the navigation
-getters this way) and P030's guard to every built-in the guard touches. Default behaviour is
-unchanged; no config, CSP, plan or manual moves.
+`beforeChange`, the `innerHTML`/`outerHTML`/`insertAdjacentHTML`/`execCommand` wrappers, the
+attribute-turn guards) read every built-in they use through references captured before any content
+runs, and call each one only through `callOf` — the DOM `nodeType`, `isConnected`, `parentNode`,
+`childNodes`, `shadowRoot`, `localName`, `namespaceURI`, `baseURI` getters; `querySelectorAll` (by
+node type), `remove`, `cloneNode`, `createTextNode`, `createElement(NS)`, `setAttributeNS`,
+`removeAttribute`, `attachShadow`, the kept insertion methods; the `NodeList` `length` getter;
+`WeakSet` `has`/`add`, `WeakMap` `get`/`set`; `MutationObserver.observe`; the `MutationRecord`
+`addedNodes`/`type`/`target` and `Attr` `name`/`namespaceURI`/`value`/`ownerElement` getters. It
+calls none of them as a member on an object content controls, and reaches none through
+`Function.prototype.call`/`apply`/`bind`: `callOf` is `Reflect.apply` itself, kept before content
+and invoked directly, so what the guard calls and with what is never seen by anything content later
+puts on `Function.prototype`. It also walks and decides without any replaceable `Array`/`Object`
+prototype method: live collections are indexed loops over the captured length getter (never
+`Array.from`, `for…of`, or the spread, whose `Array.prototype[Symbol.iterator]` is replaceable), the
+arguments it passes on are prototype-less lists given to `callOf`, and the positional decision in the
+insertion wrappers is a lookup built before content, not `Array.prototype.indexOf`. This extends
+P128's rule (which already read `matches`, `OWN_FRAME`'s inputs and the navigation getters this way)
+and P030's guard to every built-in the guard touches. Default behaviour is unchanged; no config,
+CSP, plan or manual moves.
 
 **Why.** The guard inspects objects content controls, so it must not depend on anything content can
-replace first; otherwise a page could make the guard overlook a frame-like element it must remove.
-The invariant — **the shell's guards call only built-ins captured before content runs** — is the
-property the fix establishes, and `test/shell.test.ts` asserts it generically (the guard captures
-each built-in once and its source makes no live `.querySelectorAll(`, `.remove()`, `Array.from(`,
-`.cloneNode(` or `document.createTextNode(` call on the nodes it inspects).
+replace first — a prototype method or getter, the global `Array.from` or array iterator,
+`Array.prototype.indexOf`, or `Function.prototype.apply`/`call`/`bind` — otherwise a page could make
+the guard overlook a frame-like element it must remove. The invariant — **the shell's guards call
+only built-ins captured before content runs** — is the property the fix establishes, and
+`test/shell.test.ts` asserts it generically (the guard captures each built-in once, `callOf` is
+`Reflect.apply` captured first, and the whole guard-and-wrapper region of the source makes no live
+`.call(`, `.apply(`, `.bind(`, `.querySelectorAll(`, `.remove()`, `Array.from(`, `.cloneNode(`,
+`.indexOf(`, `.forEach(` or `document.createTextNode(` call).
 
-**Rejected.** Capturing only `matches` (P128's extent): the rest of the guard still read replaceable
-built-ins. Leaving the walk on `Array.from`/`for…of`: `Array.from` and `Array.prototype[Symbol.
-iterator]` are replaceable too.
+**Rejected.** Capturing only `matches` (P128's extent), or only the walk's getters and methods: the
+insertion wrappers still reached built-ins through `.apply`, `.call` and `Array.prototype.indexOf`,
+which content can replace to the same end. Leaving the walk on `Array.from`/`for…of`/the spread:
+`Array.from` and `Array.prototype[Symbol.iterator]` are replaceable too.
 
 **Tested** (written 2026-11-04; run `pnpm check` and `pnpm test:leak` on Chromium, WebKit and
 Firefox before release). Unit: `test/shell.test.ts` (the capture table and the no-live-call

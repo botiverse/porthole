@@ -8,12 +8,13 @@ P-numbers below.
 
 - **The shell's guards call only built-ins captured before content runs (P129):** step 3's frame
   guard and its observer, the before-change backstop, and the synchronous insertion and HTML-parse
-  guards take every DOM method and getter they use (the `nodeType`, `isConnected`, `shadowRoot`,
-  `localName` and related getters, `querySelectorAll`, `remove`, `cloneNode`, `createTextNode`, the
-  `NodeList` length getter, `WeakSet` `has`/`add`, `MutationObserver.observe`, the `MutationRecord`
-  getters) from references kept before any content runs, and walk live collections with indexed
-  loops rather than `Array.from`/`for…of`. Extends P128 and P030 to every built-in the guard
-  touches. No default behaviour, CSP, plan or manual changes.
+  wrappers (`append`/`appendChild`/… , `innerHTML`/`outerHTML`/`insertAdjacentHTML`/`execCommand`,
+  the attribute-turn guards) take every built-in they use from references kept before any content
+  runs and call each only through `callOf`, which is `Reflect.apply` captured first — so nothing
+  content later puts on a DOM prototype, on `Array.from`/the array iterator/`Array.prototype.indexOf`,
+  or on `Function.prototype.apply`/`call`/`bind` takes part in the guard's reads, calls, walks or
+  decisions (live collections are indexed loops, arguments are prototype-less lists). Extends P128
+  and P030 to every built-in the guard touches. No default behaviour, CSP, plan or manual changes.
 - **A frame's size, at most once an animation frame (P127, audit 2026-10-29 C-1):** after a run's
   first size (taken at once, as before), the host takes the last `size-changed` a frame sent on the
   next animation frame, and drops a size the same as the last one taken, so content sending sizes as

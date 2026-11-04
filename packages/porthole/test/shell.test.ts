@@ -149,16 +149,22 @@ describe("the frame guard and its observer call only built-ins captured before c
     expect(end, to).toBeGreaterThan(start);
     return SHELL_RUNTIME.slice(start, end + to.length);
   };
-  const guardSource =
-    between("const guarded = (element) =>", "guardRoot(document);") +
-    between("const admit = (node) =>", 'wrapInsert(Range.prototype, "surroundContents", [0]);') +
-    between("const watched = (element) =>", "const guardMethod = (proto, name, change) =>");
+  // The whole guard-and-wrapper region: the capture table, the walk and observer, the insertion
+  // wrappers, the HTML-parse wrappers (innerHTML/outerHTML/insertAdjacentHTML/execCommand), the
+  // before-change backstop, and the attribute-turn guards — everything a running page can reach by
+  // calling a DOM API. None of it may invoke a built-in through a member the page can replace.
+  const wrapperRegion = between(
+    'const nodeTypeOf = getterOf(Node.prototype, "nodeType");',
+    'let root = document.getElementById("porthole-root");',
+  );
 
   test("captures each DOM built-in it uses, once, before content runs", () => {
     for (const capture of [
       'const nodeTypeOf = getterOf(Node.prototype, "nodeType");',
       'const isConnectedOf = getterOf(Node.prototype, "isConnected");',
+      'const parentNodeOf = getterOf(Node.prototype, "parentNode");',
       'const shadowRootOfNode = getterOf(Element.prototype, "shadowRoot");',
+      'const childNodesOf = getterOf(Node.prototype, "childNodes");',
       "const removeIn = Element.prototype.remove;",
       "const cloneNodeIn = Node.prototype.cloneNode;",
       "const queryAllElement = Element.prototype.querySelectorAll;",
@@ -167,8 +173,12 @@ describe("the frame guard and its observer call only built-ins captured before c
       'const nodeListLengthOf = getterOf(NodeList.prototype, "length");',
       "const weakSetHas = WeakSet.prototype.has;",
       "const weakSetAdd = WeakSet.prototype.add;",
+      "const weakMapGet = WeakMap.prototype.get;",
+      "const weakMapSet = WeakMap.prototype.set;",
       "const observeIn = MutationObserver.prototype.observe;",
       "const makeText = Document.prototype.createTextNode;",
+      "const setAttributeNSIn = Element.prototype.setAttributeNS;",
+      "const removeAttributeIn = Element.prototype.removeAttribute;",
       'const addedNodesOf = getterOf(recordProto, "addedNodes");',
       'const recordTypeOf = getterOf(recordProto, "type");',
       'const recordTargetOf = getterOf(recordProto, "target");',
@@ -177,25 +187,54 @@ describe("the frame guard and its observer call only built-ins captured before c
     }
   });
 
-  test("never calls a live DOM method or the global Array.from on the nodes it inspects", () => {
-    // Reached only through the captured references (callOf), never as a member call on content's
-    // own node; the captures themselves end in `;`, so `(` marks a live call.
+  test("callOf is Reflect.apply, captured before content runs", () => {
+    // callOf does not read Function.prototype's call/apply/bind: it is Reflect.apply itself, kept
+    // before content, and invoked directly. So replacing Function.prototype.apply/call changes
+    // nothing the guard does.
+    expect(SHELL_RUNTIME).toContain("const callOf = Reflect.apply;");
+    // Nothing above the capture is content; the binding is the runtime's first few statements.
+    expect(SHELL_RUNTIME.indexOf("const callOf = Reflect.apply;")).toBeLessThan(
+      SHELL_RUNTIME.indexOf("Object.getOwnPropertyNames(window)"),
+    );
+  });
+
+  test("never invokes a built-in through a member the page can replace", () => {
+    // In the whole guard-and-wrapper region, every built-in is reached through a captured
+    // reference and callOf; there is no live `.call(` / `.apply(` / `.bind(`, no array walk or
+    // decision through a replaceable prototype method (Array.from, for…of over live collections,
+    // .indexOf / .includes / .map / .filter / .forEach / Object.keys), and no DOM method called
+    // as a member on a node the page controls.
     for (const live of [
+      ".call(",
+      ".apply(",
+      ".bind(",
       ".querySelectorAll(",
       ".remove()",
       "Array.from(",
       ".cloneNode(",
       ".isConnected",
       "document.createTextNode(",
+      ".indexOf(",
+      ".includes(",
+      ".forEach(",
+      ".map(",
+      ".filter(",
+      "Object.keys(",
     ]) {
-      expect(guardSource, live).not.toContain(live);
+      expect(wrapperRegion, live).not.toContain(live);
     }
-    // It does reach them, through the captured table.
-    expect(guardSource).toContain("callOf(removeIn,");
-    expect(guardSource).toContain("callOf(observeIn, frameGuard,");
-    expect(guardSource).toContain("callOf(weakSetHas, guardedRoots,");
-    expect(guardSource).toContain("callOf(weakSetAdd, guardedRoots,");
-    expect(guardSource).toContain("callOf(cloneNodeIn, element,");
+    // It does reach them, through the captured table and callOf.
+    for (const used of [
+      "callOf(removeIn,",
+      "callOf(observeIn, frameGuard,",
+      "callOf(weakSetHas, guardedRoots,",
+      "callOf(weakSetAdd, guardedRoots,",
+      "callOf(cloneNodeIn, element,",
+      "callOf(original, this, args)",
+      "callOf(setAttributeNSIn,",
+    ]) {
+      expect(wrapperRegion, used).toContain(used);
+    }
   });
 });
 
