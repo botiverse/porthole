@@ -8,6 +8,13 @@ P-numbers below.
 
 - **Frame guard: broader coverage of DOM insertion and parsing entry points (P130),** listed in
   [docs/insertion-entry-points.md](docs/insertion-entry-points.md).
+- **Two default behaviours change (P130):**
+  - a page script that creates a frame-like element (`iframe`, `frame`, `frameset`, `object`,
+    `embed`, `portal`, `fencedframe`) with `createElement`/`createElementNS` now gets a
+    `NotSupportedError` there, so the rest of that script doesn't run; before, the element was
+    removed when it was inserted. `nestedFrames: "own"` is unchanged.
+  - in every default display, pasting or dropping formatted content into an editable element
+    (`contenteditable`, `designMode`) inserts its plain text only, so the formatting is lost.
 - **Conformance:** a frame-like element the shell refuses at creation (P130) counts as the guard
   holding, recorded as "refused at creation", not as a probe whose setup failed.
 - **The shell's guards call only built-ins captured before content runs (P129):** step 3's frame

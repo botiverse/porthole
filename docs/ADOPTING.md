@@ -588,7 +588,11 @@ entry: {
 
 ### A page's own nested frames (opt-in)
 
-By default the shell removes every nested frame content makes. `nestedFrames: "own"` (P128) on a
+By default the shell refuses every nested frame content makes: markup frames are removed, and a
+script that creates a frame-like element (`createElement("iframe")`, `object`, `embed`, …) gets a
+`NotSupportedError` at that line (P130), so tell your users' agents to build pages without them (the
+manual and the lint already do). Pasting or dropping formatted content into an editable element
+inserts its plain text only. `nestedFrames: "own"` (P128) on a
 kind's `options` lets a page keep an `<iframe>` of one of its version's own files (a relative
 `src`, served kinds) or with `srcdoc` (every kind), as Claude's Artifacts do; frames of other
 sites, `<object>` and `<embed>` stay out, and the manual and the lint say so:
