@@ -1,4 +1,5 @@
 import type { AnnotationReport } from "../annotate/types.ts";
+import type { FindReport } from "../find/types.ts";
 import type { DbRequest, DbResult } from "../runtime/db.ts";
 import type {
   ArtifactInfo,
@@ -32,6 +33,7 @@ export const CAPABILITY_NAMES = [
   "resize",
   "copyText",
   "annotate",
+  "find",
   // The capability runtime's own (P085, `config.runtime`): reached through `porthole.use`.
   "user",
   "comments",
@@ -84,7 +86,7 @@ export interface CapabilitySpec {
   /**
    * How content reaches it without the shell's global: the MCP Apps request (or Porthole's own,
    * `porthole/…`, where the standard has none), and the official App SDK's method for it, if any.
-   * Absent for what the shell does by itself (sizes, errors, annotations).
+   * Absent for what the shell does by itself (sizes, errors, annotations, find).
    */
   readonly request?: { readonly method: string; readonly sdk?: string };
   /**
@@ -175,6 +177,13 @@ export const CAPABILITIES = {
    * (it shares the realm): UI hints for the host, never permissions.
    */
   annotate: { defaultGates: [rate(120)], served: "event" },
+  /**
+   * Find in page (P131): the host's find bar asks the shell to find the person's words in the
+   * content and highlight them; the shell answers how many and which is current, and says when
+   * the person pressed the find shortcut in the frame. The query goes into the content's realm,
+   * which can read it; what the frame says back is the content's word: a find bar's numbers.
+   */
+  find: { defaultGates: [rate(120)], served: "event" },
   /** Who is viewing (P087): answered from the viewer the host gave the display. */
   user: { defaultGates: [rate(60)], served: "viewer", request: { method: "porthole/call" } },
   /** Opens the host's comment composer at the page's anchor (P090): write-only. */
@@ -221,6 +230,8 @@ export interface CapabilityArgs {
   readonly copyText: { readonly text: string };
   /** What the frame reported, once checked (`AnnotationReport`). */
   readonly annotate: AnnotationReport;
+  /** What the frame said unasked, once checked (`FindReport`): the shortcut, a changed count. */
+  readonly find: FindReport;
   readonly user: Readonly<Record<string, never>>;
   readonly comments: CommentRequest;
   readonly artifact: ArtifactRequest;
@@ -247,6 +258,7 @@ export interface CapabilityResults {
   /** Whether the text was copied. */
   readonly copyText: boolean;
   readonly annotate: undefined;
+  readonly find: undefined;
   readonly user: UserInfo;
   /** Whether the composer opened. Never a thread: content doesn't read comments (P090). */
   readonly comments: boolean;

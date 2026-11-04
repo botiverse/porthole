@@ -25,7 +25,10 @@ pages' shells, their pages, those pages' files and status pages is ever served, 
 display of the scope is same-origin with the shell (S3). Unreleased: P128 lets a host opt a config
 into a page's own nested frames (`nestedFrames: "own"`, off by default): its `srcdoc` frames and
 frames of its own files load and run, in realms the shell's hardening never reaches (WebRTC, the
-clipboard's guards: S1, S3); frames of other sites stay out.
+clipboard's guards: S1, S3); frames of other sites stay out. Unreleased, after 0.14.8: P131 adds find
+in page (`find`, off unless a config declares it): the host's find bar sends the person's query
+into the frame, where the content can read it, and takes counts, a box and the find shortcut back
+as the content's word (§6, §7 "Find in page"); no wall moves.
 
 ## 1. Two layers
 
@@ -191,6 +194,10 @@ Whatever the use:
   log them, show nothing for them. A url-mode app can still say any outcome (S6).
 - Take what the frame reports about annotations as UI hints (where to draw, what to open), never
   as permissions, and put nothing in a mark the page may not know (§7).
+- Under `find` (P131), know that the page reads every query your find bar sends it, and declare
+  `find` only for displays whose pages may learn what the person searches for (not a third-party
+  app with egress, S5, unless you accept it). Take its counts as the bar's numbers, and open your
+  bar on `findRequested`, nothing more (§7 "Find in page").
 - Guard a view that a frame's report opens or moves (`activated`, `anchored`, `selected`,
   `tracked`: a comment's bubble, a composer, a card that follows its mark, which the page moves
   at will, up to 60 times a second). The content chooses when it appears and where, so it can bring it
@@ -692,7 +699,8 @@ fallback (a sign-in prompt with a link out): that is the door's wall (P125).
 
 What it is: the presets, the isolation, the egress walls, the shell, the bridge for the display's
 host functions (`sendPrompt`, `openLink`, `downloadFile`, `copyText`, `callTool`, `readData`,
-`subscribeData`, `setModelContext`, `reportError`, annotations) and the generated manual.
+`subscribeData`, `setModelContext`, `reportError`, annotations, find in page) and the generated
+manual.
 
 **Porthole guarantees** the two lines of [§4](#4-two-lines-of-defense) for each display except url
 mode (S6), with S1–S5's open items: isolation, closed egress, the gates. One config generates the
@@ -854,6 +862,38 @@ own frame, below the shell, P111), so:
   box (better: beside it), guarded as §6 says, and never acts on it (no post, submit, discard,
   resolve, delete or reply); an anchor or a rect decides where something is drawn, never who may
   see or do anything.
+
+**Find in page** (`find`, P131). The host draws its own find bar; the shell finds the query in the
+content's text (annotations' text index) and highlights the matches in a layer of its own (a closed
+shadow root, as annotations' marks; never the CSS Custom Highlight API, which is the content's to
+read and rewrite). It shares its realm with the content, so:
+
+- *What content learns.* The query (`porthole/find.query`, posted into the frame's window), each
+  time the host sends it (a bar that searches as the person types sends their typing, key by key),
+  whether it is case-sensitive, each move to the next or previous match, when the bar clears, and
+  whether the host draws its own bar (`porthole/find.handled`). The query is the person's words,
+  typed in the host's own UI: a page with a way out (an MCP App's `connectDomains`, S5; egress a
+  host opened; a carrier such as `db`, `mayPassOn`) can send what the person searched for to its
+  author. That is why `find` is a capability a config declares, in no preset by default.
+- *What content can say.* Any count and current match (bounded: at most 1,000, whole numbers, the
+  current one among them), any box inside its frame (clamped to the frame's viewport, as
+  annotations' boxes, P104), and an `updated` while a query is shown. The host takes an answer only
+  for a query it asked, under that query's id; anything malformed is `"unsupported"` or a refusal.
+  A find bar's numbers, never a fact about the content.
+- *The shortcut.* While the host draws its own bar (`find.takeShortcut(true)`), the shell cancels
+  the browser's find on Cmd+F (Apple) or Ctrl+F (elsewhere) in the frame and says `requested`; a
+  page that handles the key itself keeps it. The page can say `requested` without the key, or keep
+  the key from the shell. The host takes it only while the platform says the page's focus is in
+  the frame (a press on it or a Tab put it there, P109; control `find-requested-focus`): a page
+  can't open the host's bar, which takes focus, while the person types in the host's composer, so
+  their next keys can't be steered into the bar and from there into the frame as queries. With the
+  person already in the frame the page has their keys anyway, and the bar moves the keyboard out of
+  it. Where a platform can't tell, it passes, as the gesture gate does. Open the bar, nothing more.
+- *What content can always do.* Hide, cover or move the layer, change its words so the count
+  changes, reach the layer through built-ins it patched (as annotations' layer, P105), or make the
+  search dear: linear in its text, at most 1,000 matches kept and 10,000 looked at, a query of 256
+  characters, found again at most once a second while the content changes; in an opaque frame that
+  shares the host's process that time is the host's too ([§5](#5-out-of-scope)).
 
 **The keyboard** (P109). Any display, of any kind and any version, can move the keyboard into its
 frame: `element.focus()` runs in the content's realm, where nothing of Porthole can stop it, and on

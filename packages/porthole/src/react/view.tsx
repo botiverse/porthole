@@ -253,6 +253,9 @@ function InstanceView(props: PortholeViewProps): ReactElement | null {
     ref,
     (): PortholeFrameHandle => ({
       clearSelection: () => shown.current?.clearSelection(),
+      find: (query, options) =>
+        shown.current?.find(query, options) ?? Promise.resolve("unsupported"),
+      clearFind: () => shown.current?.clearFind(),
     }),
     [],
   );

@@ -1,7 +1,13 @@
 import { createElement, createRef } from "react";
 import { renderToString } from "react-dom/server";
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { defineDisplays, portholeClient, presets } from "../src/index.ts";
+import {
+  defineDisplays,
+  portholeClient,
+  presets,
+  type FindOptions,
+  type FindResult,
+} from "../src/index.ts";
 import { tabLinkOf } from "../src/react/view.tsx";
 import {
   PortholeFrame,
@@ -83,7 +89,7 @@ describe("a page published before 0.7", () => {
 describe("trackedAnnotation and the handle (P118)", () => {
   const served = { served: true, contentSource: SOURCE, frameSources: [SOURCE], health: null };
 
-  it("types: a mark's id or null, and a ref to exactly `clearSelection`", () => {
+  it("types: a mark's id or null, and a ref to exactly `clearSelection`, `find` and `clearFind` (P131)", () => {
     expectTypeOf<PortholeFrameProps["trackedAnnotation"]>().toEqualTypeOf<
       string | null | undefined
     >();
@@ -91,8 +97,18 @@ describe("trackedAnnotation and the handle (P118)", () => {
       string | null | undefined
     >();
     // The display's calls, never the display: one method, nothing more.
-    expectTypeOf<keyof PortholeFrameHandle>().toEqualTypeOf<"clearSelection">();
+    expectTypeOf<keyof PortholeFrameHandle>().toEqualTypeOf<
+      "clearSelection" | "find" | "clearFind"
+    >();
     expectTypeOf<PortholeFrameHandle["clearSelection"]>().toEqualTypeOf<() => void>();
+    expectTypeOf<PortholeFrameHandle["find"]>().toEqualTypeOf<
+      (query: string, options?: FindOptions) => Promise<FindResult | "unsupported">
+    >();
+    expectTypeOf<PortholeFrameHandle["clearFind"]>().toEqualTypeOf<() => void>();
+    expectTypeOf<PortholeFrameProps["onFindRequested"]>().toEqualTypeOf<(() => void) | undefined>();
+    expectTypeOf<PortholeViewProps["onFindUpdated"]>().toEqualTypeOf<
+      ((result: FindResult) => void) | undefined
+    >();
     const ref = createRef<PortholeFrameHandle>();
     ({ displayId: "a", title: "A", display: "artifact", ref }) satisfies PortholeViewProps;
     ({ config: presets.artifact(), displayId: "a", title: "A", ref }) satisfies PortholeFrameProps;
@@ -108,10 +124,11 @@ describe("trackedAnnotation and the handle (P118)", () => {
     const frameRef = createRef<PortholeFrameHandle>();
     const frame = renderToString(
       createElement(PortholeFrame, {
-        config: presets.artifact({ capabilities: { annotate: {} } }),
+        config: presets.artifact({ capabilities: { annotate: {}, find: {} } }),
         displayId: "f",
         title: "F",
         trackedAnnotation: null,
+        onFindRequested: () => {},
         ref: frameRef,
       }),
     );

@@ -15,8 +15,9 @@ const KINDS: readonly EgressKind[] = ["connect", "script", "style", "img", "font
  * conversation and context (`sendPrompt`, `setModelContext`), and the host's data services, which
  * may be someone else's (`callTool`, `readData`, `subscribeData`: their arguments are the page's).
  * Not here: the person's own clipboard and disk (`copyText`, `downloadFile`), the host's own UI
- * (`annotate`, `resize`, `comments`: the composer is the person's, under the host's duties), and
- * what only reads (`user`). `reportError` is one where the config sends errors to the agent.
+ * (`annotate`, `find`, `resize`, `comments`: the composer is the person's, under the host's
+ * duties), and what only reads (`user`). `reportError` is one where the config sends errors to the
+ * agent.
  */
 const CARRIERS: readonly CapabilityName[] = [
   "db",

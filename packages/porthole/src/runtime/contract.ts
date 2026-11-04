@@ -171,7 +171,7 @@ export const RUNTIME_HOST_FUNCTIONS: readonly CapabilityName[] = [
 
 /**
  * Where a host function sits in the runtime: its capability and the methods it serves. Null for
- * the shell's own (`resize`, `reportError`, `annotate`), which content never calls by name.
+ * the shell's own (`resize`, `reportError`, `annotate`, `find`), which content never calls by name.
  */
 export function familyOf(
   serves: CapabilityName,

@@ -4,6 +4,28 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **Find in page (P131):** a host's own find bar over a display. Declare `find`
+  (`capabilities: { find: {} }`; in no preset by default) and use `display.find`: `query(query, {
+  direction, caseSensitive })` finds the query in the page's text (case-insensitive, any spacing,
+  what is drawn only, at most 1,000), highlights every match and the current one in a layer of the
+  shell's own, brings the current one into view, and resolves with `{ total, active, capped?,
+  rect? }` or `"unsupported"` (no `find`, an older shell, no answer in 3 s); `clear()`;
+  `takeShortcut(true)` makes Cmd+F or Ctrl+F in the frame open the host's bar (`findRequested`)
+  instead of the browser's, unless the page handles the key itself. `findUpdated` tells new numbers
+  when the page changes. React: `onFindRequested`, `onFindUpdated`, and `find`/`clearFind` on the
+  frame's handle. New exports: `FIND_METHODS`, `FIND_LIMITS`, `parseFindResult`,
+  `parseFindReport` and their types. The manual tells the agent people may search the page's words.
+- **Security (P131):** the page reads every query the host sends, so declare `find` only where it
+  may learn what the person searches for. What the frame says back is the page's word; the host
+  takes `findRequested` only with the page's focus in the frame (negative control
+  `find-requested-focus`). No CSP, sandbox or egress changes. A host must upgrade its content
+  server (the shell) for find to work; an older one answers `"unsupported"`. The find runtime and
+  the text index it shares with annotations call only built-ins captured before content runs,
+  through `callOf` (P129), and the find layer's nodes go in only through the guarded insertion
+  methods (P130; listed in [docs/insertion-entry-points.md](docs/insertion-entry-points.md)).
+
 ## 0.14.8
 
 - **Frame guard: broader coverage of DOM insertion and parsing entry points (P130),** listed in

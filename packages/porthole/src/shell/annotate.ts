@@ -1,3 +1,5 @@
+import { TEXT_INDEX } from "./text.ts";
+
 /**
  * Which marker a press on the shell's layer is for (P119), spliced into the runtime: the index of
  * `count` boxes (`boxAt(i)`, the markers' own boxes in the viewport, the last drawn on top), or -1.
@@ -107,101 +109,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const squash = (text) => String(text).replace(/\s+/g, " ").trim();
       const box = (rect) => ({ x: rect.left, y: rect.top, width: rect.width, height: rect.height });
 
-      // The document's text: the body's text nodes in order, without scripts, styles, templates.
-      const SKIPPED = { script: 1, style: 1, noscript: 1, template: 1 };
-      const textIndex = () => {
-        const nodes = [];
-        const starts = [];
-        const at = new Map();
-        let text = "";
-        const body = document.body;
-        if (body) {
-          const walker = createTreeWalker.call(document, body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
-            acceptNode: (node) => (node.nodeType === 1 ? (SKIPPED[node.localName] ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP) : NodeFilter.FILTER_ACCEPT),
-          });
-          for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-            at.set(node, nodes.length);
-            nodes.push(node);
-            starts.push(text.length);
-            text += node.nodeValue;
-          }
-        }
-        return { nodes, starts, at, text };
-      };
-      // A boundary point as an offset into the text: in a text node, where it is; elsewhere, the
-      // first text at or after it.
-      const offsetOf = (index, container, offset) => {
-        if (container.nodeType === 3 && index.at.has(container)) {
-          return index.starts[index.at.get(container)] + Math.min(offset, container.nodeValue.length);
-        }
-        const point = createRange.call(document);
-        try {
-          point.setStart(container, offset);
-        } catch (_) {
-          return index.text.length;
-        }
-        point.collapse(true);
-        let low = 0;
-        let high = index.nodes.length;
-        while (low < high) {
-          const middle = (low + high) >> 1;
-          if (point.comparePoint(index.nodes[middle], 0) >= 0) {
-            high = middle;
-          } else {
-            low = middle + 1;
-          }
-        }
-        return low < index.nodes.length ? index.starts[low] : index.text.length;
-      };
-      const pointAt = (index, at, end) => {
-        let low = 0;
-        let high = index.nodes.length - 1;
-        let found = -1;
-        while (low <= high) {
-          const middle = (low + high) >> 1;
-          if (index.starts[middle] <= at) {
-            found = middle;
-            low = middle + 1;
-          } else {
-            high = middle - 1;
-          }
-        }
-        if (found === -1) {
-          return null;
-        }
-        let node = index.nodes[found];
-        let offset = at - index.starts[found];
-        if (end) {
-          // An end at a node's very start belongs to the text before it.
-          while (offset === 0 && found > 0) {
-            found -= 1;
-            node = index.nodes[found];
-            offset = node.nodeValue.length;
-          }
-        } else {
-          while (offset >= node.nodeValue.length && found + 1 < index.nodes.length) {
-            found += 1;
-            node = index.nodes[found];
-            offset = 0;
-          }
-        }
-        return { node, offset: Math.min(offset, node.nodeValue.length) };
-      };
-      const rangeAt = (index, start, end) => {
-        const from = pointAt(index, start, false);
-        const to = pointAt(index, end, true);
-        if (from === null || to === null) {
-          return null;
-        }
-        const range = createRange.call(document);
-        try {
-          range.setStart(from.node, from.offset);
-          range.setEnd(to.node, to.offset);
-        } catch (_) {
-          return null;
-        }
-        return range;
-      };
+      ${TEXT_INDEX}
       const spanOf = (index, node) => {
         const range = createRange.call(document);
         range.selectNodeContents(node);

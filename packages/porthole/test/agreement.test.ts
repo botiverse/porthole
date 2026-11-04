@@ -84,6 +84,10 @@ const CASES: Record<string, PortholeConfig> = {
   }),
   "artifact page": presets.artifact(),
   "artifact page with comments": presets.artifact({ capabilities: { annotate: {} } }),
+  // Find in page (P131): the host's find bar, beside comments.
+  "artifact page with comments and find": presets.artifact({
+    capabilities: { annotate: {}, find: {} },
+  }),
   "a whole-page viewer (P065)": presets.artifact({
     isolation: "domain",
     contentOrigins: ["https://*.example-usercontent.com"],
@@ -170,7 +174,7 @@ const CASES: Record<string, PortholeConfig> = {
     contentOrigins: ["https://*.example-usercontent.com"],
     egress: LIBRARY_CDNS,
     runtime: "1",
-    capabilities: { annotate: {}, comments: {}, copyText: {}, openLink: {} },
+    capabilities: { annotate: {}, comments: {}, copyText: {}, find: {}, openLink: {} },
     layout: { kind: "fill" },
     errors: "host",
     storage: { scope: "this artifact, across its versions" },
@@ -229,6 +233,7 @@ const ENTRY_PREFIXES: {
   reportError: ["- Errors:"],
   copyText: ["- copyText(", "- Copying:"],
   annotate: ["- Comments:"],
+  find: ["- Find:"],
 };
 
 const GLOBALS = [
@@ -308,8 +313,9 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
         prefixesOf(config, name).some((prefix) => line.startsWith(prefix)),
       );
       expect(entry, `the manual has no entry for ${name}`).toBeDefined();
-      if (name === "annotate") {
-        // The person comments; the content calls nothing: its gates bound the frame's reports.
+      if (name === "annotate" || name === "find") {
+        // The person comments or finds; the content calls nothing: its gates bound the frame's
+        // reports.
         continue;
       }
       // A host function's gates, and under the runtime its methods' own (after the review).

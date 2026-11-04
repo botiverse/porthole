@@ -319,6 +319,7 @@ export {
 } from "./host/locator.ts";
 export type {
   AnnotationControls,
+  FindControls,
   DisplayControls,
   DisplayEvents,
   FrameBlock,
@@ -347,3 +348,14 @@ export {
   type TextQuoteSelector,
 } from "./annotate/types.ts";
 export { parseAnchor, parseRect, parseReport } from "./annotate/validate.ts";
+
+// Find in page (P131): the host's find bar, the frame's matches, and the host's checks on both.
+export {
+  FIND_LIMITS,
+  FIND_METHODS,
+  type FindDirection,
+  type FindOptions,
+  type FindReport,
+  type FindResult,
+} from "./find/types.ts";
+export { parseFindReport, parseFindResult } from "./find/validate.ts";

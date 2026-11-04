@@ -16,9 +16,12 @@ import {
   type CSSProperties,
   type ReactElement,
   type ReactNode,
+  type RefObject,
   type Ref,
 } from "react";
 import type { AnnotateMode, AnnotationMark, AnnotationReport } from "../annotate/types.ts";
+import type { FindOptions, FindResult } from "../find/types.ts";
+import { blankQuery, checkFindQuery } from "../find/validate.ts";
 import type {
   CallContext,
   CapabilityHandler,
@@ -495,7 +498,21 @@ export interface PortholeFrameHandle {
    * `"annotations"` (the core's call throws; this never does).
    */
   clearSelection(): void;
+  /**
+   * Finds `query` in the frame and highlights it (`find.query`, P131): where the matches stand,
+   * or `"unsupported"` (a config without `find`, an older shell, no answer in time, or no display
+   * running now). The query is kept: a display made later (the frame ran again, or neared the
+   * screen) finds it again and tells `onFindUpdated`. A query too long, or options that aren't
+   * these: `onHostError`, kind `"find"`, and `"unsupported"` (never a rejection). An empty query
+   * clears.
+   */
+  find(query: string, options?: FindOptions): Promise<FindResult | "unsupported">;
+  /** Removes the highlights and forgets the query (`find.clear`): the host's find bar closed. */
+  clearFind(): void;
 }
+
+/** The query a frame's handle last found (P131), for a display made after it. */
+type FindShown = { readonly query: string; readonly caseSensitive: boolean } | null;
 
 export interface PortholeFrameProps {
   /** A preset's config. Keep it stable (module scope or memoized): a new one remounts the frame. */
@@ -641,6 +658,18 @@ export interface PortholeFrameProps {
    * (`activated`). The content's word: UI hints, never permissions.
    */
   readonly onAnnotation?: (report: AnnotationReport) => void;
+  /**
+   * The person pressed Cmd+F or Ctrl+F in the frame (`findRequested`, P131): open the host's find
+   * bar. Given, it makes the frame's shortcut the host's (`find.takeShortcut(true)`): the
+   * browser's own find doesn't open there. The content's word (it can say it, or keep the key):
+   * open the bar, nothing more. Where the config declares `find`.
+   */
+  readonly onFindRequested?: () => void;
+  /**
+   * The matches of the query shown changed without the host asking (`findUpdated`, P131): the
+   * content changed, or a display made later found the handle's query again.
+   */
+  readonly onFindUpdated?: (result: FindResult) => void;
   /** Draws the placeholder instead of the default one. */
   readonly renderPlaceholder?: (props: PlaceholderProps) => ReactNode;
   readonly className?: string;
@@ -714,6 +743,8 @@ export function PortholeFrame(props: PortholeFrameProps): ReactElement {
   useLayoutEffect(() => {
     own.current = props;
   });
+  // The query the handle last found (P131): a display made after it finds it again.
+  const findShown = useRef<FindShown>(null);
   useImperativeHandle(
     handleRef,
     (): PortholeFrameHandle => ({
@@ -722,6 +753,28 @@ export function PortholeFrame(props: PortholeFrameProps): ReactElement {
         if (now !== null) {
           attempt(() => now.annotations.clearSelection(), own.current);
         }
+      },
+      find(query, options) {
+        try {
+          checkFindQuery(query, options);
+        } catch (error) {
+          hostFailed(own.current, error, "find");
+          return Promise.resolve("unsupported");
+        }
+        findShown.current = blankQuery(query)
+          ? null
+          : { query, caseSensitive: options?.caseSensitive === true };
+        const now = display.current;
+        return now === null
+          ? Promise.resolve("unsupported")
+          : now.find.query(query, options).catch((error: unknown) => {
+              hostFailed(own.current, error, "find");
+              return "unsupported" as const;
+            });
+      },
+      clearFind() {
+        findShown.current = null;
+        display.current?.find.clear();
       },
     }),
     [],
@@ -795,6 +848,7 @@ export function PortholeFrame(props: PortholeFrameProps): ReactElement {
           frame={props}
           page={page}
           running={running}
+          findShown={findShown}
           initialHeightPx={height}
           placeholder={placeholder}
           run={run}
@@ -811,6 +865,8 @@ interface MountProps {
   readonly page: PageState;
   /** Tells the frame which display runs now (null: none), for its handle. */
   readonly running: (display: DisplayHandle | null) => void;
+  /** The query the frame's handle last found (P131): a new display finds it again. */
+  readonly findShown: RefObject<FindShown>;
   readonly initialHeightPx: number;
   readonly placeholder: (props: PlaceholderProps) => ReactNode;
   readonly run: () => void;
@@ -823,6 +879,7 @@ function Mount({
   frame,
   page,
   running,
+  findShown,
   initialHeightPx,
   placeholder,
   run,
@@ -918,6 +975,12 @@ function Mount({
           return;
         case "annotation":
           frame.onAnnotation?.(detail as DisplayEvents["annotation"]);
+          return;
+        case "findRequested":
+          frame.onFindRequested?.();
+          return;
+        case "findUpdated":
+          frame.onFindUpdated?.(detail as DisplayEvents["findUpdated"]);
           return;
       }
     },
@@ -1045,6 +1108,8 @@ function Mount({
       "focusTaken",
       "outcome",
       "annotation",
+      "findRequested",
+      "findUpdated",
       "contentError",
       "hostError",
     ];
@@ -1063,6 +1128,21 @@ function Mount({
         display.annotations.track(wanted);
         following.current = wanted;
       }, first);
+    }
+    // Find (P131): the shortcut is the host's where it listens for it; the handle's query, found
+    // again in this display (its numbers told as an update: nobody awaits them).
+    if (first.onFindRequested !== undefined) {
+      display.find.takeShortcut(true);
+    }
+    const shownQuery = findShown.current;
+    if (shownQuery !== null) {
+      void display.find
+        .query(shownQuery.query, { caseSensitive: shownQuery.caseSensitive })
+        .then((result) => {
+          if (result !== "unsupported" && findShown.current === shownQuery) {
+            latest().onFindUpdated?.(result);
+          }
+        });
     }
     if (first.content !== undefined) {
       display.setContent(first.content, { partial: first.partial === true });
@@ -1095,6 +1175,7 @@ function Mount({
     locate,
     nonce,
     running,
+    findShown,
   ]);
 
   useEffect(() => {
@@ -1170,6 +1251,16 @@ function Mount({
       attempt(() => display.annotations.focus(id), latest());
     }
   }, [annotates, focusToken]);
+  // The frame's shortcut is the host's while it listens for it (P131).
+  const takesFind = frame.onFindRequested !== undefined;
+  const [mountTakesFind] = useState(takesFind);
+  const findFlipped = useRef(false);
+  useEffect(() => {
+    if (findFlipped.current || takesFind !== mountTakesFind) {
+      findFlipped.current = true;
+      handle.current?.find.takeShortcut(takesFind);
+    }
+  }, [takesFind, mountTakesFind]);
   // A flip or a restyle after the display was made: its first scheme and values went with it.
   const [mountScheme] = useState(scheme);
   const flipped = useRef(false);

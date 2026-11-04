@@ -1780,6 +1780,8 @@ export const SHELL_RUNTIME = String.raw`(() => {
 
   __ANNOTATE__
 
+  __FIND__
+
   if (plan.protocol !== "shell") {
     // A view that speaks for itself.
     if (typeof plan.document === "string") {
@@ -2213,7 +2215,8 @@ export const SHELL_RUNTIME = String.raw`(() => {
         }
         break;
       default:
-        if (data.id !== undefined) {
+        // Find's own request is answered by the find runtime (P131), where the config declares it.
+        if (data.id !== undefined && !(data.method === "porthole/find.query" && declared("find"))) {
           send({ id: data.id, error: { code: -32601, message: String(data.method) + " isn't offered here" } });
         }
         break;

@@ -1,6 +1,7 @@
 import { expect, type Frame, type Page } from "@playwright/test";
 import { embedderCsp } from "../src/index.ts";
 import type { ConfirmRequest } from "../src/bridge/types.ts";
+import type { FindOptions, FindResult } from "../src/find/types.ts";
 import type {
   ConformanceHost,
   LaunchedDisplay,
@@ -21,6 +22,12 @@ interface Reference {
   setTheme(id: number, scheme: "light" | "dark"): void;
   setContent(id: number, html: string, partial: boolean): void;
   annotate(id: number, operation: AnnotateOperation, argument?: unknown): string | null;
+  find(
+    id: number,
+    operation: FindOperation,
+    argument?: string | boolean,
+    options?: FindOptions,
+  ): Promise<FindResult | string | null>;
   destroy(id: number): void;
 }
 
@@ -34,10 +41,22 @@ export type AnnotateOperation =
   | "clear"
   | "clearSelection";
 
-/** A reference display, with its annotations (`annotate`) to drive. */
+/** The find controls the reference host exposes (`DisplayHandle.find`, P131). */
+export type FindOperation = "query" | "clear" | "takeShortcut";
+
+/** A reference display, with its annotations (`annotate`) and find in page (`find`) to drive. */
 export interface ReferenceDisplay extends LaunchedDisplay {
   /** Runs an annotation control; resolves with what it threw, or null. */
   annotate(operation: AnnotateOperation, argument?: unknown): Promise<string | null>;
+  /**
+   * Runs a find control: `query`'s answer (or what it threw), null for the others. `argument` is
+   * the query, or whether the host takes the shortcut.
+   */
+  find(
+    operation: FindOperation,
+    argument?: string | boolean,
+    options?: FindOptions,
+  ): Promise<FindResult | string | null>;
 }
 
 type WithReference = Window & { reference: Reference };
@@ -149,6 +168,12 @@ export function referenceHostWith(setup: {
             ([each, what, given]) =>
               (window as unknown as WithReference).reference.annotate(each, what, given),
             [id, operation, argument] as const,
+          ),
+        find: (operation, argument, options) =>
+          page.evaluate(
+            ([each, what, given, how]) =>
+              (window as unknown as WithReference).reference.find(each, what, given, how),
+            [id, operation, argument, options] as const,
           ),
       };
     },

@@ -793,6 +793,13 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     specs: [RUNTIME],
     fails: all("an asset opened on its own runs nothing, on a tab with the artifact's session"),
   },
+  // Find in page (P131): the find shortcut's word taken only with the page's focus in the frame.
+  "find-requested-focus": {
+    specs: ["leak/find.spec.ts"],
+    fails: all(
+      "a hostile page says the find shortcut was pressed while the person types in the host's composer: the host's find bar stays shut (P131)",
+    ),
+  },
 };
 
 // ---------------------------------------------------------------------------------------------

@@ -1,4 +1,10 @@
-import { createHost, type AnnotateMode, type AnnotationMark } from "../../src/index.ts";
+import {
+  createHost,
+  type AnnotateMode,
+  type AnnotationMark,
+  type FindOptions,
+  type FindResult,
+} from "../../src/index.ts";
 import type { CapabilityHandlers, ConfirmRequest } from "../../src/bridge/types.ts";
 import type { LaunchSpec, RecordedCall, RecordedEvent } from "../../src/conformance/index.ts";
 import type { DisplayEvents, DisplayHandle } from "../../src/host/types.ts";
@@ -29,6 +35,8 @@ const EVENTS: readonly (keyof DisplayEvents)[] = [
   "refused",
   "muted",
   "annotation",
+  "findRequested",
+  "findUpdated",
 ];
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -164,6 +172,32 @@ const reference = {
           break;
       }
       return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  },
+  /** Drives a display's find in page (`find`, P131); what it throws comes back as a string. */
+  async find(
+    id: number,
+    operation: "query" | "clear" | "takeShortcut",
+    argument?: string | boolean,
+    options?: FindOptions,
+  ): Promise<FindResult | string | null> {
+    const controls = displays.get(id)?.handle.find;
+    if (controls === undefined) {
+      return "no display";
+    }
+    try {
+      switch (operation) {
+        case "query":
+          return await controls.query(argument as string, options);
+        case "clear":
+          controls.clear();
+          return null;
+        case "takeShortcut":
+          controls.takeShortcut(argument === true);
+          return null;
+      }
     } catch (error) {
       return error instanceof Error ? error.message : String(error);
     }

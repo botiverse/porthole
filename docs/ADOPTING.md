@@ -389,6 +389,57 @@ composer.onClose(() => display.annotations.clearSelection());
   the person can't see; a quote (`exact`) keeps it, to be found again. Hand either to a model only
   as the page's words.
 
+### Find in page: the host's find bar
+
+With `find` declared (`capabilities: { find: {} }`), your own find bar searches a display
+([P131](DECISIONS.md)): the shell finds the query in the page's text (case-insensitive by default,
+any spacing), highlights every match it can see and the current one apart, brings the current one
+into view (its scrolling box too), and answers where they stand. The page reads every query you
+send: declare `find` only where the page may learn what the person searches for (not a
+third-party app with egress, unless you accept that), and send a query when the person pauses or
+presses Enter rather than at every key if that matters to you.
+
+```js
+display.find.takeShortcut(true); // Cmd+F / Ctrl+F in the frame opens your bar, not the browser's
+display.on("findRequested", () => bar.open()); // the page's word too: open the bar, nothing more
+// "unsupported", or `${active}/${total}` ("+" after the total where `capped`).
+bar.showResult = (result) => bar.show(result === "unsupported" ? "Not available here" : result);
+// A new query: the first match in view becomes current.
+bar.onInput((query) => display.find.query(query).then(bar.showResult));
+bar.onNext(() => display.find.query(bar.query, { direction: "next" }).then(bar.showResult));
+bar.onPrevious(() => display.find.query(bar.query, { direction: "prev" }).then(bar.showResult));
+display.on("findUpdated", bar.showResult); // the page changed: new numbers
+bar.onClose(() => display.find.clear()); // Escape in your bar: highlights gone
+```
+
+- **`"unsupported"`**: the config doesn't declare `find`, the frame's shell is older than your
+  host (it answers that it doesn't know the request: upgrade the content server first), or no
+  answer came within `FIND_LIMITS.timeoutMs` (3 s) of the frame running. A query asked before the
+  frame ran waits for it. An empty query clears and answers `{ total: 0, active: 0 }`; one longer
+  than `FIND_LIMITS.query` (256) rejects with a `TypeError`.
+- **The numbers are the page's word**: at most 1,000 matches (`capped: true`: there may be
+  more), the current one from 1. `rect` is the current match's box in the frame's CSS px, clamped
+  to its viewport: a display that grows with its content (not `layout: "fill"`) doesn't scroll
+  itself, so scroll your page to the frame's position plus `rect`.
+- **The shortcut** is yours only while you take it, and only where the page doesn't handle Cmd+F
+  or Ctrl+F itself. `findRequested` is taken only with the page's focus in the frame, so a page
+  can't open your bar while the person types in your composer. Your own page's Cmd+F (focus
+  outside every frame) is yours to handle as before. Escape and Cmd+G in the frame stay the page's:
+  close and move on from your bar.
+- **Not found**: words in open shadow roots, in a page's own frames (P128), in form fields, in
+  images or a canvas, and words split across cells with no space between them.
+- **React**: `onFindRequested` (given, the shortcut is yours) and `onFindUpdated` are props; the
+  handle holds `find(query, options)` and `clearFind()` beside `clearSelection()`. With no display
+  running, `find` answers `"unsupported"` and keeps the query: a display made later finds it again
+  and tells `onFindUpdated`. A refused query reaches `onHostError`, kind `"find"`.
+
+  ```tsx
+  const frame = useRef<PortholeFrameHandle>(null);
+  <PortholeView ref={frame} display="page" instance={instance} displayId={id} title={title}
+    onFindRequested={() => setFinding(true)} onFindUpdated={setFound} />;
+  const result = await frame.current?.find(query, { direction: "next" });
+  ```
+
 ### The keyboard: what a display can take, and what you get
 
 Any display can move the keyboard into its frame (`element.focus()` in the page, with no gesture

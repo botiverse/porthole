@@ -86,6 +86,23 @@ not recursion). A shadow root it finds is also watched by the observer.
 A drop or paste of formatted content into an editable region goes in as plain text. A text field
 (`<input>`, `<textarea>`) takes text only and is unaffected.
 
+## The shell's own layers
+
+Find in page (P131), where a config declares `find`, draws its highlights in a layer of the
+shell's own: an element over the content holding a closed shadow root. It adds no entry point. It
+is spliced into the runtime after step 3, takes the methods below then (the guarded ones), and
+calls each through `callOf` (P129), so its nodes go in the way any node does:
+
+- `createElement` for the layer, its style element and each highlight box (A21);
+- `attachShadow` for the layer's closed root (A19);
+- `appendChild` of the layer into the document element (A1);
+- `replaceChildren` on the shadow root and on the element holding the boxes (A2);
+- the `textContent` setter for its style sheet's text (A5).
+
+It inserts nothing into the content's own trees: no element wraps or splits the content's text, and
+the matches are ranges, read for their boxes only. Its inline styles are set through CSSOM
+(`cssText`), and it doesn't use the CSS Custom Highlight API.
+
 ## Under `nestedFrames: "own"`
 
 The configuration that keeps a page's own iframes (P128) keeps creation open: an `iframe` can be

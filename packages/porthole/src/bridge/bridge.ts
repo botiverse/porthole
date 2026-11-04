@@ -8,6 +8,8 @@ import {
 } from "../config/capabilities.ts";
 import type { AnnotationReport } from "../annotate/types.ts";
 import { parseReport } from "../annotate/validate.ts";
+import type { FindReport } from "../find/types.ts";
+import { parseFindReport } from "../find/validate.ts";
 import type { PortholeConfig } from "../config/schema.ts";
 import { callGates, effectiveGates } from "../compile/policy.ts";
 import { boundedText } from "./bounded-text.ts";
@@ -84,6 +86,8 @@ export type BridgeEvent =
   /** The shell cancelled a navigation of the frame to `url` (P080): the content's word. */
   | { readonly type: "navigationBlocked"; readonly url: string }
   | { readonly type: "annotation"; readonly report: AnnotationReport }
+  /** What the frame said of find in page unasked (P131), checked. */
+  | { readonly type: "find"; readonly report: FindReport }
   | { readonly type: "refused"; readonly capability: CapabilityName; readonly refusal: Refusal }
   | { readonly type: "muted" };
 
@@ -319,6 +323,7 @@ const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
       : null;
   },
   annotate: (args) => parseReport(args),
+  find: (args) => parseFindReport(args),
   // The runtime's own (P088-P090): their shapes and limits, before any gate.
   user: (args) => (args === undefined || isRecord(args) ? {} : null),
   comments: (args) => parseCommentRequest(args),
@@ -819,6 +824,8 @@ export function createBridge(options: BridgeOptions): DisplayBridge {
           onEvent({ type: "resize", ...size });
         } else if (capability === "annotate") {
           onEvent({ type: "annotation", report: args as CapabilityArgs["annotate"] });
+        } else if (capability === "find") {
+          onEvent({ type: "find", report: args as CapabilityArgs["find"] });
         } else {
           const report = args as CapabilityArgs["reportError"];
           if (report.navigationBlocked !== undefined) {

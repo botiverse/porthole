@@ -11,6 +11,8 @@ import {
   hasMarker,
   parseReport,
 } from "../annotate/validate.ts";
+import { FIND_LIMITS, FIND_METHODS, type FindReport, type FindResult } from "../find/types.ts";
+import { blankQuery, checkFindQuery, parseFindReport, parseFindResult } from "../find/validate.ts";
 import {
   createBridge,
   onceConsent,
@@ -46,6 +48,7 @@ import { checkDeclaration } from "../runtime/declaration.ts";
 import { parseViewer } from "../runtime/levels.ts";
 import type {
   AnnotationControls,
+  FindControls,
   HostErrorKind,
   DisplayEvents,
   DisplayHandle,
@@ -86,6 +89,12 @@ const REPORTS: Readonly<Record<string, AnnotationReport["type"]>> = {
   [ANNOTATE_METHODS.anchored]: "anchored",
   [ANNOTATE_METHODS.activated]: "activated",
   [ANNOTATE_METHODS.tracked]: "tracked",
+};
+
+/** What the frame says of find in page unasked (P131), by method. */
+const FIND_REPORTS: Readonly<Record<string, FindReport["type"]>> = {
+  [FIND_METHODS.requested]: "requested",
+  [FIND_METHODS.updated]: "updated",
 };
 
 /** The most `tracked` reports a second the host takes (P112): one per animation frame at 60 Hz. */
@@ -228,12 +237,94 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       // The mark the host follows (P112), and when it took each `tracked` in the last second.
       let tracking: string | null = null;
       const trackedTimes: number[] = [];
+      // Find in page (P131): the query shown (kept for every frame the display runs), whether the
+      // host takes the shortcut, and the queries asked and not yet answered.
+      const finds = config.capabilities.find !== undefined;
+      let findShown: { readonly query: string; readonly caseSensitive: boolean } | null = null;
+      let takesShortcut = false;
+      let nextFind = 1;
+      const findsAsked = new Map<
+        string,
+        {
+          readonly params: Record<string, unknown>;
+          readonly resolve: (result: FindResult | "unsupported") => void;
+          timer: ReturnType<typeof setTimeout>;
+        }
+      >();
       let handshaken = false;
       let storageTold = false;
       const toFrame = (method: string, params: Record<string, unknown>) => {
         if (handshaken && surface !== null) {
           surface.transport.send({ jsonrpc: "2.0", method, params });
         }
+      };
+      /** A query asked of the frame running now (once it finished its handshake). */
+      const sendFind = (id: string, params: Record<string, unknown>) => {
+        if (handshaken && surface !== null) {
+          surface.transport.send({ jsonrpc: "2.0", id, method: FIND_METHODS.query, params });
+        }
+      };
+      /** Answers a query asked, once; a later answer for it is dropped. */
+      const settleFind = (id: string, result: FindResult | "unsupported") => {
+        const asked = findsAsked.get(id);
+        if (asked !== undefined) {
+          findsAsked.delete(id);
+          clearTimeout(asked.timer);
+          asked.resolve(result);
+        }
+      };
+      /**
+       * Asks the frame a query: at once where one finished its handshake, else when one does
+       * (its load's time and the answer's). No answer in time, an error (an older shell's "isn't
+       * offered here"), or one malformed: `"unsupported"`.
+       */
+      const askFind = (params: Record<string, unknown>): Promise<FindResult | "unsupported"> =>
+        new Promise((resolve) => {
+          const id = `porthole-find-${nextFind++}`;
+          const wait = handshaken ? FIND_LIMITS.timeoutMs : timeoutMs + FIND_LIMITS.timeoutMs;
+          findsAsked.set(id, {
+            params,
+            resolve,
+            timer: setTimeout(() => settleFind(id, "unsupported"), wait),
+          });
+          sendFind(id, params);
+        });
+      /**
+       * A new frame's find (after its handshake): the shortcut, the queries still waiting (in the
+       * order asked), or, where none waits, the query shown found again, its numbers told as
+       * `findUpdated`. A query cleared since it was asked is answered as nothing found, unasked.
+       */
+      const giveFind = () => {
+        if (!finds) {
+          return;
+        }
+        if (takesShortcut) {
+          toFrame(FIND_METHODS.handled, { handled: true });
+        }
+        if (findShown === null) {
+          for (const id of findsAsked.keys()) {
+            settleFind(id, { total: 0, active: 0 });
+          }
+          return;
+        }
+        if (findsAsked.size > 0) {
+          for (const [id, asked] of findsAsked) {
+            clearTimeout(asked.timer);
+            asked.timer = setTimeout(() => settleFind(id, "unsupported"), FIND_LIMITS.timeoutMs);
+            sendFind(id, asked.params);
+          }
+          return;
+        }
+        const shown = findShown;
+        void askFind({
+          query: shown.query,
+          direction: "none",
+          caseSensitive: shown.caseSensitive,
+        }).then((result) => {
+          if (result !== "unsupported" && findShown === shown) {
+            emit("findUpdated", result);
+          }
+        });
       };
       const giveAnnotations = () => {
         if (marks.length > 0) {
@@ -405,6 +496,98 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         }
         void through.call("annotate", withinFrame(report));
       };
+      /**
+       * What the frame says of find (P131): an answer to a query asked (its own id only, checked,
+       * its box clamped to the frame), or a report unasked, taken only while the host asked for it
+       * (the shortcut while the host takes it and the page's focus is in the frame; a changed count
+       * while a query is shown), then through the bridge's gates.
+       */
+      const onFind = (
+        raw: unknown,
+        through: HostFunctionBridge,
+        focused: () => boolean | undefined,
+      ) => {
+        if (!isRecord(raw) || raw.jsonrpc !== "2.0") {
+          return;
+        }
+        if (typeof raw.method !== "string") {
+          // Its own entries only: an id the host never asked is no answer.
+          const id = raw.id;
+          if (typeof id !== "string" || !findsAsked.has(id)) {
+            return;
+          }
+          const result = "error" in raw || !("result" in raw) ? null : parseFindResult(raw.result);
+          settleFind(
+            id,
+            result === null
+              ? "unsupported"
+              : result.rect === undefined
+                ? result
+                : { ...result, rect: clampRect(result.rect, frameViewport()) },
+          );
+          return;
+        }
+        if ("id" in raw) {
+          return;
+        }
+        const type = Object.hasOwn(FIND_REPORTS, raw.method) ? FIND_REPORTS[raw.method] : undefined;
+        if (type === undefined) {
+          return;
+        }
+        const report = parseFindReport({ ...(isRecord(raw.params) ? raw.params : {}), type });
+        if (report === null) {
+          void through.call("find", null);
+          return;
+        }
+        if (report.type === "requested") {
+          // The person's key in the frame: the page's focus is there (where the platform can tell),
+          // so a page can't bring the host's find bar up while the person types beside it.
+          let inFrame: boolean | undefined;
+          try {
+            inFrame = focused();
+          } catch {
+            inFrame = false;
+          }
+          if (!takesShortcut || inFrame === false) {
+            return;
+          }
+        } else if (findShown === null) {
+          return;
+        }
+        void through.call("find", report);
+      };
+      const find: FindControls = {
+        query(query, given) {
+          if (!finds) {
+            return Promise.resolve("unsupported");
+          }
+          let checked: ReturnType<typeof checkFindQuery>;
+          try {
+            checked = checkFindQuery(query, given);
+          } catch (error) {
+            return Promise.reject(error);
+          }
+          if (blankQuery(checked.query)) {
+            findShown = null;
+            toFrame(FIND_METHODS.clear, {});
+            return Promise.resolve({ total: 0, active: 0 });
+          }
+          findShown = { query: checked.query, caseSensitive: checked.caseSensitive };
+          return askFind({ ...checked });
+        },
+        clear() {
+          if (finds) {
+            findShown = null;
+            toFrame(FIND_METHODS.clear, {});
+          }
+        },
+        takeShortcut(take) {
+          if (finds) {
+            takesShortcut = take;
+            toFrame(FIND_METHODS.handled, { handled: takesShortcut });
+          }
+        },
+      };
       const needsAnnotate = (operation: string) => {
         if (!annotates) {
           throw new TypeError(`annotations.${operation}: the config doesn't declare annotate`);
@@ -549,6 +732,14 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             return;
           case "annotation":
             emit("annotation", event.report);
+            return;
+          case "find":
+            if (event.report.type === "requested") {
+              emit("findRequested", undefined);
+            } else {
+              const { type: _type, ...result } = event.report;
+              emit("findUpdated", result);
+            }
             return;
         }
       };
@@ -745,6 +936,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         if (annotates) {
           created.transport.listen((raw) => onAnnotation(raw, opening));
         }
+        if (finds) {
+          created.transport.listen((raw) => onFind(raw, opening, () => created.focused?.()));
+        }
         // Whether the page used storage (P111): once per run, the page's word (a count, no more).
         created.transport.listen((raw) => {
           if (
@@ -777,6 +971,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
               if (!handshaken) {
                 handshaken = true;
                 giveAnnotations();
+                giveFind();
               }
               emit("initialized", undefined);
             }
@@ -879,6 +1074,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       const controls = {
         displayId: mount.displayId,
         annotations,
+        find,
         setTheme(next: ColorScheme) {
           if (themeless) {
             return;
@@ -922,6 +1118,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           destroyed = true;
           stop();
           listeners.clear();
+          for (const id of findsAsked.keys()) {
+            settleFind(id, "unsupported");
+          }
         },
       };
 
