@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.14.9
 
 - **Find in page (P131):** a host's own find bar over a display. Declare `find`
   (`capabilities: { find: {} }`; in no preset by default) and use `display.find`: `query(query, {
