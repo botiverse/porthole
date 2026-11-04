@@ -6,6 +6,18 @@ P-numbers below.
 
 ## Unreleased
 
+- **The shell's guards call only built-ins captured before content runs (P129):** step 3's frame
+  guard and its observer, the before-change backstop, and the synchronous insertion and HTML-parse
+  wrappers (`append`/`appendChild`/… , `innerHTML`/`outerHTML`/`insertAdjacentHTML`/`execCommand`,
+  the attribute-turn guards) take every built-in they use from references kept before any content
+  runs and call each only through `callOf`, which is `Reflect.apply` captured first — so nothing
+  content later puts on a DOM prototype, on `Array.from`/the array iterator/`Array.prototype.indexOf`,
+  or on `Function.prototype.apply`/`call`/`bind` takes part in the guard's reads, calls, walks or
+  decisions (live collections are indexed loops, arguments are prototype-less lists). Each name or
+  value a guard inspects and then forwards (a command name, an attribute name or value, a token) is
+  read once and that same reading is both checked and acted on, so a value that converts one way
+  when checked and another when the platform reads it can't slip past. Extends P128 and P030 to
+  every built-in the guard touches. No default behaviour, CSP, plan or manual changes.
 - **A frame's size, at most once an animation frame (P127, audit 2026-10-29 C-1):** after a run's
   first size (taken at once, as before), the host takes the last `size-changed` a frame sent on the
   next animation frame, and drops a size the same as the last one taken, so content sending sizes as

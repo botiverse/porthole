@@ -137,6 +137,127 @@ describe("a page's own frames, as the shell keeps them (P128)", () => {
   });
 });
 
+describe("the frame guard and its observer call only built-ins captured before content runs", () => {
+  // The portion of the runtime that walks and prunes content-controlled subtrees: the synchronous
+  // guard, the mutation observer, the before-change backstop, and the insertion wrappers. A page
+  // can replace any prototype method or getter it names (and the global Array.from) before it
+  // inserts a subtree, so the guard must read none of them live off the nodes it inspects.
+  const between = (from: string, to: string): string => {
+    const start = SHELL_RUNTIME.indexOf(from);
+    const end = SHELL_RUNTIME.indexOf(to, start);
+    expect(start, from).toBeGreaterThanOrEqual(0);
+    expect(end, to).toBeGreaterThan(start);
+    return SHELL_RUNTIME.slice(start, end + to.length);
+  };
+  // The whole guard-and-wrapper region: the capture table, the walk and observer, the insertion
+  // wrappers, the HTML-parse wrappers (innerHTML/outerHTML/insertAdjacentHTML/execCommand), the
+  // before-change backstop, and the attribute-turn guards — everything a running page can reach by
+  // calling a DOM API. None of it may invoke a built-in through a member the page can replace.
+  const wrapperRegion = between(
+    'const nodeTypeOf = getterOf(Node.prototype, "nodeType");',
+    'let root = document.getElementById("porthole-root");',
+  );
+
+  test("captures each DOM built-in it uses, once, before content runs", () => {
+    for (const capture of [
+      'const nodeTypeOf = getterOf(Node.prototype, "nodeType");',
+      'const isConnectedOf = getterOf(Node.prototype, "isConnected");',
+      'const parentNodeOf = getterOf(Node.prototype, "parentNode");',
+      'const shadowRootOfNode = getterOf(Element.prototype, "shadowRoot");',
+      'const childNodesOf = getterOf(Node.prototype, "childNodes");',
+      "const removeIn = Element.prototype.remove;",
+      "const cloneNodeIn = Node.prototype.cloneNode;",
+      "const queryAllElement = Element.prototype.querySelectorAll;",
+      "const queryAllDocument = Document.prototype.querySelectorAll;",
+      "const queryAllFragment = DocumentFragment.prototype.querySelectorAll;",
+      'const nodeListLengthOf = getterOf(NodeList.prototype, "length");',
+      "const weakSetHas = WeakSet.prototype.has;",
+      "const weakSetAdd = WeakSet.prototype.add;",
+      "const weakMapGet = WeakMap.prototype.get;",
+      "const weakMapSet = WeakMap.prototype.set;",
+      "const observeIn = MutationObserver.prototype.observe;",
+      "const makeText = Document.prototype.createTextNode;",
+      "const setAttributeNSIn = Element.prototype.setAttributeNS;",
+      "const removeAttributeIn = Element.prototype.removeAttribute;",
+      'const addedNodesOf = getterOf(recordProto, "addedNodes");',
+      'const recordTypeOf = getterOf(recordProto, "type");',
+      'const recordTargetOf = getterOf(recordProto, "target");',
+    ]) {
+      expect(SHELL_RUNTIME, capture).toContain(capture);
+    }
+  });
+
+  test("callOf is Reflect.apply, captured before content runs", () => {
+    // callOf does not read Function.prototype's call/apply/bind: it is Reflect.apply itself, kept
+    // before content, and invoked directly. So replacing Function.prototype.apply/call changes
+    // nothing the guard does.
+    expect(SHELL_RUNTIME).toContain("const callOf = Reflect.apply;");
+    // Nothing above the capture is content; the binding is the runtime's first few statements.
+    expect(SHELL_RUNTIME.indexOf("const callOf = Reflect.apply;")).toBeLessThan(
+      SHELL_RUNTIME.indexOf("Object.getOwnPropertyNames(window)"),
+    );
+  });
+
+  test("never invokes a built-in through a member the page can replace", () => {
+    // In the whole guard-and-wrapper region, every built-in is reached through a captured
+    // reference and callOf; there is no live `.call(` / `.apply(` / `.bind(`, no array walk or
+    // decision through a replaceable prototype method (Array.from, for…of over live collections,
+    // .indexOf / .includes / .map / .filter / .forEach / Object.keys), and no DOM method called
+    // as a member on a node the page controls.
+    for (const live of [
+      ".call(",
+      ".apply(",
+      ".bind(",
+      ".querySelectorAll(",
+      ".remove()",
+      "Array.from(",
+      ".cloneNode(",
+      ".isConnected",
+      "document.createTextNode(",
+      ".indexOf(",
+      ".includes(",
+      ".forEach(",
+      ".map(",
+      ".filter(",
+      "Object.keys(",
+    ]) {
+      expect(wrapperRegion, live).not.toContain(live);
+    }
+    // It does reach them, through the captured table and callOf.
+    for (const used of [
+      "callOf(removeIn,",
+      "callOf(observeIn, frameGuard,",
+      "callOf(weakSetHas, guardedRoots,",
+      "callOf(weakSetAdd, guardedRoots,",
+      "callOf(cloneNodeIn, element,",
+      "callOf(original, this, fixed)",
+      "callOf(setAttributeNSIn,",
+    ]) {
+      expect(wrapperRegion, used).toContain(used);
+    }
+  });
+
+  test("forwards only values it has already pinned, so a name or value is read once", () => {
+    // A guard that inspects a name or value and then forwards the argument must forward the same
+    // reading it checked: an argument whose toString answers differently the second time cannot
+    // be checked as one thing and acted on as another. Every such guard pins the argument through
+    // `once` (an object or function becomes its string here, before the check) and forwards that.
+    expect(SHELL_RUNTIME).toContain(
+      'const once = (value) => (value !== null && (typeof value === "object" || typeof value === "function") ? NativeString(value) : value);',
+    );
+    // The command the refusal checks is the command it runs (read once).
+    expect(wrapperRegion).toContain("const cmd = NativeString(command);");
+    expect(wrapperRegion).toContain("pushTo(args, cmd);");
+    // The attribute and token guards pin their arguments, then both check the copy and act on the
+    // real element with that pinned list — never with the raw argument a second time.
+    expect(wrapperRegion).toContain("pushTo(fixed, pin[i] === true ? once(args[i]) : args[i]);");
+    expect(wrapperRegion).toContain("pushTo(fixed, once(args[i]));");
+    expect(wrapperRegion).toContain("const v = once(value);");
+    // The before-change backstop and the native call take the same fixed list.
+    expect(wrapperRegion).toContain("beforeChange(this, (copy) => change(copy, fixed, original));");
+  });
+});
+
 describe("the shell document", () => {
   const compiled = compile(presets.inlineWidget({ capabilities: { sendPrompt: {} } }));
   const html = compiled.shellDocument({ origins: [ORIGIN], title: 'A "chart" </title><script>' });

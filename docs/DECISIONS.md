@@ -7086,7 +7086,10 @@ page's `frame-src`), for configs that opt in only.
   the app's, so the set's pages frame its files (`frame-ancestors` names every ancestor). The
   ticket's answer, the shell's own pages and every other display keep the app's origins alone.
   Every page of a set is served in the shell (P081), so a page of the set in a child frame has its
-  own shell, hardened: it takes messages only from the host origins, which its parent isn't.
+  own shell: it takes messages only from the host origins, which its parent isn't. That child
+  realm is same-origin with its parent, which is content, so the parent can reach the child's
+  built-ins before the child's shell captures them; the shell's "captured before content runs"
+  hardening (P129) is not guaranteed there, which is part of what opting in gives up (below).
 - **The lint.** `nested-frame` stays an error; under `"own"` it names only what never loads: a
   `<frame>`, `<object>` or `<embed>`, an iframe of another site (any scheme, `//`), of the origin's
   root (`/`), or with neither `src` nor `srcdoc`, and one with a relative `src` where there are no
@@ -7175,3 +7178,65 @@ names it.
 **Revisit when** a host asks for frames of other origins (an allowlist, with its own channel
 accepted), a nested page (P111) needs frames of its own, Claude's Artifacts change their rule, or
 every engine closes WebRTC through CSP in every realm (then the trade-off is the clipboard's only).
+
+## P129 · 2026-11-04 · The shell's guards call only built-ins captured before content runs · Accepted
+
+**Decision.** Step 3's frame guard and its MutationObserver, the before-change backstop, and the
+synchronous insertion and HTML-parse guards (`strip`, `admit`, the insertion wrappers, `watched`,
+`beforeChange`, the `innerHTML`/`outerHTML`/`insertAdjacentHTML`/`execCommand` wrappers, the
+attribute-turn guards) read every built-in they use through references captured before any content
+runs, and call each one only through `callOf` — the DOM `nodeType`, `isConnected`, `parentNode`,
+`childNodes`, `shadowRoot`, `localName`, `namespaceURI`, `baseURI` getters; `querySelectorAll` (by
+node type), `remove`, `cloneNode`, `createTextNode`, `createElement(NS)`, `setAttributeNS`,
+`removeAttribute`, `attachShadow`, the kept insertion methods; the `NodeList` `length` getter;
+`WeakSet` `has`/`add`, `WeakMap` `get`/`set`; `MutationObserver.observe`; the `MutationRecord`
+`addedNodes`/`type`/`target` and `Attr` `name`/`namespaceURI`/`value`/`ownerElement` getters. It
+calls none of them as a member on an object content controls, and reaches none through
+`Function.prototype.call`/`apply`/`bind`: `callOf` is `Reflect.apply` itself, kept before content
+and invoked directly, so what the guard calls and with what is never seen by anything content later
+puts on `Function.prototype`. It also walks and decides without any replaceable `Array`/`Object`
+prototype method: live collections are indexed loops over the captured length getter (never
+`Array.from`, `for…of`, or the spread, whose `Array.prototype[Symbol.iterator]` is replaceable), the
+arguments it passes on are prototype-less lists given to `callOf`, and the positional decision in the
+insertion wrappers is a lookup built before content, not `Array.prototype.indexOf`. This extends
+P128's rule (which already read `matches`, `OWN_FRAME`'s inputs and the navigation getters this way)
+and P030's guard to every built-in the guard touches. Default behaviour is unchanged; no config,
+CSP, plan or manual moves.
+
+**Why.** The guard inspects objects content controls, so it must not depend on anything content can
+replace first — a prototype method or getter, the global `Array.from` or array iterator,
+`Array.prototype.indexOf`, or `Function.prototype.apply`/`call`/`bind` — otherwise a page could make
+the guard overlook a frame-like element it must remove. The invariant — **the shell's guards call
+only built-ins captured before content runs** — is the property the fix establishes, and
+`test/shell.test.ts` asserts it generically (the guard captures each built-in once, `callOf` is
+`Reflect.apply` captured first, and the whole guard-and-wrapper region of the source makes no live
+`.call(`, `.apply(`, `.bind(`, `.querySelectorAll(`, `.remove()`, `Array.from(`, `.cloneNode(`,
+`.indexOf(`, `.forEach(` or `document.createTextNode(` call).
+
+**Rejected.** Capturing only `matches` (P128's extent), or only the walk's getters and methods: the
+insertion wrappers still reached built-ins through `.apply`, `.call` and `Array.prototype.indexOf`,
+which content can replace to the same end. Leaving the walk on `Array.from`/`for…of`/the spread:
+`Array.from` and `Array.prototype[Symbol.iterator]` are replaceable too. Checking a value and then
+forwarding the original argument: the platform reads the argument again, so a value that converts
+to a benign string when checked and a guarded one when the platform reads it would slip past; each
+inspected name or value is pinned to a single conversion (`once`) and that reading is both checked
+and forwarded.
+
+**Where this does not reach.** The invariant is for a shell in its own realm, which runs first
+there. Under `nestedFrames: "own"` (P128), a kept child frame is a realm the shell shares with
+content that can reach it first: a page of a set in a child frame is same-origin with its parent,
+and the parent is content, so it can touch that realm's built-ins before the child's shell captures
+them. There the "captured before content runs" ordering is not guaranteed — as P128 records, a
+config that opts in gives up the shell's defenses inside its own frames and stands on the CSP there.
+This fix changes nothing about that trade-off; it holds for the top-level shell every config has.
+
+**Tested** (written 2026-11-04; run `pnpm check` and `pnpm test:leak` on Chromium, WebKit and
+Firefox before release). Unit: `test/shell.test.ts` (the capture table and the no-live-call
+invariant). The leak suite's frame and hint probes (item 4, the served "own" cases) stand as the
+behavioural check; a probe that replaces each captured built-in before inserting a nested frame,
+with its negative control, belongs with the leak suite when the egress-probe harness is next
+extended.
+
+**Revisit when** a new built-in is used anywhere in the guard or a new guarded channel is added
+(capture it the same way and extend the invariant test), or the leak suite gains the
+per-built-in replacement probe.

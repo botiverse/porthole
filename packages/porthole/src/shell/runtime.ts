@@ -90,6 +90,11 @@ export const OWN_FRAME = String.raw`(hasSrcdoc, src, filesBase, resolve) => {
 export const SHELL_RUNTIME = String.raw`(() => {
   "use strict";
   const plan = __PLAN__;
+  // Every built-in a guard calls is called through callOf, which is Reflect.apply itself, kept
+  // now, before any content runs: a direct call of it never reads Function.prototype's call,
+  // apply or bind, so nothing content later puts there sees what the shell calls or with what.
+  const callOf = Reflect.apply;
+  const hasOwn = Object.prototype.hasOwnProperty;
   // A page that came with files, answered at its ticket's address (P083): its own address first,
   // before anything loads, so its relative addresses are its files' (and the ticket leaves).
   if (plan.files && typeof plan.files.address === "string" && location.href !== plan.files.address) {
@@ -100,7 +105,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // The embedding page's nonce, where it gave one (a srcdoc frame inherits its policy): every
   // script the shell runs for the content carries it.
   const nonce = document.currentScript && document.currentScript.nonce ? document.currentScript.nonce : "";
-  const declared = (name) => Object.prototype.hasOwnProperty.call(plan.capabilities, name);
+  const declared = (name) => callOf(hasOwn, plan.capabilities, [name]);
   // Fixed in place: content can neither restore what is removed nor replace what is wrapped. A
   // property something fixed before the shell ran (an extension, an engine's own) can't be: each
   // such name goes on the shell's own script element (data-porthole-unfixed, for a test or a
@@ -199,7 +204,6 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // The platform's own string and URL functions, kept now (P099): the rules that decide where this
   // document may go must read an address as the platform does, whatever content later puts on
   // String.prototype, URL or Reflect.
-  const callOf = Reflect.apply;
   const NativeString = String;
   const NativeURL = URL;
   const urlHref = Object.getOwnPropertyDescriptor(URL.prototype, "href").get;
@@ -242,7 +246,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
     navigationApi.addEventListener("navigate", (event) => {
       const destination = applyOf(destinationOf, event, []);
       if (!applyOf(sameDocumentOf, destination, []) && applyOf(navigationTypeOf, event, []) !== "reload") {
-        const url = urlOf === null ? "" : String(applyOf(urlOf, destination, []));
+        const url = urlOf === null ? "" : NativeString(applyOf(urlOf, destination, []));
         if (ownPage(url)) {
           navigating(url);
           return;
@@ -537,54 +541,149 @@ export const SHELL_RUNTIME = String.raw`(() => {
   };
   const matchesIn = Element.prototype.matches;
   const guarded = (element) => callOf(matchesIn, element, [GUARDED]) && !keptFrame(element);
+  // The built-ins step 3's guard and its observer use, captured before content runs and called
+  // only through these references (as the rule above reads matches, localName, namespaceURI,
+  // baseURI, src and srcdoc): a page that replaces a prototype method, a getter, or the global
+  // Array.from can't make the guard or its observer walk past a frame they must remove.
+  const nodeTypeOf = getterOf(Node.prototype, "nodeType");
+  const isConnectedOf = getterOf(Node.prototype, "isConnected");
+  const parentNodeOf = getterOf(Node.prototype, "parentNode");
+  const shadowRootOfNode = getterOf(Element.prototype, "shadowRoot");
+  const childNodesOf = getterOf(Node.prototype, "childNodes");
+  const removeIn = Element.prototype.remove;
+  const cloneNodeIn = Node.prototype.cloneNode;
+  const queryAllElement = Element.prototype.querySelectorAll;
+  const queryAllDocument = Document.prototype.querySelectorAll;
+  const queryAllFragment = DocumentFragment.prototype.querySelectorAll;
+  const nodeListLengthOf = getterOf(NodeList.prototype, "length");
+  const weakSetHas = WeakSet.prototype.has;
+  const weakSetAdd = WeakSet.prototype.add;
+  const observeIn = MutationObserver.prototype.observe;
+  const makeText = Document.prototype.createTextNode;
+  const recordProto = typeof MutationRecord === "function" ? MutationRecord.prototype : null;
+  const addedNodesOf = getterOf(recordProto, "addedNodes");
+  const recordTypeOf = getterOf(recordProto, "type");
+  const recordTargetOf = getterOf(recordProto, "target");
+  const attrProto = typeof Attr === "function" ? Attr.prototype : null;
+  const ownerElementOf = getterOf(attrProto, "ownerElement");
+  const attrNameOf = getterOf(attrProto, "name");
+  const attrNamespaceOf = getterOf(attrProto, "namespaceURI");
+  const attrValueOf = getterOf(attrProto, "value");
+  const setAttributeNSIn = Element.prototype.setAttributeNS;
+  const removeAttributeIn = Element.prototype.removeAttribute;
+  const createIn = Document.prototype.createElement;
+  const createNSIn = Document.prototype.createElementNS;
+  const weakMapGet = WeakMap.prototype.get;
+  const weakMapSet = WeakMap.prototype.set;
+  // A list the shell builds (arguments to pass on, nodes to move): an object with no prototype,
+  // so neither writing nor reading an index or its length reaches anything on Array.prototype or
+  // Object.prototype. callOf takes it as its arguments.
+  const bare = Object.create;
+  const listOf = () => {
+    const list = bare(null);
+    list.length = 0;
+    return list;
+  };
+  const pushTo = (list, value) => {
+    list[list.length] = value;
+    list.length += 1;
+  };
+  // An attribute's name, namespace and value, read through the kept getters.
+  const attrParts = (attribute) => ({
+    namespace: callOf(attrNamespaceOf, attribute, []),
+    name: callOf(attrNameOf, attribute, []),
+    value: callOf(attrValueOf, attribute, []),
+  });
+  // A name or value a guard inspects and then passes on, pinned to one reading: an object or
+  // function is turned into its string once, here, so the guard checks and the platform acts on
+  // the same text (a value whose toString answers differently the second time can't slip past).
+  // A primitive is its own single reading, so it goes on unchanged (null and booleans kept as they
+  // are, for the setters that treat them specially).
+  const once = (value) => (value !== null && (typeof value === "object" || typeof value === "function") ? NativeString(value) : value);
+  // A node's type (and whether it is connected), read through the kept getters; anything that
+  // isn't a node reads as -1 / false, never throws, so the insertion guards can ask of any value.
+  const typeOf = (node) => {
+    if (node === null || typeof node !== "object" || nodeTypeOf === null) {
+      return -1;
+    }
+    try {
+      return callOf(nodeTypeOf, node, []);
+    } catch (_) {
+      return -1;
+    }
+  };
+  const connected = (node) => {
+    if (isConnectedOf === null) {
+      return false;
+    }
+    try {
+      return callOf(isConnectedOf, node, []) === true;
+    } catch (_) {
+      return false;
+    }
+  };
+  const countOf = (list) => (nodeListLengthOf === null ? 0 : callOf(nodeListLengthOf, list, []));
+  const shadowOf = (element) => (shadowRootOfNode === null ? null : callOf(shadowRootOfNode, element, []));
+  const queryAllOf = (node, type, selector) => callOf(type === 1 ? queryAllElement : type === 9 ? queryAllDocument : queryAllFragment, node, [selector]);
   const guardedRoots = new WeakSet();
   let guardRoot = null;
   const strip = (node) => {
-    if (node === null || (node.nodeType !== 1 && node.nodeType !== 9 && node.nodeType !== 11)) {
+    const type = typeOf(node);
+    if (type !== 1 && type !== 9 && type !== 11) {
       return;
     }
-    if (node.nodeType === 1 && guarded(node)) {
-      node.remove();
+    if (type === 1 && guarded(node)) {
+      callOf(removeIn, node, []);
       return;
     }
-    for (const element of Array.from(node.querySelectorAll(GUARDED))) {
+    const framed = queryAllOf(node, type, GUARDED);
+    for (let i = 0, n = countOf(framed); i < n; i += 1) {
+      const element = framed[i];
       if (!keptFrame(element)) {
-        element.remove();
+        callOf(removeIn, element, []);
       }
     }
     // Open shadow roots made without attachShadow (declarative ones the parser built elsewhere).
-    if (node.nodeType === 1 && node.shadowRoot) {
-      guardRoot(node.shadowRoot);
+    if (type === 1) {
+      const root = shadowOf(node);
+      if (root) {
+        guardRoot(root);
+      }
     }
-    for (const element of Array.from(node.querySelectorAll("*"))) {
-      if (element.shadowRoot) {
-        guardRoot(element.shadowRoot);
+    const all = queryAllOf(node, type, "*");
+    for (let i = 0, n = countOf(all); i < n; i += 1) {
+      const root = shadowOf(all[i]);
+      if (root) {
+        guardRoot(root);
       }
     }
   };
   const frameGuard = new MutationObserver((records) => {
-    for (const record of records) {
+    for (let i = 0; i < records.length; i += 1) {
+      const record = records[i];
       // A kept frame whose src or srcdoc changed another way (P128): the backstop of the
       // synchronous guard below (beforeChange), as the rest of this observer is.
-      if (record.type === "attributes") {
-        if (record.target.isConnected && guarded(record.target)) {
-          record.target.remove();
+      if ((recordTypeOf === null ? record.type : callOf(recordTypeOf, record, [])) === "attributes") {
+        const target = recordTargetOf === null ? record.target : callOf(recordTargetOf, record, []);
+        if (connected(target) && guarded(target)) {
+          callOf(removeIn, target, []);
         }
         continue;
       }
-      for (const node of Array.from(record.addedNodes)) {
-        strip(node);
+      const added = addedNodesOf === null ? record.addedNodes : callOf(addedNodesOf, record, []);
+      for (let j = 0, n = countOf(added); j < n; j += 1) {
+        strip(added[j]);
       }
     }
   });
   const observed = ownFrames ? { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "srcdoc"] } : { childList: true, subtree: true };
   guardRoot = (root) => {
-    if (guardedRoots.has(root)) {
+    if (callOf(weakSetHas, guardedRoots, [root])) {
       return;
     }
-    guardedRoots.add(root);
+    callOf(weakSetAdd, guardedRoots, [root]);
     strip(root);
-    frameGuard.observe(root, observed);
+    callOf(observeIn, frameGuard, [root, observed]);
   };
   guardRoot(document);
 
@@ -600,9 +699,10 @@ export const SHELL_RUNTIME = String.raw`(() => {
       return { init, closed: false };
     }
     const copy = { mode: "open" };
-    for (const key of ["delegatesFocus", "slotAssignment", "clonable", "serializable", "customElementRegistry", "referenceTarget"]) {
-      if (init[key] !== undefined) {
-        copy[key] = init[key];
+    const keys = ["delegatesFocus", "slotAssignment", "clonable", "serializable", "customElementRegistry", "referenceTarget"];
+    for (let i = 0; i < keys.length; i += 1) {
+      if (init[keys[i]] !== undefined) {
+        copy[keys[i]] = init[keys[i]];
       }
     }
     return { init: copy, closed: true };
@@ -610,7 +710,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
   lock(Element.prototype, "attachShadow", function (init) {
     const asked = shadowInit(init);
     init = asked.init;
-    const root = attachShadow.call(this, init);
+    const root = callOf(attachShadow, this, [init]);
     guardRoot(root);
     if (asked.closed) {
       callOf(addShown, shownOpen, [root]);
@@ -648,14 +748,14 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // a closed one is out of the guard's reach. Fragment parsing doesn't build them, so the entry
   // points that would are given fragment parsing's behavior, and a document can't be rewritten.
   const parseInert = (html) => {
-    const template = document.createElement("template");
-    template.innerHTML = String(html);
+    const template = callOf(createIn, document, ["template"]);
+    template.innerHTML = NativeString(html);
     return template.content;
   };
   for (const proto of [Element.prototype, typeof ShadowRoot === "function" ? ShadowRoot.prototype : null]) {
     if (proto !== null && "setHTMLUnsafe" in proto) {
       lock(proto, "setHTMLUnsafe", function (html) {
-        this.innerHTML = String(html);
+        this.innerHTML = NativeString(html);
       });
     }
   }
@@ -674,24 +774,36 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // node drops guarded elements first, synchronously, and a connected link or meta can't be
   // changed into one. The observer stays as the backstop for anything these miss.
   const admit = (node) => {
-    if (node === null || typeof node !== "object" || typeof node.nodeType !== "number") {
+    const type = typeOf(node);
+    if (type === -1) {
       return true;
     }
-    if (node.nodeType === 1 && guarded(node)) {
+    if (type === 1 && guarded(node)) {
       return false;
     }
     strip(node);
     return true;
   };
-  const admitted = (args) => args.map((arg) => (admit(arg) ? arg : document.createTextNode("")));
   const wrapInsert = (proto, name, positions) => {
     const original = proto && proto[name];
     if (typeof original !== "function") {
       return;
     }
+    // Which arguments are nodes to check, decided now (before content runs), as a lookup that has
+    // no prototype: nothing content later puts on Array.prototype takes part in the decision.
+    const all = positions === "all";
+    const checks = bare(null);
+    if (!all) {
+      for (let i = 0; i < positions.length; i += 1) {
+        checks[positions[i]] = true;
+      }
+    }
     lock(proto, name, function (...args) {
-      const checked = positions === "all" ? admitted(args) : args.map((arg, index) => (positions.indexOf(index) !== -1 && !admit(arg) ? document.createTextNode("") : arg));
-      return original.apply(this, checked);
+      const checked = listOf();
+      for (let i = 0; i < args.length; i += 1) {
+        pushTo(checked, (all || checks[i] === true) && !admit(args[i]) ? callOf(makeText, document, [""]) : args[i]);
+      }
+      return callOf(original, this, checked);
     });
   };
   for (const proto of [Node.prototype]) {
@@ -712,44 +824,66 @@ export const SHELL_RUNTIME = String.raw`(() => {
   wrapInsert(Element.prototype, "insertAdjacentElement", [1]);
   wrapInsert(Range.prototype, "insertNode", [0]);
   wrapInsert(Range.prototype, "surroundContents", [0]);
+  // The insertion methods the HTML-parse wrappers below call: the locked wrappers just installed
+  // (admit runs inside them), taken now so an element can't shadow them with an own property and
+  // no spread reads a replaceable array iterator; each is given a prototype-less argument list.
+  const replaceChildrenElIn = Element.prototype.replaceChildren;
+  const replaceChildrenFragIn = DocumentFragment.prototype.replaceChildren;
+  const replaceWithIn = Element.prototype.replaceWith;
+  const beforeIn = Element.prototype.before;
+  const afterIn = Element.prototype.after;
+  const prependIn = Element.prototype.prepend;
+  const appendIn = Element.prototype.append;
 
   // Markup parsed in place: parsed first in a detached element of the same kind (so it parses as it
   // would in place, and nothing in it is connected yet), guarded, then moved in.
   const accessor = (proto, name) => (proto ? Object.getOwnPropertyDescriptor(proto, name) : undefined);
   const contextFor = (element) => {
-    if (element === null || element.nodeType !== 1) {
-      return document.createElement("div");
+    if (typeOf(element) !== 1 || localNameOf === null || namespaceOf === null) {
+      return callOf(createIn, document, ["div"]);
     }
     // A fresh element of the same kind; a custom element's own class is not run again.
-    const name = element.localName.indexOf("-") === -1 ? element.localName : "div";
-    return document.createElementNS(element.namespaceURI, name);
+    const local = callOf(localNameOf, element, []);
+    const name = callOf(indexIn, local, ["-"]) === -1 ? local : "div";
+    return callOf(createNSIn, document, [callOf(namespaceOf, element, []), name]);
   };
   const innerHTMLs = [accessor(Element.prototype, "innerHTML"), accessor(typeof ShadowRoot === "function" ? ShadowRoot.prototype : null, "innerHTML")];
   const setInner = (innerHTMLs[0] || innerHTMLs[1]).set;
   const parseIn = (contextElement, html) => {
     const box = contextFor(contextElement);
-    setInner.call(box, String(html));
+    callOf(setInner, box, [NativeString(html)]);
     strip(box);
-    return Array.from(box.childNodes);
+    const children = childNodesOf === null ? box.childNodes : callOf(childNodesOf, box, []);
+    const nodes = listOf();
+    for (let i = 0, n = countOf(children); i < n; i += 1) {
+      pushTo(nodes, children[i]);
+    }
+    return nodes;
   };
-  [Element.prototype, typeof ShadowRoot === "function" ? ShadowRoot.prototype : null].forEach((proto, index) => {
+  const innerHTMLProtos = [Element.prototype, typeof ShadowRoot === "function" ? ShadowRoot.prototype : null];
+  for (let index = 0; index < innerHTMLProtos.length; index += 1) {
+    const proto = innerHTMLProtos[index];
     const descriptor = innerHTMLs[index];
     if (!proto || !descriptor || !descriptor.set) {
-      return;
+      continue;
     }
     Object.defineProperty(proto, "innerHTML", {
       configurable: false,
       enumerable: descriptor.enumerable,
       get: descriptor.get,
       set(html) {
-        if (this.nodeType === 1 && this.localName === "template") {
-          descriptor.set.call(this, html);
+        // Which branch runs is read through the kept getters, so a replaced nodeType or localName
+        // can't route a connected element past parseIn (and its strip) by posing as a template
+        // whose markup goes in inert.
+        if (typeOf(this) === 1 && localNameOf !== null && callOf(localNameOf, this, []) === "template") {
+          callOf(descriptor.set, this, [html]);
           return;
         }
-        this.replaceChildren(...parseIn(this.nodeType === 11 ? this.host || null : this, html));
+        const forFragment = typeOf(this) === 11;
+        callOf(forFragment ? replaceChildrenFragIn : replaceChildrenElIn, this, parseIn(forFragment ? this.host || null : this, html));
       },
     });
-  });
+  }
   const outer = accessor(Element.prototype, "outerHTML");
   if (outer && outer.set) {
     Object.defineProperty(Element.prototype, "outerHTML", {
@@ -757,42 +891,60 @@ export const SHELL_RUNTIME = String.raw`(() => {
       enumerable: outer.enumerable,
       get: outer.get,
       set(html) {
-        const parent = this.parentNode;
-        if (parent === null || parent.nodeType === 9) {
-          outer.set.call(this, html);
+        const parent = parentNodeOf === null ? this.parentNode : callOf(parentNodeOf, this, []);
+        if (parent === null || typeOf(parent) === 9) {
+          callOf(outer.set, this, [html]);
           return;
         }
-        this.replaceWith(...parseIn(parent.nodeType === 1 ? parent : null, html));
+        callOf(replaceWithIn, this, parseIn(typeOf(parent) === 1 ? parent : null, html));
       },
     });
   }
   const insertAdjacentHTML = Element.prototype.insertAdjacentHTML;
   lock(Element.prototype, "insertAdjacentHTML", function (position, html) {
-    insertAdjacentHTML.call(this, position, "");
-    const where = String(position).toLowerCase();
+    // The position is read once: the empty insert that validates it and the branch that places the
+    // parsed nodes use the same reading.
+    const where = callOf(lowerOf, NativeString(position), []);
+    callOf(insertAdjacentHTML, this, [where, ""]);
     const outside = where === "beforebegin" || where === "afterend";
     const nodes = parseIn(outside ? this.parentElement : this, html);
     if (where === "beforebegin") {
-      this.before(...nodes);
+      callOf(beforeIn, this, nodes);
     } else if (where === "afterbegin") {
-      this.prepend(...nodes);
+      callOf(prependIn, this, nodes);
     } else if (where === "beforeend") {
-      this.append(...nodes);
+      callOf(appendIn, this, nodes);
     } else {
-      this.after(...nodes);
+      callOf(afterIn, this, nodes);
     }
   });
   if (typeof Element.prototype.setHTML === "function") {
     lock(Element.prototype, "setHTML", function (html) {
-      this.innerHTML = String(html);
+      this.innerHTML = NativeString(html);
     });
   }
   // insertHTML parses markup outside these guards; copy, cut and paste reach the clipboard (P051).
   const REFUSED_COMMANDS = ["inserthtml", "copy", "cut", "paste"];
   const execCommand = Document.prototype.execCommand;
   if (typeof execCommand === "function") {
+    const refused = bare(null);
+    for (let i = 0; i < REFUSED_COMMANDS.length; i += 1) {
+      refused[REFUSED_COMMANDS[i]] = true;
+    }
     lock(Document.prototype, "execCommand", function (command, ...rest) {
-      return REFUSED_COMMANDS.indexOf(String(command).toLowerCase()) !== -1 ? false : execCommand.call(this, command, ...rest);
+      // The command is read once, here, and that same text is both the one checked and the one run:
+      // a command whose name reads "bold" when checked and "insertHTML" when the platform reads it
+      // can't get past the refusal.
+      const cmd = NativeString(command);
+      if (refused[callOf(lowerOf, cmd, [])] === true) {
+        return false;
+      }
+      const args = listOf();
+      pushTo(args, cmd);
+      for (let i = 0; i < rest.length; i += 1) {
+        pushTo(args, rest[i]);
+      }
+      return callOf(execCommand, this, args);
     });
   }
 
@@ -817,36 +969,59 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // first, and if the copy would be guarded, the element leaves the document before it changes.
   // Nor can a kept iframe (P128) become one that isn't the page's own (a src elsewhere, its
   // srcdoc dropped).
-  const watched = (element) => element && element.nodeType === 1 && (element.localName === "link" || element.localName === "meta" || (ownFrames && localNameOf !== null && callOf(localNameOf, element, []) === "iframe"));
+  const watched = (element) => {
+    if (typeOf(element) !== 1 || localNameOf === null) {
+      return false;
+    }
+    const name = callOf(localNameOf, element, []);
+    return name === "link" || name === "meta" || (ownFrames && name === "iframe");
+  };
   const beforeChange = (element, change) => {
-    if (!watched(element) || !element.isConnected) {
+    if (!watched(element) || !connected(element)) {
       return;
     }
-    const copy = element.cloneNode(false);
+    const copy = callOf(cloneNodeIn, element, [false]);
     try {
       change(copy);
     } catch (_) {
       return;
     }
     if (guarded(copy)) {
-      element.remove();
+      callOf(removeIn, element, []);
     }
   };
-  const guardMethod = (proto, name, change) => {
+  // The names and values the check tests are pinned (once) before the check, and the same pinned
+  // list is what the platform's own method is then given: the copy the guard inspects and the real
+  // element can't be set from two different readings of the same argument. The strings parameter
+  // names the DOMString positions to pin (an element or a boolean goes on as it is).
+  const guardMethod = (proto, name, strings, change) => {
     const original = proto && proto[name];
     if (typeof original !== "function") {
       return;
     }
+    const pin = bare(null);
+    for (let i = 0; i < strings.length; i += 1) {
+      pin[strings[i]] = true;
+    }
     lock(proto, name, function (...args) {
-      beforeChange(this, (copy) => change(copy, args, original));
-      return original.apply(this, args);
+      const fixed = listOf();
+      for (let i = 0; i < args.length; i += 1) {
+        pushTo(fixed, pin[i] === true ? once(args[i]) : args[i]);
+      }
+      beforeChange(this, (copy) => change(copy, fixed, original));
+      return callOf(original, this, fixed);
     });
   };
-  for (const name of ["setAttribute", "setAttributeNS", "toggleAttribute", "removeAttribute", "removeAttributeNS"]) {
-    guardMethod(Element.prototype, name, (copy, args, original) => original.apply(copy, args));
+  for (const [name, strings] of [["setAttribute", [0, 1]], ["setAttributeNS", [0, 1, 2]], ["toggleAttribute", [0]], ["removeAttribute", [0]], ["removeAttributeNS", [0, 1]]]) {
+    guardMethod(Element.prototype, name, strings, (copy, args, original) => callOf(original, copy, args));
   }
   for (const name of ["setAttributeNode", "setAttributeNodeNS"]) {
-    guardMethod(Element.prototype, name, (copy, args) => copy.setAttributeNS(args[0].namespaceURI, args[0].name, args[0].value));
+    // The attribute node's own name, namespace and value are read through the kept getters (one
+    // stored string each), both to check the copy and to set it; the real call takes the node.
+    guardMethod(Element.prototype, name, [], (copy, args) => {
+      const part = attrParts(args[0]);
+      callOf(setAttributeNSIn, copy, [part.namespace, part.name, part.value]);
+    });
   }
   for (const [proto, name] of [[Attr.prototype, "value"], [Node.prototype, "nodeValue"], [Node.prototype, "textContent"]]) {
     const descriptor = accessor(proto, name);
@@ -858,11 +1033,13 @@ export const SHELL_RUNTIME = String.raw`(() => {
       enumerable: descriptor.enumerable,
       get: descriptor.get,
       set(value) {
-        if (this.nodeType === 2 && this.ownerElement) {
-          const attribute = this;
-          beforeChange(attribute.ownerElement, (copy) => copy.setAttributeNS(attribute.namespaceURI, attribute.name, String(value)));
+        const v = once(value);
+        const owner = typeOf(this) === 2 && ownerElementOf !== null ? callOf(ownerElementOf, this, []) : null;
+        if (owner !== null) {
+          const part = attrParts(this);
+          beforeChange(owner, (copy) => callOf(setAttributeNSIn, copy, [part.namespace, part.name, NativeString(v)]));
         }
-        descriptor.set.call(this, value);
+        callOf(descriptor.set, this, [v]);
       },
     });
   }
@@ -877,17 +1054,18 @@ export const SHELL_RUNTIME = String.raw`(() => {
       configurable: false,
       enumerable: descriptor.enumerable,
       get() {
-        const value = descriptor.get.call(this);
+        const value = callOf(descriptor.get, this, []);
         if (value !== null && typeof value === "object") {
-          owners.set(value, this);
+          callOf(weakMapSet, owners, [value, this]);
         }
         return value;
       },
       // relList = "…" forwards to the list's value, natively: guarded here instead.
       set: descriptor.set
         ? function (value) {
-            beforeChange(this, (copy) => descriptor.set.call(copy, value));
-            descriptor.set.call(this, value);
+            const v = once(value);
+            beforeChange(this, (copy) => callOf(descriptor.set, copy, [v]));
+            callOf(descriptor.set, this, [v]);
           }
         : undefined,
     });
@@ -908,8 +1086,9 @@ export const SHELL_RUNTIME = String.raw`(() => {
           enumerable: descriptor.enumerable,
           get: descriptor.get,
           set(value) {
-            beforeChange(this, (copy) => descriptor.set.call(copy, value));
-            descriptor.set.call(this, value);
+            const v = once(value);
+            beforeChange(this, (copy) => callOf(descriptor.set, copy, [v]));
+            callOf(descriptor.set, this, [v]);
           },
         });
       }
@@ -920,15 +1099,24 @@ export const SHELL_RUNTIME = String.raw`(() => {
     if (typeof original !== "function") {
       continue;
     }
+    const isSet = callOf(indexIn, name, ["set"]) === 0;
     lock(NamedNodeMap.prototype, name, function (...args) {
-      beforeChange(owners.get(this), (copy) => {
-        if (name.indexOf("set") === 0) {
-          copy.setAttributeNS(args[0].namespaceURI, args[0].name, args[0].value);
+      // A removal names an attribute by a string pinned once; a set takes a node, whose own name,
+      // namespace and value are read once through the kept getters. The copy and the real map act
+      // on the same readings.
+      const fixed = listOf();
+      for (let i = 0; i < args.length; i += 1) {
+        pushTo(fixed, isSet ? args[i] : once(args[i]));
+      }
+      beforeChange(callOf(weakMapGet, owners, [this]), (copy) => {
+        if (isSet) {
+          const part = attrParts(fixed[0]);
+          callOf(setAttributeNSIn, copy, [part.namespace, part.name, part.value]);
         } else {
-          copy.removeAttribute(args[args.length - 1]);
+          callOf(removeAttributeIn, copy, [fixed[fixed.length - 1]]);
         }
       });
-      return original.apply(this, args);
+      return callOf(original, this, fixed);
     });
   }
   const tokens = typeof DOMTokenList === "function" ? DOMTokenList.prototype : null;
@@ -936,9 +1124,15 @@ export const SHELL_RUNTIME = String.raw`(() => {
     const original = tokens && tokens[name];
     if (typeof original === "function") {
       lock(tokens, name, function (...args) {
-        const element = owners.get(this);
-        beforeChange(element, (copy) => original.apply(copy.relList, args));
-        return original.apply(this, args);
+        // Each token is pinned once; the copy's list and the real list are changed by the same
+        // tokens (a token that reads one way when checked and another when applied can't slip in).
+        const fixed = listOf();
+        for (let i = 0; i < args.length; i += 1) {
+          pushTo(fixed, once(args[i]));
+        }
+        const element = callOf(weakMapGet, owners, [this]);
+        beforeChange(element, (copy) => callOf(original, copy.relList, fixed));
+        return callOf(original, this, fixed);
       });
     }
   }
@@ -949,8 +1143,9 @@ export const SHELL_RUNTIME = String.raw`(() => {
       enumerable: tokenValue.enumerable,
       get: tokenValue.get,
       set(value) {
-        beforeChange(owners.get(this), (copy) => tokenValue.set.call(copy.relList, value));
-        tokenValue.set.call(this, value);
+        const v = once(value);
+        beforeChange(callOf(weakMapGet, owners, [this]), (copy) => callOf(tokenValue.set, copy.relList, [v]));
+        callOf(tokenValue.set, this, [v]);
       },
     });
   }
