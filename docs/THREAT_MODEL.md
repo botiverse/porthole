@@ -5,7 +5,7 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes Porthole 0.14.8 (2026-11-04). A review on 2026-10-19 found gaps, and every decision it led to
+**Status.** This describes Porthole 0.14.9 (2026-11-04). A review on 2026-10-19 found gaps, and every decision it led to
 has merged ([§8](#8-fixes-in-flight) lists them). P096 changed the negative-control runner and CI,
 and the shipped conformance probes' messages and timing, not what they check. P104 (0.9.0's
 annotation markers) had a review of its own, and P105, in 0.10.0, is what it led to. 0.11.0 was
@@ -22,10 +22,10 @@ person, not the page, pressed in it (§7 "The keyboard", `comments`); and P112's
 additions for a host's comment modes (hints, as every report is, §7). 0.14.1: P114
 (porthole#56) serves a nested page's shell on a label of its own, on which nothing but nested
 pages' shells, their pages, those pages' files and status pages is ever served, so no other
-display of the scope is same-origin with the shell (S3). Unreleased: P128 lets a host opt a config
+display of the scope is same-origin with the shell (S3). 0.14.8: P128 lets a host opt a config
 into a page's own nested frames (`nestedFrames: "own"`, off by default): its `srcdoc` frames and
 frames of its own files load and run, in realms the shell's hardening never reaches (WebRTC, the
-clipboard's guards: S1, S3); frames of other sites stay out. Unreleased, after 0.14.8: P131 adds find
+clipboard's guards: S1, S3); frames of other sites stay out. 0.14.9: P131 adds find
 in page (`find`, off unless a config declares it): the host's find bar sends the person's query
 into the frame, where the content can read it, and takes counts, a box and the find shortcut back
 as the content's word (§6, §7 "Find in page"); no wall moves.
