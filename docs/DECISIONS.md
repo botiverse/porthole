@@ -7304,8 +7304,11 @@ WebKit and Firefox, and `test:controls` before release). Unit: `test/shell.test.
 of the list found in the runtime, the doc's rows and statuses matching; `PASSES_AS_IS` and `ONCE`
 in isolation, fail-closed cases included; the creation refusal only under the default
 configuration), `test/agreement.test.ts` (the manual's sentence, default only). The `sync-guard` negative control also takes out the creation refusal and the
-producers' strips. The leak suite's item-4 probes that build a frame with `createElement` see the
-refusal under the default configuration and need to count it as the guard holding.
+producers' strips. The conformance probes that build a frame-like element with `createElement`
+(4.light-dom, 4.sync-realm, the shadow-root and plugin cases, 4.own-default, 7.base-plugins,
+14.shell, and the served egress case) count a refusal at creation under the default configuration
+as the guard holding, and record it ("refused at creation"); with the refusal taken out (the
+`sync-guard` control) they build the element as before.
 
 **Revisit when** an engine adds an insertion or parsing entry point (add it to the list, the
 runtime and the test), the default configuration is to allow frames, or the leak suite's probes
