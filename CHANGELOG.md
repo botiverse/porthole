@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.14.8
 
 - **Frame guard: broader coverage of DOM insertion and parsing entry points (P130),** listed in
   [docs/insertion-entry-points.md](docs/insertion-entry-points.md).
