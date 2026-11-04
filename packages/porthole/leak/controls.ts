@@ -182,7 +182,7 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     specs: [LEAK],
     fails: NOTHING,
     holds: {
-      why: "the synchronous guard drops what the observer would",
+      why: "the synchronous guard drops what the observer would, or refuses it at creation (P130)",
       by: "frame-guard,sync-guard",
     },
   },
@@ -190,7 +190,7 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     specs: [LEAK],
     fails: NOTHING,
     holds: {
-      why: "the synchronous guard reaches a closed shadow root's frames as they connect",
+      why: "the synchronous guard refuses the frame at creation (P130), and reaches a closed shadow root's frames as they connect",
       by: "attach-shadow,sync-guard",
     },
   },

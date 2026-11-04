@@ -1,7 +1,9 @@
 import { runInNewContext, Script } from "node:vm";
 import { describe, expect, test } from "vitest";
 import { compile, MCP_APPS_METHODS, presets, resolveTheme, DEFAULT_THEME } from "../src/index.ts";
-import { HELD_BACK, OWN_FRAME, SHELL_RUNTIME } from "../src/shell/runtime.ts";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { HELD_BACK, ONCE, OWN_FRAME, PASSES_AS_IS, SHELL_RUNTIME } from "../src/shell/runtime.ts";
 
 const ORIGIN = "https://host.example.com";
 
@@ -242,9 +244,8 @@ describe("the frame guard and its observer call only built-ins captured before c
     // reading it checked: an argument whose toString answers differently the second time cannot
     // be checked as one thing and acted on as another. Every such guard pins the argument through
     // `once` (an object or function becomes its string here, before the check) and forwards that.
-    expect(SHELL_RUNTIME).toContain(
-      'const once = (value) => (value !== null && (typeof value === "object" || typeof value === "function") ? NativeString(value) : value);',
-    );
+    expect(SHELL_RUNTIME).toContain(`const passesAsIs = ${PASSES_AS_IS};`);
+    expect(SHELL_RUNTIME).toContain(`const once = (${ONCE})(passesAsIs, NativeString);`);
     // The command the refusal checks is the command it runs (read once).
     expect(wrapperRegion).toContain("const cmd = NativeString(command);");
     expect(wrapperRegion).toContain("pushTo(args, cmd);");
@@ -255,6 +256,390 @@ describe("the frame guard and its observer call only built-ins captured before c
     expect(wrapperRegion).toContain("const v = once(value);");
     // The before-change backstop and the native call take the same fixed list.
     expect(wrapperRegion).toContain("beforeChange(this, (copy) => change(copy, fixed, original));");
+  });
+});
+
+describe("once: a value a guard inspects is read once, or refused (P130)", () => {
+  const passesAsIs = runInNewContext(PASSES_AS_IS) as (value: unknown) => boolean;
+  const makeOnce = runInNewContext(ONCE) as (
+    pass: (value: unknown) => boolean,
+    toText: (value: unknown) => string,
+  ) => (value: unknown) => unknown;
+  const once = makeOnce(passesAsIs, String);
+  // The refusal is the other realm's TypeError (runInNewContext), so it is matched by message.
+  const REFUSED = /can't be used here/u;
+
+  test("passes as they are only the primitives that are their own single reading", () => {
+    for (const value of ["", "x", 0, -0, 1.5, Number.NaN, true, false, 10n, null, undefined]) {
+      expect(passesAsIs(value), String(value)).toBe(true);
+    }
+    for (const value of [
+      {},
+      [],
+      () => "x",
+      Symbol("s"),
+      new String("x"),
+      Object.create(null),
+      new Proxy({}, {}),
+    ]) {
+      expect(passesAsIs(value)).toBe(false);
+    }
+  });
+
+  test("tests undefined by identity, never by typeof", () => {
+    // An object whose typeof is "undefined" (document.all's kind) can't be made in Node, so the
+    // predicate's own source is what says it: identity with undefined, and no typeof "undefined".
+    expect(PASSES_AS_IS).toContain("value === undefined");
+    expect(PASSES_AS_IS).not.toMatch(/typeof value === "undefined"|kind === "undefined"/u);
+  });
+
+  test("forwards a primitive unchanged, and turns anything else into its string once", () => {
+    for (const value of ["x", 3, false, 7n, null, undefined]) {
+      expect(once(value)).toBe(value);
+    }
+    let reads = 0;
+    const shifting = {
+      toString: () => {
+        reads += 1;
+        return reads === 1 ? "first" : "second";
+      },
+    };
+    expect(once(shifting)).toBe("first");
+    expect(reads).toBe(1);
+    expect(once(["a", "b"])).toBe("a,b");
+  });
+
+  test("fails closed: a reading that throws, a symbol, or no string at all is refused", () => {
+    const throwingGetter = {
+      get toString(): () => string {
+        throw new Error("unreadable");
+      },
+    };
+    expect(() => once(throwingGetter)).toThrow(REFUSED);
+    const throwingTrap = new Proxy(
+      {},
+      {
+        get() {
+          throw new Error("unreadable");
+        },
+      },
+    );
+    expect(() => once(throwingTrap)).toThrow(REFUSED);
+    expect(() => once(Symbol("s"))).toThrow(REFUSED);
+    expect(() => once({ toString: () => ({}), valueOf: () => ({}) })).toThrow(REFUSED);
+    // A converter that hands back something other than a string is refused too.
+    expect(() => makeOnce(passesAsIs, () => 1 as unknown as string)({})).toThrow(REFUSED);
+    // A predicate that throws lets nothing through as it is.
+    const throwingPredicate = makeOnce(() => {
+      throw new Error("x");
+    }, String);
+    expect(throwingPredicate({ toString: () => "y" })).toBe("y");
+  });
+});
+
+describe("every insertion entry point is guarded, and every subtree producer strips (P130)", () => {
+  // docs/insertion-entry-points.md, entry by entry: each id, how it is guarded, and the runtime
+  // text that does it. A new entry point is a row here, in the doc, and in the runtime.
+  type Row = readonly [id: string, status: string, text: readonly string[]];
+  const CREATION_REFUSED = [
+    "if (!ownFrames) {",
+    'refuseFrameCreation(proto, "createElement", 0);',
+    'refuseFrameCreation(proto, "createElementNS", 1);',
+    "if (fixed.length > nameAt && frameCapableName(fixed[nameAt])) {",
+  ];
+  const ROWS: readonly Row[] = [
+    [
+      "A1",
+      "wrapped",
+      [
+        'wrapInsert(proto, "appendChild", [0]);',
+        'wrapInsert(proto, "insertBefore", [0]);',
+        'wrapInsert(proto, "replaceChild", [0]);',
+      ],
+    ],
+    [
+      "A2",
+      "wrapped",
+      [
+        'for (const proto of [Element.prototype, Document.prototype, DocumentFragment.prototype]) {\n    for (const name of ["append", "prepend", "replaceChildren"]) {\n      wrapInsert(proto, name, "all");',
+      ],
+    ],
+    [
+      "A3",
+      "wrapped",
+      [
+        'for (const proto of [Element.prototype, CharacterData.prototype, DocumentType.prototype]) {\n    for (const name of ["before", "after", "replaceWith"]) {\n      wrapInsert(proto, name, "all");',
+      ],
+    ],
+    ["A4", "wrapped", ['wrapInsert(Element.prototype, "insertAdjacentElement", [1]);']],
+    [
+      "A5",
+      "text only",
+      [
+        '[[Attr.prototype, "value"], [Node.prototype, "nodeValue"], [Node.prototype, "textContent"]]',
+      ],
+    ],
+    [
+      "A6",
+      "wrapped",
+      [
+        'wrapInsert(Range.prototype, "insertNode", [0]);',
+        'wrapInsert(Range.prototype, "surroundContents", [0]);',
+      ],
+    ],
+    [
+      "A7",
+      "parsed and stripped",
+      [
+        "callOf(forFragment ? replaceChildrenFragIn : replaceChildrenElIn, this, parseIn(",
+        "callOf(descriptor.set, this, [html]);\n          strip(callOf(templateContentOf, this, []));",
+      ],
+    ],
+    ["A8", "parsed and stripped", ["callOf(replaceWithIn, this, parseIn("]],
+    ["A9", "parsed and stripped", ['lock(Element.prototype, "insertAdjacentHTML", function']],
+    [
+      "A10",
+      "parsed and stripped",
+      ['lock(proto, "setHTML", function (html) {\n        this.innerHTML'],
+    ],
+    [
+      "A11",
+      "parsed and stripped",
+      [
+        'lock(proto, "setHTMLUnsafe", function (html) {\n        this.innerHTML = NativeString(html);',
+      ],
+    ],
+    [
+      "A12",
+      "refused",
+      [
+        'for (const name of ["open", "write", "writeln"]) {\n    lock(Document.prototype, name, noRewrite);',
+      ],
+    ],
+    ["A13", "refused", ['const REFUSED_COMMANDS = ["inserthtml", "copy", "cut", "paste"];']],
+    [
+      "A14",
+      "wrapped",
+      [
+        'if (proto !== null && callOf(hasOwn, proto, ["body"])) {\n      wrapNodeSetter(proto, "body");',
+      ],
+    ],
+    [
+      "A15",
+      "wrapped",
+      [
+        'for (const name of ["tHead", "tFoot", "caption"]) {\n    wrapNodeSetter(typeof HTMLTableElement === "function" ? HTMLTableElement.prototype : null, name);',
+      ],
+    ],
+    ["A16", "nothing to guard", CREATION_REFUSED],
+    [
+      "A17",
+      "wrapped",
+      [
+        'wrapInsert(typeof HTMLSelectElement === "function" ? HTMLSelectElement.prototype : null, "add", [0]);',
+        'wrapInsert(typeof HTMLOptionsCollection === "function" ? HTMLOptionsCollection.prototype : null, "add", [0]);',
+      ],
+    ],
+    ["A18", "nothing to guard", CREATION_REFUSED],
+    [
+      "A19",
+      "wrapped",
+      [
+        "const copy = bare(null);",
+        "const value = init[field];",
+        "const root = callOf(attachShadow, this, [init]);\n    guardRoot(root);",
+      ],
+    ],
+    [
+      "A20",
+      "parsed and stripped",
+      [
+        'for (const name of ["parseHTMLUnsafe", "parseHTML"]) {',
+        "lock(Document, name, (html) => {",
+      ],
+    ],
+    ["A21", "nothing to guard", CREATION_REFUSED],
+    [
+      "A22",
+      "wrapped",
+      [
+        'ownFrames && typeof HTMLIFrameElement === "function" ? HTMLIFrameElement.prototype : null,',
+      ],
+    ],
+    [
+      "A23",
+      "refused",
+      [
+        'const FRAMES = "iframe,frame,frameset,object,embed,portal,fencedframe";',
+        ...CREATION_REFUSED,
+      ],
+    ],
+    [
+      "A24",
+      "wrapped",
+      [
+        'for (const proto of [Node.prototype, Element.prototype, Document.prototype, DocumentFragment.prototype]) {\n    if (callOf(hasOwn, proto, ["moveBefore"])) {\n      wrapInsert(proto, "moveBefore", [0]);',
+      ],
+    ],
+    [
+      "A25",
+      "refused",
+      ["const registry = typeof CustomElementRegistry", 'lock(registry, "define", function'],
+    ],
+    ["A26", "refused", ["const KNOWN_HTML = bare(null);", "lock(target, name, unknownMarkup);"]],
+    ["B1", "producer stripped", ['wrapProducer(DOMParser.prototype, "parseFromString");']],
+    [
+      "B2",
+      "producer stripped",
+      [
+        'strippedGetter(typeof HTMLTemplateElement === "function" ? HTMLTemplateElement.prototype : null, "content", false);',
+      ],
+    ],
+    [
+      "B3",
+      "producer stripped",
+      [
+        'const parsed = callOf(parseFromStringIn, new NativeDOMParser(), [NativeString(html), "text/html"]);\n        strip(parsed);',
+      ],
+    ],
+    [
+      "B4",
+      "producer stripped",
+      [
+        'wrapProducer(typeof DOMImplementation === "function" ? DOMImplementation.prototype : null, "createHTMLDocument");',
+      ],
+    ],
+    [
+      "B5",
+      "producer stripped",
+      [
+        'wrapProducer(typeof DOMImplementation === "function" ? DOMImplementation.prototype : null, "createDocument");',
+      ],
+    ],
+    ["B6", "producer stripped", ['wrapProducer(Range.prototype, "createContextualFragment");']],
+    [
+      "B7",
+      "producer stripped",
+      [
+        'wrapProducer(typeof XSLTProcessor === "function" ? XSLTProcessor.prototype : null, "transformToFragment");',
+        'wrapProducer(typeof XSLTProcessor === "function" ? XSLTProcessor.prototype : null, "transformToDocument");',
+      ],
+    ],
+    [
+      "B8",
+      "producer stripped",
+      [
+        'strippedGetter(typeof XMLHttpRequest === "function" ? XMLHttpRequest.prototype : null, "responseXML", true);',
+        'strippedGetter(typeof XMLHttpRequest === "function" ? XMLHttpRequest.prototype : null, "response", true);',
+      ],
+    ],
+    [
+      "B9",
+      "producer stripped",
+      [
+        'wrapProducer(Document.prototype, "importNode");',
+        'lock(Document.prototype, "adoptNode", function (...args) {',
+        "strip(args[0]);\n      return callOf(adoptNodeIn, this, argumentsOf(args));",
+      ],
+    ],
+    ["B10", "parsed and stripped", ["const framed = queryAllOf(node, type, GUARDED);"]],
+    [
+      "B11",
+      "wrapped",
+      ['wrapNodeSetter(proto, "body");', 'wrapProducer(Document.prototype, "importNode");'],
+    ],
+    [
+      "B12",
+      "producer stripped",
+      [
+        'const templates = queryAllOf(node, type, "template");',
+        "pushTo(pending, callOf(templateContentOf, templates[i], []));",
+        "watchRoot(root);\n          pushTo(pending, root);",
+      ],
+    ],
+    [
+      "E1",
+      "text only",
+      [
+        '["insertFromPaste", "insertFromPasteAsQuotation", "insertFromDrop", "insertReplacementText", "insertFromYank"]',
+        'if (types[i] !== "text/plain") {',
+        "callOf(preventNavigation, event, []);",
+        'callOf(execCommand, document, ["insertText", false, text]);',
+        'callOf(listenIn, window, [\n      "beforeinput",',
+      ],
+    ],
+  ];
+
+  test.each(ROWS)("%s (%s) is in the runtime", (_id, _status, text) => {
+    for (const each of text) {
+      expect(SHELL_RUNTIME, each).toContain(each);
+    }
+  });
+
+  test("the doc lists every entry, with the status the runtime gives it", () => {
+    const doc = readFileSync(
+      path.join(import.meta.dirname, "..", "..", "..", "docs", "insertion-entry-points.md"),
+      "utf8",
+    );
+    for (const [id, status] of ROWS) {
+      const row = doc.split("\n").find((line) => line.startsWith(`| ${id} |`));
+      expect(row, id).toBeDefined();
+      expect(row, id).toContain(`| ${status} |`);
+    }
+    // And no row the table above lacks.
+    const ids = new Set(ROWS.map(([id]) => id));
+    for (const [, id] of doc.matchAll(/^\| ([A-Z]\d+) \|/gmu)) {
+      expect(ids, String(id)).toContain(id);
+    }
+  });
+
+  test("every wrapper goes through the same synchronous admit and strip", () => {
+    // The setters admit their value as the insertion methods admit their arguments; a producer
+    // strips what it made before it returns; a getter strips what it hands out.
+    expect(SHELL_RUNTIME).toContain(
+      "if (!admit(value)) {\n            refuseInsert();\n          }\n          callOf(descriptor.set, this, [value]);",
+    );
+    expect(SHELL_RUNTIME).toContain(
+      "const made = callOf(original, this, argumentsOf(args));\n      strip(made);\n      if (framedElement(made)) {\n        refuseFrame();",
+    );
+    expect(SHELL_RUNTIME).toContain(
+      "const value = callOf(descriptor.get, this, []);\n          if (!documentsOnly || typeOf(value) === 9) {\n            strip(value);",
+    );
+    // Each built-in they call was captured before content runs.
+    for (const capture of [
+      'const templateContentOf = typeof HTMLTemplateElement === "function" ? getterOf(HTMLTemplateElement.prototype, "content") : null;',
+      "const parseFromStringIn = DOMParser.prototype.parseFromString;",
+      "const adoptNodeIn = Document.prototype.adoptNode;",
+      "const listenIn = EventTarget.prototype.addEventListener;",
+      'const inputTypeOf = getterOf(inputProto, "inputType");',
+      'const dataTransferOf = getterOf(inputProto, "dataTransfer");',
+      'const transferTypesOf = getterOf(transferProto, "types");',
+      "const NativeDOMException = DOMException;",
+    ]) {
+      expect(SHELL_RUNTIME, capture).toContain(capture);
+    }
+    // The walk into template contents and shadow roots is a list, not recursion.
+    expect(SHELL_RUNTIME).toContain(
+      "const pending = listOf();\n    pushTo(pending, start);\n    for (let at = 0; at < pending.length; at += 1) {",
+    );
+  });
+
+  test("refuses frame-like elements at creation only under the default config", () => {
+    // Under nestedFrames "own" (P128) an iframe is made, and the attribute guard decides.
+    const at = SHELL_RUNTIME.indexOf(
+      "  if (!ownFrames) {\n    for (const proto of [Document.prototype",
+    );
+    expect(at).toBeGreaterThan(0);
+    expect(
+      SHELL_RUNTIME.indexOf('refuseFrameCreation(proto, "createElement", 0);'),
+    ).toBeGreaterThan(at);
+    // Every name the guard removes is a name content can't create.
+    expect(SHELL_RUNTIME).toContain(
+      'for (const tag of FRAMES.split(",")) {\n    frameTags[tag] = true;',
+    );
+    expect(
+      () => new Script(SHELL_RUNTIME.replace("__PLAN__", '{"nestedFrames":"own"}')),
+    ).not.toThrow();
   });
 });
 

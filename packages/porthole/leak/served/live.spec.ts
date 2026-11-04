@@ -116,10 +116,12 @@ test.describe("a live widget (P079)", () => {
     await peer.setLocalDescription(await peer.createOffer());
     r.peer = "made";
   } catch (e) { r.peer = "threw " + e.name; }
-  // A fresh realm would have its own constructors: no frame of its own survives.
-  const child = document.createElement("iframe");
-  document.body.append(child);
-  r.child = child.isConnected ? (child.contentWindow ? typeof child.contentWindow.RTCPeerConnection : "no window") : "removed";
+  // A fresh realm would have its own constructors: no frame of its own survives (by default the
+  // shell refuses to make one, P130).
+  let child = null;
+  try { child = document.createElement("iframe"); } catch (e) { if (!e || e.name !== "NotSupportedError") throw e; }
+  if (child) document.body.append(child);
+  r.child = child === null ? "refused at creation" : child.isConnected ? (child.contentWindow ? typeof child.contentWindow.RTCPeerConnection : "no window") : "removed";
   await wait(1500);
   window.probe = r;
   document.documentElement.dataset.done = "1";
@@ -142,7 +144,7 @@ test.describe("a live widget (P079)", () => {
     expect(r.img).not.toBe("load");
     expect(r.rtc).toBe("undefined,undefined,undefined");
     expect(r.peer).toMatch(/^threw/u);
-    expect(r.child).toBe("removed");
+    expect(["removed", "refused at creation"]).toContain(r.child);
     expect(canary.requests(), "a request reached the canary").toEqual([]);
     expect(canary.connections(), "a connection reached the canary").toBe(0);
     expect(udp.packets(), "STUN reached the oracle").toBe(0);

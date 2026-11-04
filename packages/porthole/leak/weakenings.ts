@@ -106,6 +106,43 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       find: "    if (guarded(copy)) {\n      callOf(removeIn, element, []);\n    }",
       replace: "",
     },
+    // The rest of the synchronous guard (P130): the producers' strips and the creation refusal,
+    // so that with the observer out too a frame-like element is made, kept and connected.
+    {
+      file: RUNTIME,
+      find: "      const made = callOf(original, this, argumentsOf(args));\n      strip(made);\n      if (framedElement(made)) {",
+      replace: "      const made = callOf(original, this, argumentsOf(args));\n      if (false) {",
+    },
+    {
+      file: RUNTIME,
+      find: "      if (framedElement(args[0])) {\n        refuseFrame();\n      }\n      strip(args[0]);\n",
+      replace: "",
+    },
+    {
+      file: RUNTIME,
+      find: "          if (!documentsOnly || typeOf(value) === 9) {\n            strip(value);\n          }\n",
+      replace: "",
+    },
+    {
+      file: RUNTIME,
+      find: "          callOf(descriptor.set, this, [html]);\n          strip(callOf(templateContentOf, this, []));",
+      replace: "          callOf(descriptor.set, this, [html]);",
+    },
+    {
+      file: RUNTIME,
+      find: "        strip(parsed);\n        return parsed;",
+      replace: "        return parsed;",
+    },
+    {
+      file: RUNTIME,
+      find: "      if (fixed.length > nameAt && frameCapableName(fixed[nameAt])) {",
+      replace: "      if (false) {",
+    },
+    {
+      file: RUNTIME,
+      find: "            if (frameCapableName(options.extends)) {",
+      replace: "            if (false) {",
+    },
   ],
   "connect-src": [
     {

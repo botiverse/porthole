@@ -1479,12 +1479,32 @@ navigator.mediaDevices && navigator.mediaDevices.getUserMedia({ video: true }).t
           link.rel = "stylesheet";
           link.href = each.style;
           document.head.append(link);
-          const nested = document.createElement("iframe");
-          nested.src = each.frame;
-          document.body.append(nested);
+          // Refused at creation under the default config (P130): the frame can't exist.
+          let nested: HTMLIFrameElement | null = null;
+          try {
+            nested = document.createElement("iframe");
+          } catch (error) {
+            if ((error as { name?: unknown } | null)?.name !== "NotSupportedError") {
+              throw error;
+            }
+          }
+          if (nested !== null) {
+            nested.src = each.frame;
+            document.body.append(nested);
+          }
           await new Promise((resolve) => setTimeout(resolve, 800));
-          return { fetched, policy: policies.find((policy) => /connect-src/u.test(policy)) ?? "" };
+          return {
+            fetched,
+            policy: policies.find((policy) => /connect-src/u.test(policy)) ?? "",
+            frameRefused: nested === null,
+          };
         }, urls);
+        if (seen.frameRefused) {
+          info?.annotations.push({
+            type: "measured",
+            description: "the nested frame was refused at creation",
+          });
+        }
         await page.waitForTimeout(SETTLE_MS);
         expect(seen.fetched, "probe: the fetch got out").toBe("blocked");
         expect(seen.policy, "probe: a CSP applied to the document").not.toBe("");

@@ -3,7 +3,7 @@ import type { LimitId } from "../guide/limits.ts";
 import type { LaunchedDisplay } from "./index.ts";
 import { presets } from "../presets/presets.ts";
 import { resolveTheme } from "../theme/variables.ts";
-import { attack, inline, js, type Probe } from "./kit.ts";
+import { attack, inline, js, noteRefused, type Probe } from "./kit.ts";
 import { settle } from "./oracles.ts";
 
 /**
@@ -660,8 +660,10 @@ export const LIMIT_PROBES: readonly Probe[] = [
   document.getElementById("go").addEventListener("click", async () => {
     try { document.write("<p>x</p>"); r.write = "wrote"; } catch (e) { r.write = "throws"; }
     try { document.open(); r.open = "opened"; } catch (e) { r.open = "throws"; }
-    const frame = document.createElement("iframe");
-    document.body.append(frame);
+    // Refused at creation under the default config (P130): the frame can't exist.
+    let frame = null;
+    try { frame = document.createElement("iframe"); } catch (e) { if (!e || e.name !== "NotSupportedError") throw e; r.refused = ["iframe"]; }
+    if (frame) document.body.append(frame);
     await new Promise((resolve) => setTimeout(resolve, 100));
     r.frames = document.querySelectorAll("iframe, object, embed").length;
     r.fullscreen = await document.documentElement.requestFullscreen().then(() => "entered", (e) => "rejected");
@@ -671,8 +673,9 @@ export const LIMIT_PROBES: readonly Probe[] = [
 </script>`,
       });
       await click(display, "#go");
+      const shell = await replacedOrRecorded(display, "#go");
       expect(
-        await replacedOrRecorded(display, "#go"),
+        shell,
         "probe: write and open throw, nested frames are removed, full screen is closed",
       ).toMatchObject({
         write: "throws",
@@ -683,6 +686,7 @@ export const LIMIT_PROBES: readonly Probe[] = [
       expect(["rejected", "absent"], "probe: the clipboard was written").toContain(
         (await recorded(display)).clipboard,
       );
+      noteRefused(context, shell);
     },
   },
   {

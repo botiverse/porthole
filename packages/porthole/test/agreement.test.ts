@@ -483,6 +483,8 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
     const files = config.mode === "artifact" && config.isolation === "domain";
     expect(plan?.nestedFrames, "the shell keeps a page's own frames").toBe(own ? "own" : undefined);
     expect(text.includes("nested frames (iframe, object, embed) are removed")).toBe(!own);
+    // By default the shell refuses to make one (P130), and the manual says so; under "own" it doesn't.
+    expect(text.includes("making one in script throws")).toBe(!own);
     expect(text.includes("with srcdoc loads")).toBe(own);
     expect(text.includes("own files (a relative src)")).toBe(own && files);
     // The frame's own CSP frames nothing (srcdoc needs no source); a set's page, its own files.

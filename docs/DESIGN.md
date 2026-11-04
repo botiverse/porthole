@@ -1423,8 +1423,8 @@ control the tables above name to the registry):
 |---------|----------|-----------------------|---------------|-----------------------------|
 | `connect-src` | `leak.spec.ts` | `[1.connect]`, `[14.silent]` | — | — |
 | `webrtc` | `leak.spec.ts` | `[3.webrtc]`, `[14.workers]` | — | — |
-| `frame-guard` | `leak.spec.ts` | nothing | — | the synchronous guard drops what the observer would (`frame-guard,sync-guard`) |
-| `attach-shadow` | `leak.spec.ts` | nothing | — | the synchronous guard reaches a closed shadow root's frames as they connect (`attach-shadow,sync-guard`) |
+| `frame-guard` | `leak.spec.ts` | nothing | — | the synchronous guard drops what the observer would, or refuses it at creation (P130) (`frame-guard,sync-guard`) |
+| `attach-shadow` | `leak.spec.ts` | nothing | — | the synchronous guard refuses the frame at creation (P130), and reaches a closed shadow root's frames as they connect (`attach-shadow,sync-guard`) |
 | `sync-guard` | `leak.spec.ts` | nothing | WebKit: `[8.preconnect]` | on Chromium and Firefox the observer removes what the synchronous guard would, and no preconnect opens even unsandboxed (measured) (`frame-guard,sync-guard`) |
 | `frame-guard,sync-guard` | `leak.spec.ts` | `[4.light-dom]`, `[4.sync-realm]`, `[4.plugins]`, `[4.foreign-object]`, `[4.template-clone]`, `[7.base-plugins]`, `[14.shell]`, `[4.own-external]`, `[4.own-turned]`, `[4.own-default]` | WebKit: `[8.preconnect]` | — |
 | `own-frame-rule` | `leak.spec.ts`, `served/files.spec.ts` | `[4.own-external]`, `[4.own-turned]`, `a page's own frames, opted in (P128): a frame of another site, of another path of its origin, or a plugin stays out of the tree` | — | — |

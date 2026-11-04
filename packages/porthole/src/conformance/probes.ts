@@ -11,7 +11,7 @@ import {
 import { presets } from "../presets/presets.ts";
 import { resolveTheme } from "../theme/variables.ts";
 import type { ConformanceHost, LaunchedDisplay, LeakSuiteOptions } from "./index.ts";
-import { attack, inline, js, type Probe, type ProbeContext } from "./kit.ts";
+import { attack, inline, js, noteRefused, type Probe, type ProbeContext } from "./kit.ts";
 import { BEHAVIOR_PROBES } from "./behavior.ts";
 import { CLIPBOARD_PROBES } from "./clipboard.ts";
 import { LIMIT_PROBES } from "./limits.ts";
@@ -77,6 +77,7 @@ async function expectNoChild(
   expect(verdict.childRan ?? false, "probe: a nested frame's script ran").toBe(false);
   expect(verdict.frames ?? 0, "probe: a nested frame is still in the tree").toBe(0);
   expect(udp.packets(), "probe: STUN packets reached the oracle").toBe(0);
+  noteRefused(context, verdict);
   if (verdict.reached !== undefined || verdict.blocked !== undefined) {
     context.measured(
       `${context.engine}: a new frame's realm, in the task that added it, was ${verdict.blocked === undefined ? `reachable (RTCPeerConnection: ${JSON.stringify(verdict.reached)})` : `unreachable (${JSON.stringify(verdict.blocked)})`}`,
@@ -90,7 +91,7 @@ const childSetup = (stun: string) => `
     r.childRan = false;
     window.addEventListener("message", (event) => { if (event.data && event.data.tag === "child-ran") r.childRan = true; });
     const child = ${js(childDocument(stun))};
-    const makeFrame = () => { const f = document.createElement("iframe"); f.setAttribute("srcdoc", child); return f; };`;
+    const makeFrame = () => { const f = created("iframe"); if (f) f.setAttribute("srcdoc", child); return f; };`;
 
 /**
  * A navigated document's beacon to an allowed witness, heard only if that document ran: its first
@@ -595,7 +596,8 @@ export const PROBES: readonly Probe[] = [
     "light-dom",
     "a srcdoc frame appended to the document",
     () => `
-    document.body.append(makeFrame());
+    const f = makeFrame();
+    if (f) document.body.append(f);
     await wait(50);
     r.frames = document.querySelectorAll("iframe").length;`,
   ),
@@ -603,16 +605,18 @@ export const PROBES: readonly Probe[] = [
     "sync-realm",
     "reaching a new frame's realm in the same task it was added",
     (stun) => `
-    const f = document.createElement("iframe");
-    document.body.append(f);
-    try {
-      const w = window[window.length - 1] || f.contentWindow;
-      r.reached = typeof (w && w.RTCPeerConnection);
-      const p = new w.RTCPeerConnection({ iceServers: [{ urls: ${js(stun)} }], iceCandidatePoolSize: 4 });
-      p.createDataChannel("x");
-      p.createOffer().then((o) => p.setLocalDescription(o));
-      r.childRan = true;
-    } catch (e) { r.blocked = String(e && e.name); }
+    const f = created("iframe");
+    if (f) {
+      document.body.append(f);
+      try {
+        const w = window[window.length - 1] || f.contentWindow;
+        r.reached = typeof (w && w.RTCPeerConnection);
+        const p = new w.RTCPeerConnection({ iceServers: [{ urls: ${js(stun)} }], iceCandidatePoolSize: 4 });
+        p.createDataChannel("x");
+        p.createOffer().then((o) => p.setLocalDescription(o));
+        r.childRan = true;
+      } catch (e) { r.blocked = String(e && e.name); }
+    }
     await wait(50);
     r.frames = document.querySelectorAll("iframe").length;`,
   ),
@@ -623,7 +627,8 @@ export const PROBES: readonly Probe[] = [
     const host = document.createElement("div");
     document.body.append(host);
     const root = host.attachShadow({ mode: "open" });
-    root.append(makeFrame());
+    const f = makeFrame();
+    if (f) root.append(f);
     await wait(50);
     r.frames = root.querySelectorAll("iframe").length;`,
   ),
@@ -635,7 +640,8 @@ export const PROBES: readonly Probe[] = [
     document.body.append(host);
     const root = host.attachShadow({ mode: "closed" });
     root.innerHTML = '<p>shadow</p>';
-    root.append(makeFrame());
+    const f = makeFrame();
+    if (f) root.append(f);
     await wait(50);
     r.frames = root.querySelectorAll("iframe").length;`,
   ),
@@ -649,7 +655,8 @@ export const PROBES: readonly Probe[] = [
     const inner = document.createElement("div");
     first.append(inner);
     const second = inner.attachShadow({ mode: "open" });
-    second.append(makeFrame());
+    const f = makeFrame();
+    if (f) second.append(f);
     await wait(50);
     r.frames = second.querySelectorAll("iframe").length;`,
   ),
@@ -703,13 +710,17 @@ export const PROBES: readonly Probe[] = [
     "plugins",
     "object and embed elements holding a document",
     () => `
-    const object = document.createElement("object");
-    object.type = "text/html";
-    object.data = "data:text/html," + encodeURIComponent(child);
-    const embed = document.createElement("embed");
-    embed.type = "text/html";
-    embed.src = "data:text/html," + encodeURIComponent(child);
-    document.body.append(object, embed);
+    const object = created("object");
+    if (object) {
+      object.type = "text/html";
+      object.data = "data:text/html," + encodeURIComponent(child);
+    }
+    const embed = created("embed");
+    if (embed) {
+      embed.type = "text/html";
+      embed.src = "data:text/html," + encodeURIComponent(child);
+    }
+    document.body.append(...[object, embed].filter((each) => each !== null));
     await wait(50);
     r.frames = document.querySelectorAll("object, embed").length;`,
   ),
@@ -841,12 +852,16 @@ export const PROBES: readonly Probe[] = [
         config: inline(),
         content: attack(
           `${childSetup(udp.stun)}
-    const made = document.createElement("iframe");
-    made.srcdoc = child;
-    document.body.append(made);
-    const relative = document.createElement("iframe");
-    relative.src = "page.html";
-    document.body.append(relative);
+    const made = created("iframe");
+    if (made) {
+      made.srcdoc = child;
+      document.body.append(made);
+    }
+    const relative = created("iframe");
+    if (relative) {
+      relative.src = "page.html";
+      document.body.append(relative);
+    }
     await wait(1200);
     r.frames = document.querySelectorAll("iframe").length;`,
           `<iframe srcdoc="${child}"></iframe><iframe src="page.html"></iframe>`,
@@ -1022,11 +1037,11 @@ export const PROBES: readonly Probe[] = [
     const img = document.createElement("img");
     img.src = "relative.png?d=secret";
     document.body.append(img);
-    const object = document.createElement("object");
-    object.data = ${js(`${c}/object.html`)};
-    const embed = document.createElement("embed");
-    embed.src = ${js(`${c}/embed.html`)};
-    document.body.append(object, embed);
+    const object = created("object");
+    if (object) object.data = ${js(`${c}/object.html`)};
+    const embed = created("embed");
+    if (embed) embed.src = ${js(`${c}/embed.html`)};
+    document.body.append(...[object, embed].filter((each) => each !== null));
     await wait(500);
     r.plugins = document.querySelectorAll("object, embed").length;`,
           `<object data="${c}/static-object.html"></object><embed src="${c}/static-embed.swf">`,
@@ -1040,6 +1055,7 @@ export const PROBES: readonly Probe[] = [
       });
       expect(canary.requests(), "probe: requests reached the canary").toEqual([]);
       expect(context.requestsTo(canary.origin), "probe: the page requested the canary").toEqual([]);
+      noteRefused(context, verdict);
     },
   },
 

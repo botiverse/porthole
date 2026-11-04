@@ -66,6 +66,17 @@ export function attack(code: string, markup = ""): string {
     document.removeEventListener("securitypolicyviolation", seen);
     return blocked;
   };
+  // An element of \`tag\`, or null where the shell refuses to make one (P130: a frame-like element,
+  // under the default config): the guard held, and \`r.refused\` lists what was refused at creation.
+  const created = (tag) => {
+    try {
+      return document.createElement(tag);
+    } catch (error) {
+      if (!error || error.name !== "NotSupportedError") throw error;
+      r.refused = (r.refused || []).concat(tag);
+      return null;
+    }
+  };
   try {
 ${code}
   } catch (error) {
@@ -78,3 +89,14 @@ ${code}
 }
 
 export const inline = (options: PresetOptions = {}) => presets.inlineWidget(options);
+
+/**
+ * Records, as a measured fact, the frame-like elements a probe's verdict says the shell refused
+ * at creation (`created` in `attack`; P130): the guard held, and nothing was there to remove.
+ */
+export function noteRefused(context: ProbeContext, verdict: Record<string, unknown>): void {
+  const refused = verdict.refused;
+  if (Array.isArray(refused) && refused.length > 0) {
+    context.measured(`${context.engine}: ${refused.join(", ")} refused at creation`);
+  }
+}
