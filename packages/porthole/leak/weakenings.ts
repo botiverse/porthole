@@ -93,7 +93,7 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "sync-guard": [
     {
       file: RUNTIME,
-      find: "    if (node.nodeType === 1 && guarded(node)) {\n      return false;\n    }\n    strip(node);\n    return true;",
+      find: "    if (type === 1 && guarded(node)) {\n      return false;\n    }\n    strip(node);\n    return true;",
       replace: "    return true;",
     },
     {
@@ -103,7 +103,7 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
     },
     {
       file: RUNTIME,
-      find: "    if (guarded(copy)) {\n      element.remove();\n    }",
+      find: "    if (guarded(copy)) {\n      callOf(removeIn, element, []);\n    }",
       replace: "",
     },
   ],
