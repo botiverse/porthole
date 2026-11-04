@@ -49,6 +49,50 @@ export const OWN_FRAME = String.raw`(hasSrcdoc, src, filesBase, resolve) => {
   }`;
 
 /**
+ * Which values a guard forwards as they are (P129, P130), spliced into the runtime: those that are
+ * their own single reading. A string, a number, a boolean, a bigint, `null`, and a genuine
+ * `undefined` (`value === undefined`: an object whose `typeof` is "undefined" isn't one). Nothing
+ * here can throw or run content's code (`typeof` and `===` read no property).
+ */
+export const PASSES_AS_IS = String.raw`(value) => {
+    if (value === null || value === undefined) {
+      return true;
+    }
+    const kind = typeof value;
+    return kind === "string" || kind === "number" || kind === "boolean" || kind === "bigint";
+  }`;
+
+/**
+ * A name or value a guard inspects and then forwards, pinned to one reading (P129, P130), spliced
+ * into the runtime as `ONCE(passesAsIs, toText)`: a value `passesAsIs` lets through goes on
+ * unchanged; anything else is turned into its string once, by `toText` (the platform's own
+ * `String`, kept before content runs), and that string is what is both checked and forwarded. A
+ * symbol, a conversion that throws, or one that doesn't give a string is refused (the guard throws
+ * and nothing is forwarded): fail closed.
+ */
+export const ONCE = String.raw`(passesAsIs, toText) => (value) => {
+    let pass = false;
+    try {
+      pass = passesAsIs(value) === true;
+    } catch (_) {
+      pass = false;
+    }
+    if (pass) {
+      return value;
+    }
+    let text = null;
+    try {
+      text = typeof value === "symbol" ? null : toText(value);
+    } catch (_) {
+      text = null;
+    }
+    if (typeof text !== "string") {
+      throw new TypeError("This value can't be used here");
+    }
+    return text;
+  }`;
+
+/**
  * The shell's runtime: the code that runs first in the frame, before any content. Plain ES2020,
  * no imports and no build step, so every engine (a browser frame now, a native web view later)
  * runs it as it is. `__PLAN__` is replaced with the frame's plan (`ShellPlan` plus the origins it
@@ -575,6 +619,11 @@ export const SHELL_RUNTIME = String.raw`(() => {
   const createNSIn = Document.prototype.createElementNS;
   const weakMapGet = WeakMap.prototype.get;
   const weakMapSet = WeakMap.prototype.set;
+  // A template's content, read natively: the walk below goes into it (P130), and content's own
+  // reads of it are stripped first (the content getter, below).
+  const templateContentOf = typeof HTMLTemplateElement === "function" ? getterOf(HTMLTemplateElement.prototype, "content") : null;
+  const NativeDOMException = DOMException;
+  const XHTML = "http://www.w3.org/1999/xhtml";
   // A list the shell builds (arguments to pass on, nodes to move): an object with no prototype,
   // so neither writing nor reading an index or its length reaches anything on Array.prototype or
   // Object.prototype. callOf takes it as its arguments.
@@ -588,18 +637,34 @@ export const SHELL_RUNTIME = String.raw`(() => {
     list[list.length] = value;
     list.length += 1;
   };
+  // FRAMES's names as a lookup with no prototype, decided now: an element of one of these names,
+  // in any namespace and any case, is one content can't create under the default config (P130).
+  const frameTags = bare(null);
+  for (const tag of FRAMES.split(",")) {
+    frameTags[tag] = true;
+  }
+  const frameCapableName = (name) => {
+    const text = callOf(lowerOf, name, []);
+    const first = callOf(indexIn, text, [":"]);
+    const last = callOf(lastIndexIn, text, [":"]);
+    return frameTags[text] === true || (first !== -1 && frameTags[callOf(sliceOf, text, [first + 1])] === true) || (last !== -1 && frameTags[callOf(sliceOf, text, [last + 1])] === true);
+  };
   // An attribute's name, namespace and value, read through the kept getters.
   const attrParts = (attribute) => ({
     namespace: callOf(attrNamespaceOf, attribute, []),
     name: callOf(attrNameOf, attribute, []),
     value: callOf(attrValueOf, attribute, []),
   });
-  // A name or value a guard inspects and then passes on, pinned to one reading: an object or
-  // function is turned into its string once, here, so the guard checks and the platform acts on
-  // the same text (a value whose toString answers differently the second time can't slip past).
-  // A primitive is its own single reading, so it goes on unchanged (null and booleans kept as they
-  // are, for the setters that treat them specially).
-  const once = (value) => (value !== null && (typeof value === "object" || typeof value === "function") ? NativeString(value) : value);
+  // A name or value a guard inspects and then passes on, pinned to one reading (PASSES_AS_IS,
+  // ONCE): anything but a primitive that is its own single reading (a string, number, boolean,
+  // bigint, null, or undefined itself) is turned into its string once, here, so the guard checks
+  // and the platform acts on the same text (a value whose toString answers differently the second
+  // time can't slip past). null and booleans are kept as they are, for the setters that treat them
+  // specially. A value that can't be read once (a symbol, a conversion that throws) is refused.
+  const passesAsIs = ${PASSES_AS_IS};
+  const once = (${ONCE})(passesAsIs, NativeString);
+  // An object (a dictionary to read once), by the same rule: anything once wouldn't pass as it is.
+  const objectLike = (value) => !passesAsIs(value) && typeof value !== "symbol";
   // A node's type (and whether it is connected), read through the kept getters; anything that
   // isn't a node reads as -1 / false, never throws, so the insertion guards can ask of any value.
   const typeOf = (node) => {
@@ -625,36 +690,64 @@ export const SHELL_RUNTIME = String.raw`(() => {
   const countOf = (list) => (nodeListLengthOf === null ? 0 : callOf(nodeListLengthOf, list, []));
   const shadowOf = (element) => (shadowRootOfNode === null ? null : callOf(shadowRootOfNode, element, []));
   const queryAllOf = (node, type, selector) => callOf(type === 1 ? queryAllElement : type === 9 ? queryAllDocument : queryAllFragment, node, [selector]);
+  // An HTML template (its content is what the walk enters), by the kept getters: the selector
+  // "template" also matches an HTML-namespace element named "TEMPLATE" in any case, which isn't one.
+  const isTemplate =
+    templateContentOf === null || localNameOf === null || namespaceOf === null
+      ? null
+      : (element) => callOf(localNameOf, element, []) === "template" && callOf(namespaceOf, element, []) === XHTML;
   const guardedRoots = new WeakSet();
-  let guardRoot = null;
-  const strip = (node) => {
-    const type = typeOf(node);
-    if (type !== 1 && type !== 9 && type !== 11) {
-      return;
-    }
-    if (type === 1 && guarded(node)) {
-      callOf(removeIn, node, []);
-      return;
-    }
-    const framed = queryAllOf(node, type, GUARDED);
-    for (let i = 0, n = countOf(framed); i < n; i += 1) {
-      const element = framed[i];
-      if (!keptFrame(element)) {
-        callOf(removeIn, element, []);
+  let watchRoot = null;
+  // Every subtree the walk reaches is stripped: the node's own tree (querySelectorAll's reach), and
+  // what that never enters, each template's content and each open shadow root's tree (P130),
+  // however deep they nest. A list of what is left to walk, not recursion: no depth runs it out of
+  // stack. A shadow root found is watched by the observer too (declarative ones the parser built
+  // elsewhere, made without attachShadow).
+  const strip = (start) => {
+    const pending = listOf();
+    pushTo(pending, start);
+    for (let at = 0; at < pending.length; at += 1) {
+      const node = pending[at];
+      const type = typeOf(node);
+      if (type !== 1 && type !== 9 && type !== 11) {
+        continue;
       }
-    }
-    // Open shadow roots made without attachShadow (declarative ones the parser built elsewhere).
-    if (type === 1) {
-      const root = shadowOf(node);
-      if (root) {
-        guardRoot(root);
+      if (type === 1 && guarded(node)) {
+        callOf(removeIn, node, []);
+        continue;
       }
-    }
-    const all = queryAllOf(node, type, "*");
-    for (let i = 0, n = countOf(all); i < n; i += 1) {
-      const root = shadowOf(all[i]);
-      if (root) {
-        guardRoot(root);
+      const framed = queryAllOf(node, type, GUARDED);
+      for (let i = 0, n = countOf(framed); i < n; i += 1) {
+        const element = framed[i];
+        if (!keptFrame(element)) {
+          callOf(removeIn, element, []);
+        }
+      }
+      if (isTemplate !== null) {
+        const templates = queryAllOf(node, type, "template");
+        for (let i = 0, n = countOf(templates); i < n; i += 1) {
+          if (isTemplate(templates[i])) {
+            pushTo(pending, callOf(templateContentOf, templates[i], []));
+          }
+        }
+        if (type === 1 && isTemplate(node)) {
+          pushTo(pending, callOf(templateContentOf, node, []));
+        }
+      }
+      if (type === 1) {
+        const root = shadowOf(node);
+        if (root) {
+          watchRoot(root);
+          pushTo(pending, root);
+        }
+      }
+      const all = queryAllOf(node, type, "*");
+      for (let i = 0, n = countOf(all); i < n; i += 1) {
+        const root = shadowOf(all[i]);
+        if (root) {
+          watchRoot(root);
+          pushTo(pending, root);
+        }
       }
     }
   };
@@ -677,13 +770,16 @@ export const SHELL_RUNTIME = String.raw`(() => {
     }
   });
   const observed = ownFrames ? { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "srcdoc"] } : { childList: true, subtree: true };
-  guardRoot = (root) => {
+  watchRoot = (root) => {
     if (callOf(weakSetHas, guardedRoots, [root])) {
       return;
     }
     callOf(weakSetAdd, guardedRoots, [root]);
-    strip(root);
     callOf(observeIn, frameGuard, [root, observed]);
+  };
+  const guardRoot = (root) => {
+    strip(root);
+    watchRoot(root);
   };
   guardRoot(document);
 
@@ -694,18 +790,32 @@ export const SHELL_RUNTIME = String.raw`(() => {
   const attachShadow = Element.prototype.attachShadow;
   const shownOpen = new WeakSet();
   const addShown = WeakSet.prototype.add;
+  // The init dictionary is read once (P130): each field, once, into a fresh object with no
+  // prototype, which is all the platform is given; the mode that decides the closed-to-open turn
+  // is the same pinned text the platform reads. A field this list doesn't name isn't passed on.
+  const SHADOW_FIELDS = ["mode", "delegatesFocus", "slotAssignment", "clonable", "serializable", "customElementRegistry", "referenceTarget"];
+  const SHADOW_TEXT = bare(null);
+  SHADOW_TEXT.mode = true;
+  SHADOW_TEXT.slotAssignment = true;
+  SHADOW_TEXT.referenceTarget = true;
   const shadowInit = (init) => {
-    if (window.top !== window || init === null || typeof init !== "object" || init.mode !== "closed") {
-      return { init, closed: false };
-    }
-    const copy = { mode: "open" };
-    const keys = ["delegatesFocus", "slotAssignment", "clonable", "serializable", "customElementRegistry", "referenceTarget"];
-    for (let i = 0; i < keys.length; i += 1) {
-      if (init[keys[i]] !== undefined) {
-        copy[keys[i]] = init[keys[i]];
+    const copy = bare(null);
+    if (objectLike(init)) {
+      for (let i = 0; i < SHADOW_FIELDS.length; i += 1) {
+        const field = SHADOW_FIELDS[i];
+        const value = init[field];
+        if (value !== undefined) {
+          copy[field] = SHADOW_TEXT[field] === true ? once(value) : value;
+        }
       }
     }
-    return { init: copy, closed: true };
+    const asked = bare(null);
+    asked.closed = window.top === window && copy.mode === "closed";
+    if (asked.closed) {
+      copy.mode = "open";
+    }
+    asked.init = copy;
+    return asked;
   };
   lock(Element.prototype, "attachShadow", function (init) {
     const asked = shadowInit(init);
@@ -759,8 +869,18 @@ export const SHELL_RUNTIME = String.raw`(() => {
       });
     }
   }
-  if (typeof Document.parseHTMLUnsafe === "function") {
-    lock(Document, "parseHTMLUnsafe", (html) => new DOMParser().parseFromString(String(html), "text/html"));
+  // Document.parseHTMLUnsafe and the Sanitizer API's Document.parseHTML: DOMParser's parse (no
+  // declarative shadow DOM), through the platform's own parser, stripped before it is returned.
+  const NativeDOMParser = DOMParser;
+  const parseFromStringIn = DOMParser.prototype.parseFromString;
+  for (const name of ["parseHTMLUnsafe", "parseHTML"]) {
+    if (typeof Document[name] === "function") {
+      lock(Document, name, (html) => {
+        const parsed = callOf(parseFromStringIn, new NativeDOMParser(), [NativeString(html), "text/html"]);
+        strip(parsed);
+        return parsed;
+      });
+    }
   }
   const noRewrite = function () {
     throw new Error("document.open and document.write aren't available here: build the page with DOM methods");
@@ -824,6 +944,49 @@ export const SHELL_RUNTIME = String.raw`(() => {
   wrapInsert(Element.prototype, "insertAdjacentElement", [1]);
   wrapInsert(Range.prototype, "insertNode", [0]);
   wrapInsert(Range.prototype, "surroundContents", [0]);
+  // A select's add and its options' add (P130), and moveBefore wherever the engine defines it.
+  wrapInsert(typeof HTMLSelectElement === "function" ? HTMLSelectElement.prototype : null, "add", [0]);
+  wrapInsert(typeof HTMLOptionsCollection === "function" ? HTMLOptionsCollection.prototype : null, "add", [0]);
+  for (const proto of [Node.prototype, Element.prototype, Document.prototype, DocumentFragment.prototype]) {
+    if (callOf(hasOwn, proto, ["moveBefore"])) {
+      wrapInsert(proto, "moveBefore", [0]);
+    }
+  }
+  // The setters that put a node in place (P130): document.body, a table's tHead, tFoot and
+  // caption. The value is admitted as the insertion methods' arguments are, and a refused one
+  // refuses the set (the setter has no harmless stand-in: null would remove the table's own).
+  const refuseInsert = () => {
+    throw new NativeDOMException("This element can't be inserted here", "HierarchyRequestError");
+  };
+  const wrapNodeSetter = (proto, name) => {
+    const descriptor = proto ? Object.getOwnPropertyDescriptor(proto, name) : undefined;
+    if (!descriptor || typeof descriptor.set !== "function") {
+      return;
+    }
+    try {
+      Object.defineProperty(proto, name, {
+        configurable: false,
+        enumerable: descriptor.enumerable,
+        get: descriptor.get,
+        set(value) {
+          if (!admit(value)) {
+            refuseInsert();
+          }
+          callOf(descriptor.set, this, [value]);
+        },
+      });
+    } catch (_) {
+      unfixed.push(name);
+    }
+  };
+  for (const proto of [Document.prototype, typeof HTMLDocument === "function" ? HTMLDocument.prototype : null]) {
+    if (proto !== null && callOf(hasOwn, proto, ["body"])) {
+      wrapNodeSetter(proto, "body");
+    }
+  }
+  for (const name of ["tHead", "tFoot", "caption"]) {
+    wrapNodeSetter(typeof HTMLTableElement === "function" ? HTMLTableElement.prototype : null, name);
+  }
   // The insertion methods the HTML-parse wrappers below call: the locked wrappers just installed
   // (admit runs inside them), taken now so an element can't shadow them with an own property and
   // no spread reads a replaceable array iterator; each is given a prototype-less argument list.
@@ -875,8 +1038,11 @@ export const SHELL_RUNTIME = String.raw`(() => {
         // Which branch runs is read through the kept getters, so a replaced nodeType or localName
         // can't route a connected element past parseIn (and its strip) by posing as a template
         // whose markup goes in inert.
-        if (typeOf(this) === 1 && localNameOf !== null && callOf(localNameOf, this, []) === "template") {
+        if (typeOf(this) === 1 && isTemplate !== null && isTemplate(this)) {
+          // An HTML template's markup goes into its inert content, stripped before the setter
+          // returns (P130), as every read of the content is.
           callOf(descriptor.set, this, [html]);
+          strip(callOf(templateContentOf, this, []));
           return;
         }
         const forFragment = typeOf(this) === 11;
@@ -918,10 +1084,156 @@ export const SHELL_RUNTIME = String.raw`(() => {
       callOf(afterIn, this, nodes);
     }
   });
-  if (typeof Element.prototype.setHTML === "function") {
-    lock(Element.prototype, "setHTML", function (html) {
-      this.innerHTML = NativeString(html);
+  for (const proto of [Element.prototype, typeof ShadowRoot === "function" ? ShadowRoot.prototype : null]) {
+    if (proto !== null && callOf(hasOwn, proto, ["setHTML"]) && typeof proto.setHTML === "function") {
+      lock(proto, "setHTML", function (html) {
+        this.innerHTML = NativeString(html);
+      });
+    }
+  }
+  // A parser method this shell doesn't know (a later engine's) is refused rather than left open:
+  // every name with "HTML" in it on the interfaces that take markup, other than the ones above.
+  const KNOWN_HTML = bare(null);
+  for (const name of ["innerHTML", "outerHTML", "insertAdjacentHTML", "setHTML", "setHTMLUnsafe", "getHTML", "parseHTMLUnsafe", "parseHTML"]) {
+    KNOWN_HTML[name] = true;
+  }
+  const unknownMarkup = function () {
+    throw new NativeDOMException("This way to add markup isn't available here: use innerHTML or DOM methods", "NotSupportedError");
+  };
+  for (const target of [Element.prototype, typeof ShadowRoot === "function" ? ShadowRoot.prototype : null, Document.prototype, DocumentFragment.prototype, Document, Range.prototype]) {
+    for (const name of target === null ? [] : Object.getOwnPropertyNames(target)) {
+      const descriptor = Object.getOwnPropertyDescriptor(target, name);
+      if (KNOWN_HTML[name] !== true && /HTML/.test(name) && descriptor && typeof descriptor.value === "function") {
+        lock(target, name, unknownMarkup);
+      }
+    }
+  }
+
+  // Every API that hands content a subtree it can insert later strips it before it returns it
+  // (P130): a parsed document, a template's content, a contextual fragment, a transform's output,
+  // an XHR's document, an imported or adopted node. A producer whose result is itself a frame-like
+  // element (one importNode or adoptNode would return) refuses instead: there is nothing to strip
+  // it from.
+  const framedElement = (node) => typeOf(node) === 1 && callOf(matchesIn, node, [FRAMES]) && !keptFrame(node);
+  const refuseFrame = () => {
+    throw new NativeDOMException("Frame elements aren't available here", "NotSupportedError");
+  };
+  const argumentsOf = (args) => {
+    const list = listOf();
+    for (let i = 0; i < args.length; i += 1) {
+      pushTo(list, args[i]);
+    }
+    return list;
+  };
+  const wrapProducer = (proto, name) => {
+    const original = proto && callOf(hasOwn, proto, [name]) ? proto[name] : null;
+    if (typeof original !== "function") {
+      return;
+    }
+    lock(proto, name, function (...args) {
+      const made = callOf(original, this, argumentsOf(args));
+      strip(made);
+      if (framedElement(made)) {
+        refuseFrame();
+      }
+      return made;
     });
+  };
+  wrapProducer(DOMParser.prototype, "parseFromString");
+  wrapProducer(typeof DOMImplementation === "function" ? DOMImplementation.prototype : null, "createHTMLDocument");
+  wrapProducer(typeof DOMImplementation === "function" ? DOMImplementation.prototype : null, "createDocument");
+  wrapProducer(Range.prototype, "createContextualFragment");
+  wrapProducer(typeof XSLTProcessor === "function" ? XSLTProcessor.prototype : null, "transformToFragment");
+  wrapProducer(typeof XSLTProcessor === "function" ? XSLTProcessor.prototype : null, "transformToDocument");
+  // importNode's clone is stripped (where an engine has it on a shadow root too, there as well).
+  wrapProducer(Document.prototype, "importNode");
+  wrapProducer(typeof ShadowRoot === "function" ? ShadowRoot.prototype : null, "importNode");
+  // adoptNode's node is stripped before it is adopted.
+  const adoptNodeIn = Document.prototype.adoptNode;
+  if (typeof adoptNodeIn === "function") {
+    lock(Document.prototype, "adoptNode", function (...args) {
+      if (framedElement(args[0])) {
+        refuseFrame();
+      }
+      strip(args[0]);
+      return callOf(adoptNodeIn, this, argumentsOf(args));
+    });
+  }
+  const strippedGetter = (proto, name, documentsOnly) => {
+    const descriptor = accessor(proto, name);
+    if (!descriptor || typeof descriptor.get !== "function") {
+      return;
+    }
+    try {
+      Object.defineProperty(proto, name, {
+        configurable: false,
+        enumerable: descriptor.enumerable,
+        get() {
+          const value = callOf(descriptor.get, this, []);
+          if (!documentsOnly || typeOf(value) === 9) {
+            strip(value);
+          }
+          return value;
+        },
+        set: descriptor.set,
+      });
+    } catch (_) {
+      unfixed.push(name);
+    }
+  };
+  strippedGetter(typeof HTMLTemplateElement === "function" ? HTMLTemplateElement.prototype : null, "content", false);
+  strippedGetter(typeof XMLHttpRequest === "function" ? XMLHttpRequest.prototype : null, "responseXML", true);
+  strippedGetter(typeof XMLHttpRequest === "function" ? XMLHttpRequest.prototype : null, "response", true);
+
+  // Under the default config (no nested frames) no frame-like element exists anywhere content
+  // reaches (P130): the parser's are stripped (above), and none can be made. createElement and
+  // createElementNS refuse a FRAMES name, in any case and any namespace (the local name after a
+  // prefix included), as document.write is refused; so does a customized built-in that extends
+  // one (its constructor would make one). The name is read once, and that reading is what the
+  // platform is given. Under nestedFrames "own" (P128) these stay as they are: an iframe is made,
+  // and the guards above decide when it is connected or changed.
+  const refuseFrameCreation = (proto, name, nameAt) => {
+    const original = proto && callOf(hasOwn, proto, [name]) ? proto[name] : null;
+    if (typeof original !== "function") {
+      return;
+    }
+    lock(proto, name, function (...args) {
+      const fixed = listOf();
+      for (let i = 0; i < args.length; i += 1) {
+        pushTo(fixed, i === nameAt ? NativeString(once(args[i])) : i < nameAt ? once(args[i]) : args[i]);
+      }
+      if (fixed.length > nameAt && frameCapableName(fixed[nameAt])) {
+        refuseFrame();
+      }
+      return callOf(original, this, fixed);
+    });
+  };
+  if (!ownFrames) {
+    for (const proto of [Document.prototype, typeof ShadowRoot === "function" ? ShadowRoot.prototype : null]) {
+      refuseFrameCreation(proto, "createElement", 0);
+      refuseFrameCreation(proto, "createElementNS", 1);
+    }
+    const registry = typeof CustomElementRegistry === "function" ? CustomElementRegistry.prototype : null;
+    const defineIn = registry === null ? null : registry.define;
+    if (typeof defineIn === "function") {
+      lock(registry, "define", function (...args) {
+        const fixed = argumentsOf(args);
+        if (fixed.length > 2 && objectLike(fixed[2])) {
+          // The options are read once, into a fresh object with no prototype (extends, its one
+          // field), which is what the platform is given.
+          const read = fixed[2].extends;
+          const options = bare(null);
+          if (read !== undefined) {
+            options.extends = NativeString(once(read));
+            if (frameCapableName(options.extends)) {
+              refuseFrame();
+            }
+          }
+          fixed[2] = options;
+        }
+        return callOf(defineIn, this, fixed);
+      });
+    }
   }
   // insertHTML parses markup outside these guards; copy, cut and paste reach the clipboard (P051).
   const REFUSED_COMMANDS = ["inserthtml", "copy", "cut", "paste"];
@@ -946,6 +1258,97 @@ export const SHELL_RUNTIME = String.raw`(() => {
       }
       return callOf(execCommand, this, args);
     });
+  }
+  // Editing that brings markup in (P130): a paste, a drop, a replacement or a yank whose data
+  // carries any type but plain text (text/html above all) is cancelled before the editor acts on
+  // it, and only its plain text goes in, through the editor's own insertText, which carries no
+  // markup. The first listener there is (the shell's, on window, capturing), on the platform's
+  // own getters, kept now; only the browser's own events (isTrusted) are acted on. Composition
+  // (insertCompositionText) can't be cancelled, and is text alone.
+  const RICH_INPUTS = bare(null);
+  for (const name of ["insertFromPaste", "insertFromPasteAsQuotation", "insertFromDrop", "insertReplacementText", "insertFromYank"]) {
+    RICH_INPUTS[name] = true;
+  }
+  const listenIn = EventTarget.prototype.addEventListener;
+  const inputProto = typeof InputEvent === "function" ? InputEvent.prototype : null;
+  const inputTypeOf = getterOf(inputProto, "inputType");
+  const dataTransferOf = getterOf(inputProto, "dataTransfer");
+  const targetRangesIn = inputProto !== null && typeof inputProto.getTargetRanges === "function" ? inputProto.getTargetRanges : null;
+  const transferProto = typeof DataTransfer === "function" ? DataTransfer.prototype : null;
+  const transferTypesOf = getterOf(transferProto, "types");
+  const transferDataIn = transferProto !== null && typeof transferProto.getData === "function" ? transferProto.getData : null;
+  const cancelableOf = getterOf(Event.prototype, "cancelable");
+  const rangeProto = typeof AbstractRange === "function" ? AbstractRange.prototype : typeof StaticRange === "function" ? StaticRange.prototype : null;
+  const rangeEnds = [getterOf(rangeProto, "startContainer"), getterOf(rangeProto, "startOffset"), getterOf(rangeProto, "endContainer"), getterOf(rangeProto, "endOffset")];
+  const selectionProto = typeof Selection === "function" ? Selection.prototype : null;
+  const removeAllRangesIn = selectionProto === null ? null : selectionProto.removeAllRanges;
+  const addRangeIn = selectionProto === null ? null : selectionProto.addRange;
+  const getSelectionIn = Document.prototype.getSelection;
+  const createRangeIn = Document.prototype.createRange;
+  const setStartIn = Range.prototype.setStart;
+  const setEndIn = Range.prototype.setEnd;
+  // Where the editor would have put it (a drop's point, a replaced word): the event's first target
+  // range, made the selection, so insertText puts the text there.
+  const placeAt = (event) => {
+    if (targetRangesIn === null || typeof removeAllRangesIn !== "function" || typeof addRangeIn !== "function" || rangeEnds[0] === null || rangeEnds[1] === null || rangeEnds[2] === null || rangeEnds[3] === null) {
+      return;
+    }
+    try {
+      const ranges = callOf(targetRangesIn, event, []);
+      if (ranges.length === 0) {
+        return;
+      }
+      const target = ranges[0];
+      const range = callOf(createRangeIn, document, []);
+      callOf(setStartIn, range, [callOf(rangeEnds[0], target, []), callOf(rangeEnds[1], target, [])]);
+      callOf(setEndIn, range, [callOf(rangeEnds[2], target, []), callOf(rangeEnds[3], target, [])]);
+      const selection = callOf(getSelectionIn, document, []);
+      callOf(removeAllRangesIn, selection, []);
+      callOf(addRangeIn, selection, [range]);
+    } catch (_) {}
+  };
+  if (inputTypeOf !== null && dataTransferOf !== null && transferTypesOf !== null && transferDataIn !== null) {
+    callOf(listenIn, window, [
+      "beforeinput",
+      (event) => {
+        if (event.isTrusted !== true) {
+          return;
+        }
+        let rich = false;
+        let text = "";
+        try {
+          if (RICH_INPUTS[callOf(inputTypeOf, event, [])] !== true) {
+            return;
+          }
+          const data = callOf(dataTransferOf, event, []);
+          if (data === null) {
+            return;
+          }
+          const types = callOf(transferTypesOf, data, []);
+          for (let i = 0; i < types.length; i += 1) {
+            if (types[i] !== "text/plain") {
+              rich = true;
+            }
+          }
+          if (!rich) {
+            return;
+          }
+          text = NativeString(callOf(transferDataIn, data, ["text/plain"]));
+        } catch (_) {
+          // Unreadable: it is cancelled, and nothing of it goes in.
+          text = "";
+        }
+        if (cancelableOf !== null && callOf(cancelableOf, event, []) !== true) {
+          return;
+        }
+        callOf(preventNavigation, event, []);
+        if (text !== "" && typeof execCommand === "function") {
+          placeAt(event);
+          callOf(execCommand, document, ["insertText", false, text]);
+        }
+      },
+      true,
+    ]);
   }
 
   // The clipboard is the host's to write (P051): content can neither write nor read it. A copy

@@ -7240,3 +7240,73 @@ extended.
 **Revisit when** a new built-in is used anywhere in the guard or a new guarded channel is added
 (capture it the same way and extend the invariant test), or the leak suite gains the
 per-built-in replacement probe.
+
+## P130 · 2026-11-04 · Every insertion entry point is guarded, every subtree producer strips, and by default no frame-like element can be made · Accepted
+
+**Decision.** The shell's frame guard (step 3, P030, P129) holds one invariant: **every insertion
+entry point is guarded, every subtree producer strips before returning, and under the default
+configuration no frame-capable element can exist in a content-reachable tree.** The list of entry
+points and how each is guarded is [insertion-entry-points.md](insertion-entry-points.md);
+`test/shell.test.ts` checks every row against the runtime.
+- **Insertion.** Every DOM method or setter that connects a node runs its node arguments through
+  the same synchronous `admit`/`strip`, whatever the parent (connected or detached), on built-ins
+  captured before content runs and called through `callOf` (P129): the P030 methods, `moveBefore`
+  where an engine has it, `HTMLSelectElement.add` and `HTMLOptionsCollection.add`, and the
+  `document.body` and `HTMLTableElement` `tHead`/`tFoot`/`caption` setters (a refused value refuses
+  the set: a setter has no harmless stand-in).
+- **Producers.** Every API that hands content a subtree it can insert later strips it
+  synchronously before it returns: `DOMParser.parseFromString` (every MIME type),
+  `Document.parseHTMLUnsafe` and `Document.parseHTML`, `HTMLTemplateElement.content` (and what a
+  template's `innerHTML` fills), `DOMImplementation.createHTMLDocument`/`createDocument`,
+  `Range.createContextualFragment`, `XSLTProcessor.transformToFragment`/`transformToDocument`,
+  `XMLHttpRequest` `responseXML` and a document `response`, `Document.importNode` (the clone) and
+  `adoptNode` (the node; one that is itself frame-like is refused). `strip` enters what
+  `querySelectorAll` doesn't: each template's content and each open shadow root's tree, at any
+  depth (a work list, not recursion).
+- **Creation, under the default configuration.** `createElement` and `createElementNS` refuse a
+  `FRAMES` name (any case, any namespace, the local name after a prefix included) with a neutral
+  error, as `document.write` is refused; so does `CustomElementRegistry.define` with an `extends`
+  naming one (its constructor would make one). With the parsers stripped, nothing else makes a
+  frame-like element (`cloneNode` and `importNode` copy trees that hold none; `Option`, `Image`
+  and `Audio` make their own kinds), so the indexed setters that can't be wrapped
+  (`select[i] = …`, `options[i] = …`, `length`) have nothing to connect. Under `nestedFrames:
+  "own"` (P128) creation stays open and the guards decide when a frame is connected or changed.
+  The manual says so from the same config ("making one in script throws", default only).
+- **Markup methods the shell doesn't know** (one a later engine adds, on Element, ShadowRoot,
+  Document, DocumentFragment or Range, with `HTML` in its name) are refused.
+- **Editing.** A `beforeinput` listener the shell registers before content runs (on `window`,
+  capturing, with the platform's own getters) cancels a paste, a drop, a replacement or a yank
+  (`insertFromPaste`, `insertFromPasteAsQuotation`, `insertFromDrop`, `insertReplacementText`,
+  `insertFromYank`) whose data carries any type but `text/plain`, and inserts its plain text
+  through the editor's `insertText`, which carries no markup. Only the browser's own events are
+  acted on. Composition events can't be cancelled and carry text alone.
+- **Read once.** Every value a guard inspects and forwards passes as it is only if it is a string,
+  number, boolean, bigint, `null` or `undefined` itself (`value === undefined`); anything else is
+  converted once, and that reading is both checked and forwarded; a symbol, or a conversion that
+  throws, is refused (`PASSES_AS_IS`, `ONCE`). `attachShadow`'s `init` is read field by field,
+  once, into a fresh object with no prototype, which is all the platform is given.
+
+**Why.** A guard that covers most entry points is as strong as the one it doesn't: the invariant
+is stated over all of them, producers included, so a subtree can't reach the document by a route
+the list doesn't name. Refusing creation makes the invariant hold for trees content builds by hand
+too, where no producer is involved. Under the default configuration no page needs a frame-like
+element: the lint already reports every one (`nested-frame`), and the guard removes them.
+
+**Rejected.** Covering the indexed setters by stripping at the producers alone: a tree built by
+hand is no producer's. Replacing a refused element with a placeholder at creation: a page would
+get an element that silently isn't what it asked for; a refusal says why. Letting editing insert
+markup and relying on the observer: the editor connects it before the observer's microtask.
+
+**Under `nestedFrames: "own"`** the creation refusal doesn't apply, and P128's trade-offs stand.
+
+**Tested** (written 2026-11-04, not yet run: run `pnpm check`, `pnpm test:leak` on Chromium,
+WebKit and Firefox, and `test:controls` before release). Unit: `test/shell.test.ts` (every entry
+of the list found in the runtime, the doc's rows and statuses matching; `PASSES_AS_IS` and `ONCE`
+in isolation, fail-closed cases included; the creation refusal only under the default
+configuration), `test/agreement.test.ts` (the manual's sentence, default only). The `sync-guard` negative control also takes out the creation refusal and the
+producers' strips. The leak suite's item-4 probes that build a frame with `createElement` see the
+refusal under the default configuration and need to count it as the guard holding.
+
+**Revisit when** an engine adds an insertion or parsing entry point (add it to the list, the
+runtime and the test), the default configuration is to allow frames, or the leak suite's probes
+cover each row.

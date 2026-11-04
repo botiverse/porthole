@@ -190,10 +190,11 @@ export function manualLimits(config: PortholeConfig, network: string): ManualLim
       ? `The ${it}'s address is about:srcdoc: it has no query string or hash to read.`
       : `The ${it}'s address is its own (with Porthole's one-time ticket), never the app's: read no parameters from it.`,
   );
-  // A page's own frames (P128): what loads, as the shell keeps it; the rest is removed.
+  // A page's own frames (P128): what loads, as the shell keeps it; the rest is removed. By default
+  // the shell also refuses to make one (P130).
   const frames =
     config.nestedFrames !== "own"
-      ? "nested frames (iframe, object, embed) are removed"
+      ? "nested frames (iframe, object, embed) are removed, and making one in script throws"
       : config.mode === "artifact" && config.isolation === "domain"
         ? `an <iframe> of one of the ${it}'s own files (a relative src) or with srcdoc loads, set before it is added; other iframes, object, embed and frame are removed`
         : "an <iframe> with srcdoc loads, set before it is added; other iframes, object, embed and frame are removed";

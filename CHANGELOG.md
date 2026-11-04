@@ -6,6 +6,8 @@ P-numbers below.
 
 ## Unreleased
 
+- **Frame guard: broader coverage of DOM insertion and parsing entry points (P130),** listed in
+  [docs/insertion-entry-points.md](docs/insertion-entry-points.md).
 - **The shell's guards call only built-ins captured before content runs (P129):** step 3's frame
   guard and its observer, the before-change backstop, and the synchronous insertion and HTML-parse
   wrappers (`append`/`appendChild`/… , `innerHTML`/`outerHTML`/`insertAdjacentHTML`/`execCommand`,
