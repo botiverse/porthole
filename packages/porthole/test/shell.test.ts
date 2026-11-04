@@ -230,11 +230,31 @@ describe("the frame guard and its observer call only built-ins captured before c
       "callOf(weakSetHas, guardedRoots,",
       "callOf(weakSetAdd, guardedRoots,",
       "callOf(cloneNodeIn, element,",
-      "callOf(original, this, args)",
+      "callOf(original, this, fixed)",
       "callOf(setAttributeNSIn,",
     ]) {
       expect(wrapperRegion, used).toContain(used);
     }
+  });
+
+  test("forwards only values it has already pinned, so a name or value is read once", () => {
+    // A guard that inspects a name or value and then forwards the argument must forward the same
+    // reading it checked: an argument whose toString answers differently the second time cannot
+    // be checked as one thing and acted on as another. Every such guard pins the argument through
+    // `once` (an object or function becomes its string here, before the check) and forwards that.
+    expect(SHELL_RUNTIME).toContain(
+      'const once = (value) => (value !== null && (typeof value === "object" || typeof value === "function") ? NativeString(value) : value);',
+    );
+    // The command the refusal checks is the command it runs (read once).
+    expect(wrapperRegion).toContain("const cmd = NativeString(command);");
+    expect(wrapperRegion).toContain("pushTo(args, cmd);");
+    // The attribute and token guards pin their arguments, then both check the copy and act on the
+    // real element with that pinned list — never with the raw argument a second time.
+    expect(wrapperRegion).toContain("pushTo(fixed, pin[i] === true ? once(args[i]) : args[i]);");
+    expect(wrapperRegion).toContain("pushTo(fixed, once(args[i]));");
+    expect(wrapperRegion).toContain("const v = once(value);");
+    // The before-change backstop and the native call take the same fixed list.
+    expect(wrapperRegion).toContain("beforeChange(this, (copy) => change(copy, fixed, original));");
   });
 });
 

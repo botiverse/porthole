@@ -594,6 +594,12 @@ export const SHELL_RUNTIME = String.raw`(() => {
     name: callOf(attrNameOf, attribute, []),
     value: callOf(attrValueOf, attribute, []),
   });
+  // A name or value a guard inspects and then passes on, pinned to one reading: an object or
+  // function is turned into its string once, here, so the guard checks and the platform acts on
+  // the same text (a value whose toString answers differently the second time can't slip past).
+  // A primitive is its own single reading, so it goes on unchanged (null and booleans kept as they
+  // are, for the setters that treat them specially).
+  const once = (value) => (value !== null && (typeof value === "object" || typeof value === "function") ? NativeString(value) : value);
   // A node's type (and whether it is connected), read through the kept getters; anything that
   // isn't a node reads as -1 / false, never throws, so the insertion guards can ask of any value.
   const typeOf = (node) => {
@@ -896,8 +902,10 @@ export const SHELL_RUNTIME = String.raw`(() => {
   }
   const insertAdjacentHTML = Element.prototype.insertAdjacentHTML;
   lock(Element.prototype, "insertAdjacentHTML", function (position, html) {
-    callOf(insertAdjacentHTML, this, [position, ""]);
+    // The position is read once: the empty insert that validates it and the branch that places the
+    // parsed nodes use the same reading.
     const where = callOf(lowerOf, NativeString(position), []);
+    callOf(insertAdjacentHTML, this, [where, ""]);
     const outside = where === "beforebegin" || where === "afterend";
     const nodes = parseIn(outside ? this.parentElement : this, html);
     if (where === "beforebegin") {
@@ -924,11 +932,15 @@ export const SHELL_RUNTIME = String.raw`(() => {
       refused[REFUSED_COMMANDS[i]] = true;
     }
     lock(Document.prototype, "execCommand", function (command, ...rest) {
-      if (refused[callOf(lowerOf, NativeString(command), [])] === true) {
+      // The command is read once, here, and that same text is both the one checked and the one run:
+      // a command whose name reads "bold" when checked and "insertHTML" when the platform reads it
+      // can't get past the refusal.
+      const cmd = NativeString(command);
+      if (refused[callOf(lowerOf, cmd, [])] === true) {
         return false;
       }
       const args = listOf();
-      pushTo(args, command);
+      pushTo(args, cmd);
       for (let i = 0; i < rest.length; i += 1) {
         pushTo(args, rest[i]);
       }
@@ -978,21 +990,35 @@ export const SHELL_RUNTIME = String.raw`(() => {
       callOf(removeIn, element, []);
     }
   };
-  const guardMethod = (proto, name, change) => {
+  // The names and values the check tests are pinned (once) before the check, and the same pinned
+  // list is what the platform's own method is then given: the copy the guard inspects and the real
+  // element can't be set from two different readings of the same argument. The strings parameter
+  // names the DOMString positions to pin (an element or a boolean goes on as it is).
+  const guardMethod = (proto, name, strings, change) => {
     const original = proto && proto[name];
     if (typeof original !== "function") {
       return;
     }
+    const pin = bare(null);
+    for (let i = 0; i < strings.length; i += 1) {
+      pin[strings[i]] = true;
+    }
     lock(proto, name, function (...args) {
-      beforeChange(this, (copy) => change(copy, args, original));
-      return callOf(original, this, args);
+      const fixed = listOf();
+      for (let i = 0; i < args.length; i += 1) {
+        pushTo(fixed, pin[i] === true ? once(args[i]) : args[i]);
+      }
+      beforeChange(this, (copy) => change(copy, fixed, original));
+      return callOf(original, this, fixed);
     });
   };
-  for (const name of ["setAttribute", "setAttributeNS", "toggleAttribute", "removeAttribute", "removeAttributeNS"]) {
-    guardMethod(Element.prototype, name, (copy, args, original) => callOf(original, copy, args));
+  for (const [name, strings] of [["setAttribute", [0, 1]], ["setAttributeNS", [0, 1, 2]], ["toggleAttribute", [0]], ["removeAttribute", [0]], ["removeAttributeNS", [0, 1]]]) {
+    guardMethod(Element.prototype, name, strings, (copy, args, original) => callOf(original, copy, args));
   }
   for (const name of ["setAttributeNode", "setAttributeNodeNS"]) {
-    guardMethod(Element.prototype, name, (copy, args) => {
+    // The attribute node's own name, namespace and value are read through the kept getters (one
+    // stored string each), both to check the copy and to set it; the real call takes the node.
+    guardMethod(Element.prototype, name, [], (copy, args) => {
       const part = attrParts(args[0]);
       callOf(setAttributeNSIn, copy, [part.namespace, part.name, part.value]);
     });
@@ -1007,12 +1033,13 @@ export const SHELL_RUNTIME = String.raw`(() => {
       enumerable: descriptor.enumerable,
       get: descriptor.get,
       set(value) {
+        const v = once(value);
         const owner = typeOf(this) === 2 && ownerElementOf !== null ? callOf(ownerElementOf, this, []) : null;
         if (owner !== null) {
           const part = attrParts(this);
-          beforeChange(owner, (copy) => callOf(setAttributeNSIn, copy, [part.namespace, part.name, NativeString(value)]));
+          beforeChange(owner, (copy) => callOf(setAttributeNSIn, copy, [part.namespace, part.name, NativeString(v)]));
         }
-        callOf(descriptor.set, this, [value]);
+        callOf(descriptor.set, this, [v]);
       },
     });
   }
@@ -1036,8 +1063,9 @@ export const SHELL_RUNTIME = String.raw`(() => {
       // relList = "…" forwards to the list's value, natively: guarded here instead.
       set: descriptor.set
         ? function (value) {
-            beforeChange(this, (copy) => callOf(descriptor.set, copy, [value]));
-            callOf(descriptor.set, this, [value]);
+            const v = once(value);
+            beforeChange(this, (copy) => callOf(descriptor.set, copy, [v]));
+            callOf(descriptor.set, this, [v]);
           }
         : undefined,
     });
@@ -1058,8 +1086,9 @@ export const SHELL_RUNTIME = String.raw`(() => {
           enumerable: descriptor.enumerable,
           get: descriptor.get,
           set(value) {
-            beforeChange(this, (copy) => callOf(descriptor.set, copy, [value]));
-            callOf(descriptor.set, this, [value]);
+            const v = once(value);
+            beforeChange(this, (copy) => callOf(descriptor.set, copy, [v]));
+            callOf(descriptor.set, this, [v]);
           },
         });
       }
@@ -1072,15 +1101,22 @@ export const SHELL_RUNTIME = String.raw`(() => {
     }
     const isSet = callOf(indexIn, name, ["set"]) === 0;
     lock(NamedNodeMap.prototype, name, function (...args) {
+      // A removal names an attribute by a string pinned once; a set takes a node, whose own name,
+      // namespace and value are read once through the kept getters. The copy and the real map act
+      // on the same readings.
+      const fixed = listOf();
+      for (let i = 0; i < args.length; i += 1) {
+        pushTo(fixed, isSet ? args[i] : once(args[i]));
+      }
       beforeChange(callOf(weakMapGet, owners, [this]), (copy) => {
         if (isSet) {
-          const part = attrParts(args[0]);
+          const part = attrParts(fixed[0]);
           callOf(setAttributeNSIn, copy, [part.namespace, part.name, part.value]);
         } else {
-          callOf(removeAttributeIn, copy, [args[args.length - 1]]);
+          callOf(removeAttributeIn, copy, [fixed[fixed.length - 1]]);
         }
       });
-      return callOf(original, this, args);
+      return callOf(original, this, fixed);
     });
   }
   const tokens = typeof DOMTokenList === "function" ? DOMTokenList.prototype : null;
@@ -1088,9 +1124,15 @@ export const SHELL_RUNTIME = String.raw`(() => {
     const original = tokens && tokens[name];
     if (typeof original === "function") {
       lock(tokens, name, function (...args) {
+        // Each token is pinned once; the copy's list and the real list are changed by the same
+        // tokens (a token that reads one way when checked and another when applied can't slip in).
+        const fixed = listOf();
+        for (let i = 0; i < args.length; i += 1) {
+          pushTo(fixed, once(args[i]));
+        }
         const element = callOf(weakMapGet, owners, [this]);
-        beforeChange(element, (copy) => callOf(original, copy.relList, args));
-        return callOf(original, this, args);
+        beforeChange(element, (copy) => callOf(original, copy.relList, fixed));
+        return callOf(original, this, fixed);
       });
     }
   }
@@ -1101,8 +1143,9 @@ export const SHELL_RUNTIME = String.raw`(() => {
       enumerable: tokenValue.enumerable,
       get: tokenValue.get,
       set(value) {
-        beforeChange(callOf(weakMapGet, owners, [this]), (copy) => callOf(tokenValue.set, copy.relList, [value]));
-        callOf(tokenValue.set, this, [value]);
+        const v = once(value);
+        beforeChange(callOf(weakMapGet, owners, [this]), (copy) => callOf(tokenValue.set, copy.relList, [v]));
+        callOf(tokenValue.set, this, [v]);
       },
     });
   }

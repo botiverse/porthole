@@ -7086,7 +7086,10 @@ page's `frame-src`), for configs that opt in only.
   the app's, so the set's pages frame its files (`frame-ancestors` names every ancestor). The
   ticket's answer, the shell's own pages and every other display keep the app's origins alone.
   Every page of a set is served in the shell (P081), so a page of the set in a child frame has its
-  own shell, hardened: it takes messages only from the host origins, which its parent isn't.
+  own shell: it takes messages only from the host origins, which its parent isn't. That child
+  realm is same-origin with its parent, which is content, so the parent can reach the child's
+  built-ins before the child's shell captures them; the shell's "captured before content runs"
+  hardening (P129) is not guaranteed there, which is part of what opting in gives up (below).
 - **The lint.** `nested-frame` stays an error; under `"own"` it names only what never loads: a
   `<frame>`, `<object>` or `<embed>`, an iframe of another site (any scheme, `//`), of the origin's
   root (`/`), or with neither `src` nor `srcdoc`, and one with a relative `src` where there are no
@@ -7213,7 +7216,19 @@ only built-ins captured before content runs** — is the property the fix establ
 **Rejected.** Capturing only `matches` (P128's extent), or only the walk's getters and methods: the
 insertion wrappers still reached built-ins through `.apply`, `.call` and `Array.prototype.indexOf`,
 which content can replace to the same end. Leaving the walk on `Array.from`/`for…of`/the spread:
-`Array.from` and `Array.prototype[Symbol.iterator]` are replaceable too.
+`Array.from` and `Array.prototype[Symbol.iterator]` are replaceable too. Checking a value and then
+forwarding the original argument: the platform reads the argument again, so a value that converts
+to a benign string when checked and a guarded one when the platform reads it would slip past; each
+inspected name or value is pinned to a single conversion (`once`) and that reading is both checked
+and forwarded.
+
+**Where this does not reach.** The invariant is for a shell in its own realm, which runs first
+there. Under `nestedFrames: "own"` (P128), a kept child frame is a realm the shell shares with
+content that can reach it first: a page of a set in a child frame is same-origin with its parent,
+and the parent is content, so it can touch that realm's built-ins before the child's shell captures
+them. There the "captured before content runs" ordering is not guaranteed — as P128 records, a
+config that opts in gives up the shell's defenses inside its own frames and stands on the CSP there.
+This fix changes nothing about that trade-off; it holds for the top-level shell every config has.
 
 **Tested** (written 2026-11-04; run `pnpm check` and `pnpm test:leak` on Chromium, WebKit and
 Firefox before release). Unit: `test/shell.test.ts` (the capture table and the no-live-call
