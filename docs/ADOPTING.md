@@ -385,6 +385,35 @@ composer.onClose(() => display.annotations.clearSelection());
   position. A frame you scale or transform (a thumbnail, a zoomed preview) needs the box mapped
   through that transform too (`frame.getBoundingClientRect().width / frame.clientWidth` for a
   plain scale), or your view lands off by the difference.
+- **Places in the document** (P132): for UI that lines up with marks outside the frame's view
+  (comment cards in a margin beside a scrolling page), a newer shell gives each attached result a
+  `documentRect` (its box in the document: it doesn't move as the page scrolls, and isn't clamped)
+  and each `anchored` report the `scroll` it was read at; `tracked` carries both too, so following
+  one mark (`track`) tells the scroll at every animation frame where it changed, whether that mark
+  is in view or not. A mark's top in the frame's viewport is then `documentRect.y - scroll.y`, with
+  no need to ask again as the page scrolls. The numbers are the page's word, and unclamped: clip
+  what you draw from them to the frame's box, or to your own region beside it. An older shell sends
+  neither: test for `scroll` and keep the viewport boxes' way where it is absent.
+
+  ```js
+  const tops = new Map(); // mark id → its top in the document
+  let scrollY = null; // null: an older shell, places by `rect` only
+  display.on("annotation", (report) => {
+    if (report.type !== "anchored" && report.type !== "tracked") return;
+    if (report.scroll) scrollY = report.scroll.y;
+    if (report.type === "anchored") {
+      for (const result of report.results) {
+        if (result.documentRect) tops.set(result.id, result.documentRect.y);
+        else tops.delete(result.id); // orphaned
+      }
+    }
+    if (scrollY !== null) margin.place(tops, scrollY); // card top: frame top + top - scrollY, clipped
+  });
+  display.annotations.track(anyShownMarkId); // its reports carry the scroll
+  ```
+
+  A page that scrolls a box of its own rather than its document moves the places of the marks in
+  it as it scrolls; show again (or follow such a mark) to hear them again.
 - **Labels and quotes are the page's text**: shown only as text. Porthole takes out of a label what
   the person can't see; a quote (`exact`) keeps it, to be found again. Hand either to a model only
   as the page's words.

@@ -404,14 +404,15 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "a hostile page's marker click with no gesture is dropped; one on the person's own press is the host's view to guard (P105)",
     ),
   },
-  // The host clamps every reported box to the frame (P104); the two cases that read a mark below
-  // the viewport see its box on the edge only through it.
+  // The host clamps every reported box to the frame (P104); the cases that read a mark below the
+  // viewport see its box on the edge only through it, P132's beside its unclamped document place.
   "annotation-rect-clamp": {
     specs: [ANNOTATE],
     fails: all(
       "a hostile page reports a box outside its frame: the host gets it clamped to the frame's viewport",
       "marks: drawn over their anchors, one brought into view, an unfound one orphaned, all cleared",
       "following: once a scroll settles, one report with only the marks that moved",
+      "every attached mark's place in the document comes with the scroll it was read at, offscreen ones too, and the followed mark's as the document scrolls (P132)",
     ),
   },
   // Served content (leak/served/).

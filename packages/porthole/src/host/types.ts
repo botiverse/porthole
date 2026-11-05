@@ -306,7 +306,9 @@ export interface AnnotationControls {
    * Follows one shown mark (P112): while it moves (a scroll, a layout change) the display reports
    * `{ type: "tracked", id, rect }` at most once per animation frame (60 a second), its box clamped
    * to the frame, for that mark only; `null` stops. One at a time: a new id replaces the last.
-   * Throws for an id no shown mark has; a `show` without it, or `clear`, stops it.
+   * Throws for an id no shown mark has; a `show` without it, or `clear`, stops it. From a newer
+   * shell (P132) each also carries the mark's `documentRect` and the document's `scroll`, so
+   * following one mark tells how far the document scrolled, for every mark placed by `documentRect`.
    */
   track(id: string | null): void;
   /** Removes every mark. */

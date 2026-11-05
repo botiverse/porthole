@@ -389,7 +389,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       };
       /**
        * Every box a report carries, clamped to the frame's viewport as it is now (P104): the page
-       * places the host's own UI nowhere outside its frame.
+       * places the host's own UI nowhere outside its frame. A mark's `documentRect` and the
+       * document's `scroll` (P132) pass as they were checked: where a mark is in the document,
+       * offscreen too, which a clamp would erase; the host clips what it draws from them.
        */
       const withinFrame = (report: AnnotationReport): AnnotationReport => {
         const viewport = frameViewport();
@@ -400,7 +402,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             return { ...report, rect: clampRect(report.rect, viewport) };
           case "anchored":
             return {
-              type: "anchored",
+              ...report,
               results: report.results.map((result) =>
                 result.rect === undefined
                   ? result
@@ -490,7 +492,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             if (results.length === 0) {
               return;
             }
-            report = { type: "anchored", results };
+            report = { ...report, results };
             break;
           }
           case "activated": {

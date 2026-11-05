@@ -193,7 +193,9 @@ Whatever the use:
   framed as it is: upgrade the server/Worker first, resolve clean addresses through issue, P125):
   log them, show nothing for them. A url-mode app can still say any outcome (S6).
 - Take what the frame reports about annotations as UI hints (where to draw, what to open), never
-  as permissions, and put nothing in a mark the page may not know (§7).
+  as permissions, and put nothing in a mark the page may not know (§7). A mark's place in the
+  document (`documentRect`, with the report's `scroll`, P132) isn't clamped to the frame: clip
+  whatever you draw from it to the frame's box, or to your own region beside the frame.
 - Under `find` (P131), know that the page reads every query your find bar sends it, and declare
   `find` only for displays whose pages may learn what the person searches for (not a third-party
   app with egress, S5, unless you accept it). Take its counts as the bar's numbers, and open your
@@ -813,6 +815,14 @@ own frame, below the shell, P111), so:
   no size, or throws, clamps every box to nothing at the frame's corner (P105). The frame's size is
   read for every report the host takes, before the report's rate: a forced layout of the host's
   page per message, which a repeated `ui/initialize` already causes (accepted, P105).
+  A newer shell also says where each mark is in the document (`documentRect` in `anchored` and
+  `tracked`, with the document's `scroll`, P132), so a host can place a mark scrolled out of the
+  frame. Porthole checks those numbers (finite, within `ANNOTATION_LIMITS.coordinate`, sizes not
+  negative; a malformed one drops the report) but doesn't clamp them, since a clamp would erase
+  what they are for: a host that maps a `documentRect` onto its own page without clipping to the
+  frame's box (or to its own region beside it) lets the page choose where that UI goes, outside
+  the frame as well (accepted, P132; the host's duty in §6). They say nothing else: the page knows
+  where its words are anyway.
 - *What holds, against content that patches none of the DOM's or JavaScript's built-ins.* A real
   press or click on a marker reaches none of the content's handlers (the shell's first listener
   stops it; control `marker-click`) and moves neither focus nor a selection (control

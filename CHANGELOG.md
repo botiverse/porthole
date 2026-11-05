@@ -4,6 +4,25 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **Annotations: a mark's place in the document (P132).** Each attached result of an `anchored`
+  report now has a `documentRect` (its box in the document: it stays put as the page scrolls, and
+  says where a mark scrolled out of the frame is), and the report a `scroll` (`{ x, y }`, how far
+  the document was scrolled as the boxes were read); `rect` is `documentRect` less `scroll`, then
+  clamped as before. `tracked` (P112) carries both too, so following one mark tells the document's
+  scroll at every animation frame where it changed, whether that mark is in view or not: a host
+  places every mark from one report and keeps them placed as the page scrolls, without asking
+  again. New exports: `AnnotationScroll`, `parseScroll`. Both fields are optional: an older shell
+  sends neither (test for `scroll`), and an older host drops them. Upgrade the content server (the
+  shell) for them.
+- **Security (P132):** `documentRect` is the page's word and isn't clamped to the frame (a clamp
+  would erase the offscreen places it is for); Porthole checks it as any box (finite, within
+  `ANNOTATION_LIMITS.coordinate`, sizes not negative; a malformed one, or a malformed `scroll`,
+  drops the report). Clip what you draw from it to the frame's box, or to your own region beside
+  it (THREAT_MODEL §6, ADOPTING). `rect` is clamped as before. No CSP, sandbox, egress or gate
+  changes.
+
 ## 0.14.9
 
 - **Find in page (P131):** a host's own find bar over a display. Declare `find`

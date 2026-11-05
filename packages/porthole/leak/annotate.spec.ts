@@ -2465,6 +2465,128 @@ test("a followed mark's box comes as it moves, for that mark only, at most 60 a 
   expect((await tracked()).length, "nothing after track(null)").toBe(stopped);
 });
 
+test("every attached mark's place in the document comes with the scroll it was read at, offscreen ones too, and the followed mark's as the document scrolls (P132)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    content: SCROLLING,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#far")).toBeAttached();
+  // Where each element is in the document, and the frame's height, as the page itself reads them.
+  const measured = await frame.evaluate(() => {
+    const at = (id: string) => {
+      const box = (document.getElementById(id) as HTMLElement).getBoundingClientRect();
+      return { y: box.top + scrollY, height: box.height };
+    };
+    return { top: at("top"), far: at("far"), height: innerHeight };
+  });
+  expect(measured.far.y, "the far paragraph starts below the frame").toBeGreaterThan(
+    measured.height,
+  );
+  await display.annotate("show", [elementMark("top", "#top"), elementMark("far", "#far")]);
+  const shown = await next(display, "anchored");
+  expect(shown.scroll, "probe: the scroll the boxes were read at").toEqual({ x: 0, y: 0 });
+  const resultOf = (id: string) => shown.results.find((each) => each.id === id);
+  expect(resultOf("far")?.rect?.height, "its box in the viewport, clamped to the frame").toBe(0);
+  for (const [id, want] of [
+    ["top", measured.top],
+    ["far", measured.far],
+  ] as const) {
+    const place = resultOf(id)?.documentRect;
+    expect(place, `probe: ${id} has its place in the document`).toBeDefined();
+    expect(Math.abs((place?.y ?? Number.NaN) - want.y), `${id}: where it is`).toBeLessThan(1);
+    expect(Math.abs((place?.height ?? Number.NaN) - want.height), `${id}: its size`).toBeLessThan(
+      1,
+    );
+  }
+
+  // Followed, the far mark tells the scroll as the document moves, its place in it unchanged.
+  expect(await display.annotate("track", "far")).toBeNull();
+  const start = (await reports(display)).length;
+  const lastTracked = async () =>
+    (await reports(display))
+      .slice(start)
+      .filter(
+        (each): each is Extract<AnnotationReport, { type: "tracked" }> => each.type === "tracked",
+      )
+      .at(-1);
+  await frame.evaluate(() => window.scrollBy(0, 300));
+  await expect
+    .poll(
+      async () => {
+        const y = (await lastTracked())?.scroll?.y;
+        return y === undefined ? null : Math.round(y);
+      },
+      { message: "probe: the followed mark's report tells the scroll" },
+    )
+    .toBe(300);
+  const tracked = await lastTracked();
+  expect(
+    Math.abs((tracked?.documentRect?.y ?? Number.NaN) - measured.far.y),
+    "probe: its place in the document stays where it was",
+  ).toBeLessThan(1);
+  const seen = await frame.evaluate(
+    () => (document.getElementById("far") as HTMLElement).getBoundingClientRect().top,
+  );
+  expect(
+    Math.abs((tracked?.documentRect?.y ?? 0) - (tracked?.scroll?.y ?? 0) - seen),
+    "its place less the scroll is where the page draws it",
+  ).toBeLessThan(1);
+
+  // The page's word: a place anywhere in its document is taken as it says (never clamped, P132),
+  // a malformed one or a malformed scroll is no report.
+  const fake = (params: unknown) =>
+    frame.evaluate(
+      (given) =>
+        parent.postMessage(
+          { jsonrpc: "2.0", method: "porthole/annotate.anchored", params: given },
+          "*",
+        ),
+      params,
+    );
+  const rect = { x: 0, y: 0, width: 10, height: 10 };
+  const before = (await reports(display)).length;
+  const invalid = (await refusals(display)).filter((each) => each === "annotate:invalid").length;
+  await fake({
+    results: [{ id: "top", state: "attached", rect, documentRect: { ...rect, height: -1 } }],
+    scroll: { x: 0, y: 0 },
+  });
+  await fake({
+    results: [{ id: "top", state: "attached", rect, documentRect: rect }],
+    scroll: { x: 0, y: "300" },
+  });
+  await expect
+    .poll(
+      async () =>
+        (await refusals(display)).filter((each) => each === "annotate:invalid").length - invalid,
+      { message: "probe: a malformed place or scroll is refused" },
+    )
+    .toBe(2);
+  await fake({
+    results: [
+      {
+        id: "top",
+        state: "attached",
+        rect,
+        documentRect: { x: 0, y: 9_000_000, width: 10, height: 10 },
+      },
+    ],
+    scroll: { x: 0, y: -5_000 },
+  });
+  const far = await next(display, "anchored", before);
+  expect(far.results, "a place far down the document, as the page said").toEqual([
+    {
+      id: "top",
+      state: "attached",
+      rect,
+      documentRect: { x: 0, y: 9_000_000, width: 10, height: 10 },
+    },
+  ]);
+  expect(far.scroll).toEqual({ x: 0, y: -5_000 });
+});
+
 test("an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second", async ({
   page,
 }) => {

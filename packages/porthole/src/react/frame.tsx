@@ -690,7 +690,8 @@ export interface PortholeFrameProps {
     | null;
   /**
    * The mark to follow (`annotations.track`, P112, P118): while it moves, `onAnnotation` gets
-   * `{ type: "tracked", id, rect }` at most once per animation frame, for it alone. `null` (or
+   * `{ type: "tracked", id, rect }` at most once per animation frame, for it alone (from a newer
+   * shell with its `documentRect` and the document's `scroll`, P132). `null` (or
    * leaving it out once set) stops. By value: given when it changes, and when the display is made.
    * Only a shown mark (`annotations`) is followed: another id, or a config without `annotate`, is
    * `onHostError` (kind `"annotations"`), as the core's call throws. `annotations` without it
