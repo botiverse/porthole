@@ -2489,7 +2489,10 @@ test("every attached mark's place in the document comes with the scroll it was r
   const shown = await next(display, "anchored");
   expect(shown.scroll, "probe: the scroll the boxes were read at").toEqual({ x: 0, y: 0 });
   const resultOf = (id: string) => shown.results.find((each) => each.id === id);
-  expect(resultOf("far")?.rect?.height, "probe: its box in the viewport, clamped to the frame").toBe(0);
+  expect(
+    resultOf("far")?.rect?.height,
+    "probe: its box in the viewport, clamped to the frame",
+  ).toBe(0);
   for (const [id, want] of [
     ["top", measured.top],
     ["far", measured.far],
