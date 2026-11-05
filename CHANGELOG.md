@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.14.10
 
 - **Annotations: a mark's place in the document (P132).** Each attached result of an `anchored`
   report now has a `documentRect` (its box in the document: it stays put as the page scrolls, and
