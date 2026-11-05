@@ -52,13 +52,25 @@ export interface AnnotationAnchor {
  * The page's word: the host clamps each it reports to the frame's viewport (P104), so one wholly
  * outside is a box of no size on the nearest edge. A positioning hint only. It is in the frame's
  * own layout px: a host that scales or transforms the frame maps it through that transform too
- * (P105).
+ * (P105). A result's `documentRect` (P132) is the same shape in the document's coordinates, and
+ * isn't clamped.
  */
 export interface AnnotationRect {
   readonly x: number;
   readonly y: number;
   readonly width: number;
   readonly height: number;
+}
+
+/**
+ * How far the frame's document is scrolled when the boxes beside it were read (P132), CSS px: the
+ * top left of the document's root element (`<html>`), from the viewport's, negated (`window.scrollX`
+ * and `window.scrollY` on a page whose root has no margin). A box in the viewport is its
+ * `documentRect` less this. The page's word, as every box is.
+ */
+export interface AnnotationScroll {
+  readonly x: number;
+  readonly y: number;
 }
 
 /** What the person may point at while the host is asking. */
@@ -113,6 +125,14 @@ export interface AnchorResult {
   /** Where it is now, when attached. */
   readonly rect?: AnnotationRect;
   /**
+   * Where it is in the document (P132): `rect` as the shell read it, before the host clamped it,
+   * plus the report's `scroll`; so it stays where it is as the document scrolls, and says where a
+   * mark scrolled out of the frame is. Not clamped to the frame's viewport (an offscreen mark's is
+   * outside it: that is its point): a host places its own UI from it only clipped to the frame's
+   * box, or to its own region beside the frame. Absent from an older shell. The page's word.
+   */
+  readonly documentRect?: AnnotationRect;
+  /**
    * Its place in the document among the found marks, from 0 (P112): where it starts, offscreen
    * marks included, for a host that lists marks in reading order. The content's word: an order to
    * sort by, never a fact.
@@ -143,13 +163,32 @@ export type AnnotationReport =
    * scroll, a resize or a change of the content has settled, only the marks that moved since the
    * host was last told, at most once a second (P104).
    */
-  | { readonly type: "anchored"; readonly results: readonly AnchorResult[] }
+  | {
+      readonly type: "anchored";
+      readonly results: readonly AnchorResult[];
+      /**
+       * How far the document was scrolled as the boxes were read (P132); with it, each attached
+       * result has its `documentRect`. Absent from an older shell: its results have no
+       * `documentRect` either, and only `rect` says where marks are.
+       */
+      readonly scroll?: AnnotationScroll;
+    }
   /**
    * The box of the mark the host follows (`annotations.track`, P112), in the frame's viewport, at
    * an animation frame where it moved: at most 60 a second, for that mark only, clamped to the
-   * frame. The content's word: where to put a card beside it, nothing more.
+   * frame. The content's word: where to put a card beside it, nothing more. A newer shell (P132)
+   * adds the mark's `documentRect` and the document's `scroll`: the mark's box moves as the
+   * document scrolls, so a host following one mark hears the scroll at every animation frame where
+   * it changed, whether that mark is in the frame or not, and places every mark it holds a
+   * `documentRect` for (an `anchored` report's) without asking again.
    */
-  | { readonly type: "tracked"; readonly id: string; readonly rect: AnnotationRect }
+  | {
+      readonly type: "tracked";
+      readonly id: string;
+      readonly rect: AnnotationRect;
+      readonly documentRect?: AnnotationRect;
+      readonly scroll?: AnnotationScroll;
+    }
   /**
    * The person clicked the marker of a mark the host shows with a `count` (P104), or of a draft
    * (P107); `rect` is the marker's box, to open the host's own UI beside it. The content can fake

@@ -7531,3 +7531,68 @@ probe, with its positive control: taken with the person in the frame).
 Escape or Cmd+G in the frame should reach the host's bar, a host searches as the person types and
 wants the page not to see each keystroke (debounce in the host first), or engines give a frame a
 highlight registry content can't reach.
+
+## P132 · 2026-11-05 · A mark's place in the document, and the document's scroll, beside its box in the viewport · Accepted
+
+A host that lines its own UI up with marks beside a scrolling page (comment cards in a margin
+next to the frame, each level with its passage) needs to know where every mark is, the ones
+scrolled out of the frame included, and to keep that as the page scrolls. 0.14 gives it boxes in
+the frame's viewport only, clamped to it (P104): a mark above or below the frame is a box of no
+size on that edge, so its card can't be placed; and a box read before a scroll is wrong after it.
+Such a host followed one mark (`track`, P112) and moved every card by as much as it moved, hid
+the cards it knew no place for, and asked for every place again (a `show` that changed) when the
+page stopped scrolling, every few hundred ms during a long scroll, when the followed mark left the
+frame, and on a poll while nothing was placed: a message and a full re-anchoring per ask, and
+cards missing until the answer.
+
+**Decision.**
+- **`documentRect`** on each attached result of `anchored`: the mark's box as the shell read it
+  (before the host's clamp) plus how far the document was scrolled. It stays where it is as the
+  document scrolls and says where an offscreen mark is.
+- **`scroll`** (`{ x, y }`) on each `anchored` report: how far the document was scrolled as its
+  boxes were read, one reading for every result in it. It is the top left of the document's root
+  element (`<html>`) from the viewport's, negated, read with the DOM's own `getBoundingClientRect`
+  taken before content runs, not `window.scrollX`/`scrollY` (a page can replace those). `rect` =
+  `documentRect` − `scroll`, before the clamp. Its presence is how a host tells a shell that reports places in the document.
+- **`tracked`** carries both too. The followed mark's box moves at every scroll of the document,
+  in the frame or not, so its reports (one an animation frame at most, 60 a second the host takes,
+  P112) are the document's scroll as it changes: a host places every mark it has a `documentRect`
+  for from one report and the followed mark's scroll, and asks again only when the content changes
+  (a `tracked` whose `documentRect` moved says the layout did, near that mark at least).
+- No new message, method, option or rate: the existing reports carry two optional fields; the
+  React binding passes them through `onAnnotation` unchanged.
+- Rather than a scroll message of its own (a shell that posts the scroll at every frame while asked,
+  with its own opt-in and its own rate): the host that needs the scroll already follows a mark, and
+  each `tracked` is already a message per frame that moved; a second stream per frame would double
+  that for no more information. Rather than reports pushed at every scroll for every mark: 500 marks
+  a frame is a cost the shell and the bridge's rate can't carry; their places in the document don't
+  change as it scrolls, so one report is enough.
+
+**Compatibility.** Both fields are optional. An older shell sends neither and a host reads
+`rect` as before; an older host drops fields it doesn't know (each report is rebuilt from known
+fields, P053), so a newer shell's reports reach it as they did. A malformed `documentRect` or
+`scroll` drops the whole report, as any malformed part does.
+
+**Threat.** P104's clamp holds a page's boxes to its frame so it can't make the host place its UI
+over the rest of the app. `documentRect` isn't clamped, because a clamp would erase what it is for:
+a host that maps one onto its own page without clipping lets the page choose where that UI goes,
+outside the frame too. Bounded by the checks every box gets (finite, within
+`ANNOTATION_LIMITS.coordinate`, sizes not negative) and by the host's duty to clip what it draws
+from them to the frame's box or to its own region beside the frame (THREAT_MODEL §6, ADOPTING);
+`rect` stays clamped, so a host that reads only it is as before. The page learns nothing new (the
+fields go from the frame to the host) and could already say any place inside its frame; where its
+words are in its own document it knows anyway.
+
+**Tested.** `test/annotate.test.ts` "places in the document (P132)": `parseScroll`; both fields
+kept in `anchored` and `tracked`, rebuilt from known fields, an older shell's reports exactly as
+before; a malformed one dropping the report; through `createHost`, each `rect` clamped and each
+`documentRect` and `scroll` as the shell said. `leak/annotate.spec.ts` "every attached mark's place
+in the document comes with the scroll it was read at…" (three engines): an offscreen mark's place
+where the page measures it, its `rect` clamped; the followed mark's reports telling the scroll as
+the document scrolls, its place unchanged, place less scroll where the page draws it; a page's
+malformed place or scroll refused, a place far down its document taken as it said. No negative
+control: nothing here is a defense; the bound is `parseRect`'s, which existing probes hold.
+
+**Revisit when** a host needs places within a page's own scrolling box (a place relative to that
+box, and its scroll), the scroll without following a mark (a page with no marks the host follows),
+or a host draws from `documentRect` inside the frame's own area and wants Porthole to clip for it.

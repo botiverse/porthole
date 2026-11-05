@@ -8,6 +8,7 @@ import {
   parseAnchor,
   parseRect,
   parseReport,
+  parseScroll,
 } from "../src/annotate/validate.ts";
 import { ANNOTATION_LIMITS, type AnnotationAnchor } from "../src/annotate/types.ts";
 import { createBridge, type BridgeEvent } from "../src/bridge/bridge.ts";
@@ -611,6 +612,229 @@ describe("clearSelection (P115), on createHost over a stand-in platform", () => 
       /clearSelection: the config doesn't declare annotate/u,
     );
     expect(plain.annotateSent()).toEqual([]);
+  });
+});
+
+describe("places in the document (P132): a result's documentRect and the report's scroll", () => {
+  const rect = { x: 10, y: 0, width: 200, height: 0 };
+  const documentRect = { x: 10, y: 1_480, width: 200, height: 22 };
+  const scroll = { x: 0, y: 900 };
+
+  test("a scroll is two finite numbers within the coordinate limit, either negative", () => {
+    expect(parseScroll({ x: 0, y: 900, extra: true })).toEqual({ x: 0, y: 900 });
+    expect(parseScroll({ x: -3, y: -40.5 }), "an engine's overscroll").toEqual({ x: -3, y: -40.5 });
+    for (const bad of [
+      null,
+      [0, 900],
+      { x: 0 },
+      { x: "0", y: 0 },
+      { x: 0, y: Number.NaN },
+      { x: 0, y: Infinity },
+      { x: 0, y: ANNOTATION_LIMITS.coordinate + 1 },
+    ]) {
+      expect(parseScroll(bad), JSON.stringify(bad)).toBeNull();
+    }
+  });
+
+  test("anchored and tracked keep both, rebuilt from known fields; an older shell's, without them, as before", () => {
+    expect(
+      parseReport({
+        type: "anchored",
+        results: [
+          { id: "a", state: "attached", rect, documentRect: { ...documentRect, z: 1 }, order: 0 },
+          { id: "b", state: "orphaned", documentRect },
+        ],
+        scroll: { ...scroll, extra: true },
+      }),
+    ).toEqual({
+      type: "anchored",
+      results: [
+        { id: "a", state: "attached", rect, documentRect, order: 0 },
+        { id: "b", state: "orphaned" },
+      ],
+      scroll,
+    });
+    expect(parseReport({ type: "tracked", id: "a", rect, documentRect, scroll })).toEqual({
+      type: "tracked",
+      id: "a",
+      rect,
+      documentRect,
+      scroll,
+    });
+    // An older shell's: no field appears that it didn't send.
+    expect(
+      parseReport({ type: "anchored", results: [{ id: "a", state: "attached", rect }] }),
+    ).toStrictEqual({ type: "anchored", results: [{ id: "a", state: "attached", rect }] });
+    expect(parseReport({ type: "tracked", id: "a", rect })).toStrictEqual({
+      type: "tracked",
+      id: "a",
+      rect,
+    });
+  });
+
+  test("a malformed one drops the whole report, never repaired", () => {
+    for (const bad of [
+      { ...documentRect, height: -1 },
+      { ...documentRect, y: Number.NaN },
+      { ...documentRect, y: 1e9 },
+      [10, 1_480, 200, 22],
+      null,
+    ]) {
+      expect(
+        parseReport({
+          type: "anchored",
+          results: [{ id: "a", state: "attached", rect, documentRect: bad }],
+          scroll,
+        }),
+        JSON.stringify(bad),
+      ).toBeNull();
+      expect(parseReport({ type: "tracked", id: "a", rect, documentRect: bad, scroll })).toBeNull();
+    }
+    for (const bad of [{ x: 0 }, { x: 0, y: "900" }, null, 900]) {
+      expect(
+        parseReport({
+          type: "anchored",
+          results: [{ id: "a", state: "attached", rect, documentRect }],
+          scroll: bad,
+        }),
+        JSON.stringify(bad),
+      ).toBeNull();
+      expect(parseReport({ type: "tracked", id: "a", rect, documentRect, scroll: bad })).toBeNull();
+    }
+  });
+
+  describe("on createHost over a stand-in platform", () => {
+    const mounted: DisplayHandle[] = [];
+    afterEach(() => {
+      for (const display of mounted.splice(0)) {
+        display.destroy();
+      }
+    });
+    const mount = () => {
+      const listeners = new Set<(message: unknown) => void>();
+      const platform: PlatformHost = {
+        name: "stand-in",
+        createSurface: () => ({
+          transport: {
+            send: () => {},
+            listen: (listener) => {
+              listeners.add(listener);
+              return () => listeners.delete(listener);
+            },
+            close: () => listeners.clear(),
+          },
+          element: null,
+          setHeight: () => {},
+          setColorScheme: () => {},
+          userActivation: () => undefined,
+          viewport: () => ({ width: 600, height: 400 }),
+          onNavigated: () => () => {},
+          onLoad: () => () => {},
+          destroy: () => {},
+        }),
+      };
+      const container = {
+        ownerDocument: {
+          defaultView: {
+            location: { origin: "https://app.example" },
+            navigator: { language: "en" },
+          },
+        },
+        getBoundingClientRect: () => ({ width: 600 }),
+      } as unknown as HTMLElement;
+      const display = createHost(presets.artifact({ capabilities: { annotate: {} } }), {
+        platform,
+      }).mount(container, { displayId: "d1", title: "Notes", scheme: "light" });
+      mounted.push(display);
+      const reports: AnnotationReport[] = [];
+      display.on("annotation", (report) => reports.push(report));
+      const say = async (method: string, params: unknown) => {
+        for (const listener of listeners) {
+          listener({ jsonrpc: "2.0", method: `porthole/annotate.${method}`, params });
+        }
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      };
+      return { display, reports, say };
+    };
+
+    test("each box in the viewport is clamped to it (P104); the document's are not, and the scroll is kept", async () => {
+      const t = mount();
+      t.display.annotations.show([
+        { id: "near", anchor: text },
+        { id: "far", anchor: element },
+      ]);
+      // A mark in the frame and one below it, as a shell reads them 900 px down the document.
+      await t.say("anchored", {
+        results: [
+          {
+            id: "near",
+            state: "attached",
+            rect: { x: 8, y: 120, width: 300, height: 20 },
+            documentRect: { x: 8, y: 1_020, width: 300, height: 20 },
+            order: 0,
+          },
+          {
+            id: "far",
+            state: "attached",
+            rect: { x: 8, y: 2_100, width: 300, height: 40 },
+            documentRect: { x: 8, y: 3_000, width: 300, height: 40 },
+            order: 1,
+          },
+          { id: "not-shown", state: "attached", rect, documentRect },
+        ],
+        scroll,
+      });
+      expect(t.reports).toEqual([
+        {
+          type: "anchored",
+          results: [
+            {
+              id: "near",
+              state: "attached",
+              rect: { x: 8, y: 120, width: 300, height: 20 },
+              documentRect: { x: 8, y: 1_020, width: 300, height: 20 },
+              order: 0,
+            },
+            {
+              id: "far",
+              state: "attached",
+              rect: { x: 8, y: 400, width: 300, height: 0 },
+              documentRect: { x: 8, y: 3_000, width: 300, height: 40 },
+              order: 1,
+            },
+          ],
+          scroll,
+        },
+      ]);
+      // The followed mark's, as the document scrolls: its box clamped, its place and the scroll
+      // as the shell read them, wherever the mark is.
+      t.display.annotations.track("far");
+      await t.say("tracked", {
+        id: "far",
+        rect: { x: 8, y: 1_600, width: 300, height: 40 },
+        documentRect: { x: 8, y: 3_000, width: 300, height: 40 },
+        scroll: { x: 0, y: 1_400 },
+      });
+      expect(t.reports.at(-1)).toEqual({
+        type: "tracked",
+        id: "far",
+        rect: { x: 8, y: 400, width: 300, height: 0 },
+        documentRect: { x: 8, y: 3_000, width: 300, height: 40 },
+        scroll: { x: 0, y: 1_400 },
+      });
+      // An older shell's reports reach the host as they did.
+      await t.say("anchored", {
+        results: [
+          { id: "near", state: "attached", rect: { x: 8, y: 120, width: 300, height: 20 } },
+        ],
+      });
+      expect(t.reports.at(-1)).toStrictEqual({
+        type: "anchored",
+        results: [
+          { id: "near", state: "attached", rect: { x: 8, y: 120, width: 300, height: 20 } },
+        ],
+      });
+    });
   });
 });
 

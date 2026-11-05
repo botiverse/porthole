@@ -6,6 +6,7 @@ import {
   type AnnotationMark,
   type AnnotationRect,
   type AnnotationReport,
+  type AnnotationScroll,
   type AnnotationSelector,
 } from "./types.ts";
 import { withoutUnseen } from "../bridge/unseen.ts";
@@ -113,6 +114,17 @@ export function parseRect(value: unknown): AnnotationRect | null {
 }
 
 /**
+ * How far the document is scrolled (P132): two finite numbers within the coordinate limit (either
+ * may be negative: an engine's overscroll); null for anything else.
+ */
+export function parseScroll(value: unknown): AnnotationScroll | null {
+  if (!isRecord(value) || !coordinate(value.x) || !coordinate(value.y)) {
+    return null;
+  }
+  return { x: value.x, y: value.y };
+}
+
+/**
  * A box the frame reported, clamped to the frame's viewport (`width` by `height`, CSS px, P104):
  * each side is held within it, so what overlaps the viewport keeps the part inside, and what lies
  * wholly outside becomes a box of no size on the nearest edge. Where the viewport isn't known, a
@@ -152,7 +164,9 @@ function results(value: unknown): AnchorResult[] | null {
       return null;
     }
     const rect = each.rect === undefined ? undefined : parseRect(each.rect);
-    if (rect === null) {
+    // Where it is in the document (P132): a box as `rect` is, never clamped.
+    const documentRect = each.documentRect === undefined ? undefined : parseRect(each.documentRect);
+    if (rect === null || documentRect === null) {
       return null;
     }
     // A place among the marks (P112): a whole number below the most marks a show carries.
@@ -167,6 +181,7 @@ function results(value: unknown): AnchorResult[] | null {
       id: each.id,
       state: "attached",
       ...(rect === undefined ? {} : { rect }),
+      ...(documentRect === undefined ? {} : { documentRect }),
       ...(order === undefined ? {} : { order }),
     });
   }
@@ -190,7 +205,10 @@ export function parseReport(value: unknown): AnnotationReport | null {
       return { type: "cancelled" };
     case "anchored": {
       const checked = results(value.results);
-      return checked === null ? null : { type: "anchored", results: checked };
+      const scroll = value.scroll === undefined ? undefined : parseScroll(value.scroll);
+      return checked === null || scroll === null
+        ? null
+        : { type: "anchored", results: checked, ...(scroll === undefined ? {} : { scroll }) };
     }
     case "activated": {
       const rect = parseRect(value.rect);
@@ -198,7 +216,20 @@ export function parseReport(value: unknown): AnnotationReport | null {
     }
     case "tracked": {
       const rect = parseRect(value.rect);
-      return !markId(value.id) || rect === null ? null : { type: "tracked", id: value.id, rect };
+      // A newer shell's (P132): where the mark is in the document, and how far it is scrolled.
+      const documentRect =
+        value.documentRect === undefined ? undefined : parseRect(value.documentRect);
+      const scroll = value.scroll === undefined ? undefined : parseScroll(value.scroll);
+      if (!markId(value.id) || rect === null || documentRect === null || scroll === null) {
+        return null;
+      }
+      return {
+        type: "tracked",
+        id: value.id,
+        rect,
+        ...(documentRect === undefined ? {} : { documentRect }),
+        ...(scroll === undefined ? {} : { scroll }),
+      };
     }
     default:
       return null;

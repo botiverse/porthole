@@ -1050,7 +1050,9 @@ chooses), and the annotation runtime is in the shell only then.
 | frame → host | `porthole/annotate.selected` | `{ anchor, rect }`; after a scroll, the same selection again only if its box moved more than 0.5 px, on the follow-ups' clock (P105) |
 | frame → host | `porthole/annotate.unselected` | — (the text selection went away) |
 | frame → host | `porthole/annotate.cancelled` | — (Escape) |
-| frame → host | `porthole/annotate.anchored` | `{ results: [{ id, state: "attached" \| "orphaned", rect? }] }`: every mark after `show`, the one after `focus`, every mark when the content changed a state, and, while any mark has a marker (a `count` or a draft, P107), once a scroll, a resize or a run of content changes has settled (150 ms quiet), only the marks that moved more than 0.5 px since the host was last told, at most one a second together with the selection's (P104, P105) |
+| frame → host | `porthole/annotate.anchored` | `{ results: [{ id, state: "attached" \| "orphaned", rect?, documentRect?, order? }], scroll? }` (a newer shell's `documentRect` and `scroll`: P132, below): every mark after `show`, the one after `focus`, every mark when the content changed a state, and, while any mark has a marker (a `count` or a draft, P107), once a scroll, a resize or a run of content changes has settled (150 ms quiet), only the marks that moved more than 0.5 px since the host was last told, at most one a second together with the selection's (P104, P105) |
+| host → frame | `porthole/annotate.track` | `{ id }` or `{ id: null }`: follow one shown mark, or none (P112) |
+| frame → host | `porthole/annotate.tracked` | `{ id, rect, documentRect?, scroll? }`: the followed mark's box at an animation frame where it moved, at most one every 16 ms; the host takes 60 a second, for that mark only (P112); a newer shell adds its place in the document and the document's scroll (P132) |
 | frame → host | `porthole/annotate.activated` | `{ id, rect }`: the person clicked a mark's marker; `rect` is the marker's (P104); taken only while the host's page has transient activation (P105) |
 
 - **Anchors** are W3C Web Annotation selectors, at most one of each:
@@ -1070,6 +1072,17 @@ chooses), and the annotation runtime is in the shell only then.
   hears it (P104); a box wholly outside becomes one of no size on the nearest edge
   (a mark below the fold: `y` at the viewport's height, no height). A platform whose
   `viewport()` answers no size or throws gets nothing at the corner (P105).
+- **Places in the document** (P132). A newer shell gives each attached result a
+  `documentRect` too: its box plus how far the document was scrolled as it was read, the
+  report's `scroll` (`{ x, y }`: the root element's top left from the viewport's, negated,
+  read with the DOM's own `getBoundingClientRect`). So it stays put as the document
+  scrolls, and says where a mark outside the frame is; `rect` is `documentRect` less
+  `scroll`, before the clamp. `tracked` carries both too: a followed mark's box moves at
+  every scroll, so its reports tell the scroll at each animation frame, in the frame or
+  not. `createHost` checks them as boxes (finite, within the coordinate limit, sizes not
+  negative; a malformed one drops the report) and clamps neither: the host clips what it
+  draws from them. A page that scrolls a box of its own rather than its document moves
+  its marks' places with it, as their `rect` does; those are told as before.
 - **Markers** (P104). A mark with a `count` gets a bubble glyph and its number ("99+"
   above 99; 0 the bubble alone) on an element's top right corner, inside the frame's
   width, and beside a text anchor's last line, centred on it (P105, #36): in the

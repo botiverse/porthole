@@ -57,7 +57,11 @@ export const MARKER_HIT = String.raw`(count, boxAt, x, y, touch) => {
  *   bubble with no number, and has a marker with or without a count;
  * - following: while a mark has a marker, once a scroll, a resize or a change of the content
  *   settles, the marks that moved since the host was last told are reported, at most once a
- *   second, so the host's own UI beside a mark can follow.
+ *   second, so the host's own UI beside a mark can follow;
+ * - places in the document (P132): each result's box also in the document's coordinates
+ *   (`documentRect`), with how far the document was scrolled as it was read (`scroll`), and the
+ *   followed mark's (`tracked`) too, so a host places marks scrolled out of the frame, and keeps
+ *   them placed as the document scrolls, from one report and the followed mark's scroll.
  *
  * It shares the realm with the content, which can interfere with all of it: the host takes its
  * reports as UI hints only.
@@ -306,6 +310,19 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         return null;
       };
       const rectOf = (found) => (found.range ? rangeRect.call(found.range) : elementRect.call(found.element));
+      // How far the document is scrolled (P132): the top left of its root's box from the
+      // viewport's, negated, read with the DOM's own getBoundingClientRect (taken before content
+      // runs), never window.scrollY, which the content can replace. 0 - n: no -0 for a top at 0.
+      const scrollOf = () => {
+        const root = document.documentElement;
+        if (!root) {
+          return { x: 0, y: 0 };
+        }
+        const rect = elementRect.call(root);
+        return { x: 0 - rect.left, y: 0 - rect.top };
+      };
+      // A box in the viewport, in the document (P132): where it is as the document scrolls.
+      const inDocument = (rect, scroll) => ({ x: rect.x + scroll.x, y: rect.y + scroll.y, width: rect.width, height: rect.height });
 
       // The shell's own layer, over the content: marks, the outline of what would be picked.
       let layer = null;
@@ -799,7 +816,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           if (apart(trackedBox, rect) && now - trackedAt >= 16) {
             trackedBox = rect;
             trackedAt = now;
-            tell(M.tracked, { id: tracking, rect });
+            // Its box moves as the document scrolls, inside the frame or not: each one tells the
+            // host the scroll, for every mark it places by its place in the document (P132).
+            const scroll = scrollOf();
+            tell(M.tracked, { id: tracking, rect, documentRect: inDocument(rect, scroll), scroll });
           }
         }
         trackFrame = nextFrame(trackTick);
@@ -843,12 +863,15 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         placed.forEach((each, at) => orders.set(each.mark, at));
         return orders;
       };
-      const resultOf = (mark, orders) => {
+      // A mark's result: its box in the viewport, and in the document (P132) by scroll, the
+      // report's one reading of it.
+      const resultOf = (mark, orders, scroll) => {
         if (mark.found === null) {
           return { id: mark.id, state: "orphaned" };
         }
         const order = (orders || ordersOf()).get(mark);
-        return Object.assign({ id: mark.id, state: "attached", rect: box(rectOf(mark.found)) }, order === undefined ? {} : { order });
+        const rect = box(rectOf(mark.found));
+        return Object.assign({ id: mark.id, state: "attached", rect, documentRect: inDocument(rect, scroll) }, order === undefined ? {} : { order });
       };
       // Two boxes more than 0.5 px apart on any side (or one of them unknown).
       const apart = (a, b) => !a || !b || Math.abs(a.x - b.x) > 0.5 || Math.abs(a.y - b.y) > 0.5 || Math.abs(a.width - b.width) > 0.5 || Math.abs(a.height - b.height) > 0.5;
@@ -860,17 +883,18 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
         return result.state === "attached" && (apart(told.rect, result.rect) || told.order !== result.order);
       };
-      const report = (pairs) => {
+      // With the scroll the results' document boxes were read at (P132).
+      const report = (pairs, scroll) => {
         if (pairs.length > 0) {
           for (const pair of pairs) {
             pair.mark.told = pair.result;
           }
-          tell(M.anchored, { results: pairs.map((pair) => pair.result) });
+          tell(M.anchored, { results: pairs.map((pair) => pair.result), scroll });
         }
       };
-      const resultsOf = (only) => {
+      const resultsOf = (only, scroll) => {
         const orders = ordersOf();
-        return marks.map((mark) => ({ mark, result: resultOf(mark, orders) })).filter((pair) => !only || moved(pair.mark, pair.result));
+        return marks.map((mark) => ({ mark, result: resultOf(mark, orders, scroll) })).filter((pair) => !only || moved(pair.mark, pair.result));
       };
       // Finds every mark again; tells the host every result (after show, or when a state changed),
       // only the marks that moved (once the content is quiet), or nothing.
@@ -892,7 +916,8 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           mark.state = state;
         }
         if (all || changed) {
-          report(resultsOf(false));
+          const scroll = scrollOf();
+          report(resultsOf(false, scroll), scroll);
         } else if (quiet) {
           follow();
         }
@@ -977,9 +1002,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const sendFollow = () => {
         let sent = 0;
         if (marks.length > 0 && !settling() && counted()) {
-          const pairs = resultsOf(true);
+          const scroll = scrollOf();
+          const pairs = resultsOf(true, scroll);
           if (pairs.length > 0) {
-            report(pairs);
+            report(pairs, scroll);
             sent += 1;
           }
         }
@@ -1043,7 +1069,8 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           setTimeout(redraw, 1850);
         }
         draw();
-        report([{ mark, result: resultOf(mark) }]);
+        const scroll = scrollOf();
+        report([{ mark, result: resultOf(mark, null, scroll) }], scroll);
       };
 
       // A marker's click (P104). The layer takes no pointer but on its markers, so a press whose
