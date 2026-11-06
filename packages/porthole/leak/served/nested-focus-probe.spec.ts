@@ -60,8 +60,8 @@ const recorder = (variant: Variant) => {
   }
   addEventListener("keydown", (event) => say(`keydown:${event.key}`), true);
 
-  const focusOf = Reflect.get(HTMLElement.prototype, "focus") as () => void;
-  const blurOf = Reflect.get(HTMLElement.prototype, "blur") as () => void;
+  const focusOf = Reflect.get(HTMLElement.prototype, "focus");
+  const blurOf = Reflect.get(HTMLElement.prototype, "blur");
   HTMLElement.prototype.focus = function focus(options) {
     say(`call-focus(${named(this)}) before`);
     Reflect.apply(focusOf, this, [options]);
