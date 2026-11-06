@@ -2387,8 +2387,8 @@ test("a marker is a button the keyboard reaches: Tab in reading order, Enter and
       (await layerNodes(page, frame, "marker")).map(({ tag, name }) => ({ tag, name })),
       "probe: each marker is a button named for what it is, in the page's order",
     ).toEqual([
-      { tag: "BUTTON", name: "1 comment on fell" },
-      { tag: "BUTTON", name: "2 comments on rose" },
+      { tag: "BUTTON", name: '1 comment on "fell"' },
+      { tag: "BUTTON", name: '2 comments on "rose"' },
     ]);
   }
   await frame.locator("#field").focus();
@@ -2489,6 +2489,171 @@ test("a marker out of view brings itself into view as the keyboard reaches it, a
     (await next(display, "activated", count)).id,
     "probe: the key is still the same marker's",
   ).toBe("far");
+});
+
+test("focusMark puts the focus on that mark's marker and tells nothing; no such marker, a moved page or picking, and it does nothing (P134)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, { config: annotated(), content: KEYED });
+  const frame = await display.frame();
+  await expect(frame.locator("#field")).toBeVisible();
+  await showAndDraw(display, frame, [
+    textMark("fell", "fell", 1),
+    textMark("rose", "rose", 2),
+    textMark("bare", "two percent"),
+    textMark("gone", "not on this page", 3),
+  ]);
+
+  // As a host's card closes on Escape: its field goes, focus with it, and then the host asks.
+  await page.evaluate(() => {
+    const card = document.createElement("textarea");
+    card.id = "card";
+    document.body.append(card);
+    card.focus();
+  });
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => document.getElementById("card")?.remove());
+  const told = (await reports(display)).length;
+  expect(
+    await display.annotate("focusMark", "rose"),
+    "probe: a shown marker is no fault",
+  ).toBeNull();
+  await expect
+    .poll(() => onLayer(frame), { message: "probe: the focus is on a marker" })
+    .toBe(true);
+  expect(
+    await page.evaluate(() => document.activeElement?.localName),
+    "probe: the frame is what the host's page reads as focused",
+  ).toBe("iframe");
+  await page.waitForTimeout(300);
+  // By content: a control's follow-up may come first, and `anchored` isn't this call's.
+  expect(
+    (await reports(display)).slice(told).filter((report) => report.type !== "anchored"),
+    "probe: the move tells the host nothing",
+  ).toEqual([]);
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(
+      async () =>
+        (await reports(display))
+          .slice(told)
+          .some((report) => report.type === "activated" && report.id === "rose"),
+      { message: "probe: it is the marker asked for" },
+    )
+    .toBe(true);
+
+  // From here the page's field holds the focus, and each of these must leave it there.
+  await frame.locator("#field").focus();
+  const leftAlone = async (id: string, why: string) => {
+    expect(await display.annotate("focusMark", id), `probe: no fault: ${why}`).toBeNull();
+    await page.waitForTimeout(300);
+    expect(
+      await frame.evaluate(() => document.activeElement?.id),
+      `probe: the focus stays where it was: ${why}`,
+    ).toBe("field");
+  };
+  await leftAlone("nope", "no mark has this id");
+  await leftAlone("bare", "a mark without a marker");
+  await leftAlone("gone", "a mark whose words were never found");
+  await frame.evaluate(() => document.getElementById("p2")?.remove());
+  await expect
+    .poll(
+      async () =>
+        (await reports(display)).some(
+          (report) =>
+            report.type === "anchored" &&
+            report.results.some((each) => each.id === "rose" && each.state === "orphaned"),
+        ),
+      { message: "probe: the page took the marked words away" },
+    )
+    .toBe(true);
+  await leftAlone("rose", "the page took the marker's words away");
+  await display.annotate("start", { elements: true, text: false });
+  await leftAlone("fell", "markers step aside while elements are picked");
+});
+
+test("focusMark right after a show waits for the marker, and the focus brings it into view (P134)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    heightPx: 500,
+    content: `<!doctype html><html><head><title>Long</title></head><body style="margin: 8px">
+<p id="near">The near words.</p>
+<div style="height: 2000px">spacer</div>
+<p id="far">The far words.</p>
+<div style="height: 1500px">spacer</div>
+</body></html>`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#far")).toBeAttached();
+  await display.annotate("show", [textMark("near", "near", 1), textMark("far", "far", 2)]);
+  await display.annotate("focusMark", "far");
+  await expect
+    .poll(() => onLayer(frame), { message: "probe: the marker got the focus once it was drawn" })
+    .toBe(true);
+  await expect
+    .poll(() => frame.evaluate(() => Math.round(window.scrollY)), {
+      message: "probe: the document scrolled to the marker",
+    })
+    .toBeGreaterThan(1_500);
+});
+
+test("a page that patched focus isn't handed the marker the host's focusMark moves to (P134)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: annotated(),
+    content: `${KEYED}<script>
+  window.reached = [];
+  const own = HTMLElement.prototype.focus;
+  HTMLElement.prototype.focus = function (...args) {
+    window.reached.push(this.localName);
+    return own.apply(this, args);
+  };
+</script>`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#field")).toBeVisible();
+  await showAndDraw(display, frame, [textMark("fell", "fell", 1)]);
+  await display.annotate("focusMark", "fell");
+  await expect.poll(() => onLayer(frame), { message: "the focus is on the marker" }).toBe(true);
+  expect(
+    await frame.evaluate(() => (window as unknown as { reached: string[] }).reached),
+    "probe: the page's own focus never saw the marker",
+  ).toEqual([]);
+});
+
+test("a marker's name is the words it is on, in quotes, with no element's tag; what the host stores keeps it (P134)", async ({
+  page,
+  browserName,
+}) => {
+  test.skip(browserName !== "chromium", "the closed layer is read through Chromium's inspector");
+  const display = await referenceHost.launch(page, { config: annotated(), content: KEYED });
+  const frame = await display.frame();
+  await expect(frame.locator("#p1")).toBeVisible();
+  await display.annotate("start", { elements: true, text: false });
+  await frame.locator("#p1").click();
+  const picked = await next(display, "selected");
+  await display.annotate("stop");
+  expect(picked.anchor.label, "probe: the anchor the host stores is as it was").toBe(
+    "p#p1 Costs fell by three percent.",
+  );
+  await showAndDraw(display, frame, [
+    { id: "para", anchor: picked.anchor, count: 1 },
+    elementMark("wordless", "#field", 2),
+    { id: "draft", anchor: textMark("x", "rose").anchor, kind: "draft" },
+  ]);
+  expect(
+    (await layerNodes(page, frame, "marker"))
+      .map(({ name }) => String(name))
+      .toSorted((a, b) => a.localeCompare(b)),
+    "probe: each marker is named for its words, an element's tag left out",
+  ).toEqual([
+    '1 comment on "Costs fell by three percent."',
+    "2 comments",
+    'Draft comment on "rose"',
+  ]);
 });
 
 /** ADOPTING.md's guardPresses, as it is written there: the duty's reference code (P105). */

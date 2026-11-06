@@ -498,6 +498,12 @@ export interface PortholeFrameHandle {
    */
   clearSelection(): void;
   /**
+   * Puts the keyboard back on a mark's marker in the frame (`annotations.focusMark(id)`, P134),
+   * once Escape closed your own view of that mark. Nothing happens for an id with no marker, or
+   * while no display runs. A config without `annotate`: `onHostError`, kind `"annotations"`.
+   */
+  focusMark(id: string): void;
+  /**
    * Finds `query` in the frame and highlights it (`find.query`, P131): where the matches stand,
    * or `"unsupported"` (a config without `find`, an older shell, no answer in time, a later
    * query superseded it, or no display running now). The query is kept for the content the frame
@@ -810,6 +816,12 @@ export function PortholeFrame(props: PortholeFrameProps): ReactElement {
         const now = display.current;
         if (now !== null) {
           attempt(() => now.annotations.clearSelection(), own.current);
+        }
+      },
+      focusMark(id) {
+        const now = display.current;
+        if (now !== null) {
+          attempt(() => now.annotations.focusMark(id), own.current);
         }
       },
       find(query, options) {

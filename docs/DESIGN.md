@@ -780,8 +780,8 @@ binding is mounting and lifecycle (P034).
   null), `annotations` (the marks), `focusedAnnotation` (each new id is brought into
   view; `{ id, key }` with a new key focuses the same one again), `trackedAnnotation`
   (the mark followed, or null, P118); `onAnnotation` gets what the frame reported, `tracked`
-  boxes too. A frame that mounts again gets them all. A `ref` holds `clearSelection()` alone
-  (`PortholeFrameHandle`), a no-op while no display runs.
+  boxes too. A frame that mounts again gets them all. A `ref` holds `clearSelection()`, `find`,
+  `clearFind` and `focusMark(id)` (`PortholeFrameHandle`), each a no-op while no display runs.
 - **Errors** (P055): `onContentError` gets what the content did wrong (what it
   threw, what the sandbox blocked, a navigation the shell stopped, that it kept
   navigating away): the agent's to hear. `onNavigationBlocked` gets a stopped
@@ -1047,6 +1047,7 @@ chooses), and the annotation runtime is in the shell only then.
 | host → frame | `porthole/annotate.focus` | `{ id }`: scrolled into view inside the frame, made the active mark, flashed |
 | host → frame | `porthole/annotate.clear` | — |
 | host → frame | `porthole/annotate.clearSelection` | —: the page's text selection is taken away (the DOM's own `removeAllRanges`, taken before content runs) with what the shell held of it, and nothing is reported back; marks, drafts and the mode stay (P115) |
+| host → frame | `porthole/annotate.focusMark` | `{ id }`: the DOM focus goes to that mark's marker (the DOM's own `focus`, taken before content runs), once the marks of a `show` are found; nothing is reported back, and with no such marker, or while elements are picked, nothing happens. For after Escape closed the host's view (P134) |
 | frame → host | `porthole/annotate.selected` | `{ anchor, rect, lastLineDocumentRect?, scroll? }` (a newer shell's last two: P133, below); after a scroll, the same selection again only if its box moved more than 0.5 px, on the follow-ups' clock (P105) |
 | frame → host | `porthole/annotate.unselected` | — (the text selection went away) |
 | frame → host | `porthole/annotate.cancelled` | — (Escape) |
@@ -1126,8 +1127,8 @@ chooses), and the annotation runtime is in the shell only then.
   while elements are picked, the keyboard's Tab too.
 - **Markers from the keyboard** (P133). Each marker is a `<button>` with a tab stop,
   in the page's reading order after the page's own stops (the layer is the document's
-  last child), named for what it is (`aria-label`: "3 comments on …", "Draft comment on
-  …", with the mark's `anchor.label`, in English); only the markers are exposed to
+  last child), named for what it is (`aria-label`: `3 comments on "…"`, `Draft comment
+  on "…"`, with the words it is on, an element's tag left out, P134, in English); only the markers are exposed to
   assistive technology, the layer no longer `aria-hidden`, its marks and outline are.
   A press of a pointer still moves no focus. Enter and Space make the button's own
   trusted click, which goes the way a pointer's does, but has no count and no place, so
@@ -1172,9 +1173,9 @@ chooses), and the annotation runtime is in the shell only then.
   see or do anything. A view a report opens or moves guards its presses
   (THREAT_MODEL §6).
 - **Host API.** `display.annotations.start(mode?)`, `stop()`, `show(marks)`,
-  `focus(id)`, `track(id)`, `clear()`, `clearSelection()` (P115), and the `annotation`
-  event (`AnnotationReport`); the state is given to every frame the display runs (not a
-  `clearSelection`: a new frame has no selection). `parseAnchor` checks an anchor a host
+  `focus(id)`, `track(id)`, `clear()`, `clearSelection()` (P115), `focusMark(id)` (P134), and the
+  `annotation` event (`AnnotationReport`); the state is given to every frame the display runs (not a
+  `clearSelection`: a new frame has no selection; nor a `focusMark`). `parseAnchor` checks an anchor a host
   stores (its server, before saving a comment).
 
 Tests (`leak/annotate.spec.ts`, all three engines): a pick outlines and picks
@@ -1190,7 +1191,8 @@ double, right or middle click (`marker-click` → those two cases), by the keybo
 too (P133: a button in reading order and named for what it is, Enter and Space
 reported once, a key held down once, none of it heard, nothing while elements are
 picked; `marker-key`, `marker-click` too), brought into view by the focus and keeping
-it through redraws, at its paragraph's end past the last word, a nested block's
+it through redraws, reached by the host's `focusMark` after its card closed and left
+alone where there's no such marker, by the kept `focus` (P134, `marker-focus`), at its paragraph's end past the last word, a nested block's
 words not its own, a draft's by its words; focus and
 selection kept, a drag from a marker too (`marker-prevent` → the press case), none
 without a count, stepping aside while picking, drawn whole at the frame's top; a
@@ -1532,6 +1534,7 @@ control the tables above name to the registry):
 | `marker-prevent` | `annotate.spec.ts` | `a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection` | — | — |
 | `marker-place` | `annotate.spec.ts` | `text markers cover no word: on a column page, and on a phone's lines with one marker each (P105, #36)` | — | — |
 | `marker-key` | `annotate.spec.ts` | `a marker is a button the keyboard reaches: Tab in reading order, Enter and Space report it once, the content hears neither, and it steps aside while elements are picked (P133)` | — | — |
+| `marker-focus` | `annotate.spec.ts` | `a page that patched focus isn't handed the marker the host's focusMark moves to (P134)` | — | — |
 | `marker-originals` | `annotate.spec.ts` | `a page that patches the event's built-ins neither hears a marker's press nor stops its report (P105)` | — | — |
 | `follow-throttle` | `annotate.spec.ts` | `an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second` | — | — |
 | `selection-follow` | `annotate.spec.ts` | `an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second` | — | — |

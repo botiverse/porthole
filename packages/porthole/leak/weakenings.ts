@@ -415,6 +415,15 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: '        if (key === "Enter" || key === " ") {\n',
     },
   ],
+  // The host's move to a marker (P134): through the live prototype, which hands a page that patched
+  // focus the marker from inside the closed root.
+  "marker-focus": [
+    {
+      file: "src/shell/annotate.ts",
+      find: "            callOf(focusElement, markers[i].element, [{ preventScroll: true }]);\n",
+      replace: "            markers[i].element.focus({ preventScroll: true });\n",
+    },
+  ],
   // A marker's press (P104, P105): what the browser would do with it (focus, selection) goes on.
   "marker-prevent": [
     {

@@ -15,6 +15,7 @@ interface App {
   log(): { display: string; event: string; detail?: unknown }[];
   answerCustom(accepted: boolean): void;
   clearSelection(displayId: string): boolean;
+  focusMark(displayId: string, id: string): boolean;
   restyle(value: string): void;
   restyleLater(value: string): void;
 }
@@ -942,6 +943,52 @@ test("a ref's clearSelection takes the frame's selection away; nothing without a
   // Unmounted: the ref is let go.
   await open(page, { provider: "default", frames: [] });
   expect(await call("notes")).toBe(false);
+});
+
+test("a ref's focusMark puts the focus on a marker; nothing for an id without one, or without a display (P134)", async ({
+  page,
+}) => {
+  const marks: AnnotationMark[] = [
+    { ...quoteMark("c1", "Costs fell by 3%."), count: 1 },
+    quoteMark("bare", "Costs fell by 3%."),
+  ];
+  await open(page, {
+    provider: "default",
+    frames: [
+      frame({ displayId: "notes", config: "notes", content: PARAGRAPHS, annotations: marks }),
+      // A config without annotate.
+      frame({ displayId: "plain", content: "<p>plain</p>" }),
+    ],
+  });
+  const inside = frameOf(page, "notes");
+  await expect(inside.locator("#p1")).toBeVisible();
+  const call = (display: string, id: string) =>
+    page.evaluate(([each, mark]) => (window as unknown as { app: App }).app.focusMark(each, mark), [
+      display,
+      id,
+    ] as const);
+  const onMarker = () =>
+    inside
+      .locator("body")
+      .evaluate(
+        () => document.activeElement === document.querySelector("[data-porthole-annotations]"),
+      );
+  expect(await call("notes", "bare"), "a handle, doing nothing").toBe(true);
+  expect(await call("notes", "nope"), "a handle, doing nothing").toBe(true);
+  await page.waitForTimeout(300);
+  expect(await onMarker()).toBe(false);
+  // Polled: the marker is there once the frame has found the mark.
+  await expect
+    .poll(async () => {
+      await call("notes", "c1");
+      return onMarker();
+    })
+    .toBe(true);
+  expect(await call("plain", "c1")).toBe(true);
+  await expect
+    .poll(async () => (await events(page, "plain", "host-error")).map((entry) => entry.detail))
+    .toEqual([{ kind: "annotations", message: expect.stringMatching(/annotate/u) as unknown }]);
+  expect(await events(page, "notes", "host-error")).toEqual([]);
 });
 
 test("a host's inline objects (config, instance, hostInfo, locator) don't start a running frame again", async ({

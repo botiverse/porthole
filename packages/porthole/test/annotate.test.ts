@@ -21,7 +21,7 @@ import {
   type DisplayHandle,
   type PlatformHost,
 } from "../src/index.ts";
-import { ANNOTATE_RUNTIME, MARKER_HIT } from "../src/shell/annotate.ts";
+import { ANNOTATE_RUNTIME, MARKER_HIT, MARKER_NAME } from "../src/shell/annotate.ts";
 import { SHELL_RUNTIME } from "../src/shell/runtime.ts";
 
 /** Annotations (P053): what the host takes from a frame, and what the shell is given. */
@@ -515,7 +515,7 @@ describe("a marker's click (P104), on createHost over a stand-in platform", () =
   });
 });
 
-describe("clearSelection (P115), on createHost over a stand-in platform", () => {
+describe("clearSelection (P115) and focusMark (P134), on createHost over a stand-in platform", () => {
   const mounted: DisplayHandle[] = [];
   afterEach(() => {
     for (const display of mounted.splice(0)) {
@@ -612,6 +612,46 @@ describe("clearSelection (P115), on createHost over a stand-in platform", () => 
       /clearSelection: the config doesn't declare annotate/u,
     );
     expect(plain.annotateSent()).toEqual([]);
+  });
+
+  test("focusMark sends a shown marker's id and nothing else, and is kept for no later frame", () => {
+    const t = mount(true);
+    t.handshake();
+    t.display.annotations.show([
+      { id: "c1", anchor: text, count: 1 },
+      { id: "d1", anchor: element, kind: "draft" },
+    ]);
+    t.display.annotations.focusMark("c1");
+    expect(t.sent.at(-1)).toEqual({ method: "porthole/annotate.focusMark", params: { id: "c1" } });
+    t.display.annotations.focusMark("d1");
+    expect(t.sent.at(-1)).toEqual({ method: "porthole/annotate.focusMark", params: { id: "d1" } });
+    const before = t.sent.length;
+    t.display.reload();
+    t.handshake();
+    expect(t.sent.slice(before).map((each) => each.method)).toContain("porthole/annotate.show");
+    expect(t.sent.slice(before).map((each) => each.method)).not.toContain(
+      "porthole/annotate.focusMark",
+    );
+  });
+
+  test("focusMark is nothing, and no fault, without a marker to go to; without annotate declared it throws", () => {
+    const t = mount(true);
+    t.handshake();
+    t.display.annotations.show([
+      { id: "c1", anchor: text, count: 1 },
+      { id: "bare", anchor: text },
+    ]);
+    const sent = t.annotateSent().length;
+    expect(() => t.display.annotations.focusMark("nope")).not.toThrow();
+    expect(() => t.display.annotations.focusMark("bare")).not.toThrow();
+    t.display.annotations.clear();
+    expect(() => t.display.annotations.focusMark("c1")).not.toThrow();
+    expect(t.annotateSent().slice(sent)).toEqual(["porthole/annotate.clear"]);
+    const plain = mount(false);
+    plain.handshake();
+    expect(() => plain.display.annotations.focusMark("c1")).toThrow(
+      /focusMark: the config doesn't declare annotate/u,
+    );
   });
 });
 
@@ -1086,6 +1126,66 @@ describe("the shell", () => {
     expect(handler).toContain("removeAllRanges.call(selection)");
     // Nothing told back from it.
     expect(handler).not.toContain("tell(");
+  });
+
+  test("focuses a marker with the DOM's own focus, taken before content runs, and tells nothing (P134)", () => {
+    expect(ANNOTATE_RUNTIME).toContain('focusMark: "porthole/annotate.focusMark"');
+    const taken = ANNOTATE_RUNTIME.indexOf("const focusElement = HTMLElement.prototype.focus;");
+    expect(taken).toBeGreaterThan(-1);
+    const moved = ANNOTATE_RUNTIME.indexOf("const focusMark = (id) => {");
+    expect(moved).toBeGreaterThan(taken);
+    const body = ANNOTATE_RUNTIME.slice(moved, ANNOTATE_RUNTIME.indexOf("      };", moved));
+    expect(body).toContain("callOf(focusElement, markers[i].element");
+    expect(body).not.toContain("tell(");
+    expect(body).not.toContain("report(");
+  });
+
+  test("a marker's name is what it is and its words, quoted, without an element's tag (P134)", () => {
+    type Named = { anchor: AnnotationAnchor; count: number | null; draft: boolean };
+    const name = runInNewContext(MARKER_NAME) as (mark: Named) => string;
+    const posted = (anchor: AnnotationAnchor, count: number | null = 1) => ({
+      anchor,
+      count,
+      draft: false,
+    });
+    expect(ANNOTATE_RUNTIME).toContain(`const nameOf = ${MARKER_NAME};`);
+    // An element with text: its quote, whatever its tag, id and classes.
+    expect(name(posted(element))).toBe('1 comment on "Revenue grew 12%"');
+    expect(name(posted(element, 3))).toBe('3 comments on "Revenue grew 12%"');
+    expect(name(posted(element, 0))).toBe('Comment on "Revenue grew 12%"');
+    expect(name({ anchor: element, count: null, draft: true })).toBe(
+      'Draft comment on "Revenue grew 12%"',
+    );
+    // Words spaced as the page has them, cut where the label cuts an element's.
+    const spaced = {
+      ...element,
+      selectors: [{ type: "TextQuoteSelector" as const, exact: "a  b\n" }],
+    };
+    expect(name(posted(spaced))).toBe('1 comment on "a b"');
+    const cut = {
+      ...element,
+      selectors: [{ type: "TextQuoteSelector" as const, exact: "x".repeat(300) }],
+    };
+    expect(name(posted(cut))).toBe(`1 comment on "${"x".repeat(40)}…"`);
+    const exactly = {
+      ...element,
+      selectors: [{ type: "TextQuoteSelector" as const, exact: "x".repeat(40) }],
+    };
+    expect(name(posted(exactly))).toBe(`1 comment on "${"x".repeat(40)}"`);
+    // No text of its own: what follows the tag in the label, an `alt`'s words; a bare tag is none.
+    const css = [{ type: "CssSelector" as const, value: "#chart" }];
+    const pictured = {
+      kind: "element" as const,
+      selectors: css,
+      label: "img#chart Sales by month",
+    };
+    expect(name(posted(pictured))).toBe('1 comment on "Sales by month"');
+    expect(name(posted({ ...pictured, label: "div.chart" }))).toBe("1 comment");
+    // A text anchor's label is its words: nothing is taken off it.
+    expect(name(posted(text))).toBe('1 comment on "grew 12%"');
+    expect(name(posted({ ...text, label: "" }))).toBe("1 comment");
+    // What the host stores is untouched: its label keeps the tag.
+    expect(parseAnchor(element)?.label).toBe("h2#revenue Revenue grew 12%");
   });
 
   test("a press is a marker's on its bubble, and on touch within 44 by 44 around it, the nearest (P119)", () => {

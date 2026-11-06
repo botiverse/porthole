@@ -100,8 +100,8 @@ export interface AnnotationMark {
    * draws the bubble alone) at the end of a text anchor's paragraph (P133) and the top right of an
    * element. The person can click it, or reach it with the keyboard and press Enter or Space
    * (P133): the frame reports `activated`. Its accessible name says what it is, with the count and
-   * `anchor.label`. The content can read the number; give one only where the page may know it. A
-   * draft's is dropped (P107): its marker has no number.
+   * the words it is on, quoted, an element's tag left out (P134). The content can read the number;
+   * give one only where the page may know it. A draft's is dropped (P107): its marker has no number.
    */
   readonly count?: number;
   /**
@@ -240,6 +240,8 @@ export const ANNOTATE_METHODS = {
   tracked: "porthole/annotate.tracked",
   /** Host → frame: take the page's text selection away, telling nothing back (P115). */
   clearSelection: "porthole/annotate.clearSelection",
+  /** Host → frame: put the focus on one mark's marker (`{ id }`), telling nothing back (P134). */
+  focusMark: "porthole/annotate.focusMark",
 } as const;
 
 /** The most of each part of an anchor or report the host takes. */

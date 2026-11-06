@@ -359,6 +359,12 @@ const app = {
     handle?.clearSelection();
     return handle !== null;
   },
+  /** The same, for `focusMark`. */
+  focusMark(displayId: string, id: string): boolean {
+    const handle = handles.get(displayId)?.current ?? null;
+    handle?.focusMark(id);
+    return handle !== null;
+  },
   answerCustom(accepted: boolean) {
     pendingCustom?.(accepted);
     pendingCustom = null;
