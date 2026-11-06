@@ -878,8 +878,8 @@ own frame, below the shell, P111), so:
   conditions: a page can put the person's next keys in that view, and keeping those keys from posting
   is the host's own gate on that view's controls, not Porthole's.
 - *Back to a marker* (P134). `annotations.focusMark(id)` is the host's word to the frame
-  (`porthole/annotate.focusMark`, `{ id }`), for one moment only: after Escape closed the host's own
-  view of that mark. No content goes with it, beyond an id the frame has, and nothing comes back. The
+  (`porthole/annotate.focusMark`, `{ id }`), for one moment only: after the keyboard closed the host's
+  own view of that mark, by Escape or by a Tab past its first or last control. No content goes with it, beyond an id the frame has, and nothing comes back. The
   shell moves the focus through the platform's `focus` as it was before content ran (control
   `marker-focus`: a page that replaced it is handed the marker otherwise); with no such marker it does
   nothing. The page reads the message, so it learns a card closed, and can take the focus back at once
@@ -887,6 +887,12 @@ own frame, below the shell, P111), so:
   a host can't rely on the focus landing. To the focus guard the move is the frame's own, so from a
   host's text field that still has focus it is undone and counted (P109), not passed as the host's:
   no window was opened in the guard for it.
+  The word is a message, so from the host's close until the frame moves, the focus rests on the host's
+  body. A forged `activated` in that gap finds no frame focused, so a host that gates a view on "the
+  frame had the focus" doesn't gate that one. That is accepted, on the host's side of the wall: such
+  a view takes no focus and keeps keys out until the focus has reached the frame (in Raft, content
+  inert for 500 ms, and the focus handed back to the frame within 150 ms if the marker didn't take
+  it), so the keys go to the page and nothing is written.
 - *What doesn't hold against content that does.* The shell shares the content's realm. It reads
   and stops a marker's press through the platform's own functions and getters, kept before
   content runs (P105, control `marker-originals`), so patching `Event`'s or `MouseEvent`'s

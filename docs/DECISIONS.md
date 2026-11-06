@@ -7748,7 +7748,7 @@ anchor's marker is read out as "1 comment on p Paragraph 3. Filler…", the tag 
    is `focus(id)`'s, for the mark's marker: `focus` scrolls to a mark and lights it, and moves no DOM
    focus. The shell moves the DOM focus to that mark's marker button, with the platform's `focus`
    kept before content runs and `preventScroll`: the focus listener P133 added lights the words and
-   brings it into view, as for a Tab. **It is for the Esc path only:** after Escape closed the host's
+   brings it into view, as for a Tab. **It is for the Esc path only** (widened the same day: a Tab past the view's ends closes it the same way, the same word, for the same reason; the shell doesn't change, and `THREAT_MODEL` §6 says so): after Escape closed the host's
    own view of that mark. Nothing else needs a host to move the keyboard into a frame, and P109 and
    §6 spend a good deal on keeping it out.
 2. **No content, and nothing new back.** An id the host already sent in `show`; no report, no field,
