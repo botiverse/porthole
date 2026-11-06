@@ -1047,7 +1047,7 @@ chooses), and the annotation runtime is in the shell only then.
 | host → frame | `porthole/annotate.focus` | `{ id }`: scrolled into view inside the frame, made the active mark, flashed |
 | host → frame | `porthole/annotate.clear` | — |
 | host → frame | `porthole/annotate.clearSelection` | —: the page's text selection is taken away (the DOM's own `removeAllRanges`, taken before content runs) with what the shell held of it, and nothing is reported back; marks, drafts and the mode stay (P115) |
-| host → frame | `porthole/annotate.focusMark` | `{ id }`: the DOM focus goes to that mark's marker (the DOM's own `focus`, taken before content runs), once the marks of a `show` are found; a call that had to wait for them is dropped unless the focus is in the frame's document as it lands (the DOM's own `hasFocus`, taken before content runs; P135), one that didn't wait isn't asked; nothing is reported back, and with no such marker, or while elements are picked, nothing happens. For after the keyboard closed the host's view: Escape, or a Tab past its ends (P134); a host calls it again after its own `display.focus()` |
+| host → frame | `porthole/annotate.focusMark` | `{ id }`: the DOM focus goes to that mark's marker (the DOM's own `focus`, taken before content runs), once the marks of a `show` are found; a call that had to wait for them is dropped unless the focus is in the frame's document as it lands (the DOM's own `hasFocus`, taken before content runs; P135; on a nested page that had the focus the host's `display.focus()` doesn't bring it back, a known gap), one that didn't wait isn't asked; nothing is reported back, and with no such marker, or while elements are picked, nothing happens. For after the keyboard closed the host's view: Escape, or a Tab past its ends (P134); a host calls it again after its own `display.focus()` |
 | frame → host | `porthole/annotate.selected` | `{ anchor, rect, lastLineDocumentRect?, scroll? }` (a newer shell's last two: P133, below); after a scroll, the same selection again only if its box moved more than 0.5 px, on the follow-ups' clock (P105) |
 | frame → host | `porthole/annotate.unselected` | — (the text selection went away) |
 | frame → host | `porthole/annotate.cancelled` | — (Escape) |
@@ -1194,8 +1194,9 @@ picked; `marker-key`, `marker-click` too), brought into view by the focus and ke
 it through redraws, reached by the host's `focusMark` after its card closed and left
 alone where there's no such marker, by the kept `focus` (P134, `marker-focus`), a call parked meanwhile
 dropped once the person has moved on or the focus is on the host's body, and a second after the
-host's `display.focus()` landing, through a nested page's shell too (P135, `marker-late`), by the kept
-`hasFocus`, which a page's patch can't answer (`marker-has-focus`), at its paragraph's end past the last word, a nested block's
+host's `display.focus()` landing (P135, `marker-late`), by the kept
+`hasFocus`, which a page's patch can't answer (`marker-has-focus`); on a nested page a parked call
+lands while the focus is in the page, and that host's move is a known gap (`test.fail`, P135), at its paragraph's end past the last word, a nested block's
 words not its own, a draft's by its words; focus and
 selection kept, a drag from a marker too (`marker-prevent` → the press case), none
 without a count, stepping aside while picking, drawn whole at the frame's top; a

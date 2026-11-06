@@ -248,7 +248,9 @@ Whatever the use:
   focus is in the frame by then, and in the normal flow it is on your `<body>`. Nothing says so. If
   the focus is still on your body a moment later, the person hasn't moved on: `display.focus()`,
   then `focusMark(id)` again. Look first: that move is yours, the focus guard doesn't judge it, and
-  a move after the person went on to a button of yours takes the keyboard from them.
+  a move after the person went on to a button of yours takes the keyboard from them. A known gap
+  (P135): on a nested page that had the focus, `display.focus()` doesn't bring it back, so a word
+  that waits is dropped even then. Nothing leaks: the keyboard stays out of the page.
 - List every app origin in `appOrigins` (`hostOrigins` in `/server`): only those may frame content,
   and only those are checked against the content domain for a shared site.
 - Under the app runtime, run `defineRuntimeConformance` with `api` in CI (§7).

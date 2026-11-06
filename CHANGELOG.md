@@ -10,7 +10,8 @@ P-numbers below.
   waits, and is now dropped unless the focus is in the frame by then, so it takes no keyboard from a
   person who moved on. A call on a calm page is unchanged. After your card closes the focus is on your
   `<body>`, so a call that waited is dropped: if the focus is still there a moment later, call
-  `display.focus()` and `focusMark(id)` again (ADOPTING).
+  `display.focus()` and `focusMark(id)` again (ADOPTING). Known gap: on a nested page that had the
+  focus, `display.focus()` doesn't bring it back, so a call that waits is dropped even then.
 - **Security (P135):** the shell asks through the platform's `hasFocus`, kept before content runs
   (controls `marker-late`, `marker-has-focus`). No CSP, sandbox, egress or gate changes; the focus
   guard is untouched.

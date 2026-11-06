@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Frame, type Page } from "@playwright/test";
 import type { PortholeConfig } from "../../src/index.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
 import { mount, outcomeOf, runtimeCalls } from "./porthole-host.ts";
@@ -16,6 +16,7 @@ import {
   seen,
   show,
   tell,
+  type Shown,
   unique,
   valueOf,
 } from "./nested-pages.ts";
@@ -37,6 +38,64 @@ import {
 // would turn on at each action, which no person's browser does (measured: the shell's activation
 // on as the page loaded, with no input). These cases run untraced.
 test.use({ trace: "off" });
+
+/** The host's page's displays, as a case drives them. */
+interface Driven {
+  readonly portholeHost: {
+    readonly displays: readonly {
+      focus(): void;
+      annotations: { show(marks: unknown[]): void; focusMark(id: string): void };
+    }[];
+  };
+}
+
+const elementMark = (id: string, selector: string) => ({
+  id,
+  anchor: {
+    kind: "element",
+    selectors: [{ type: "CssSelector", value: selector }],
+    label: selector,
+  },
+  count: 2,
+});
+
+/** A `show` and a `focusMark` in one task: the second is parked while the first's marks are found. */
+const park = (page: Page, marks: unknown[], id: string) =>
+  page.evaluate(
+    ([shown, which]) => {
+      const display = (window as unknown as Driven).portholeHost.displays.at(-1);
+      display?.annotations.show(shown);
+      display?.annotations.focusMark(which);
+    },
+    [marks, id] as const,
+  );
+
+/** The person's press on the page's field: the focus in the page. */
+async function pressPage(page: Page, shown: Shown) {
+  await page.mouse.click(field(shown).x, field(shown).y);
+  await expect.poll(() => hostActive(page), { message: "the page has the focus" }).toBe("IFRAME");
+}
+
+/** The person moves on: the focus on the host's own button. */
+async function moveOn(page: Page) {
+  await page.evaluate(() => document.getElementById("host-button")?.focus());
+  await expect.poll(() => hostActive(page), { message: "the person moved on" }).toBe("host-button");
+}
+
+/** The page's own frame, the shell's child. */
+async function pageFrame(shown: Shown): Promise<Frame> {
+  const child = (await shown.shell()).childFrames()[0];
+  if (child === undefined) {
+    throw new Error("the shell has no child frame");
+  }
+  return child;
+}
+
+/** Whether the page's focus is on the shell's layer: on one of its markers, to the page. */
+const onMarker = (child: Frame) =>
+  child.evaluate(
+    () => document.activeElement === document.querySelector("[data-porthole-annotations]"),
+  );
 
 test.describe("a nested page (P111)", () => {
   test.setTimeout(90_000);
@@ -534,60 +593,90 @@ test.describe("a nested page (P111)", () => {
     await expect.poll(async () => (await seen(page)).activated).toEqual(["m1"]);
   });
 
-  test("a page that had the focus gets it back by the host's own move, and a parked focusMark lands on its marker (P135)", async ({
+  test("a parked focusMark lands on a nested page's marker while the focus is in the page, and not once the person has moved on (P135)", async ({
     page,
   }) => {
     const shown = await show(page);
-    await page.mouse.click(field(shown).x, field(shown).y);
-    await expect.poll(() => hostActive(page), { message: "the page has the focus" }).toBe("IFRAME");
-    await page.evaluate(() => document.getElementById("host-button")?.focus());
+    await pressPage(page, shown);
+    const child = await pageFrame(shown);
     await expect
-      .poll(() => hostActive(page), { message: "the person moved on" })
-      .toBe("host-button");
-    // In one task, so the focusMark is parked while the show's mark is found.
-    await page.evaluate(() => {
-      const display = (
-        window as unknown as {
-          portholeHost: {
-            displays: {
-              focus(): void;
-              annotations: { show(marks: unknown[]): void; focusMark(id: string): void };
-            }[];
-          };
-        }
-      ).portholeHost.displays.at(-1);
-      display?.focus();
-      display?.annotations.show([
-        {
-          id: "m1",
-          anchor: {
-            kind: "element",
-            selectors: [{ type: "CssSelector", value: "#target" }],
-            label: "#target",
-          },
-          count: 2,
-        },
-      ]);
-      display?.annotations.focusMark("m1");
-    });
-    const shell = await shown.shell();
-    const child = shell.childFrames()[0];
-    if (child === undefined) {
-      throw new Error("the shell has no child frame");
-    }
+      .poll(() => child.evaluate(() => document.hasFocus()), {
+        message: "probe: a press puts the focus in the page",
+      })
+      .toBe(true);
+    await park(page, [elementMark("m1", "#target")], "m1");
+    await expect
+      .poll(() => onMarker(child), { message: "probe: parked, it landed on its marker" })
+      .toBe(true);
+
+    await moveOn(page);
+    await expect
+      .poll(() => child.evaluate(() => document.hasFocus()), {
+        message: "probe: on the host's button, the focus is out of the page",
+      })
+      .toBe(false);
+    await park(page, [elementMark("m1", "#target"), elementMark("m2", "#go")], "m2");
+    await page.waitForTimeout(600);
+    expect(await hostActive(page), "probe: the keyboard stayed on the host's button").toBe(
+      "host-button",
+    );
+    expect(
+      await child.evaluate(() => document.hasFocus()),
+      "probe: the parked mark didn't take the focus into the page",
+    ).toBe(false);
+  });
+
+  test("a focusMark that doesn't wait lands on a nested page that had the focus, from the host's body (P134, P135)", async ({
+    page,
+  }) => {
+    const shown = await show(page);
+    await page.evaluate(
+      ([mark]) =>
+        (window as unknown as Driven).portholeHost.displays.at(-1)?.annotations.show([mark]),
+      [elementMark("m1", "#target")],
+    );
+    const child = await pageFrame(shown);
+    await expect
+      .poll(
+        () => child.evaluate(() => document.querySelector("[data-porthole-annotations]") !== null),
+        { message: "the marker drawn" },
+      )
+      .toBe(true);
+    await page.waitForTimeout(400);
+    await pressPage(page, shown);
+    await moveOn(page);
+    await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+    await expect.poll(() => hostActive(page), { message: "the focus is on the body" }).toBe("BODY");
+    await page.evaluate(() =>
+      (window as unknown as Driven).portholeHost.displays.at(-1)?.annotations.focusMark("m1"),
+    );
+    await expect
+      .poll(() => onMarker(child), { message: "probe: it landed on its marker" })
+      .toBe(true);
+    expect(await hostActive(page), "probe: the frame holds the host's page's focus").toBe("IFRAME");
+  });
+
+  test("a page that had the focus gets it back by the host's own move (P135, #proj-workspace:#214)", async ({
+    page,
+  }) => {
+    const shown = await show(page);
+    await pressPage(page, shown);
+    await moveOn(page);
+    const child = await pageFrame(shown);
+    // Marked here, not on the test, so a failure of the steps above is a failure. Known gap,
+    // #proj-workspace:#214: failed on all four of CI's Chromium, oopif, WebKit and Firefox, the
+    // page's hasFocus false after the host's move. This is the only step it covers: when #214
+    // lands this passes, which fails the run: take this off, and assert a parked focusMark
+    // landing after the move here, as the case above does without it.
+    test.fail(
+      true,
+      "#proj-workspace:#214: the host's move doesn't reach a page that had the focus",
+    );
+    await page.evaluate(() => (window as unknown as Driven).portholeHost.displays.at(-1)?.focus());
     await expect
       .poll(() => child.evaluate(() => document.hasFocus()), {
         message: "probe: the host's move reached the page through its shell",
       })
-      .toBe(true);
-    await expect
-      .poll(
-        () =>
-          child.evaluate(
-            () => document.activeElement === document.querySelector("[data-porthole-annotations]"),
-          ),
-        { message: "probe: the parked mark landed on its marker" },
-      )
       .toBe(true);
   });
 

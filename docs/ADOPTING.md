@@ -485,6 +485,16 @@ composer.onClose(() => display.annotations.clearSelection());
   keyboard from them. With React, whose `ref` has no `focus()`, call the frame's own `focus()` for
   that step: it is only ever taken for the page's from a text field, and this one starts on `<body>`.
   An id with no marker then leaves the focus in the frame, with the keys going to the page.
+
+  **Known gap, nested pages (P135).** On a nested page that had the focus, `display.focus()` doesn't
+  bring it back into the page (measured on Chromium, WebKit and Firefox), so a `focusMark` that waits
+  is dropped even after it, and the person is left without the marker. On a calm page the second
+  call doesn't wait and lands. On a page that is changing, it doesn't, and nothing tells you: keep
+  your own list of marks as the way back. A fix to the shell is open; this paragraph goes with it.
+
+  Without the second call, nothing changes on a calm page. On a busy one, a word that the frame
+  finishes with before your own move is lost where it used to land, so the person gets the frame and
+  not the marker. That is the cost of never pulling the keyboard into the page.
 - **Labels and quotes are the page's text**: shown only as text. Porthole takes out of a label what
   the person can't see; a quote (`exact`) keeps it, to be found again. Hand either to a model only
   as the page's words.

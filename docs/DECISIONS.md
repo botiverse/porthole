@@ -7883,6 +7883,23 @@ the moment P134 is for.
    `focus`, and called with `callOf` (the kept `Reflect.apply`), as `marker-originals` keeps a press's
    readers, so neither a patched `hasFocus` nor a patched `Function.prototype.call` answers.
 
+**What gets worse for a host that adds no second call.** The trade is the accuracy of "back on the
+marker" against never pulling the keyboard into the page. Read against the shell's anchor timer and
+Raft's `backToMark` (`focusMark` once, then after 150 ms, from `<body>` only, the frame's own
+`focus()`, and no second call). A call that doesn't wait is unchanged. A call that waits meets the
+timer, which fires 150 ms after the last change or `show`, or at its run's one-second deadline
+whichever is first, so on a page still changing too, and a change after the call pushes it later:
+- **Normal frame, the timer fires before the host's fallback:** dropped, since the focus is on the
+  body. The fallback then gives the frame the focus and not the marker; before this decision it
+  landed on the marker. This is what gets worse.
+- **Normal frame, the timer fires after the fallback:** the focus is in the frame by then, and it
+  lands, as before. A word parked by a `show` sent with it starts a 150 ms timer of its own, so
+  against a 150 ms fallback the two are within a post of each other and either can come first.
+  (Raft's marks don't change as a card closes, so there it is the page's changes that park it.)
+- **Nested page that had the focus:** the page's `hasFocus` stays false after the host's move (below),
+  so a call that waits is dropped whenever the timer fires, whatever parked it, where it used to land.
+  A nested page that never had the focus isn't measured. Raft has no nested pages today.
+
 **Compatibility.** No API, message or report changes. A host that only ever calls on a calm page sees
 no change. A host whose first call parks stops getting the landing it got by luck: that landing was
 the bug, on a page the person may have left. Its fallback is the second call. An older shell lands
@@ -7908,10 +7925,18 @@ frame's document and not on the marker.
   host's own word, for one moment, and calling it after the person moved on is the host's mistake.
   The fallback above must look before it moves. The focus guard is unchanged.
 
-**Tested (written, not run: test runs were paused where this was written, and no browser was started,
-so what's said of the engines above and here is reasoned from the HTML standard's has-focus steps,
-P109's and P111's measurements, and awaits CI; the specs are the probes).** `leak/annotate.spec.ts`,
-three engines: "document.hasFocus() in a frame says where a host's moves leave the focus…" (the probe:
+**Known gap: a nested page (#proj-workspace:#214).** Measured by CI on Chromium with frames in and
+out of process, WebKit and Firefox (Playwright 1.63): after a nested page had the focus and the
+person moved to a host's button, `display.focus()` leaves the page's `hasFocus` false, so this
+decision's fallback doesn't work there for a call that waits. The host's `activeElement` is the
+frame. On Chromium and WebKit the shell's is still the page's frame, so `frame.ts`'s focus listener
+doesn't pass the move on (`document.activeElement !== frame`). On Firefox the shell's isn't, so that
+listener's test doesn't explain it, and why isn't known. No focus goes to the page, so nothing leaks,
+and a call that doesn't wait lands (tested). This is an older path than P135, in `frame.ts`, which
+this decision doesn't change; `nested.spec.ts` marks the one step `test.fail` until #214 closes.
+
+**Tested.** Measured by CI's run of these specs, on the engines as Playwright builds them.
+`leak/annotate.spec.ts`, three engines: "document.hasFocus() in a frame says where a host's moves leave the focus…" (the probe:
 a host's field, the body, the host's move in, the page's field, a host's button, the move back, an
 unparked landing); "a parked focusMark doesn't land once the person has moved on…" (`marker-late`),
 parked by a `show` with the person already gone; "a focusMark parked with the focus in the frame…"
@@ -7920,8 +7945,9 @@ with the focus on the host's body is dropped; after the host's own move…" (`ma
 parked too, and Enter on it reporting that mark; "a page that patched hasFocus…" (`marker-has-focus`, `marker-late`). P134's
 "focusMark puts the focus on that mark's marker…" is the unparked call from the body, on a calm page,
 unchanged; "focusMark right after a show…" now moves the focus in first. `leak/served/nested.spec.ts`:
-"a page that had the focus gets it back by the host's own move…", through a nested page's shell, the
-one display whose host move isn't a plain frame's. `test/annotate.test.ts`: the kept function, the
+"a parked focusMark lands on a nested page's marker while the focus is in the page…", "a focusMark that
+doesn't wait lands on a nested page that had the focus…", and "a page that had the focus gets it back
+by the host's own move…", the known gap, `test.fail` from that step on. `test/annotate.test.ts`: the kept function, the
 landing's test, and no read of the focus in `focusMark`. CI's WebKit is Playwright's build, not
 Safari; Safari and iOS are unmeasured. Playwright emulates a focused window on every engine, so
 `hasFocus` false for a window behind another app (dropped, by the standard) is unmeasured too.
@@ -7938,6 +7964,7 @@ Safari; Safari and iOS are unmeasured. Playwright emulates a focused window on e
 - Parking the word and landing it when focus next comes into the frame: a word with no end, landing
   at a moment nobody asked for.
 
-**Revisit when** a host needs a parked word to land without moving the focus in first; CI or a real
+**Revisit when** #214 closes (take off the `test.fail`, and assert the landing after the host's move
+on a nested page); a host needs a parked word to land without moving the focus in first; CI or a real
 Safari shows `hasFocus` disagreeing with the host's `activeElement` after `display.focus()`; or a
 word must expire by itself (a host that sends many, or content that stays out for long).

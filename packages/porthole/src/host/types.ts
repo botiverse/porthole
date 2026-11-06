@@ -335,7 +335,8 @@ export interface AnnotationControls {
    * the focus is in the frame by then (P135), so a word that comes late takes no keyboard from a
    * person who moved on. Nothing says it was dropped: if the frame isn't your page's
    * `document.activeElement` soon after and the person hasn't moved on, call `focus()` and then
-   * `focusMark(id)` again.
+   * `focusMark(id)` again. Known gap: on a nested page that had the focus, `focus()` doesn't bring
+   * it back into the page, so a second call that waits is dropped too (ADOPTING).
    */
   focusMark(id: string): void;
 }
