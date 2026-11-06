@@ -4,6 +4,20 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **Nested pages: `display.focus()` reaches the page (P136).** It stopped at the page's shell on every
+  engine, for a page that never had the focus as much as one that did, and took the keyboard out of
+  a page that held it on Chromium and WebKit. So P135's fallback, `display.focus()` and `focusMark(id)`
+  again, now works on a nested page, and the known gap from 0.14.13 goes. Two cases stay, in
+  ADOPTING: the frame's own `focus()` still stops at the shell, which is the React step on a nested
+  page; and on Firefox `display.focus()` inside a key's own handler moves nothing, so call it from a
+  task. Upgrade the content server and the host together: either alone behaves as before.
+- **Security (P136):** a new host-to-shell word, `porthole/shell/focus`, sent only by
+  `display.focus()`. The shell acts on it only while the focus is on its own document, and no page
+  can say it (control `shell-focus-held`). `marker-late` now covers nested pages too. No CSP, sandbox,
+  egress or gate changes; the focus guard is untouched.
+
 ## 0.14.13
 
 - **Annotations: a `focusMark` that had to wait (P135).** While the frame finds its marks, `focusMark`

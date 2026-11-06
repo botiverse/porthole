@@ -100,6 +100,13 @@ export const SHELL_BEAT_METHOD = "porthole/shell/beat";
  */
 export const SHELL_LOOK_METHOD = "porthole/shell/look";
 
+/**
+ * The host's word to a nested page's shell (P136) that it moved the focus into the frame: pass it on
+ * to the page, in this task, not in the focus event (where the shell's move doesn't take). Sent by
+ * `display.focus()` alone; a page has no way to say it.
+ */
+export const SHELL_FOCUS_METHOD = "porthole/shell/focus";
+
 /** The shell's own namespace (P111): the shell drops a page's message that names a method in it. */
 export const SHELL_METHOD_PREFIX = "porthole/shell/";
 

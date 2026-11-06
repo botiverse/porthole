@@ -250,9 +250,11 @@ Whatever the use:
   focus is in the frame by then, and in the normal flow it is on your `<body>`. Nothing says so. If
   the focus is still on your body a moment later, the person hasn't moved on: `display.focus()`,
   then `focusMark(id)` again. Look first: that move is yours, the focus guard doesn't judge it, and
-  a move after the person went on to a button of yours takes the keyboard from them. A known gap
-  (P135): on a nested page that had the focus, `display.focus()` doesn't bring it back, so a word
-  that waits is dropped even then. Nothing leaks: the keyboard stays out of the page.
+  a move after the person went on to a button of yours takes the keyboard from them. On a nested
+  page, use `display.focus()`: it tells the page's shell to pass the focus on (P136), and the frame's
+  own `focus()` stops at the shell, so a word that waits is dropped even after it. On Firefox,
+  `display.focus()` inside a key's own handler moves nothing: call it from a task (measured on a
+  nested page). Nothing leaks either way: the keyboard stays out of the page.
 - List every app origin in `appOrigins` (`hostOrigins` in `/server`): only those may frame content,
   and only those are checked against the content domain for a shared site.
 - Under the app runtime, run `defineRuntimeConformance` with `api` in CI (§7).
@@ -1043,7 +1045,8 @@ unposted words beside the frame and tell the page when.
   since; or a Tab, the host's own move, or a press the engine shows on the frame element. Nothing
   else counts as a press: no pointer over the frame, no host-wide activation. A move the shell
   hasn't spoken of yet waits for its word at most 500 ms (the host asks it to look at once,
-  `porthole/shell/look`), then is taken back. A key the person types into the page turns its
+  `porthole/shell/look`), then is taken back. The shell passes a focus on to the page by the host's
+  word (`porthole/shell/focus`, P136), which only `display.focus()` sends and no page can say. A key the person types into the page turns its
   activation on as a press does, so (P120, after the audit of P111's guard, NG-1): where the
   host's page sees the pointer over its frames (Firefox; Chromium and WebKit where the frame is in
   their process, once the pointer has been over one), an activation while the pointer isn't over

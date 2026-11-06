@@ -167,6 +167,12 @@ const MARKER_MOVED_ON_WAITING =
   "a focusMark parked with the focus in the frame doesn't land once the person moves on while it waits (P135)";
 const MARKER_SECOND =
   "a parked focusMark with the focus on the host's body is dropped; after the host's own move into the frame a second one, parked too, lands on the marker (P135)";
+/** The nested page's own case of it (#proj-workspace:#214); `nested.spec.ts` takes its title here. */
+export const NESTED_MOVED_ON =
+  "a parked focusMark doesn't land on a nested page once the person has moved on to the host's button (P135)";
+/** The host's word takes no focus that has left the shell (P136). */
+export const NESTED_WORD_LATE =
+  "the host's move takes no keyboard from where the host's page went on to in the same task (P136)";
 const MARKER_PATCHED_FOCUS =
   "a page that patched hasFocus to say yes gets no landing the platform's own answer refuses (P135)";
 const HONEST_SCROLL =
@@ -381,8 +387,14 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   "marker-focus": { specs: [ANNOTATE], fails: all(MARKER_FOCUS) },
   // P135: a parked focusMark lands only with the focus still in the document, by the kept hasFocus.
   "marker-late": {
-    specs: [ANNOTATE],
-    fails: all(MARKER_MOVED_ON, MARKER_MOVED_ON_WAITING, MARKER_SECOND, MARKER_PATCHED_FOCUS),
+    specs: [ANNOTATE, NESTED],
+    fails: all(
+      MARKER_MOVED_ON,
+      MARKER_MOVED_ON_WAITING,
+      MARKER_SECOND,
+      MARKER_PATCHED_FOCUS,
+      NESTED_MOVED_ON,
+    ),
   },
   "marker-has-focus": { specs: [ANNOTATE], fails: all(MARKER_PATCHED_FOCUS) },
   "marker-originals": { specs: [ANNOTATE], fails: all(PATCHED_PRESS) },
@@ -707,6 +719,8 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "the shell's words are the shell's alone: a page that says them, to its parent or to the host's window, moves nothing",
     ),
   },
+  // The host's word (P136) moves only a focus that is on the shell.
+  "shell-focus-held": { specs: [NESTED], fails: all(NESTED_WORD_LATE) },
   // A nested page's shell on a label of its own (P114, porthole#56): on its scope's, a same-scope
   // inline widget or artifact reads the shell's document, and in it the page's sealed address.
   // Alone, the host's mount refuses the scope's label (P121), and the shell wouldn't run there: run

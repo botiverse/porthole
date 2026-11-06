@@ -486,11 +486,14 @@ composer.onClose(() => display.annotations.clearSelection());
   that step: it is only ever taken for the page's from a text field, and this one starts on `<body>`.
   An id with no marker then leaves the focus in the frame, with the keys going to the page.
 
-  **Known gap, nested pages (P135).** On a nested page that had the focus, `display.focus()` doesn't
-  bring it back into the page (measured on Chromium, WebKit and Firefox), so a `focusMark` that waits
-  is dropped even after it, and the person is left without the marker. On a calm page the second
-  call doesn't wait and lands. On a page that is changing, it doesn't, and nothing tells you: keep
-  your own list of marks as the way back. A fix to the shell is open; this paragraph goes with it.
+  **Nested pages (P136).** `display.focus()` reaches a nested page on every engine, whether or not
+  it had the focus. Two ways don't:
+  - The frame's own `focus()`, which the React step above is: it stops at the page's shell (Chromium
+    and WebKit from anywhere, Firefox from a focused element of yours), so a `focusMark` that waits
+    is dropped even after it, and nothing tells you. On a calm page the second call doesn't wait and
+    lands. On a page that is changing, keep your own list of marks as the way back.
+  - `display.focus()` inside a key's own handler, on Firefox (measured on a nested page): it moves
+    nothing. Call it from a task, as the timer above does.
 
   Without the second call, nothing changes on a calm page. On a busy one, a word that the frame
   finishes with before your own move is lost where it used to land, so the person gets the frame and

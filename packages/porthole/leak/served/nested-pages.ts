@@ -63,6 +63,15 @@ export interface Shown {
   readonly box: { readonly x: number; readonly y: number };
 }
 
+/** What the display told the host's page: `anchored` the ids of each mark it found. */
+interface Seen {
+  taken: boolean[];
+  errors: string[];
+  storage: boolean[];
+  activated: string[];
+  anchored: string[];
+}
+
 /** The host's own composer and button, above the display, and what the display tells it. */
 export async function hostUi(page: Page): Promise<void> {
   await page.evaluate(() => {
@@ -75,9 +84,9 @@ export async function hostUi(page: Page): Promise<void> {
     button.style.cssText = "display:block;width:120px;height:40px";
     document.body.prepend(composer, button);
     const w = window as unknown as {
-      seen: { taken: boolean[]; errors: string[]; storage: boolean[]; activated: string[] };
+      seen: Seen;
     };
-    w.seen = { taken: [], errors: [], storage: [], activated: [] };
+    w.seen = { taken: [], errors: [], storage: [], activated: [], anchored: [] };
   });
 }
 
@@ -85,7 +94,7 @@ export async function hostUi(page: Page): Promise<void> {
 export async function listen(page: Page): Promise<void> {
   await page.evaluate(() => {
     const w = window as unknown as {
-      seen: { taken: boolean[]; errors: string[]; storage: boolean[]; activated: string[] };
+      seen: Seen;
       portholeHost: { displays: { on(event: string, listener: (detail: never) => void): void }[] };
     };
     const display = w.portholeHost.displays.at(-1);
@@ -94,23 +103,21 @@ export async function listen(page: Page): Promise<void> {
       w.seen.errors.push(detail.message),
     );
     display?.on("storage", (detail: { used: boolean }) => w.seen.storage.push(detail.used));
-    display?.on("annotation", (detail: { type: string; id?: string }) => {
-      if (detail.type === "activated") {
-        w.seen.activated.push(detail.id ?? "");
-      }
-    });
+    display?.on(
+      "annotation",
+      (detail: { type: string; id?: string; results?: { id: string }[] }) => {
+        if (detail.type === "activated") {
+          w.seen.activated.push(detail.id ?? "");
+        }
+        if (detail.type === "anchored") {
+          w.seen.anchored.push(...(detail.results ?? []).map((one) => one.id));
+        }
+      },
+    );
   });
 }
 
-export const seen = (page: Page) =>
-  page.evaluate(
-    () =>
-      (
-        window as unknown as {
-          seen: { taken: boolean[]; errors: string[]; storage: boolean[]; activated: string[] };
-        }
-      ).seen,
-  );
+export const seen = (page: Page) => page.evaluate(() => (window as unknown as { seen: Seen }).seen);
 export const composerText = (page: Page) =>
   page.evaluate(() => (document.getElementById("host-composer") as HTMLTextAreaElement).value);
 export const hostActive = (page: Page) =>
