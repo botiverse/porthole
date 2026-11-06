@@ -80,7 +80,8 @@ export const MARKER_NAME = String.raw`(mark) => {
  *   focus on it (P133), is reported (`activated`), and the content's own handlers never see it; a
  *   draft is drawn apart, a dashed line and a hollow bubble with no number, and has a marker with
  *   or without a count; the host's `focusMark` (P134) puts the focus on a marker that is there, and
- *   tells nothing back;
+ *   tells nothing back; one that had to wait for the marks lands only if the focus is still in this
+ *   document (P135);
  * - following: while a mark has a marker, once a scroll, a resize or a change of the content
  *   settles, the marks that moved since the host was last told are reported, at most once a
  *   second, so the host's own UI beside a mark can follow;
@@ -123,6 +124,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const selectionOf = Document.prototype.getSelection;
       const removeAllRanges = Selection.prototype.removeAllRanges;
       const focusElement = HTMLElement.prototype.focus;
+      const hasFocus = Document.prototype.hasFocus;
       const elementRect = Element.prototype.getBoundingClientRect;
       const rangeRect = Range.prototype.getBoundingClientRect;
       const rangeRects = Range.prototype.getClientRects;
@@ -1116,7 +1118,13 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           if (pendingMarker !== null) {
             const id = pendingMarker;
             pendingMarker = null;
-            focusMark(id);
+            // Parked, the host's word is old: the person may have moved on, and a marker's focus
+            // takes the keyboard with no gesture. So it lands only if the focus is still in this
+            // document, asked through the kept function: a page that says it has the focus gets
+            // no landing the platform would refuse. Otherwise it is dropped (P135).
+            if (callOf(hasFocus, document, []) === true) {
+              focusMark(id);
+            }
           }
         }, wait);
       };
@@ -1226,7 +1234,9 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       // markers yet, so it waits for them, as focus does; then a marker that isn't there, or has
       // stepped aside for picking, is nothing to do. The kept function, so a page that patched
       // focus isn't handed the marker from inside the closed root. The shell's focus listener
-      // lights it and brings it into view; nothing is told.
+      // lights it and brings it into view; nothing is told. A call that isn't parked reads no
+      // focus: it is the host's word just now, and after its card closed the focus is on the
+      // host's body, so this document has none yet. Only the landing of a parked one asks (P135).
       const focusMark = (id) => {
         if (settling()) {
           pendingMarker = id;

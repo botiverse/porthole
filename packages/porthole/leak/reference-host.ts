@@ -21,6 +21,7 @@ interface Reference {
   answer(id: number, accept: boolean): ConfirmRequest | null;
   setTheme(id: number, scheme: "light" | "dark"): void;
   setContent(id: number, html: string, partial: boolean): void;
+  focus(id: number): void;
   annotate(id: number, operation: AnnotateOperation, argument?: unknown): string | null;
   find(
     id: number,
@@ -47,8 +48,20 @@ export type FindOperation = "query" | "clear" | "takeShortcut";
 
 /** A reference display, with its annotations (`annotate`) and find in page (`find`) to drive. */
 export interface ReferenceDisplay extends LaunchedDisplay {
+  /** Moves focus into the frame, as the host's own move (`DisplayControls.focus`). */
+  focus(): Promise<void>;
   /** Runs an annotation control; resolves with what it threw, or null. */
   annotate(operation: AnnotateOperation, argument?: unknown): Promise<string | null>;
+  /**
+   * Sends a `show` and a `focusMark` in one task of the host's page, with the host's move of
+   * focus first if asked: the frame takes the second while it finds the first's marks, so it is
+   * parked whatever the machine's load (as a host's call as its card closes is).
+   */
+  showAndFocusMark(
+    marks: unknown,
+    id: string,
+    options?: { readonly focus?: boolean },
+  ): Promise<void>;
   /**
    * Runs a find control: `query`'s answer (or what it threw), null for the others. `argument` is
    * the query, or whether the host takes the shortcut.
@@ -164,6 +177,20 @@ export function referenceHostWith(setup: {
           page.evaluate((each) => (window as unknown as WithReference).reference.events(each), id),
         destroy: () =>
           page.evaluate((each) => (window as unknown as WithReference).reference.destroy(each), id),
+        focus: () =>
+          page.evaluate((each) => (window as unknown as WithReference).reference.focus(each), id),
+        showAndFocusMark: (marks, mark, options) =>
+          page.evaluate(
+            ([each, shown, which, first]) => {
+              const { reference } = window as unknown as WithReference;
+              if (first) {
+                reference.focus(each);
+              }
+              reference.annotate(each, "show", shown);
+              reference.annotate(each, "focusMark", which);
+            },
+            [id, marks, mark, options?.focus === true] as const,
+          ),
         annotate: (operation, argument) =>
           page.evaluate(
             ([each, what, given]) =>

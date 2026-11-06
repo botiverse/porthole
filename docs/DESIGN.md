@@ -1047,7 +1047,7 @@ chooses), and the annotation runtime is in the shell only then.
 | host → frame | `porthole/annotate.focus` | `{ id }`: scrolled into view inside the frame, made the active mark, flashed |
 | host → frame | `porthole/annotate.clear` | — |
 | host → frame | `porthole/annotate.clearSelection` | —: the page's text selection is taken away (the DOM's own `removeAllRanges`, taken before content runs) with what the shell held of it, and nothing is reported back; marks, drafts and the mode stay (P115) |
-| host → frame | `porthole/annotate.focusMark` | `{ id }`: the DOM focus goes to that mark's marker (the DOM's own `focus`, taken before content runs), once the marks of a `show` are found; nothing is reported back, and with no such marker, or while elements are picked, nothing happens. For after the keyboard closed the host's view: Escape, or a Tab past its ends (P134) |
+| host → frame | `porthole/annotate.focusMark` | `{ id }`: the DOM focus goes to that mark's marker (the DOM's own `focus`, taken before content runs), once the marks of a `show` are found; a call that had to wait for them is dropped unless the focus is in the frame's document as it lands (the DOM's own `hasFocus`, taken before content runs; P135), one that didn't wait isn't asked; nothing is reported back, and with no such marker, or while elements are picked, nothing happens. For after the keyboard closed the host's view: Escape, or a Tab past its ends (P134); a host calls it again after its own `display.focus()` |
 | frame → host | `porthole/annotate.selected` | `{ anchor, rect, lastLineDocumentRect?, scroll? }` (a newer shell's last two: P133, below); after a scroll, the same selection again only if its box moved more than 0.5 px, on the follow-ups' clock (P105) |
 | frame → host | `porthole/annotate.unselected` | — (the text selection went away) |
 | frame → host | `porthole/annotate.cancelled` | — (Escape) |
@@ -1192,7 +1192,10 @@ too (P133: a button in reading order and named for what it is, Enter and Space
 reported once, a key held down once, none of it heard, nothing while elements are
 picked; `marker-key`, `marker-click` too), brought into view by the focus and keeping
 it through redraws, reached by the host's `focusMark` after its card closed and left
-alone where there's no such marker, by the kept `focus` (P134, `marker-focus`), at its paragraph's end past the last word, a nested block's
+alone where there's no such marker, by the kept `focus` (P134, `marker-focus`), a call parked meanwhile
+dropped once the person has moved on or the focus is on the host's body, and a second after the
+host's `display.focus()` landing, through a nested page's shell too (P135, `marker-late`), by the kept
+`hasFocus`, which a page's patch can't answer (`marker-has-focus`), at its paragraph's end past the last word, a nested block's
 words not its own, a draft's by its words; focus and
 selection kept, a drag from a marker too (`marker-prevent` → the press case), none
 without a count, stepping aside while picking, drawn whole at the frame's top; a
@@ -1535,6 +1538,8 @@ control the tables above name to the registry):
 | `marker-place` | `annotate.spec.ts` | `text markers cover no word: on a column page, and on a phone's lines with one marker each (P105, #36)` | — | — |
 | `marker-key` | `annotate.spec.ts` | `a marker is a button the keyboard reaches: Tab in reading order, Enter and Space report it once, the content hears neither, and it steps aside while elements are picked (P133)` | — | — |
 | `marker-focus` | `annotate.spec.ts` | `a page that patched focus isn't handed the marker the host's focusMark moves to (P134)` | — | — |
+| `marker-late` | `annotate.spec.ts` | `a parked focusMark doesn't land once the person has moved on to the host's button (P135)`, `a focusMark parked with the focus in the frame doesn't land once the person moves on while it waits (P135)`, `a parked focusMark with the focus on the host's body is dropped; after the host's own move into the frame a second one, parked too, lands on the marker (P135)`, `a page that patched hasFocus to say yes gets no landing the platform's own answer refuses (P135)` | — | — |
+| `marker-has-focus` | `annotate.spec.ts` | `a page that patched hasFocus to say yes gets no landing the platform's own answer refuses (P135)` | — | — |
 | `marker-originals` | `annotate.spec.ts` | `a page that patches the event's built-ins neither hears a marker's press nor stops its report (P105)` | — | — |
 | `follow-throttle` | `annotate.spec.ts` | `an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second` | — | — |
 | `selection-follow` | `annotate.spec.ts` | `an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second` | — | — |

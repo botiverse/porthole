@@ -137,6 +137,10 @@ const reference = {
     return waiting.request;
   },
   setTheme: (id: number, scheme: "light" | "dark") => displays.get(id)?.handle.setTheme(scheme),
+  /** Moves focus into a display's frame, as the host's own move (`DisplayControls.focus`). */
+  focus(id: number) {
+    displays.get(id)?.handle.focus();
+  },
   /** Drives a display's annotations (`annotate`); what it throws comes back as a string. */
   annotate(
     id: number,

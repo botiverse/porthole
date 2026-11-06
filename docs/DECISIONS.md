@@ -7734,7 +7734,7 @@ it didn't focus is missed, or reported as the marker that has the focus, so the 
 end should be on its left (P105's places aren't direction-aware either); paragraphs split by `<br>`
 should count as many; or a host wants a picked paragraph's marker at its end.
 
-## P134 · 2026-11-06 · The keyboard back on a marker after the host's card closes, and a marker's name without an element's tag · Accepted
+## P134 · 2026-11-06 · The keyboard back on a marker after the host's card closes, and a marker's name without an element's tag · Accepted; amended by P135
 
 Amends P133 (its point 1, the name) and adds to P104's host API. Two follow-ups for comment markers,
 from a host (Raft web): a person who pressed Enter on a marker reads the host's card, presses
@@ -7837,3 +7837,107 @@ focusMark…". Reports are found by what they say, and a control's own follow-up
 **Revisit when** a host needs to return focus somewhere other than after Escape; a host's card has a
 reason to stay open while the keyboard goes back; or a platform's guard should take a host's own word
 for a move into a frame it can't make itself.
+
+## P135 · 2026-11-06 · A parked `focusMark` lands only while the focus is in the frame's document · Accepted
+
+Amends P134 (its points 3 and 4: a `focusMark` that waits, and the host's `display.focus()`).
+
+**Context.** The shell parks `focusMark` while the marks are being found (`settling()`: about 150 ms
+after a change of the content or a `show`, up to 1 s on a page that keeps changing, and for as long as
+the content isn't in). It then landed in the anchor timer with nothing asked of the focus: nothing but
+`clear` cancelled it, and it didn't expire. A marker's kept `focus()` takes the keyboard with no
+gesture on Chromium and WebKit (P109, P134), and the focus guard defends only the host's text fields.
+So a word parked as a card closed, landing after the person had moved on to a host's button or link,
+pulled the keyboard into the page.
+
+**Found: an unparked call has no such test.** `focusMark` read nothing of the focus when this was
+written: the shell asked `settling()`, `mode.elements`, `isShown(id)` and for a marker, and
+`create-host.ts` asks only that a shown mark has a marker, the React handle nothing more. So an
+unparked call lands from wherever the focus is, and that is what the Esc path needs: after a card
+closes the focus is on the host's `<body>`, so the frame's `document.hasFocus()` is false at exactly
+the moment P134 is for.
+
+**Decision.**
+
+1. **Where `pendingMarker` lands, it is dropped unless `document.hasFocus()` is true**, asked in the
+   anchor timer, at the landing, not when the word came: where the focus was when it was parked says
+   nothing of where the person is now. Dropped is dropped: not parked again, and nothing is told.
+2. **The test is on the parked path only.** It sits at the landing, not in `focusMark`, so an unparked
+   call is as P134 left it. In `focusMark` it would refuse every call of P134's normal flow on a calm
+   page, and Escape would stop reaching the marker. The two paths differ in what the word is: unparked,
+   it is the host's word of this moment, about a focus the host can see on its own page; parked, it
+   is up to a second old, and the frame can't know what happened on the host's page since. All the
+   shell can ask then is whether the focus is still its own.
+3. **That is the intended logic, with this consequence: no focus, no grab.** In the normal flow the
+   focus is on the host's body, so a first `focusMark` that happens to park is dropped, and a host
+   that sends a `show` as its card closes (P134's point 3 says many do) parks every time. Only a call
+   after the focus is in the frame lands: **a host calls `focusMark` again after its own move of the
+   focus into the frame** (`display.focus()`). This is the host's fallback P134's point 4 didn't need,
+   and that point stands for a calm page: `focusMark` first, on its own. The word can't be parked for
+   the host to know, and nothing says it was dropped, so the host reads its own page a moment later:
+   the frame not `document.activeElement`, and the focus still on the body (the person hasn't moved
+   on), is when to move and ask again (ADOPTING has the code). Asking again is cheap: a second word
+   after a landing moves nothing, and one sent while the first waits takes its place. If the host's
+   move comes while the first word waits, the first lands by itself.
+4. **The kept `hasFocus`.** `Document.prototype.hasFocus`, taken before content runs beside the kept
+   `focus`, and called with `callOf` (the kept `Reflect.apply`), as `marker-originals` keeps a press's
+   readers, so neither a patched `hasFocus` nor a patched `Function.prototype.call` answers.
+
+**Compatibility.** No API, message or report changes. A host that only ever calls on a calm page sees
+no change. A host whose first call parks stops getting the landing it got by luck: that landing was
+the bug, on a page the person may have left. Its fallback is the second call. An older shell lands
+as it did, and a second call there is harmless. The shell is the content server's: upgrade that. Hosts whose fallback already moves the focus into the frame (Raft: "within
+150 ms if the marker didn't take it") must add the second `focusMark`, or the keyboard stops at the
+frame's document and not on the marker.
+
+**Threat.**
+- A page that patches `hasFocus` to say yes gets no landing the platform's answer refuses (control
+  `marker-has-focus`; `marker-late` takes the test out). A page saying no only loses its own marker.
+- A page can make the true answer true: it may `focus()` its own element from anywhere but a host's
+  text field (P109), and a parked word then lands. That gives it nothing: it already has the keyboard,
+  and it can forge the message and focus a marker itself (P134).
+- A page can make a word park, by changing its content as the word comes, and so get it dropped. It
+  reads the message anyway, and can take the focus back at once: failing is fine (P134), and the
+  host's fallback then asks again.
+- `hasFocus` says the focus is in this document (or a frame of its own), not where. A parked word can
+  still move the focus off the page's own field onto a marker. That stays inside the frame, is no
+  keyboard taken from the host, and a page's own focus order is not the host's to defend (P133).
+- It still doesn't expire. Nothing here bounds a word parked while the content isn't in: it is only
+  held to the same test when it lands, however late.
+- An unparked call lands from anywhere on the host's page, a host's button too, as in P134: it is the
+  host's own word, for one moment, and calling it after the person moved on is the host's mistake.
+  The fallback above must look before it moves. The focus guard is unchanged.
+
+**Tested (written, not run: test runs were paused where this was written, and no browser was started,
+so what's said of the engines above and here is reasoned from the HTML standard's has-focus steps,
+P109's and P111's measurements, and awaits CI; the specs are the probes).** `leak/annotate.spec.ts`,
+three engines: "document.hasFocus() in a frame says where a host's moves leave the focus…" (the probe:
+a host's field, the body, the host's move in, the page's field, a host's button, the move back, an
+unparked landing); "a parked focusMark doesn't land once the person has moved on…" (`marker-late`),
+parked by a `show` with the person already gone; "a focusMark parked with the focus in the frame…"
+(`marker-late`), on a page that keeps changing, the person gone before it lands; "a parked focusMark
+with the focus on the host's body is dropped; after the host's own move…" (`marker-late`), the second
+parked too, and Enter on it reporting that mark; "a page that patched hasFocus…" (`marker-has-focus`, `marker-late`). P134's
+"focusMark puts the focus on that mark's marker…" is the unparked call from the body, on a calm page,
+unchanged; "focusMark right after a show…" now moves the focus in first. `leak/served/nested.spec.ts`:
+"a page that had the focus gets it back by the host's own move…", through a nested page's shell, the
+one display whose host move isn't a plain frame's. `test/annotate.test.ts`: the kept function, the
+landing's test, and no read of the focus in `focusMark`. CI's WebKit is Playwright's build, not
+Safari; Safari and iOS are unmeasured. Playwright emulates a focused window on every engine, so
+`hasFocus` false for a window behind another app (dropped, by the standard) is unmeasured too.
+
+**Rejected.**
+- The test in `focusMark`: see point 2.
+- A time limit on the parked word: how long a word has waited says nothing of where the person is;
+  a word 100 ms old can land on a person who moved on at 90.
+- Reading the host's focus from the host: `focusMark` sent only if the frame holds the focus, or a
+  host-side recheck when the frame settles. The first is the Esc path again, the second a new report
+  and a round trip for a moment where failing is fine.
+- `activeElement` in the frame (dropped unless on `<body>` or the layer): stricter inside the page, and
+  the page writes that document; the wall here is the frame's edge.
+- Parking the word and landing it when focus next comes into the frame: a word with no end, landing
+  at a moment nobody asked for.
+
+**Revisit when** a host needs a parked word to land without moving the focus in first; CI or a real
+Safari shows `hasFocus` disagreeing with the host's `activeElement` after `display.focus()`; or a
+word must expire by itself (a host that sends many, or content that stays out for long).

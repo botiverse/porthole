@@ -424,6 +424,23 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "            markers[i].element.focus({ preventScroll: true });\n",
     },
   ],
+  // A parked focusMark (P135): it lands whoever has the focus by then, as it did before.
+  "marker-late": [
+    {
+      file: "src/shell/annotate.ts",
+      find: "            if (callOf(hasFocus, document, []) === true) {\n              focusMark(id);\n            }\n",
+      replace: "            focusMark(id);\n",
+    },
+  ],
+  // The landing's question (P135) through the live prototype: a page that patched hasFocus answers
+  // it, and gets the landing the platform would refuse.
+  "marker-has-focus": [
+    {
+      file: "src/shell/annotate.ts",
+      find: "            if (callOf(hasFocus, document, []) === true) {\n",
+      replace: "            if (document.hasFocus() === true) {\n",
+    },
+  ],
   // A marker's press (P104, P105): what the browser would do with it (focus, selection) goes on.
   "marker-prevent": [
     {

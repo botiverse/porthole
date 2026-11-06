@@ -977,7 +977,8 @@ test("a ref's focusMark puts the focus on a marker; nothing for an id without on
   expect(await call("notes", "nope"), "a handle, doing nothing").toBe(true);
   await page.waitForTimeout(300);
   expect(await onMarker()).toBe(false);
-  // Polled: the marker is there once the frame has found the mark.
+  // Polled: the marker is there once the frame has found the mark; a call made while it looks is
+  // dropped, the focus being on the host's page (P135), and a later one lands.
   await expect
     .poll(async () => {
       await call("notes", "c1");

@@ -500,7 +500,9 @@ export interface PortholeFrameHandle {
   /**
    * Puts the keyboard back on a mark's marker in the frame (`annotations.focusMark(id)`, P134),
    * once Escape closed your own view of that mark. Nothing happens for an id with no marker, or
-   * while no display runs. A config without `annotate`: `onHostError`, kind `"annotations"`.
+   * while no display runs. A config without `annotate`: `onHostError`, kind `"annotations"`. While
+   * the frame is finding its marks it waits, and is dropped unless the focus is in the frame by
+   * then (P135): call it again after your own move of the focus into the frame.
    */
   focusMark(id: string): void;
   /**

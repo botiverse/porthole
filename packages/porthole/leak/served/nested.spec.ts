@@ -534,6 +534,63 @@ test.describe("a nested page (P111)", () => {
     await expect.poll(async () => (await seen(page)).activated).toEqual(["m1"]);
   });
 
+  test("a page that had the focus gets it back by the host's own move, and a parked focusMark lands on its marker (P135)", async ({
+    page,
+  }) => {
+    const shown = await show(page);
+    await page.mouse.click(field(shown).x, field(shown).y);
+    await expect.poll(() => hostActive(page), { message: "the page has the focus" }).toBe("IFRAME");
+    await page.evaluate(() => document.getElementById("host-button")?.focus());
+    await expect
+      .poll(() => hostActive(page), { message: "the person moved on" })
+      .toBe("host-button");
+    // In one task, so the focusMark is parked while the show's mark is found.
+    await page.evaluate(() => {
+      const display = (
+        window as unknown as {
+          portholeHost: {
+            displays: {
+              focus(): void;
+              annotations: { show(marks: unknown[]): void; focusMark(id: string): void };
+            }[];
+          };
+        }
+      ).portholeHost.displays.at(-1);
+      display?.focus();
+      display?.annotations.show([
+        {
+          id: "m1",
+          anchor: {
+            kind: "element",
+            selectors: [{ type: "CssSelector", value: "#target" }],
+            label: "#target",
+          },
+          count: 2,
+        },
+      ]);
+      display?.annotations.focusMark("m1");
+    });
+    const shell = await shown.shell();
+    const child = shell.childFrames()[0];
+    if (child === undefined) {
+      throw new Error("the shell has no child frame");
+    }
+    await expect
+      .poll(() => child.evaluate(() => document.hasFocus()), {
+        message: "probe: the host's move reached the page through its shell",
+      })
+      .toBe(true);
+    await expect
+      .poll(
+        () =>
+          child.evaluate(
+            () => document.activeElement === document.querySelector("[data-porthole-annotations]"),
+          ),
+        { message: "probe: the parked mark landed on its marker" },
+      )
+      .toBe(true);
+  });
+
   test("the host's clearSelection reaches the nested page through its shell (P115)", async ({
     page,
   }) => {

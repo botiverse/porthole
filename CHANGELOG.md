@@ -4,6 +4,17 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **Annotations: a `focusMark` that had to wait (P135).** While the frame finds its marks, `focusMark`
+  waits, and is now dropped unless the focus is in the frame by then, so it takes no keyboard from a
+  person who moved on. A call on a calm page is unchanged. After your card closes the focus is on your
+  `<body>`, so a call that waited is dropped: if the focus is still there a moment later, call
+  `display.focus()` and `focusMark(id)` again (ADOPTING).
+- **Security (P135):** the shell asks through the platform's `hasFocus`, kept before content runs
+  (controls `marker-late`, `marker-has-focus`). No CSP, sandbox, egress or gate changes; the focus
+  guard is untouched.
+
 ## 0.14.12
 
 - **Annotations: the keyboard back on a marker (P134).** `annotations.focusMark(id)` (React:
