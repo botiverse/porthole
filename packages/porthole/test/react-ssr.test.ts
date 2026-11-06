@@ -89,7 +89,7 @@ describe("a page published before 0.7", () => {
 describe("trackedAnnotation and the handle (P118)", () => {
   const served = { served: true, contentSource: SOURCE, frameSources: [SOURCE], health: null };
 
-  it("types: a mark's id or null, and a ref to exactly `clearSelection`, `find` and `clearFind` (P131)", () => {
+  it("types: a mark's id or null, and a ref to exactly `clearSelection`, `focusMark`, `find` and `clearFind` (P131, P134)", () => {
     expectTypeOf<PortholeFrameProps["trackedAnnotation"]>().toEqualTypeOf<
       string | null | undefined
     >();
@@ -98,9 +98,10 @@ describe("trackedAnnotation and the handle (P118)", () => {
     >();
     // The display's calls, never the display: one method, nothing more.
     expectTypeOf<keyof PortholeFrameHandle>().toEqualTypeOf<
-      "clearSelection" | "find" | "clearFind"
+      "clearSelection" | "focusMark" | "find" | "clearFind"
     >();
     expectTypeOf<PortholeFrameHandle["clearSelection"]>().toEqualTypeOf<() => void>();
+    expectTypeOf<PortholeFrameHandle["focusMark"]>().toEqualTypeOf<(id: string) => void>();
     expectTypeOf<PortholeFrameHandle["find"]>().toEqualTypeOf<
       (query: string, options?: FindOptions) => Promise<FindResult | "unsupported">
     >();

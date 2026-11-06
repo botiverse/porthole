@@ -7597,7 +7597,7 @@ control: nothing here is a defense; the bound is `parseRect`'s, which existing p
 box, and its scroll), the scroll without following a mark (a page with no marks the host follows),
 or a host draws from `documentRect` inside the frame's own area and wants Porthole to clip for it.
 
-## P133 · 2026-11-06 · Markers are labelled buttons, a posted comment's sits at its paragraph's end, and reports say where the last line is · Accepted
+## P133 · 2026-11-06 · Markers are labelled buttons, a posted comment's sits at its paragraph's end, and reports say where the last line is · Accepted; amended by P134
 
 Amends P104 (its point 6, and its "Revisit when" on a keyboard inside the frame) and P105 (its
 point 3, for posted text marks, and P2-B's click listener on each marker). Three follow-ups for
@@ -7733,3 +7733,107 @@ it didn't focus is missed, or reported as the marker that has the focus, so the 
 (give the layer a way to learn its target); a right-to-left paragraph's
 end should be on its left (P105's places aren't direction-aware either); paragraphs split by `<br>`
 should count as many; or a host wants a picked paragraph's marker at its end.
+
+## P134 · 2026-11-06 · The keyboard back on a marker after the host's card closes, and a marker's name without an element's tag · Accepted
+
+Amends P133 (its point 1, the name) and adds to P104's host API. Two follow-ups for comment markers,
+from a host (Raft web): a person who pressed Enter on a marker reads the host's card, presses
+Escape, and lands on the host's `<body>`, the marker's place in the Tab order lost, and an element
+anchor's marker is read out as "1 comment on p Paragraph 3. Filler…", the tag and all.
+
+**Decision.**
+
+1. **`annotations.focusMark(id)`** (`porthole/annotate.focusMark`, `{ id }`; React: `focusMark(id)` on
+   `PortholeFrameHandle`, as `clearSelection` is, since it is a moment and not a state). The name
+   is `focus(id)`'s, for the mark's marker: `focus` scrolls to a mark and lights it, and moves no DOM
+   focus. The shell moves the DOM focus to that mark's marker button, with the platform's `focus`
+   kept before content runs and `preventScroll`: the focus listener P133 added lights the words and
+   brings it into view, as for a Tab. **It is for the Esc path only:** after Escape closed the host's
+   own view of that mark. Nothing else needs a host to move the keyboard into a frame, and P109 and
+   §6 spend a good deal on keeping it out.
+2. **No content, and nothing new back.** An id the host already sent in `show`; no report, no field,
+   no rate. It is host to frame only, and kept for no later frame.
+3. **No such marker, nothing happens.** No fault either: the mark may have gone with the card. The
+   host sends nothing for an id with no shown mark or no marker; the shell does nothing for a mark
+   with no marker now (orphaned, the page moved its words) or while elements are picked (markers step
+   aside, P133). After a `show` it waits for the marks to be found, as `focus` does: a host commonly
+   sends a new `show` as a card closes. Without `annotate` it throws, as every call does.
+4. **The shell alone moves it, not the host's `display.focus()` first.** A marker's `focus()` from
+   inside takes the frame's focus with it, as any page's does (P109, measured on all three), and
+   the host doesn't know whether the frame still has the marker: moving the frame first would give
+   the frame the keyboard for a marker that isn't there. So the focus guard sees the move as the
+   frame's own, and rightly does nothing to a move from `<body>`. A host calls it once its card is
+   closed. Still in a text field of the host's page, the guard undoes the move and counts it
+   (`focusTaken`, Escape counting as typing), which can stop the display (P109).
+5. **A marker's name is the words it is on, in quotes, with no tag**: `1 comment on "Paragraph 3.
+   Filler…"`, `Draft comment on "…"`, and `1 comment` for a wordless element with nothing to say.
+   Text anchors are quoted too, one form for one kind of button. `describe` gives an element's
+   `anchor.label` its tag, and the host stores and shows that label, so it stays as it is, in the
+   picking outline and in every report. The name is worked out from the anchor: an element's
+   `TextQuoteSelector`, cut at the label's 40 characters with an ellipsis; with no quote (an image
+   named by its `alt`) what follows the first space of the label; nothing else. No field, no message.
+6. **The host's way to tell a key from a pointer is its own**: `document.activeElement` on the host's
+   page, read as `activated` arrives. A marker's press by a pointer moves no focus (P105), so a click
+   from outside the frame finds the frame not focused, and a key on a marker finds it focused. The
+   host reads that itself: `activated` is unchanged, no new field. It is a hint, what the next section
+   says of it holds, and Porthole does nothing with it.
+
+**Compatibility.** An older shell ignores `focusMark` (it knows no such method), which is a call
+that did nothing. `PortholeFrameHandle` gains a method, which only Porthole implements. `activated`,
+`AnnotationAnchor` and everything stored are as they were. Names change in place on a host doing
+nothing. The shell is the content server's: upgrade that.
+
+**Threat.**
+- `focusMark` gives the page nothing new. It reads the message in its own window and learns that a
+  card closed just now, and which mark's, which it could tell from the focus moving anyway. It can
+  take the focus straight back or spoil the move: failure is fine, and a host can't rely on it, as
+  P133 says of markers. A page can make up the message with a `MessageEvent` naming the frame's
+  parent as its source (the shell's listener checks those, not `isTrusted`, for every message here)
+  and so focus a marker itself: a marker's press has no power but `activated`, which it can fake
+  anyway. The key the person then presses is a trusted click on a marker, and as guarded.
+- The move is through the kept `focus`, so a page that patched `HTMLElement.prototype.focus` isn't
+  handed a marker from inside the closed root (control `marker-focus`, as P129 holds the guards).
+- The name's quotes are punctuation, no bound: a page's words can hold a `"`. The kind of thing the
+  name says it is stays first, the shell's, as in P133. An element's quote keeps what can't be seen,
+  as its selector does (P105 cleans labels), and it is the text the page shows anyway, only read out.
+- **The host's signal.** The page can't change what `document.activeElement` says on the host's
+  page. That is all it gives: it says the focus is in the frame, not that a key was pressed or by
+  whom. The page can forge `activated` while the person really is in the frame, and the signal
+  doesn't stop that. The page can also make it true, with `focus()` on its own element from anywhere
+  but a text field of the host's (P109 lets that be). And a pointer's click on a marker reads as a
+  key if the person was already in the frame. So a host that moves the keyboard into its view on this
+  signal takes the second exception to "takes no focus" that this decision adds (THREAT_MODEL §6,
+  after P112's): a page can time a forged `activated` and put the person's next keys in that view.
+  All three conditions are the host's: the signal read on its own page, focus only on a container
+  that takes no input, and its own gate on every control there that can write, so a forged opening
+  and the keys after it can't submit. Porthole can't do that for it.
+
+**Tested.** `test/annotate.test.ts`: what `createHost` sends and for which ids, kept for no later
+frame, the throw without `annotate`; the kept `focus` and no `tell` in the shell's; every name
+(`MARKER_NAME`, spliced into the runtime as `MARKER_HIT` is, and run). `leak/annotate.spec.ts` (three
+engines; written and not yet run: test runs were paused where this was written, so the behaviour of
+engines above is reasoned from P109's and P105's measurements and awaits CI): "focusMark puts the
+focus on that mark's marker…", from the host's `<body>` after a card's field went, with the frame the
+host page's `activeElement`, nothing but `anchored` reported, Enter reporting that mark, and the
+focus left where it was for an unknown id, no marker, an orphaned mark, words the page removed, and
+picking; "focusMark right after a show…"; "a page that patched focus…" (new control `marker-focus`);
+"a marker's name is the words it is on…" (Chromium, by its inspector). `leak/react.spec.ts`: "a ref's
+focusMark…". Reports are found by what they say, and a control's own follow-up doesn't fail these.
+
+**Rejected.**
+- `keyboard: true` on `activated` (the first draft of this decision, from the click's `detail` 0):
+  a field the page can forge with the rest of the report, to tell the host what it can read for itself
+  from a place the page can't write to. Neither stops a forged `activated`.
+- The host's `display.focus()` before the message: see point 4.
+- An answer from the shell (did the marker take it?), for a host to fall back on: a new report for a
+  moment where failing is fine.
+- `focus(id)` also moving the DOM focus: `focus` is what a host's own list calls, and that keeps
+  the keyboard in the host's list.
+- A hole in the focus guard for this call: a window in which a frame's move from a text field
+  passes as the host's, for a page to use, to save a host from closing its card first.
+- Changing `describe`, or a new `words` field on an anchor: the first changes what hosts have stored
+  and show, the second what they store and send back; neither is needed.
+
+**Revisit when** a host needs to return focus somewhere other than after Escape; a host's card has a
+reason to stay open while the keyboard goes back; or a platform's guard should take a host's own word
+for a move into a frame it can't make itself.

@@ -320,6 +320,17 @@ export interface AnnotationControls {
    * a frame that runs later (it has no selection to clear).
    */
   clearSelection(): void;
+  /**
+   * Puts the keyboard back on a mark's marker in the frame (P134): for after Escape closed the
+   * host's own view of that mark, and for nothing else. No content goes with it, and no report
+   * comes of it. Nothing happens, and nothing throws, for an id no mark with a marker is shown
+   * under, or if the frame has no such marker now (its words are gone, elements are being picked):
+   * the display's own `focus()` isn't used, so the frame takes no focus for a marker it hasn't got.
+   * Call it once the view is closed: from one of the page's text fields that still has focus, the
+   * move is the frame's own to the focus guard, undone and counted (P109). The page can take the
+   * focus back at once. Not kept for a frame that runs later.
+   */
+  focusMark(id: string): void;
 }
 
 export interface DisplayControls {

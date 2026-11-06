@@ -664,6 +664,14 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           needsAnnotate("clearSelection");
           toFrame(ANNOTATE_METHODS.clearSelection, {});
         },
+        focusMark(id) {
+          // Host → frame only, and kept for no later frame (P134). A mark that has gone, or has no
+          // marker, is nothing to ask for, and no fault: the host's card closed with the mark's.
+          needsAnnotate("focusMark");
+          if (marks.some((mark) => mark.id === id && hasMarker(mark))) {
+            toFrame(ANNOTATE_METHODS.focusMark, { id });
+          }
+        },
       };
 
       const hostContext = (): HostContext => {

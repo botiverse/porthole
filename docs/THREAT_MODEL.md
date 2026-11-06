@@ -227,6 +227,11 @@ Whatever the use:
   when `selected` comes, so what it can do with that moment is put the person's next keys into a
   draft they see and can discard, never send one; outside such a mode, or for a composer that can
   send, it takes no focus.
+  A second exception (P134): a host may move focus into a view a report opened if all of these hold:
+  it reads its own page's `document.activeElement` and that is this frame; the focus goes only to a
+  container that takes no input (`tabindex="-1"`), never a field or a button; and every control in
+  that view that can write has the host's own gate, so that a forged opening and the keys right after
+  it can't submit. That's the host's duty: Porthole doesn't guarantee it.
 - Know that a display can take the keyboard: a page calls `focus()` on its own input whenever it
   likes (on Chromium and WebKit with no gesture), and what the person goes on typing goes to it.
   `createHost` (every `PortholeView` too) gives focus back when it leaves one of the page's text
@@ -856,9 +861,30 @@ own frame, below the shell, P111), so:
   power but `activated`, which it can fake anyway within the host's checks, keys go to a marker only
   while the frame has the focus, so nothing typed in the host passes through it (P109 is unchanged),
   and a page's made-up key or `click()` is no trusted click. Assistive technology now reads the
-  marker's name, the page's own words (`anchor.label`, the host's copy with what can't be seen taken
-  out) after the shell's. A host can't rely on a marker being reached, as it can't on one being
-  seen: its own list of marks is the keyboard way that holds.
+  marker's name, the page's own words after the shell's, in quotes that bound nothing (P134: a
+  text anchor's `label`, an element's quote, or what follows the tag in its `label`). A host can't
+  rely on a marker being reached, as it can't on one being seen: its own list of marks is the
+  keyboard way that holds.
+- *Which input made an `activated`* (P134). The report doesn't say, and a field saying so would be
+  the page's word. A host reads its own page instead, as the report arrives: is the frame element
+  `document.activeElement`? The page can't fake that reading, and that is all it gets. It tells that
+  the focus is in the frame, not that a key was pressed: a pointer's click after the person was
+  in the frame reads the same, and the page can move the focus into its frame itself, from anywhere
+  but one of the host's text fields (the guard lets that be, P109). **The page can still forge
+  `activated` while the person really is in the frame, and this signal doesn't stop that.** A host
+  that moves the keyboard into its view on the signal takes §6's second exception, with its
+  conditions: a page can put the person's next keys in that view, and keeping those keys from posting
+  is the host's own gate on that view's controls, not Porthole's.
+- *Back to a marker* (P134). `annotations.focusMark(id)` is the host's word to the frame
+  (`porthole/annotate.focusMark`, `{ id }`), for one moment only: after Escape closed the host's own
+  view of that mark. No content goes with it, beyond an id the frame has, and nothing comes back. The
+  shell moves the focus through the platform's `focus` as it was before content ran (control
+  `marker-focus`: a page that replaced it is handed the marker otherwise); with no such marker it does
+  nothing. The page reads the message, so it learns a card closed, and can take the focus back at once
+  or forge the message and focus a marker itself, which gives it nothing a fake `activated` doesn't:
+  a host can't rely on the focus landing. To the focus guard the move is the frame's own, so from a
+  host's text field that still has focus it is undone and counted (P109), not passed as the host's:
+  no window was opened in the guard for it.
 - *What doesn't hold against content that does.* The shell shares the content's realm. It reads
   and stops a marker's press through the platform's own functions and getters, kept before
   content runs (P105, control `marker-originals`), so patching `Event`'s or `MouseEvent`'s

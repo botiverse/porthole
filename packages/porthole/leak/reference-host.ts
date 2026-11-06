@@ -39,7 +39,8 @@ export type AnnotateOperation =
   | "focus"
   | "track"
   | "clear"
-  | "clearSelection";
+  | "clearSelection"
+  | "focusMark";
 
 /** The find controls the reference host exposes (`DisplayHandle.find`, P131). */
 export type FindOperation = "query" | "clear" | "takeShortcut";

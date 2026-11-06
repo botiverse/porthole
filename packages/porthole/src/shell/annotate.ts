@@ -35,13 +35,36 @@ export const MARKER_HIT = String.raw`(count, boxAt, x, y, touch) => {
       }`;
 
 /**
+ * What a marker is called (P133, P134), to whoever can't see it, spliced into the runtime: what it
+ * is, and the words it is on, in quotes. In English, whatever the page's language: the shell has no
+ * words of the host's. `anchor.label` stays as the host stores it (it is the host's to show): an
+ * element's starts with its tag (`describe`, "p#intro.lead Words"), so an element's words are its
+ * quote, cut where the label's are and marked so, or for one with no text of its own (an image's
+ * `alt`) what follows the tag in the label. An element with neither has no words.
+ */
+export const MARKER_NAME = String.raw`(mark) => {
+        const squash = (text) => String(text).replace(/\s+/g, " ").trim();
+        const anchor = mark.anchor;
+        const label = typeof anchor.label === "string" ? squash(anchor.label).slice(0, 120) : "";
+        let words = label;
+        if (anchor.kind === "element") {
+          const quote = anchor.selectors.filter((each) => each && each.type === "TextQuoteSelector")[0];
+          const said = quote && typeof quote.exact === "string" ? squash(quote.exact.slice(0, 300)) : "";
+          const space = label.indexOf(" ");
+          words = said.length > 40 ? said.slice(0, 40).trim() + "\u2026" : said !== "" ? said : space === -1 ? "" : label.slice(space + 1);
+        }
+        const what = mark.draft ? "Draft comment" : mark.count === 1 ? "1 comment" : mark.count > 1 ? mark.count + " comments" : "Comment";
+        return words === "" ? what : what + ' on "' + words + '"';
+      }`;
+
+/**
  * The shell's annotation runtime (P053), spliced into the shell's runtime (`__ANNOTATE__`) when
  * the config declares `annotate`, so it runs before any content does, with the DOM's own
  * functions as they were. Plain ES2020 like the rest of the shell; no template literals (it sits
  * in one).
  *
- * The host drives it (`porthole/annotate.start|stop|show|focus|clear|track|clearSelection`) and it
- * reports (`porthole/annotate.selected|unselected|cancelled|anchored|activated|tracked`):
+ * The host drives it (`porthole/annotate.start|stop|show|focus|clear|track|clearSelection|focusMark`)
+ * and it reports (`porthole/annotate.selected|unselected|cancelled|anchored|activated|tracked`):
  * - picking an element: the element under the pointer (or finger) is outlined with its name; a
  *   click or tap picks it, and the content's own handlers never see that click (unless the content
  *   patched the DOM's built-ins, P105); Escape cancels (while selecting text too, P112);
@@ -56,7 +79,8 @@ export const MARKER_HIT = String.raw`(count, boxAt, x, y, touch) => {
  *   in the line's gutter), an element's on its corner; a click on it, or Enter or Space with the
  *   focus on it (P133), is reported (`activated`), and the content's own handlers never see it; a
  *   draft is drawn apart, a dashed line and a hollow bubble with no number, and has a marker with
- *   or without a count;
+ *   or without a count; the host's `focusMark` (P134) puts the focus on a marker that is there, and
+ *   tells nothing back;
  * - following: while a mark has a marker, once a scroll, a resize or a change of the content
  *   settles, the marks that moved since the host was last told are reported, at most once a
  *   second, so the host's own UI beside a mark can follow;
@@ -87,6 +111,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         track: "porthole/annotate.track",
         tracked: "porthole/annotate.tracked",
         clearSelection: "porthole/annotate.clearSelection",
+        focusMark: "porthole/annotate.focusMark",
       };
       // The DOM's own functions, taken before content runs.
       const elementFromPoint = Document.prototype.elementFromPoint;
@@ -97,6 +122,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const createElementNS = Document.prototype.createElementNS;
       const selectionOf = Document.prototype.getSelection;
       const removeAllRanges = Selection.prototype.removeAllRanges;
+      const focusElement = HTMLElement.prototype.focus;
       const elementRect = Element.prototype.getBoundingClientRect;
       const rangeRect = Range.prototype.getBoundingClientRect;
       const rangeRects = Range.prototype.getClientRects;
@@ -401,13 +427,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const markerWidth = (label) => Math.max(MARKER_HEIGHT, 23 + (label === "" ? 0 : 3 + label.length * 7));
       // Compact (P105): the number alone, or the glyph alone for none, with less padding.
       const compactWidth = (label) => (label === "" ? 21 : Math.max(MARKER_HEIGHT, 10 + label.length * 7));
-      // What a marker is called (P133), to whoever can't see it: what it is, and the words it is
-      // on. In English, whatever the page's language: the shell has no words of the host's.
-      const nameOf = (mark) => {
-        const words = typeof mark.anchor.label === "string" ? squash(mark.anchor.label).slice(0, LIMIT.label) : "";
-        const what = mark.draft ? "Draft comment" : mark.count === 1 ? "1 comment" : mark.count > 1 ? mark.count + " comments" : "Comment";
-        return words === "" ? what : what + " on " + words;
-      };
+      const nameOf = ${MARKER_NAME};
       // A rect's last line with words on it: its last box with a width, else any with a size.
       const lastBox = (rects) => {
         let any = null;
@@ -1054,6 +1074,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       // mark), nor before a run of changes settles; a focus asked for meanwhile waits for it.
       let waitingForContent = false;
       let pendingFocus = null;
+      let pendingMarker = null;
       const settling = () => anchorTimer !== 0 || waitingForContent || marks.some((mark) => mark.state === null);
       const scheduleAnchor = (all) => {
         if (all) {
@@ -1091,6 +1112,11 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             const id = pendingFocus;
             pendingFocus = null;
             focus(id);
+          }
+          if (pendingMarker !== null) {
+            const id = pendingMarker;
+            pendingMarker = null;
+            focusMark(id);
           }
         }, wait);
       };
@@ -1194,6 +1220,27 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         draw();
         const scroll = scrollOf();
         report([{ mark, result: resultOf(mark, null, scroll) }], scroll);
+      };
+
+      // The focus on a mark's marker, at the host's word (P134). Marks a show just replaced have no
+      // markers yet, so it waits for them, as focus does; then a marker that isn't there, or has
+      // stepped aside for picking, is nothing to do. The kept function, so a page that patched
+      // focus isn't handed the marker from inside the closed root. The shell's focus listener
+      // lights it and brings it into view; nothing is told.
+      const focusMark = (id) => {
+        if (settling()) {
+          pendingMarker = id;
+          return;
+        }
+        if (mode.elements || !isShown(id)) {
+          return;
+        }
+        for (let i = 0; i < markers.length; i += 1) {
+          if (markers[i].id === id) {
+            callOf(focusElement, markers[i].element, [{ preventScroll: true }]);
+            return;
+          }
+        }
       };
 
       // A marker's click (P104). The layer takes no pointer but on its markers, so a press whose
@@ -1630,9 +1677,13 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             }
             break;
           }
+          case M.focusMark:
+            focusMark(String(params.id));
+            break;
           case M.clear:
             track(null);
             pendingFocus = null;
+            pendingMarker = null;
             marks = [];
             active = null;
             hot = null;

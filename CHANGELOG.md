@@ -4,6 +4,22 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **Annotations: the keyboard back on a marker (P134).** `annotations.focusMark(id)` (React:
+  `focusMark(id)` on the `ref`) moves the DOM focus to that mark's marker in the frame. It is for
+  one moment: after Escape closed your own view of that mark, once it is closed. It carries no
+  content and reports nothing; with no such marker it does nothing and throws nothing. An older
+  shell ignores it.
+- **Annotations: a marker's name (P134).** It reads `1 comment on "Paragraph 3. Filler…"`: the words
+  it is on, in quotes, with no element's tag. `anchor.label` and everything you store are unchanged.
+- **Key or pointer (P134).** `activated` is unchanged. Read `document.activeElement` on your own page
+  as it arrives: the frame there means the focus is in the frame. A hint: a page can still forge
+  `activated` while the person is in the frame, and a host that moves the keyboard into its view on
+  this gates what posts from that view itself (ADOPTING, THREAT_MODEL §7).
+- **Security (P134):** the shell's move uses the platform's `focus`, kept before content runs (control
+  `marker-focus`). No CSP, sandbox, egress or gate changes; the focus guard is untouched.
+
 ## 0.14.11
 
 - **Annotations: markers are buttons (P133).** A marker is a real button in the frame's Tab order,

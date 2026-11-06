@@ -337,7 +337,8 @@ composer.onClose(() => display.annotations.clearSelection());
   for 500 ms after it appears or moves (no
   `pointerdown`, `pointerup`, `click` or key: menu triggers act on a press, and menu items click
   themselves on a release), ignores a press that began before that, opens beside the frame rather
-  than over `rect` where the layout allows, takes no focus, and has nothing one click away that
+  than over `rect` where the layout allows, takes no focus (unless it meets the conditions of
+  THREAT_MODEL §6's exceptions), and has nothing one click away that
   posts, submits, resolves, deletes or discards. Making it `inert` while it arms does all of the
   first:
 
@@ -434,14 +435,31 @@ composer.onClose(() => display.annotations.clearSelection());
   });
   ```
 - **The keyboard** (P133): each marker is a button in the frame's Tab order, after the page's own
-  stops, in reading order, named for what it is ("3 comments on …", from the `count` and the
-  anchor's `label`; in English, whatever your UI's language). Enter or Space on it is `activated`,
+  stops, in reading order, named for what it is (`3 comments on "the words"`, from the `count` and
+  the anchor's words, without an element's tag, P134; in English, whatever your UI's language). The
+  `label` you store keeps its tag. Enter or Space on it is `activated`,
   through the same path and the same gesture check as a click: nothing to handle apart. It is the
   page's focus order, which a page can steal from or hide a marker from, and it is one more
   `activated` the content can time: keep your own list of marks as the way a keyboard can rely on,
   with `annotations.focus(id)` to bring one into view, and leave your view's guard as it is (it
   takes no key for 500 ms either, and takes no focus: Enter again on the marker is one more
   `activated`).
+- **Key or pointer, and back to the marker** (P134). `activated` doesn't say what made it. Read
+  your own page as it arrives, in the listener: `document.activeElement === container.querySelector("iframe")`
+  (a shadow root of yours: its `activeElement`). True means the focus is in the frame, as it is
+  for a key on a marker; a pointer's press on a marker moves no focus, so a click from outside
+  reads false. The page can't change that reading, but it is a hint, not a proof: a click after the
+  person was already in the frame reads true, the page can put the focus in its frame itself, and it
+  can forge `activated` while the person really is there, which this doesn't stop. So moving the
+  keyboard into your view on it is your own step outside "takes no focus" above, and a page can
+  bring it about: gate whatever posts from that view (a Reply in a frame-opened card) yourself;
+  Porthole can't. When Escape closes that view, and only then, close it and call
+  `display.annotations.focusMark(id)` (React: `focusMark(id)` on the `ref`) to put the keyboard back
+  on the marker. It carries no content and reports nothing; an id with no marker, or a marker the
+  page has moved away, does nothing and throws nothing; the page can take the focus straight back.
+  Close the view first: from one of your text fields that still has focus, the focus guard takes
+  the move for the page's, undoes it and counts it (`focusTaken`). Keep your own list of marks as
+  the way that holds.
 - **Labels and quotes are the page's text**: shown only as text. Porthole takes out of a label what
   the person can't see; a quote (`exact`) keeps it, to be found again. Hand either to a model only
   as the page's words.
@@ -545,7 +563,8 @@ display.on("contentError", ({ message }) => log(message)); // "The content kept 
 display.focus(); // not frame.focus(): from a text field, that one is taken for the page's and undone
 // Opening your composer focused: only in a comment mode the person started, for a composer that can
 // only save a draft (Enter adds it to the batch; submitting is only your own "Submit N"), and that
-// shows plainly it is a draft (THREAT_MODEL §6, P112); any other view a report opens takes no focus. Then
+// shows plainly it is a draft (THREAT_MODEL §6, P112); any other view a report opens takes no focus (P134's
+// exception, §6, is a container only, and its own conditions). Then
 // Porthole's move, not textarea.focus().
 import { focusField } from "@botiverse/porthole";
 focusField(composer.textarea); // Firefox ignores a plain focus() while a fighting frame holds focus

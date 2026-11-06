@@ -159,6 +159,8 @@ const MARKER_TAP =
   "a tap on a marker is reported on every engine, and the content hears none of it (P105)";
 const MARKER_KEYS =
   "a marker is a button the keyboard reaches: Tab in reading order, Enter and Space report it once, the content hears neither, and it steps aside while elements are picked (P133)";
+const MARKER_FOCUS =
+  "a page that patched focus isn't handed the marker the host's focusMark moves to (P134)";
 const HONEST_SCROLL =
   "an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second";
 /** A served page's own frames (P128): a frame of elsewhere stays out of the tree (files.spec.ts). */
@@ -367,6 +369,8 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   },
   // P133: the keys that click a focused marker, heard by none of the content.
   "marker-key": { specs: [ANNOTATE], fails: all(MARKER_KEYS) },
+  // P134: the host's move to a marker, through the platform's focus, kept before content runs.
+  "marker-focus": { specs: [ANNOTATE], fails: all(MARKER_FOCUS) },
   "marker-originals": { specs: [ANNOTATE], fails: all(PATCHED_PRESS) },
   "follow-throttle": { specs: [ANNOTATE], fails: all(HONEST_SCROLL) },
   "selection-follow": { specs: [ANNOTATE], fails: all(HONEST_SCROLL) },
