@@ -337,7 +337,8 @@ composer.onClose(() => display.annotations.clearSelection());
   for 500 ms after it appears or moves (no
   `pointerdown`, `pointerup`, `click` or key: menu triggers act on a press, and menu items click
   themselves on a release), ignores a press that began before that, opens beside the frame rather
-  than over `rect` where the layout allows, takes no focus, and has nothing one click away that
+  than over `rect` where the layout allows, takes no focus (unless it meets the conditions of
+  THREAT_MODEL §6's exceptions), and has nothing one click away that
   posts, submits, resolves, deletes or discards. Making it `inert` while it arms does all of the
   first:
 
@@ -562,7 +563,8 @@ display.on("contentError", ({ message }) => log(message)); // "The content kept 
 display.focus(); // not frame.focus(): from a text field, that one is taken for the page's and undone
 // Opening your composer focused: only in a comment mode the person started, for a composer that can
 // only save a draft (Enter adds it to the batch; submitting is only your own "Submit N"), and that
-// shows plainly it is a draft (THREAT_MODEL §6, P112); any other view a report opens takes no focus. Then
+// shows plainly it is a draft (THREAT_MODEL §6, P112); any other view a report opens takes no focus (P134's
+// exception, §6, is a container only, and its own conditions). Then
 // Porthole's move, not textarea.focus().
 import { focusField } from "@botiverse/porthole";
 focusField(composer.textarea); // Firefox ignores a plain focus() while a fighting frame holds focus

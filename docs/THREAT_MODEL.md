@@ -227,6 +227,11 @@ Whatever the use:
   when `selected` comes, so what it can do with that moment is put the person's next keys into a
   draft they see and can discard, never send one; outside such a mode, or for a composer that can
   send, it takes no focus.
+  A second exception (P134): a host may move focus into a view a report opened if all of these hold:
+  it reads its own page's `document.activeElement` and that is this frame; the focus goes only to a
+  container that takes no input (`tabindex="-1"`), never a field or a button; and every control in
+  that view that can write has the host's own gate, so that a forged opening and the keys right after
+  it can't submit. That's the host's duty: Porthole doesn't guarantee it.
 - Know that a display can take the keyboard: a page calls `focus()` on its own input whenever it
   likes (on Chromium and WebKit with no gesture), and what the person goes on typing goes to it.
   `createHost` (every `PortholeView` too) gives focus back when it leaves one of the page's text
@@ -867,9 +872,9 @@ own frame, below the shell, P111), so:
   in the frame reads the same, and the page can move the focus into its frame itself, from anywhere
   but one of the host's text fields (the guard lets that be, P109). **The page can still forge
   `activated` while the person really is in the frame, and this signal doesn't stop that.** A host
-  that moves the keyboard into its view on the signal is outside §6's "takes no focus", so a page can
-  put the person's next keys in that view; keeping those keys from posting is the host's own gate
-  on that view's Reply, not Porthole's.
+  that moves the keyboard into its view on the signal takes §6's second exception, with its
+  conditions: a page can put the person's next keys in that view, and keeping those keys from posting
+  is the host's own gate on that view's controls, not Porthole's.
 - *Back to a marker* (P134). `annotations.focusMark(id)` is the host's word to the frame
   (`porthole/annotate.focusMark`, `{ id }`), for one moment only: after Escape closed the host's own
   view of that mark. No content goes with it, beyond an id the frame has, and nothing comes back. The

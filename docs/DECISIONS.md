@@ -7802,10 +7802,11 @@ nothing. The shell is the content server's: upgrade that.
   doesn't stop that. The page can also make it true, with `focus()` on its own element from anywhere
   but a text field of the host's (P109 lets that be). And a pointer's click on a marker reads as a
   key if the person was already in the frame. So a host that moves the keyboard into its view on this
-  signal has stepped outside "takes no focus" (THREAT_MODEL §6, whose one exception is P112's): a
-  page can time a forged `activated` and put the person's next keys in that view. What must hold
-  there is the host's own: nothing in that view posts on a key the page can bring about. Porthole
-  can't do that for it.
+  signal takes the second exception to "takes no focus" that this decision adds (THREAT_MODEL §6,
+  after P112's): a page can time a forged `activated` and put the person's next keys in that view.
+  All three conditions are the host's: the signal read on its own page, focus only on a container
+  that takes no input, and its own gate on every control there that can write, so a forged opening
+  and the keys after it can't submit. Porthole can't do that for it.
 
 **Tested.** `test/annotate.test.ts`: what `createHost` sends and for which ids, kept for no later
 frame, the throw without `annotate`; the kept `focus` and no `tell` in the shell's; every name
