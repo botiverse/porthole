@@ -7838,7 +7838,7 @@ focusMark…". Reports are found by what they say, and a control's own follow-up
 reason to stay open while the keyboard goes back; or a platform's guard should take a host's own word
 for a move into a frame it can't make itself.
 
-## P135 · 2026-11-06 · A parked `focusMark` lands only while the focus is in the frame's document · Accepted
+## P135 · 2026-11-06 · A parked `focusMark` lands only while the focus is in the frame's document · Accepted; amended by P136
 
 Amends P134 (its points 3 and 4: a `focusMark` that waits, and the host's `display.focus()`).
 
@@ -7896,7 +7896,7 @@ whichever is first, so on a page still changing too, and a change after the call
   lands, as before. A word parked by a `show` sent with it starts a 150 ms timer of its own, so
   against a 150 ms fallback the two are within a post of each other and either can come first.
   (Raft's marks don't change as a card closes, so there it is the page's changes that park it.)
-- **Nested page that had the focus:** the page's `hasFocus` stays false after the host's move (below),
+- **Nested page that had the focus (until P136):** the page's `hasFocus` stays false after the host's move (below),
   so a call that waits is dropped whenever the timer fires, whatever parked it, where it used to land.
   A nested page that never had the focus isn't measured. Raft has no nested pages today.
 
@@ -7925,7 +7925,8 @@ frame's document and not on the marker.
   host's own word, for one moment, and calling it after the person moved on is the host's mistake.
   The fallback above must look before it moves. The focus guard is unchanged.
 
-**Known gap: a nested page (#proj-workspace:#214).** Measured by CI on Chromium with frames in and
+**Known gap: a nested page (#proj-workspace:#214; closed by P136, which also found the explanation
+below wrong on every engine).** Measured by CI on Chromium with frames in and
 out of process, WebKit and Firefox (Playwright 1.63): after a nested page had the focus and the
 person moved to a host's button, `display.focus()` leaves the page's `hasFocus` false, so this
 decision's fallback doesn't work there for a call that waits. The host's `activeElement` is the
@@ -7964,7 +7965,126 @@ Safari; Safari and iOS are unmeasured. Playwright emulates a focused window on e
 - Parking the word and landing it when focus next comes into the frame: a word with no end, landing
   at a moment nobody asked for.
 
-**Revisit when** #214 closes (take off the `test.fail`, and assert the landing after the host's move
-on a nested page); a host needs a parked word to land without moving the focus in first; CI or a real
+**Revisit when** a host needs a parked word to land without moving the focus in first; CI or a real
 Safari shows `hasFocus` disagreeing with the host's `activeElement` after `display.focus()`; or a
 word must expire by itself (a host that sends many, or content that stays out for long).
+
+## P136 · 2026-11-06 · `display.focus()` reaches a nested page: the host's word to its shell, in a task of its own · Accepted
+
+Amends P111 and closes P135's known gap (#proj-workspace:#214). Tenny's requirement, #proj-workspace:#211:
+`marker-late` covers the nested case.
+
+**Context.** On a nested page that had the focus, `display.focus()` left the page's `hasFocus` false.
+P135 explained that from snapshots and `frame.ts`: the shell's `activeElement` was still the page's
+frame, so its listener didn't pass the move on; on Firefox, unexplained. Nobody had seen the listener
+fire. So this measured first (CI on #112, runs 42281836768 and 42284603904, on `frame.ts` as main had
+it: each frame logging its own focus events, its `focus()` and `blur()` calls, and where a key landed,
+from an init script over the console, nothing evaluated in the shell or the page).
+
+**Measured: the explanation was wrong, on every engine, and the bug is wider.**
+- **Chromium (headless shell and full, frames out of process) and WebKit.** The listener fires. The
+  shell's `activeElement` is `BODY` then, not the frame: focus leaving a frame clears each document's
+  on the way out. So the test P135 named passes, and `frame.focus()` is called. It sets the shell's
+  `activeElement` and fires the element's `focus`, and the focused frame doesn't move: no `blur` on the
+  shell's window, nothing in the page, the next key at the shell. The frame in P135's snapshots was
+  that failed call's effect, not its cause. From a later task the same call goes through.
+- **Firefox.** From a focused element of the host's, the shell's document gets `focus` and its window
+  doesn't, so the listener never runs and `frame.focus()` is never called: not refused, not asked. A
+  later task's call goes through with no gesture. From the host's `<body>` both get it, and the
+  listener's own call goes through inside the event: why `had-body` was fine there.
+- **Not only a page that had the focus.** A page that never had it fails the same way (P135 hadn't
+  measured that). And with the focus already in the page, Chromium and WebKit move it out to the
+  shell: the host's move took the keyboard from the page, and the next key went nowhere. Firefox leaves
+  it in the page.
+- **Why inside the event, a reading not a measurement:** Chromium's and WebKit's focus controllers
+  ignore a change of the focused frame while one is in progress. What is measured is the behaviour.
+- **Firefox's key rule** (Gecko's `IsHandlingKeyBoardEvent`, no focus into a cross-origin frame while
+  a key is handled) had nothing to do with this: there is no key in that case. It is a separate limit,
+  under Residual.
+
+**Decision.**
+1. **`display.focus()` tells the shell** (`porthole/shell/focus`, no params): for a nested frame, after
+   the guard's move and only if it landed (the frame is the host's `activeElement`). It is a message, so
+   it runs as a task of the shell's own, outside the focus event.
+2. **The shell acts on it only while the focus is on its own document** (`holds`: set by a `focus` on
+   its window or, for Firefox, its document, cleared by its window's `blur`), and `document.hasFocus()`
+   agrees: it blurs its frame (a failed call left it active, and `focus()` on the active element does
+   nothing), then focuses it. Not holding the focus, it moves nothing, so a page that has the focus
+   hears no blur, and a word that came late takes nothing from where the host went on to.
+3. **A word ahead of its focus waits 250 ms, once.** The two cross processes; a word that comes first
+   is kept that long, and spent on the next focus, in a task. In the one trace read per engine the
+   focus came first; this is for an order nothing promises, and it hasn't been seen to run.
+4. **The listener and the focus guard stay as they were.** `focus-guard.ts` isn't touched: the host's
+   move is judged as before, and handing on inside the frame leaves the host's `activeElement` on the
+   frame, so the guard reads no change. Only the listener's comment changes: it spoke of a Tab, which
+   doesn't land there (Residual).
+
+**Compatibility.** An older shell drops a word in its namespace, and an older host sends none: either
+way as before. The shell is the content server's: upgrade both.
+
+**Threat.** Nothing widens: no CSP, sandbox, gate or guard rule changes.
+- **Who can start it.** The shell takes the word from its parent, on a host origin, as P120's ask. A
+  page's message comes from its own window, goes down the other branch and is dropped by namespace;
+  said to the host's window, it is one more word the transport drops. So a focus reaches the page by
+  this path only as the host's own move, which P111 and P120 already allow.
+- **`comments.open`.** The guard's `earned` for a host's move is what it was, so the gate already
+  passed after `display.focus()`; a page that holds the focus adds no gesture to it.
+- **What a host gets.** The move does now put the keyboard in the page, which is what it was documented
+  to do. Calling it after the person moved on takes the keyboard from them, as §6 says: that duty is
+  the host's, and it now bites on a nested page too.
+- **A stale read.** Out of process, the shell's `hasFocus` can lag the host's move on by a moment. A word
+  that passes then gives the page the focus the host just asked it to have. The case the shell can see
+  is held (control); this one is the width of a process hop after a host's own call.
+
+**Rejected.**
+- **Blur first, in the listener** (the first candidate): inside the event it is the failing call with a
+  no-op before it, and on Firefox from a button the listener doesn't run.
+- **`hasFocus` for `activeElement` in the listener** (the second): the test never was what stopped it.
+- **Passing on from the listener, a task later, for any focus.** It would also fix the frame's own
+  `focus()`, so the React step, with no message and no host change. But it passes on any focus into
+  the shell, and a page can make one with `parent.focus()`: a new way for a page to start the shell's
+  own move. Modelled in the shell, measured: on Chromium it gave the page the focus; on Firefox and
+  WebKit it didn't (Firefox's window hears nothing, and `parent.focus()` moves nothing on WebKit). That
+  buys a page nothing it hasn't: with no gesture, its own `field.focus()` puts the focus in the page on
+  all four (Firefox: in its document, not on the field; at odds with P120's note that WebKit refuses
+  one, a case not looked at again here). So this is no measured hole. It is left out because P111 and
+  P120 name the host's move and not a page's, and the word is enough for what was asked. If React hosts
+  of nested pages come up, this or a `focus()` on the handle is the choice to make.
+
+**Residual.**
+- **The frame's own `focus()` stops at the shell** (no word): on Chromium and WebKit from anywhere, on
+  Firefox from a focused element of the host's. ADOPTING's React step is that. React has no `focus()` on
+  its handle, and adding one is an API decision this doesn't take.
+- **Firefox: `display.focus()` inside a key's own handler moves nothing**: the host's own `frame.focus()`
+  leaves its `activeElement` where it was, so there is no move to pass on. Consistent with Gecko's rule;
+  measured once on a nested page, not on others. ADOPTING's fallback runs in a timer, and isn't hit.
+  `test.fail` on Firefox alone holds it.
+- **Where the focus lands.** In the page's document, not on its old element: focus leaving a frame
+  clears its `activeElement`, so after the move it is `<body>` on all four. WebKit puts it back on the
+  field at the next key.
+- **A Tab** was never the shell's: from the host's button it goes straight into the page on all four
+  (measured), with no focus on the shell, so nothing here touches it.
+
+**The control Tenny asked for.** "The person has moved on" on a nested page had none, and it wasn't
+only unrun, it couldn't have failed well: the case waited a fixed 600 ms, asked only the host's
+`activeElement` and the page's `hasFocus` (an engine that lands a marker inside a frame without the
+host's focus would pass), and `marker-late` didn't reach a nested page at all: its edit is to
+`annotate.ts`, which there is in the served shell, so it has to be in `weakenings.ts`'s `SERVED`. Now
+the case is its own test, starts with no marker holding the page's focus, waits for the `anchored`
+report naming the mark, and asks the page's `activeElement` first. `marker-late` runs `nested.spec.ts`
+and must fail it on Chromium, WebKit and Firefox. `chromium-oopif` runs the case, but no control: the
+registry's engines are those three (`controls.ts`).
+
+**Tested.** `test/nested.test.ts`: the word, told as each engine tells it; moving nothing without the
+focus; a word ahead of its focus, once, and too old; a page saying it. `leak/served/nested.spec.ts`:
+"a page that had the focus gets it back by the host's own move, and a parked focusMark then lands…"
+(P135's step, no `test.fail`), "a page that never had the focus…", "the host's move into a page that
+holds the focus leaves it there", "the host's move from its own text field reaches the page, and the
+focus guard takes nothing back", "the host's move takes no keyboard from where the host's page went on
+to in the same task" (control `shell-focus-held`), "the host's move from inside a key's own handler…"
+(`test.fail` on Firefox), the page saying the word in "the shell's words are the shell's alone…". The
+keyboard's cases and `nested-fight` run unchanged. Static checks only where this was written: CI is
+the run. CI's WebKit is Playwright's build, not Safari; Safari and iOS are unmeasured.
+
+**Revisit when** a host of nested pages uses React; Firefox's key rule moves; or an engine lets a frame
+move inside the focus event that made it the focused one (then the word can go).

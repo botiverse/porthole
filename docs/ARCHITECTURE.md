@@ -215,6 +215,7 @@ Host app                  Shell (its own origin)            Page (opaque child)
    │── the host's messages ──────►│── postMessage ───────────────►│
    │◄── porthole/shell/state ─────│ its own activation, its focus │
    │── porthole/shell/look ──────►│ look now (as a move is heard) │
+   │── porthole/shell/focus ─────►│ display.focus(): on to the ──►│ the page's window
 ```
 
 ### URL frame
