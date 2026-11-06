@@ -1,7 +1,7 @@
 import { expect, test, type Frame, type Page } from "@playwright/test";
 import type { PortholeConfig } from "../../src/index.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
-import { NESTED_MOVED_ON, NESTED_WORD_LATE } from "../controls.ts";
+import { NESTED_MOVED_ON, NESTED_SECOND_MOVE, NESTED_WORD_LATE } from "../controls.ts";
 import { mount, outcomeOf, runtimeCalls } from "./porthole-host.ts";
 import { storedFiles } from "./files.ts";
 import { harness } from "./harness.ts";
@@ -718,6 +718,39 @@ test.describe("a nested page (P111)", () => {
       .toBe(false);
     await hostMove(page);
     await landed(child, "probe: from the host's button, the move reached the page");
+  });
+
+  // The cases around this start from a press, where the shell never held the focus. Here it just
+  // handed it on, which is what could leave it thinking it still holds it. The page says each blur
+  // over the console: an evaluation in it would be a gesture, and could move nothing to see.
+  test(NESTED_SECOND_MOVE, async ({ page }) => {
+    const shown = await show(
+      page,
+      `addEventListener("blur", (event) => say("blurred", { on: event.target === window ? "window" : event.target.id || event.target.nodeName }), true);
+       addEventListener("focus", (event) => { if (event.target === field) say("field"); }, true);`,
+    );
+    const child = await pageFrame(shown);
+    await moveOn(page);
+    await hostMove(page);
+    await landed(child, "the first move reached the page");
+    await tell(page, { test: "focus" });
+    await expect
+      .poll(() => shown.said.some((each) => each.type === "field"), {
+        message: "the page's field has the focus",
+      })
+      .toBe(true);
+    await page.waitForTimeout(100);
+    const before = shown.said.filter((each) => each.type === "blurred").length;
+    await hostMove(page);
+    await page.waitForTimeout(400);
+    expect(
+      shown.said.filter((each) => each.type === "blurred").slice(before),
+      "probe: the page heard no blur",
+    ).toEqual([]);
+    await page.keyboard.press("k");
+    await expect
+      .poll(() => valueOf(shown), { message: "probe: its field kept the keyboard" })
+      .toBe("k");
   });
 
   test("the host's move into a page that holds the focus leaves it there (P136)", async ({

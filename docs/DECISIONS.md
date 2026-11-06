@@ -8010,7 +8010,8 @@ from an init script over the console, nothing evaluated in the shell or the page
    its window or, for Firefox, its document, cleared by its window's `blur`), and `document.hasFocus()`
    agrees: it blurs its frame (a failed call left it active, and `focus()` on the active element does
    nothing), then focuses it. Not holding the focus, it moves nothing, so a page that has the focus
-   hears no blur, and a word that came late takes nothing from where the host went on to.
+   hears no blur from the word (the host's own call is another matter: "After its review"), and a word
+   that came late takes nothing from where the host went on to.
 3. **A word ahead of its focus waits 250 ms, once.** The two cross processes; a word that comes first
    is kept that long, and spent on the next focus, in a task. In the one trace read per engine the
    focus came first; this is for an order nothing promises, and it hasn't been seen to run.
@@ -8086,5 +8087,29 @@ to in the same task" (control `shell-focus-held`), "the host's move from inside 
 keyboard's cases and `nested-fight` run unchanged. Static checks only where this was written: CI is
 the run. CI's WebKit is Playwright's build, not Safari; Safari and iOS are unmeasured.
 
-**Revisit when** a host of nested pages uses React; Firefox's key rule moves; or an engine lets a frame
-move inside the focus event that made it the focused one (then the word can go).
+**After its review** (Tenny, #112). Every case began from a press, where the shell never held the
+focus. If an engine's shell window got no `blur` during a handover, `holds` would stay true, `hasFocus`
+would be true with the focus in its child, and a second `display.focus()` would blur and refocus the
+page, which would lose its field. UX, not security; Firefox the likeliest.
+- **Measured (CI on #113, run 42297050666): it doesn't happen.** After a move in from a host's button,
+  with the page's field then focused by the page, a second `display.focus()` left no `blur` in the page
+  and the next key in its field, on Chromium, full Chromium, WebKit and Firefox. So the shell doesn't
+  change. It agrees with the traces of #112: the window's `blur` fires in the handover on all four.
+- **That case is now held.** "a second host's move into a page it just handed the focus to…", and
+  `shell-focus-held` has to fail it too: that the page's blurs are heard at all is what that shows.
+- **A correction: a page can still hear a blur from `display.focus()`, from the host's own call.** With
+  the focus in the page by the person's press, Chromium and WebKit answer the host's `frame.focus()` by
+  moving the focus out to the shell: `blur` on the page's field and window, before any word (the
+  `in-page` trace of run 42281836768, on `frame.ts` before the word). The word then brings it back, so
+  the page has the focus again, but it heard a blur and its field is no longer its `activeElement`.
+  This case differs in how the page got the focus. Why that decides it is a reading, not a measurement:
+  after a host's own move the host's document already holds the frame as its focused element, so a
+  second `focus()` is no move, and after a press it doesn't. No word could stop that blur, the shell
+  hasn't heard of the move yet, so it would be the host's change (no `frame.focus()` for a nested frame
+  that is already its `activeElement`, the word alone). Not done here: nothing asked for it, and it
+  isn't known that a host calls `display.focus()` with the person already in the page. Firefox doesn't
+  do this: it leaves the focus in the page.
+
+**Revisit when** a host of nested pages uses React; a host calls `display.focus()` with the person in
+the page and the blur shows; Firefox's key rule moves; or an engine lets a frame move inside the focus
+event that made it the focused one (then the word can go).
