@@ -326,9 +326,10 @@ several displays on one page are in [THREAT_MODEL.md](THREAT_MODEL.md).
   `/server` from the host's store at `/_blob/<id>` on the artifact's origin.
 - **Annotations** (`annotate`): the host drives a select mode and marks anchors in
   the shell; anchors are W3C Web Annotation selectors a host stores with its own
-  comments (P053). A mark may carry a count, drawn as a clickable marker whose click
-  the host hears and answers with its own UI outside the frame (P104), and may be a
-  draft, its author's unposted comment, drawn apart with a hollow marker (P107).
+  comments (P053). A mark may carry a count, drawn as a marker, a button at its
+  paragraph's end (P133), whose click the host hears and answers with its own UI outside
+  the frame (P104), and may be a draft, its author's unposted comment, drawn apart with a
+  hollow marker (P107).
 - **Find in page** (`find`): the host draws its own find bar and asks the shell for
   a query (`porthole/find.query`, a request: how many matches, which is current);
   the shell finds it in the same text index annotations read, highlights it in a layer

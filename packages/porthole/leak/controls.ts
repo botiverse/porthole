@@ -157,6 +157,8 @@ const PATCHED_PRESS =
   "a page that patches the event's built-ins neither hears a marker's press nor stops its report (P105)";
 const MARKER_TAP =
   "a tap on a marker is reported on every engine, and the content hears none of it (P105)";
+const MARKER_KEYS =
+  "a marker is a button the keyboard reaches: Tab in reading order, Enter and Space report it once, the content hears neither, and it steps aside while elements are picked (P133)";
 const HONEST_SCROLL =
   "an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second";
 /** A served page's own frames (P128): a frame of elsewhere stays out of the tree (files.spec.ts). */
@@ -342,6 +344,8 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       MARKER_PRESS,
       PATCHED_PRESS,
       MARKER_TAP,
+      // P133: Enter and Space make a click, stopped as a press's is.
+      MARKER_KEYS,
       // P107: a draft's and a posted marker's presses beside each other reach none of the content.
       "drafts (P107): a dashed line and a hollow marker with no number, apart from posted marks; their clicks are reported the same",
       // P119: a tap in a marker's 44 px box, the nearest of two, and a pinned marker's click and
@@ -361,21 +365,8 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "text markers cover no word: on a column page, and on a phone's lines with one marker each (P105, #36)",
     ),
   },
-  "marker-tap": {
-    specs: [ANNOTATE],
-    // P119's touch probes tap a marker too, so on WebKit they fail with it.
-    fails: each([], {
-      webkit: [
-        MARKER_TAP,
-        "on touch, a marker takes a tap a few px off its bubble (44 by 44), after the page scrolled itself; a tap past that is the page's (P119)",
-        "on touch, where two markers' 44 px boxes overlap, a tap is the nearest bubble's (P119)",
-        "a paragraph's marker pinned at the frame's top once its start scrolled away takes a mouse click and a tap where it is drawn (P119, porthole#42)",
-      ],
-    }),
-    holds: {
-      why: "no probe can see it on Chromium and Firefox: they make a tap a click on the marker without a listener of its own (measured, P105)",
-    },
-  },
+  // P133: the keys that click a focused marker, heard by none of the content.
+  "marker-key": { specs: [ANNOTATE], fails: all(MARKER_KEYS) },
   "marker-originals": { specs: [ANNOTATE], fails: all(PATCHED_PRESS) },
   "follow-throttle": { specs: [ANNOTATE], fails: all(HONEST_SCROLL) },
   "selection-follow": { specs: [ANNOTATE], fails: all(HONEST_SCROLL) },
@@ -413,6 +404,7 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "marks: drawn over their anchors, one brought into view, an unfound one orphaned, all cleared",
       "following: once a scroll settles, one report with only the marks that moved",
       "every attached mark's place in the document comes with the scroll it was read at, offscreen ones too, and the followed mark's as the document scrolls (P132)",
+      "a selection's and a mark's last line come in the document's coordinates with the scroll, offscreen ones too; rect stays clamped (P133)",
     ),
   },
   // Served content (leak/served/).
@@ -1174,7 +1166,6 @@ const MEASURED: Readonly<Record<string, number>> = {
   "selection-follow": 70,
   "follow-count": 70,
   "annotation-activated-gesture": 69,
-  "marker-tap": 83,
   "marker-place": 83,
 };
 

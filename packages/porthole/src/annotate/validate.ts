@@ -166,7 +166,10 @@ function results(value: unknown): AnchorResult[] | null {
     const rect = each.rect === undefined ? undefined : parseRect(each.rect);
     // Where it is in the document (P132): a box as `rect` is, never clamped.
     const documentRect = each.documentRect === undefined ? undefined : parseRect(each.documentRect);
-    if (rect === null || documentRect === null) {
+    // Where its last line is in the document (P133), as `documentRect` is.
+    const lastLineDocumentRect =
+      each.lastLineDocumentRect === undefined ? undefined : parseRect(each.lastLineDocumentRect);
+    if (rect === null || documentRect === null || lastLineDocumentRect === null) {
       return null;
     }
     // A place among the marks (P112): a whole number below the most marks a show carries.
@@ -182,6 +185,7 @@ function results(value: unknown): AnchorResult[] | null {
       state: "attached",
       ...(rect === undefined ? {} : { rect }),
       ...(documentRect === undefined ? {} : { documentRect }),
+      ...(lastLineDocumentRect === undefined ? {} : { lastLineDocumentRect }),
       ...(order === undefined ? {} : { order }),
     });
   }
@@ -197,7 +201,22 @@ export function parseReport(value: unknown): AnnotationReport | null {
     case "selected": {
       const anchor = parseAnchor(value.anchor);
       const rect = parseRect(value.rect);
-      return anchor === null || rect === null ? null : { type: "selected", anchor, rect };
+      // A newer shell's (P133): where its last line is in the document, and how far it is scrolled.
+      const lastLineDocumentRect =
+        value.lastLineDocumentRect === undefined
+          ? undefined
+          : parseRect(value.lastLineDocumentRect);
+      const scroll = value.scroll === undefined ? undefined : parseScroll(value.scroll);
+      if (anchor === null || rect === null || lastLineDocumentRect === null || scroll === null) {
+        return null;
+      }
+      return {
+        type: "selected",
+        anchor,
+        rect,
+        ...(lastLineDocumentRect === undefined ? {} : { lastLineDocumentRect }),
+        ...(scroll === undefined ? {} : { scroll }),
+      };
     }
     case "unselected":
       return { type: "unselected" };
@@ -219,8 +238,18 @@ export function parseReport(value: unknown): AnnotationReport | null {
       // A newer shell's (P132): where the mark is in the document, and how far it is scrolled.
       const documentRect =
         value.documentRect === undefined ? undefined : parseRect(value.documentRect);
+      const lastLineDocumentRect =
+        value.lastLineDocumentRect === undefined
+          ? undefined
+          : parseRect(value.lastLineDocumentRect);
       const scroll = value.scroll === undefined ? undefined : parseScroll(value.scroll);
-      if (!markId(value.id) || rect === null || documentRect === null || scroll === null) {
+      if (
+        !markId(value.id) ||
+        rect === null ||
+        documentRect === null ||
+        lastLineDocumentRect === null ||
+        scroll === null
+      ) {
         return null;
       }
       return {
@@ -228,6 +257,7 @@ export function parseReport(value: unknown): AnnotationReport | null {
         id: value.id,
         rect,
         ...(documentRect === undefined ? {} : { documentRect }),
+        ...(lastLineDocumentRect === undefined ? {} : { lastLineDocumentRect }),
         ...(scroll === undefined ? {} : { scroll }),
       };
     }

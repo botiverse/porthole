@@ -52,8 +52,8 @@ export interface AnnotationAnchor {
  * The page's word: the host clamps each it reports to the frame's viewport (P104), so one wholly
  * outside is a box of no size on the nearest edge. A positioning hint only. It is in the frame's
  * own layout px: a host that scales or transforms the frame maps it through that transform too
- * (P105). A result's `documentRect` (P132) is the same shape in the document's coordinates, and
- * isn't clamped.
+ * (P105). A result's `documentRect` (P132) and a report's `lastLineDocumentRect` (P133) are the
+ * same shape in the document's coordinates, and aren't clamped.
  */
 export interface AnnotationRect {
   readonly x: number;
@@ -95,20 +95,21 @@ export interface AnnotationMark {
   readonly id: string;
   readonly anchor: AnnotationAnchor;
   /**
-   * A marker (P104): with a count, the shell also draws a small bubble with this number (0 to
-   * `ANNOTATION_LIMITS.count`, a larger one clamped to it (P116); above 99 it reads "99+", 0 draws
-   * the bubble alone) at the end of a
-   * text anchor and the top right of an element. The person can click it: the frame reports
-   * `activated`. The content can read the number; give one only where the page may know it. A
+   * A marker (P104): with a count, the shell also draws a small button, a bubble with this number
+   * (0 to `ANNOTATION_LIMITS.count`, a larger one clamped to it (P116); above 99 it reads "99+", 0
+   * draws the bubble alone) at the end of a text anchor's paragraph (P133) and the top right of an
+   * element. The person can click it, or reach it with the keyboard and press Enter or Space
+   * (P133): the frame reports `activated`. Its accessible name says what it is, with the count and
+   * `anchor.label`. The content can read the number; give one only where the page may know it. A
    * draft's is dropped (P107): its marker has no number.
    */
   readonly count?: number;
   /**
    * What the mark is (P107): `"posted"` (the default, as absent) or `"draft"`, a comment its
    * author hasn't submitted yet. A draft is drawn apart (a dashed line and a hollow marker with no
-   * number) and has a marker whether or not it has a count; its count is dropped before the mark
-   * goes to the frame. The content can read that a mark is a draft: send drafts only to their
-   * author's own frame.
+   * number, beside its anchor's own last line, not at its paragraph's end: P133) and has a marker
+   * whether or not it has a count; its count is dropped before the mark goes to the frame. The
+   * content can read that a mark is a draft: send drafts only to their author's own frame.
    */
   readonly kind?: AnnotationMarkKind;
 }
@@ -133,6 +134,13 @@ export interface AnchorResult {
    */
   readonly documentRect?: AnnotationRect;
   /**
+   * Where its last line is in the document (P133), in the coordinates of `documentRect` and as
+   * unclamped: its last line with words on it for text, its whole box for an element, which has no
+   * lines of its own. For a host's UI after the last line (its right, or its bottom). Absent from
+   * an older shell, and where nothing of the mark is drawn. The page's word.
+   */
+  readonly lastLineDocumentRect?: AnnotationRect;
+  /**
    * Its place in the document among the found marks, from 0 (P112): where it starts, offscreen
    * marks included, for a host that lists marks in reading order. The content's word: an order to
    * sort by, never a fact.
@@ -142,11 +150,18 @@ export interface AnchorResult {
 
 /** What the frame reports, once the host has checked it. */
 export type AnnotationReport =
-  /** The person pointed at an element or settled a text selection. */
+  /**
+   * The person pointed at an element or settled a text selection. A newer shell (P133) adds where
+   * it ends, for a host's UI after its last line: `lastLineDocumentRect` as a result's is, with
+   * how far the document was scrolled as it was read (so its place in the frame's viewport is the
+   * one less the other, unclamped). Both absent from an older shell.
+   */
   | {
       readonly type: "selected";
       readonly anchor: AnnotationAnchor;
       readonly rect: AnnotationRect;
+      readonly lastLineDocumentRect?: AnnotationRect;
+      readonly scroll?: AnnotationScroll;
     }
   /** The text selection went away. */
   | { readonly type: "unselected" }
@@ -180,18 +195,21 @@ export type AnnotationReport =
    * adds the mark's `documentRect` and the document's `scroll`: the mark's box moves as the
    * document scrolls, so a host following one mark hears the scroll at every animation frame where
    * it changed, whether that mark is in the frame or not, and places every mark it holds a
-   * `documentRect` for (an `anchored` report's) without asking again.
+   * `documentRect` for (an `anchored` report's) without asking again. A newer one still (P133) adds
+   * its `lastLineDocumentRect`.
    */
   | {
       readonly type: "tracked";
       readonly id: string;
       readonly rect: AnnotationRect;
       readonly documentRect?: AnnotationRect;
+      readonly lastLineDocumentRect?: AnnotationRect;
       readonly scroll?: AnnotationScroll;
     }
   /**
    * The person clicked the marker of a mark the host shows with a `count` (P104), or of a draft
-   * (P107); `rect` is the marker's box, to open the host's own UI beside it. The content can fake
+   * (P107), or pressed Enter or Space on it (P133); `rect` is the marker's box, to open the host's
+   * own UI beside it. The content can fake
    * it for any mark the host shows with a marker, and can tell a real one happened: open the
    * host's own view of that mark, never act on it.
    */
@@ -214,7 +232,7 @@ export const ANNOTATE_METHODS = {
   unselected: "porthole/annotate.unselected",
   cancelled: "porthole/annotate.cancelled",
   anchored: "porthole/annotate.anchored",
-  /** Frame → host: a mark's marker was clicked (P104). */
+  /** Frame → host: a mark's marker was clicked, or pressed from the keyboard (P104, P133). */
   activated: "porthole/annotate.activated",
   /** Host → frame: follow one mark's box (`{ id }`), or none (`{ id: null }`) (P112). */
   track: "porthole/annotate.track",

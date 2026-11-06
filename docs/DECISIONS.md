@@ -4595,7 +4595,7 @@ second wall on a tab); a host needs a served page to open windows from a tab (th
 `'self'` default (it joins `FRAME_DENIED_FEATURES`); or WebKit and Firefox apply
 `Permissions-Policy` to these features (the shell's device locks become the second wall there too).
 
-## P104 · 2026-10-20 · Annotation markers: a number at an anchor, a click the host hears, marks that follow a scroll · Accepted; amended by P105, P107, P116
+## P104 · 2026-10-20 · Annotation markers: a number at an anchor, a click the host hears, marks that follow a scroll · Accepted; amended by P105, P107, P116, P133
 
 A host that shows its comments beside an artifact page wants, at each comment's anchor in the page,
 a small marker (a bubble and how many comments are there) that scrolls with the content; a click on
@@ -4873,7 +4873,7 @@ when someone remembered, and what DESIGN.md said they fail had drifted from what
 a control's run makes a CI job too long (shard the controls across jobs), or the kit's app gains
 a weakening seam (then its controls join the registry).
 
-## P105 · 2026-10-20 · After the review of P104: a marker's click within a gesture and the host's view guarded, one clock for follow-ups, text markers beside their line · Accepted
+## P105 · 2026-10-20 · After the review of P104: a marker's click within a gesture and the host's view guarded, one clock for follow-ups, text markers beside their line · Accepted; amended by P133
 
 Amends P104 (its points 1, 3, 5 and 7, and its Trust) and P053's Trust. From the independent
 review of P104 and 0.9.0 (botiverse/porthole#37: no P0 or P1, two P2s, six P3s) and from #36
@@ -7596,3 +7596,139 @@ control: nothing here is a defense; the bound is `parseRect`'s, which existing p
 **Revisit when** a host needs places within a page's own scrolling box (a place relative to that
 box, and its scroll), the scroll without following a mark (a page with no marks the host follows),
 or a host draws from `documentRect` inside the frame's own area and wants Porthole to clip for it.
+
+## P133 · 2026-11-06 · Markers are labelled buttons, a posted comment's sits at its paragraph's end, and reports say where the last line is · Accepted
+
+Amends P104 (its point 6, and its "Revisit when" on a keyboard inside the frame) and P105 (its
+point 3, for posted text marks, and P2-B's click listener on each marker). Three follow-ups for
+comment markers, from a host (Raft web):
+
+- A marker can't be reached from the keyboard or named by assistive technology (P104 point 6
+  chose that, and named this as what would reopen it).
+- A marker beside the anchor's last line, in the gutter, sits between the lines of a paragraph
+  someone is reading, up to the column's width from its words (P105 point 3 said so); the host
+  wants it where the paragraph ends.
+- A host that puts its own UI after a selection's last line has only the selection's whole box:
+  `rect` ends at the widest line's right, not where the words end, and it is clamped.
+
+**Decision.**
+
+1. **A marker is a real button.** A `<button type="button">` with an explicit tab stop (`tabindex`:
+   Safari's Tab otherwise skips one) and a name that says what it is: `aria-label` "3 comments on
+   …", "1 comment on …", "Comment on …" for a count of 0, "Draft comment on …", with the mark's
+   `anchor.label`. The layer is no longer `aria-hidden`: its marks and its outline are, so the
+   markers are all assistive technology finds in it. A marker's styles take off what a browser
+   gives a button, and it has a focus ring of its own. Markers go in the page's reading order
+   (each finding reads where each mark starts, as `order` does), which is the Tab key's: after the
+   page's own stops, since the layer is the document's last child. A marker that stays in its
+   place isn't touched, and none moves while one has the focus.
+2. **The existing path, from the keyboard.** Enter and Space make the button's own trusted click,
+   which reaches the shell's first window listener as a pointer's does, retargeted to the layer. It
+   has no click count and no point (0, 0, or the like), so the hit test can't place it: a trusted
+   click with `detail` 0 is the focused marker's, read through the closed shadow root's
+   `activeElement` by the platform's getter, kept before content runs, and otherwise goes on to the
+   hit test as ever (assistive technology that clicks an element without focusing it is missed:
+   see Revisit). `activated`, its `rect` (the marker's box), the
+   host's id check and its gesture check are unchanged: a real key gives the host's page transient
+   activation as a click does (as the HTML standard says for a key but Escape; unmeasured here, see
+   Tested). While elements are picked a marker takes itself out of the Tab order (`tabindex` -1) and
+   a click on one reports nothing, as the pointer's goes past it.
+3. **Enter and Space are stopped as a press is**, in the window's first listener, read through
+   kept getters, on all of keydown, keypress and keyup while their target is the layer: the content
+   neither hears them nor cancels the click. Every other key stays the page's, as on a button of its
+   own: Tab, Escape (which the shell's own picking and selecting hear after this), and the host's
+   find shortcut. A repeat of either is cancelled: a key held down clicks once, where 30 clicks a
+   second would spend the bridge's 120 a minute on one press.
+4. **The focus stays while the page redraws.** A draw hit-tests places with the markers out of the
+   display (P105), which loses a focused one, on every scroll. While one has the focus they only
+   take no pointer (`pointer-events`, so the tests skip them): dearer for that time, as P105 measured
+   (0.13 ms a marker per test), and only then. Nothing else in a draw touches a kept node.
+5. **The focus brings a marker into view.** One out of view is outside the layer's box. A focused
+   element scrolls its scrolling ancestors into view, and `overflow: hidden` is one, so the layer
+   would have scrolled away from everything it draws: it clips now (`overflow: clip`, `hidden`
+   where an engine lacks it, Safari before 16; the shared `LAYER_STYLE`, find's layer too). The
+   shell scrolls the document instead, to centre the marker, with the `scrollBy` kept before content
+   runs, as `focus(id)` does for a mark. The focus on a marker lights its words as the pointer does.
+   Focus events between two markers don't leave the shadow root, so these listen there.
+6. **A posted comment's marker sits at its paragraph's end.** A text anchor's, not a draft's: on
+   the last line of the block its words end in, read from the anchor's end as far as a block inside
+   it (a nested list's words are their own paragraph) and over only what is drawn, at most 256 text
+   nodes, once for each finding (a range kept on the mark, so a draw reads one box). It takes P105's
+   places on that line, after a new first one: just past the last word, where nothing follows that a
+   marker could cover, which is what P105's gutter gave up for. Where the line leaves no room, the
+   gutter, the frame's edge, compact and over the line's end as before. Those at one paragraph's end
+   go together, in the order their words end.
+7. **A draft's stays by its words**, as P105 places it: it is the person's comment being written on
+   those words, beside a composer near them, and nothing else says which words those are. **An
+   element's stays on its corner** (P104): it may have no text and no lines, and a pinned paragraph's
+   marker is P119's. The light on the words, on hover and on focus, still ties a marker at a
+   paragraph's end to the words it is for.
+8. **`lastLineDocumentRect`** on `selected`, on each attached result of `anchored` and on `tracked`:
+   the last line with words on it (the last client rect with a width: a triple click's empty box on
+   the next block doesn't count), or an element's whole box, in the coordinates of `documentRect`:
+   the box as the shell read it plus the `scroll` it was read at. **`selected` takes `scroll` too**,
+   so it is `rect`'s equal: its viewport place is one less the other. `createHost` checks each as a
+   box, clamps none (a clamp erases an offscreen line, and `rect` is P104's). No other field, method,
+   option or rate. Follow-ups still go by `rect` and `order`: a line that moves inside an unmoved box
+   isn't told, and comparing in document coordinates would tell a fixed mark at every scroll.
+9. **The marker's own click listener goes**, and with it the control `marker-tap`. It was there
+   only so WebKit would make a tap a click on a `div`: P105's P2-B measured that it did so for a
+   button all along. The tap probes stay, under `marker-click`.
+
+**Compatibility.** Every field is optional and only added. An older shell sends none, and a host
+tests for `lastLineDocumentRect`; an older host drops them (each report is rebuilt from known
+fields, P053). A malformed one drops the whole report, as any malformed part does. Markers change in
+place for a host doing nothing: they move, and take the keyboard. `show`, `activated` and every
+existing field are as they were. The shell is the content server's: upgrade that for all of it.
+
+**Threat.** P104 refused the tab stop because the content controls that focus order. That stands,
+and is accepted (THREAT_MODEL §7): the content can take the focus from a marker, keep a person from
+one, draw a look-alike with a tab stop of its own, and tell that the person is on one. It gains no
+power from that: a marker's press has no effect but `activated`, which it can fake within the host's
+checks anyway; a made-up key or `click()` is no trusted click; and keys reach a marker only while
+the frame has the focus, so P109's keyboard is untouched. The focus model P104 hoped for, one the
+content can't steal, is rejected below: only the host's own UI can be that, and the host's list of
+marks stays the way a keyboard can rely on. `activated` by keyboard is as fakeable and as guarded
+as by pointer; ADOPTING's guard already takes no key. The name carries the page's own words
+(`anchor.label`) to assistive technology, after the shell's own: a page can't change what kind of
+thing it says this is, and those words reach the frame in `show` already. `lastLineDocumentRect`
+re-opens what `documentRect` re-opened, no more: a host that draws from it without clipping lets the
+page choose where (P132's duty, THREAT_MODEL §6). `rect` stays clamped. The page learns nothing new
+from it (it goes from the frame to the host).
+
+**Tested.** `test/annotate.test.ts` "the last line (P133)": kept in all three reports, rebuilt from
+known fields; an older shell's selection exactly as before; a malformed one or a selection's
+malformed scroll dropping the report; through `createHost`, `rect` clamped, the last line and the
+scroll as the shell said. `leak/annotate.spec.ts` (three engines), written and not yet run (test runs
+were paused where this was written, so everything measured above is reasoned from the standards and
+the engines' sources and awaits CI): "a marker is a button the keyboard reaches…" (`marker-key`,
+`marker-click`); "a marker out of view brings itself into view…"; "a posted comment's marker sits at
+its paragraph's end…"; "a selection's and a mark's last line…" (`annotation-rect-clamp`, as P132's).
+"text markers cover no word" now puts a draft in a line's middle: posted ones have no next word to
+cover, so that is what control `marker-place` shows. Tests that clicked a posted marker on its
+anchor's line now look on its paragraph's last line. New control `marker-key`.
+
+**Rejected.**
+- A focus model the content can't steal, inside the frame (P104's hope): the shell shares the realm,
+  so nothing in the frame is out of a page's reach. Only the host's overlay could be, a tab stop per
+  mark outside the frame, kept level with content it can't see into: that is the host's list again.
+- `role="button"` on the `div`: every activation by hand (Enter on keydown, Space on keyup,
+  nothing for assistive technology's own click), for nothing; "works with the existing path" is what
+  a real button's trusted click gives.
+- A click listener on the marker itself, to know the target without the focus: the window's first
+  listener has to stop the click before it gets there, or the content hears it.
+- Stopping every key on a marker: it would take Escape and Tab from a page's own handling, and the
+  host's find shortcut, for no secret; what's stopped is what acts on a marker.
+- A host's `label` on a mark for the name in the person's language: a new field in `show` and in
+  what the page reads, not asked for yet (see Revisit).
+- Moving the marker to the paragraph's end in the gutter always (P105's place on that line): it
+  keeps the distance from the words that this is here to end.
+- A marker at a picked paragraph's end too: an element anchor isn't always text, and P119 pins that
+  marker on purpose.
+- `documentRect` on `selected` as well: not asked for; `rect` and the last line place a host's UI.
+
+**Revisit when** a host's UI isn't in English and its marker names should be (a host's `label` on a
+mark, sent into the frame, the page reading it); an engine's or a screen reader's click on a marker
+it didn't focus is missed (give the layer a way to learn its target); a right-to-left paragraph's
+end should be on its left (P105's places aren't direction-aware either); paragraphs split by `<br>`
+should count as many; or a host wants a picked paragraph's marker at its end.

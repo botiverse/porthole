@@ -251,9 +251,10 @@ createHost(config, {
 With `annotate` declared (`capabilities: { annotate: {} }`), a host lets people point at a
 display and keeps its comments beside it ([P053](DECISIONS.md), P104). Everything the frame
 reports is the page's word: a hint where to draw, never a permission. A mark's `count` puts a
-numbered marker beside its words; a click on one is `activated`. A draft, a comment its author
-hasn't posted yet (`kind: "draft"`, P107), is drawn apart: a dashed line and a hollow marker with no
-number, which is clicked and followed as a posted one is.
+numbered marker, a button, at the end of its words' paragraph (P133); a click on one, or Enter or
+Space with the keyboard on it, is `activated`. A draft, a comment its author hasn't posted yet
+(`kind: "draft"`, P107), is drawn apart, beside its own words: a dashed line and a hollow marker
+with no number, which is clicked and followed as a posted one is.
 
 ```js
 display.annotations.show([
@@ -414,6 +415,33 @@ composer.onClose(() => display.annotations.clearSelection());
 
   A page that scrolls a box of its own rather than its document moves the places of the marks in
   it as it scrolls; show again (or follow such a mark) to hear them again.
+- **After the last line** (P133): for UI after a selection's or a mark's words rather than beside
+  their whole box (a composer's button, a card), a newer shell gives `selected`, each attached
+  result and `tracked` a `lastLineDocumentRect`: the last line with words on it, in the document's
+  coordinates (an element's whole box: it has no lines), unclamped as `documentRect` is. `selected`
+  carries the `scroll` it was read at too; an `anchored` report and `tracked` already do. A line's
+  end in the frame's viewport is `x + width - scroll.x`, its bottom `y + height - scroll.y`. Clip
+  what you draw from it, as above, and keep `rect` where it is absent (an older shell):
+
+  ```js
+  display.on("annotation", (report) => {
+    if (report.type !== "selected") return;
+    const line = report.lastLineDocumentRect;
+    const at = line
+      ? { x: line.x + line.width - report.scroll.x, y: line.y + line.height - report.scroll.y }
+      : { x: report.rect.x + report.rect.width, y: report.rect.y + report.rect.height };
+    composer.openAt(frame, clipToFrame(at), report.anchor); // the frame's px: clip them, then add its position
+  });
+  ```
+- **The keyboard** (P133): each marker is a button in the frame's Tab order, after the page's own
+  stops, in reading order, named for what it is ("3 comments on …", from the `count` and the
+  anchor's `label`; in English, whatever your UI's language). Enter or Space on it is `activated`,
+  through the same path and the same gesture check as a click: nothing to handle apart. It is the
+  page's focus order, which a page can steal from or hide a marker from, and it is one more
+  `activated` the content can time: keep your own list of marks as the way a keyboard can rely on,
+  with `annotations.focus(id)` to bring one into view, and leave your view's guard as it is (it
+  takes no key for 500 ms either, and takes no focus: Enter again on the marker is one more
+  `activated`).
 - **Labels and quotes are the page's text**: shown only as text. Porthole takes out of a label what
   the person can't see; a quote (`exact`) keeps it, to be found again. Hand either to a model only
   as the page's words.
