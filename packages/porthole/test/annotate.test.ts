@@ -703,6 +703,79 @@ describe("places in the document (P132): a result's documentRect and the report'
     }
   });
 
+  describe("the last line (P133): lastLineDocumentRect, with the scroll", () => {
+    const lastLineDocumentRect = { x: 10, y: 1_500, width: 120, height: 22 };
+
+    test("selected, anchored and tracked keep it, rebuilt from known fields; a selection takes the scroll too", () => {
+      expect(
+        parseReport({
+          type: "selected",
+          anchor: text,
+          rect,
+          lastLineDocumentRect: { ...lastLineDocumentRect, z: 1 },
+          scroll: { ...scroll, extra: true },
+        }),
+      ).toEqual({ type: "selected", anchor: text, rect, lastLineDocumentRect, scroll });
+      expect(
+        parseReport({
+          type: "anchored",
+          results: [
+            { id: "a", state: "attached", rect, documentRect, lastLineDocumentRect },
+            { id: "b", state: "orphaned", lastLineDocumentRect },
+          ],
+          scroll,
+        }),
+      ).toEqual({
+        type: "anchored",
+        results: [
+          { id: "a", state: "attached", rect, documentRect, lastLineDocumentRect },
+          { id: "b", state: "orphaned" },
+        ],
+        scroll,
+      });
+      expect(
+        parseReport({ type: "tracked", id: "a", rect, documentRect, lastLineDocumentRect, scroll }),
+      ).toEqual({ type: "tracked", id: "a", rect, documentRect, lastLineDocumentRect, scroll });
+    });
+
+    test("an older shell's selection, without them, as before: no field appears", () => {
+      expect(parseReport({ type: "selected", anchor: text, rect })).toStrictEqual({
+        type: "selected",
+        anchor: text,
+        rect,
+      });
+    });
+
+    test("a malformed one, or a selection's malformed scroll, drops the whole report", () => {
+      for (const bad of [
+        { ...lastLineDocumentRect, height: -1 },
+        { ...lastLineDocumentRect, y: Number.NaN },
+        { ...lastLineDocumentRect, y: 1e9 },
+        [10, 1_500, 120, 22],
+        null,
+      ]) {
+        const each = { lastLineDocumentRect: bad };
+        expect(
+          parseReport({ type: "selected", anchor: text, rect, ...each }),
+          JSON.stringify(bad),
+        ).toBeNull();
+        expect(
+          parseReport({
+            type: "anchored",
+            results: [{ id: "a", state: "attached", rect, ...each }],
+          }),
+        ).toBeNull();
+        expect(parseReport({ type: "tracked", id: "a", rect, ...each })).toBeNull();
+      }
+      for (const bad of [{ x: 0 }, { x: 0, y: "900" }, null, 900]) {
+        expect(
+          parseReport({ type: "selected", anchor: text, rect, lastLineDocumentRect, scroll: bad }),
+          JSON.stringify(bad),
+        ).toBeNull();
+      }
+    });
+  });
+
   describe("on createHost over a stand-in platform", () => {
     const mounted: DisplayHandle[] = [];
     afterEach(() => {
@@ -756,6 +829,26 @@ describe("places in the document (P132): a result's documentRect and the report'
       };
       return { display, reports, say };
     };
+
+    test("a selection's box is clamped to the viewport (P104); its last line isn't, and the scroll is kept (P133)", async () => {
+      const t = mount();
+      t.display.annotations.start({ elements: false, text: true });
+      await t.say("selected", {
+        anchor: text,
+        rect: { x: 8, y: 2_100, width: 300, height: 66 },
+        lastLineDocumentRect: { x: 8, y: 3_044, width: 120, height: 22 },
+        scroll: { x: 0, y: 900 },
+      });
+      expect(t.reports).toEqual([
+        {
+          type: "selected",
+          anchor: text,
+          rect: { x: 8, y: 400, width: 300, height: 0 },
+          lastLineDocumentRect: { x: 8, y: 3_044, width: 120, height: 22 },
+          scroll: { x: 0, y: 900 },
+        },
+      ]);
+    });
 
     test("each box in the viewport is clamped to it (P104); the document's are not, and the scroll is kept", async () => {
       const t = mount();

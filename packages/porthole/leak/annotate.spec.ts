@@ -778,7 +778,7 @@ async function layerNodes(
   page: Page,
   frame: Frame,
   name: string,
-): Promise<{ className: string; text: string }[]> {
+): Promise<{ className: string; text: string; tag: string; name: string | null }[]> {
   interface Node {
     nodeName: string;
     nodeValue?: string;
@@ -796,7 +796,7 @@ async function layerNodes(
   const { root } = (await session.send("DOM.getDocument", { depth: -1, pierce: true })) as {
     root: Node;
   };
-  const labels: { className: string; text: string }[] = [];
+  const labels: { className: string; text: string; tag: string; name: string | null }[] = [];
   const named = new RegExp(`(^|\\s)${name}(\\s|$)`, "u");
   const text = (node: Node): string =>
     node.nodeName === "#text"
@@ -807,7 +807,13 @@ async function layerNodes(
     const classAt = attributes.indexOf("class");
     const className = classAt === -1 ? "" : (attributes[classAt + 1] ?? "");
     if (named.test(className)) {
-      labels.push({ className, text: text(node) });
+      const nameAt = attributes.indexOf("aria-label");
+      labels.push({
+        className,
+        text: text(node),
+        tag: node.nodeName,
+        name: nameAt === -1 ? null : (attributes[nameAt + 1] ?? null),
+      });
     }
     for (const child of [
       ...(node.children ?? []),
@@ -825,7 +831,8 @@ async function layerNodes(
 /**
  * Where the markers are on the line of `selector`'s last words (P105: beside that line, in its
  * gutter, at the frame's edge or past its last word), in the frame's viewport: the runs of points
- * along the line's middle where the shell's layer takes the pointer, which only a marker does.
+ * along the line's middle where the shell's layer takes the pointer, which only a marker does. A
+ * posted text mark's marker is on its paragraph's last line (P133): name the paragraph.
  */
 async function markersOnLine(frame: Frame, selector: string) {
   return frame.evaluate((where) => {
@@ -903,7 +910,7 @@ test("markers: a mark with a count gets a numbered bubble; its click is reported
   }
 
   // A click on the text's marker: reported with its box; nothing of the content's hears it.
-  const fell = await textMarkerPoint(frame, "#p1 b");
+  const fell = await textMarkerPoint(frame, "#p1");
   await page.mouse.click(fell.x, fell.y);
   const activated = await next(display, "activated");
   expect(activated.id, "probe: the text marker's click is reported for its mark").toBe("fell");
@@ -1196,7 +1203,7 @@ test("a hostile page fakes a marker's click: the host takes it only for a mark i
 
   // Content's own synthetic click on the shell's layer, where the marker is, reports nothing.
   const after = (await reports(display)).length;
-  const line = await markersOnLine(frame, "#p1 b");
+  const line = await markersOnLine(frame, "#p1");
   const marker = line.runs[0];
   expect(marker, "the marker is on its line").toBeDefined();
   await frame.evaluate(
@@ -1333,7 +1340,7 @@ test("drafts (P107): a dashed line and a hollow marker with no number, apart fro
     "probe: the reported box is the draft's marker",
   ).toBeGreaterThanOrEqual(fell.x);
   count = (await reports(display)).length;
-  const rose = await textMarkerPoint(frame, "#p2 i");
+  const rose = await textMarkerPoint(frame, "#p2");
   await page.mouse.click(rose.x, rose.y);
   expect(
     (await next(display, "activated", count)).id,
@@ -1538,7 +1545,7 @@ test("a marker's press, of any kind, moves nothing of the content's: no handler,
   await expect(frame.locator("#field")).toBeVisible();
   await display.annotate("show", [textMark("fell", "fell", 3)]);
   await next(display, "anchored");
-  const at = await textMarkerPoint(frame, "#p1 b");
+  const at = await textMarkerPoint(frame, "#p1");
   const activations = async () =>
     (await reports(display)).filter((each) => each.type === "activated").length;
 
@@ -1628,7 +1635,7 @@ test("a page that patches the event's built-ins neither hears a marker's press n
   await expect(frame.locator("#after")).toBeVisible();
   await display.annotate("show", [textMark("fell", "fell", 3)]);
   await next(display, "anchored");
-  const at = await textMarkerPoint(frame, "#p1 b");
+  const at = await textMarkerPoint(frame, "#p1");
   const count = (await reports(display)).length;
   await page.mouse.click(at.x, at.y);
   await expect
@@ -1738,7 +1745,7 @@ test("a tap on a marker is reported on every engine, and the content hears none 
       await expect(frame.locator("#after")).toBeVisible();
       await display.annotate("show", [textMark("fell", "fell", 3)]);
       await next(display, "anchored");
-      const at = await textMarkerPoint(frame, "#p1 b");
+      const at = await textMarkerPoint(frame, "#p1");
       // Nothing asks either page anything for 6 s (an evaluate is a gesture): the tap's own
       // activation is what the host takes it by.
       await page.waitForTimeout(6_000);
@@ -1827,7 +1834,7 @@ test("on touch, a marker takes a tap a few px off its bubble (44 by 44), after t
       const offset = (await (await frame.frameElement()).boundingBox()) ?? { x: 0, y: 0 };
       const tap = (x: number, y: number) => page.touchscreen.tap(offset.x + x, offset.y + y);
       // At its middle: its own box comes back with the report.
-      const middle = await textMarkerPoint(frame, "#p1 b");
+      const middle = await textMarkerPoint(frame, "#p1");
       let count = (await reports(display)).length;
       await page.touchscreen.tap(middle.x, middle.y);
       await expect
@@ -1844,8 +1851,7 @@ test("on touch, a marker takes a tap a few px off its bubble (44 by 44), after t
       expect(own.height, "the bubble is as it was: 18 px").toBe(18);
       expect(own.width, "the bubble is as it was: narrower than 44 px").toBeLessThan(44);
       const x = own.x + own.width / 2;
-      // 11 px below its bottom edge, 11 above its top, 4 px left of it (it is in the gutter, at
-      // the frame's edge): inside 44 by 44.
+      // 11 px below its bottom edge, 11 above its top, 4 px left of it: inside 44 by 44.
       for (const [where, px, py] of [
         ["below", x, own.y + own.height + 11],
         ["above", x, own.y - 11],
@@ -2095,7 +2101,7 @@ test("a mouse is as before: a click just off a marker's bubble is the page's, al
         await page.touchscreen.tap(offset.x + 10, offset.y + 10);
         await expect.poll(async () => (await heardOf(frame)).clicks).toBe(1);
       }
-      const middle = await textMarkerPoint(frame, "#p1 b");
+      const middle = await textMarkerPoint(frame, "#p1");
       let count = (await reports(display)).length;
       await page.mouse.click(middle.x, middle.y);
       await expect.poll(() => activatedSince(display, count)).toEqual(["fell"]);
@@ -2242,19 +2248,21 @@ test("text markers cover no word: on a column page, and on a phone's lines with 
     const count = (await reports(display)).length;
     await display.annotate("show", [
       textMark("mid", "Revenue grew 12%", 3),
-      textMark("hire", "one designer", 99),
       textMark("card", "lowest in two years", 4),
       textMark("cell", "$1.2M", 7),
       elementMark("title", "#title", 0),
       elementMark("c2", "#c2", 2),
-      // On a phone two or three anchors ending on one full line can't all fit beside it: the
-      // column only (P105).
+      // Posted, each goes to its paragraph's end (P133), where on a phone two or three can't all
+      // fit beside a full last line: the column only (P105). A draft stays by its words: at the
+      // start of a line, with the rest of it beside them, and a marker just past them covers those.
       ...(kind === "column"
         ? [
+            textMark("hire", "one designer", 99),
             textMark("end", at.lineEnd, 1),
             textMark("wrap", at.wrapped, 12),
             textMark("two-a", at.firstOfTwo, 2),
             textMark("two-b", at.secondOfTwo, 5),
+            asDraft(textMark("next", "Next steps")),
           ]
         : []),
     ]);
@@ -2264,6 +2272,219 @@ test("text markers cover no word: on a column page, and on a phone's lines with 
     expect(markerPoints, `the markers are drawn (${kind})`).toBeGreaterThan(0);
     expect(covered, `probe: no marker covers a word (${kind})`).toEqual([]);
   }
+});
+
+test("a posted comment's marker sits at its paragraph's end, past the last word, a nested block's words not its own; a draft's stays by its words (P133)", async ({
+  page,
+}) => {
+  const words = "All of these words wrap the paragraph on to its next lines. ".repeat(6);
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    widthPx: 420,
+    heightPx: 640,
+    content: `<!doctype html><html><head><title>Ends</title></head><body style="margin: 20px; font-size: 16px">
+<p id="para">Alpha <b id="word">beta</b> gamma. ${words}<br>The end.</p>
+<ul><li id="item">An <b id="inner">item</b> with more.<ul><li id="nested">Its nested words.</li></ul></li></ul>
+</body></html>`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#nested")).toBeVisible();
+  await showAndDraw(display, frame, [
+    textMark("second", "gamma", 2),
+    textMark("first", "beta", 3),
+    textMark("inner", "item", 1),
+  ]);
+  /** How far right the words of `selector`'s last line reach. */
+  const wordsEnd = (selector: string) =>
+    frame.evaluate((where) => {
+      const range = document.createRange();
+      range.selectNodeContents(document.querySelector(where) as Node);
+      const last = Array.from(range.getClientRects())
+        .filter((rect) => rect.width > 0)
+        .at(-1);
+      return last?.right ?? 0;
+    }, selector);
+  // On the paragraph's last line, just past its words, in the order their own words end; none is
+  // left on the words' own line.
+  const end = await markersOnLine(frame, "#para");
+  expect(end.runs, "probe: both markers are on the paragraph's last line").toHaveLength(2);
+  const right = await wordsEnd("#para");
+  expect(end.runs[0]?.left, "probe: past the paragraph's last word").toBeGreaterThanOrEqual(right);
+  expect(end.runs[0]?.left, "probe: just past it, not in the gutter").toBeLessThan(right + 14);
+  expect(
+    (await markersOnLine(frame, "#word")).runs,
+    "probe: nothing stays on the words' own line",
+  ).toEqual([]);
+  const count = (await reports(display)).length;
+  const { x, y } = await textMarkerPoint(frame, "#para");
+  await page.mouse.click(x, y);
+  expect(
+    (await next(display, "activated", count)).id,
+    "probe: those on one paragraph's end go in the order their words end",
+  ).toBe("first");
+  // A list item's words end where its nested list starts: that list is its own paragraph.
+  expect(
+    (await markersOnLine(frame, "#inner")).runs,
+    "probe: the item's marker is on the item's own last line",
+  ).toHaveLength(1);
+  expect(
+    (await markersOnLine(frame, "#nested")).runs,
+    "probe: not on a nested block's words",
+  ).toEqual([]);
+
+  // A draft stays beside the words being written on, a posted mark on the same words moves.
+  await showAndDraw(display, frame, [
+    asDraft(textMark("draft", "beta")),
+    textMark("posted", "gamma", 2),
+  ]);
+  expect(
+    (await markersOnLine(frame, "#word")).runs,
+    "probe: a draft's marker stays on its words' line",
+  ).toHaveLength(1);
+  expect(
+    (await markersOnLine(frame, "#para")).runs,
+    "probe: the posted one's is at the paragraph's end",
+  ).toHaveLength(1);
+});
+
+/** A page of two short paragraphs and a field, hearing what reaches it of a key on the layer. */
+const KEYED = `<p id="p1" style="font-size: 18px">Costs <b>fell</b> by three percent.</p>
+<p id="p2" style="font-size: 18px">Sales <i>rose</i> by two percent.</p>
+<input id="field" value="typed">
+<script>
+  window.heard = [];
+  const layer = () => document.querySelector("[data-porthole-annotations]");
+  for (const type of ["keydown", "keypress", "keyup", "click"]) {
+    window.addEventListener(type, (event) => {
+      if (event.target === layer() && (type === "click" || event.key === "Enter" || event.key === " ")) {
+        window.heard.push(type);
+      }
+    }, true);
+  }
+</script>`;
+
+/** Whether the page's focus is on the shell's layer: on one of its markers, to the page. */
+const onLayer = (frame: Frame) =>
+  frame.evaluate(
+    () => document.activeElement === document.querySelector("[data-porthole-annotations]"),
+  );
+
+test("a marker is a button the keyboard reaches: Tab in reading order, Enter and Space report it once, the content hears neither, and it steps aside while elements are picked (P133)", async ({
+  page,
+  browserName,
+}) => {
+  const display = await referenceHost.launch(page, { config: annotated(), content: KEYED });
+  const frame = await display.frame();
+  await expect(frame.locator("#field")).toBeVisible();
+  // Shown out of the page's order: the keyboard goes by the page, not by the host's list.
+  await showAndDraw(display, frame, [textMark("rose", "rose", 2), textMark("fell", "fell", 1)]);
+  expect(
+    await frame.locator("[data-porthole-annotations]").getAttribute("aria-hidden"),
+    "probe: the layer isn't hidden from assistive technology",
+  ).toBeNull();
+  if (browserName === "chromium") {
+    expect(
+      (await layerNodes(page, frame, "marker")).map(({ tag, name }) => ({ tag, name })),
+      "probe: each marker is a button named for what it is, in the page's order",
+    ).toEqual([
+      { tag: "BUTTON", name: "1 comment on fell" },
+      { tag: "BUTTON", name: "2 comments on rose" },
+    ]);
+  }
+  await frame.locator("#field").focus();
+
+  await page.keyboard.press("Tab");
+  await expect.poll(() => onLayer(frame), { message: "probe: Tab reaches a marker" }).toBe(true);
+  let count = (await reports(display)).length;
+  await page.keyboard.press("Enter");
+  const first = await next(display, "activated", count);
+  expect(first.id, "probe: Enter reports the page's first marker").toBe("fell");
+  expect(first.rect.width, "probe: with the marker's box").toBeGreaterThan(0);
+
+  await page.keyboard.press("Tab");
+  count = (await reports(display)).length;
+  await page.keyboard.press("Space");
+  const second = await next(display, "activated", count);
+  expect(second.id, "probe: Tab goes on to the next, Space reports it").toBe("rose");
+  expect(second.rect.y, "probe: the next marker's box").toBeGreaterThan(first.rect.y);
+
+  // Held down, a key clicks once: each repeat would spend the bridge's rate.
+  count = (await reports(display)).length;
+  await page.keyboard.down("Enter");
+  await page.keyboard.down("Enter");
+  await page.keyboard.down("Enter");
+  await page.keyboard.up("Enter");
+  await next(display, "activated", count);
+  await page.waitForTimeout(300);
+  expect(
+    (await reports(display)).slice(count).filter((each) => each.type === "activated"),
+    "probe: a key held down clicks once",
+  ).toHaveLength(1);
+
+  await expect(frame.locator("#field"), "typing goes nowhere near the field").toHaveValue("typed");
+  expect(
+    await frame.evaluate(() => (window as unknown as { heard: string[] }).heard),
+    "probe: the content heard no key that clicks a marker, and no click",
+  ).toEqual([]);
+
+  // Picking elements, markers step aside: the key on one reports nothing, and Tab passes them.
+  await display.annotate("start", { elements: true, text: false });
+  await frame.evaluate(
+    () =>
+      new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve(0))),
+      ),
+  );
+  count = (await reports(display)).length;
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(300);
+  expect(
+    (await reports(display)).slice(count).filter((each) => each.type === "activated"),
+    "probe: no marker reports while elements are picked",
+  ).toEqual([]);
+});
+
+test("a marker out of view brings itself into view as the keyboard reaches it, and keeps the focus as the page scrolls and redraws (P133)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    heightPx: 500,
+    content: `<!doctype html><html><head><title>Long</title></head><body style="margin: 8px">
+<input id="field"><p id="near">The near words.</p>
+<div style="height: 2000px">spacer</div>
+<p id="far">The far words.</p>
+<div style="height: 1500px">spacer</div>
+</body></html>`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#far")).toBeAttached();
+  await showAndDraw(display, frame, [textMark("near", "near", 1), textMark("far", "far", 2)]);
+  await frame.locator("#field").focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect
+    .poll(() => frame.evaluate(() => Math.round(window.scrollY)), {
+      message: "probe: the document scrolled to the marker",
+    })
+    .toBeGreaterThan(1_500);
+  await expect
+    .poll(async () => (await markersOnLine(frame, "#far")).runs.length, {
+      message: "probe: the marker is drawn on its line, the layer not scrolled away from it",
+    })
+    .toBe(1);
+  expect(await onLayer(frame), "probe: it has the focus").toBe(true);
+  // Redraws, of a scroll and of a change of the content, leave it there.
+  await frame.evaluate(() => window.scrollBy(0, 40));
+  await frame.evaluate(() => document.body.append(document.createElement("div")));
+  await page.waitForTimeout(600);
+  expect(await onLayer(frame), "probe: a redraw leaves the focus on the marker").toBe(true);
+  const count = (await reports(display)).length;
+  await page.keyboard.press("Enter");
+  expect(
+    (await next(display, "activated", count)).id,
+    "probe: the key is still the same marker's",
+  ).toBe("far");
 });
 
 /** ADOPTING.md's guardPresses, as it is written there: the duty's reference code (P105). */
@@ -2588,6 +2809,115 @@ test("every attached mark's place in the document comes with the scroll it was r
     },
   ]);
   expect(far.scroll).toEqual({ x: 0, y: -5_000 });
+});
+
+test("a selection's and a mark's last line come in the document's coordinates with the scroll, offscreen ones too; rect stays clamped (P133)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    widthPx: 480,
+    heightPx: 300,
+    content: `<!doctype html><html><head><title>Lines</title></head><body style="margin: 0">
+<div style="height: 700px">spacer</div>
+<p id="lines" style="margin: 8px; font-size: 16px; white-space: pre-line">The first line of words
+the second line of words
+the third one ends here</p>
+<div id="block" style="margin: 8px; height: 40px">A block</div>
+<div style="height: 1200px">spacer</div>
+</body></html>`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#lines")).toBeAttached();
+  const phrase = "line of words\nthe second line of words\nthe third one";
+  // Where the phrase's last line is in the document, as the page reads it.
+  const measured = await frame.evaluate((exact) => {
+    const node = document.getElementById("lines")?.firstChild as Text;
+    const at = (node.nodeValue ?? "").indexOf(exact);
+    const range = document.createRange();
+    range.setStart(node, at);
+    range.setEnd(node, at + exact.length);
+    const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0);
+    const last = rects.at(-1) as DOMRect;
+    return { lines: rects.length, y: last.top + scrollY, right: last.right + scrollX };
+  }, phrase);
+  expect(measured.lines, "the phrase runs over three lines").toBe(3);
+  const near = (box: { x: number; y: number; width: number } | undefined) =>
+    box !== undefined &&
+    Math.abs(box.y - measured.y) < 1 &&
+    Math.abs(box.x + box.width - measured.right) < 1;
+
+  // A selection below the frame: its box on the frame's edge, its last line where it is.
+  await display.annotate("start", { elements: false, text: true });
+  expect(await select(frame, "#lines", phrase)).toBe(true);
+  const selected = await next(display, "selected");
+  expect(selected.rect.height, "probe: rect stays clamped to the frame").toBe(0);
+  expect(selected.scroll, "probe: the scroll it was read at").toEqual({ x: 0, y: 0 });
+  expect(
+    near(selected.lastLineDocumentRect),
+    "probe: the selection's last line, in the document",
+  ).toBe(true);
+  // Scrolled to it: told again, the place in the document the same, less the scroll in view.
+  let count = (await reports(display)).length;
+  await frame.evaluate(() => window.scrollBy(0, 650));
+  const moved = await next(display, "selected", count);
+  expect(moved.scroll?.y, "probe: the selection's report tells the scroll").toBe(650);
+  expect(near(moved.lastLineDocumentRect), "probe: its last line stays where it is").toBe(true);
+  await display.annotate("stop");
+  await frame.evaluate(() => window.scrollTo(0, 0));
+
+  // A mark's: on each result, and on the followed mark's reports; an element's is its box.
+  count = (await reports(display)).length;
+  await display.annotate("show", [textMark("words", phrase, 1), elementMark("block", "#block")]);
+  const shown = await next(display, "anchored", count);
+  const resultOf = (id: string) => shown.results.find((each) => each.id === id);
+  expect(resultOf("words")?.rect?.height, "probe: a result's rect stays clamped").toBe(0);
+  expect(
+    near(resultOf("words")?.lastLineDocumentRect),
+    "probe: a result's last line, in the document",
+  ).toBe(true);
+  expect(
+    resultOf("block")?.lastLineDocumentRect,
+    "probe: an element's last line is its whole box",
+  ).toEqual(resultOf("block")?.documentRect);
+  expect(await display.annotate("track", "words")).toBeNull();
+  count = (await reports(display)).length;
+  await frame.evaluate(() => window.scrollBy(0, 300));
+  const tracked = await next(display, "tracked", count);
+  expect(
+    near(tracked.lastLineDocumentRect),
+    "probe: the followed mark's last line, in the document",
+  ).toBe(true);
+
+  // The page's word: never clamped, a malformed one is no report.
+  const fake = (params: unknown) =>
+    frame.evaluate(
+      (given) =>
+        parent.postMessage(
+          { jsonrpc: "2.0", method: "porthole/annotate.selected", params: given },
+          "*",
+        ),
+      params,
+    );
+  await display.annotate("start", { elements: false, text: true });
+  const rect = { x: 0, y: 0, width: 10, height: 10 };
+  const anchor = textMark("any", "first").anchor;
+  const invalid = (await refusals(display)).filter((each) => each === "annotate:invalid").length;
+  await fake({ anchor, rect, lastLineDocumentRect: { ...rect, height: -1 } });
+  await expect
+    .poll(
+      async () =>
+        (await refusals(display)).filter((each) => each === "annotate:invalid").length - invalid,
+      { message: "probe: a malformed last line is refused" },
+    )
+    .toBe(1);
+  count = (await reports(display)).length;
+  const far = { x: 0, y: 9_000_000, width: 10, height: 10 };
+  await fake({ anchor, rect, lastLineDocumentRect: far, scroll: { x: 0, y: 0 } });
+  expect(
+    (await next(display, "selected", count)).lastLineDocumentRect,
+    "probe: a last line far down the document, as the page said",
+  ).toEqual(far);
 });
 
 test("an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second", async ({

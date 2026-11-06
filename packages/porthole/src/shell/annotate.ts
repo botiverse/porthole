@@ -51,17 +51,21 @@ export const MARKER_HIT = String.raw`(count, boxAt, x, y, touch) => {
  *   was, its text anywhere, its words with any spacing) and drawn over it, in a layer of the
  *   shell's own (a closed shadow root), again whenever the content changes; what can't be found
  *   is reported `orphaned`;
- * - markers (P104): a mark with a count gets a small bubble with the number beside its anchor's
- *   last line (P105: in the line's gutter); a click on it is reported (`activated`), and the
- *   content's own handlers never see it; a draft (P107) is drawn apart, a dashed line and a hollow
- *   bubble with no number, and has a marker with or without a count;
+ * - markers (P104): a mark with a count gets a small button with the number, a bubble: a text
+ *   anchor's at its paragraph's end (P133), a draft's (P107) beside its anchor's last line (P105:
+ *   in the line's gutter), an element's on its corner; a click on it, or Enter or Space with the
+ *   focus on it (P133), is reported (`activated`), and the content's own handlers never see it; a
+ *   draft is drawn apart, a dashed line and a hollow bubble with no number, and has a marker with
+ *   or without a count;
  * - following: while a mark has a marker, once a scroll, a resize or a change of the content
  *   settles, the marks that moved since the host was last told are reported, at most once a
  *   second, so the host's own UI beside a mark can follow;
  * - places in the document (P132): each result's box also in the document's coordinates
  *   (`documentRect`), with how far the document was scrolled as it was read (`scroll`), and the
  *   followed mark's (`tracked`) too, so a host places marks scrolled out of the frame, and keeps
- *   them placed as the document scrolls, from one report and the followed mark's scroll.
+ *   them placed as the document scrolls, from one report and the followed mark's scroll;
+ * - the last line (P133): where a selection or a mark's words end, in the document's coordinates
+ *   too (`lastLineDocumentRect`), so a host places its UI after them.
  *
  * It shares the realm with the content, which can interfere with all of it: the host takes its
  * reports as UI hints only.
@@ -323,6 +327,19 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       };
       // A box in the viewport, in the document (P132): where it is as the document scrolls.
       const inDocument = (rect, scroll) => ({ x: rect.x + scroll.x, y: rect.y + scroll.y, width: rect.width, height: rect.height });
+      // Where what was found ends (P133), in the document as a documentRect is: its last line with
+      // words on it, or an element's whole box (it has no lines of its own). Null with nothing drawn.
+      const lastLineOf = (found, scroll) => {
+        const rect = found.range ? lastBox(rangeRects.call(found.range)) : elementRect.call(found.element);
+        return rect === null ? null : inDocument(box(rect), scroll);
+      };
+      // What a selection's report adds to its box (P133): its last line, with the scroll it was
+      // read at; neither where nothing of it is drawn.
+      const placeOf = (found) => {
+        const scroll = scrollOf();
+        const lastLineDocumentRect = lastLineOf(found, scroll);
+        return lastLineDocumentRect === null ? {} : { lastLineDocumentRect, scroll };
+      };
 
       // The shell's own layer, over the content: marks, the outline of what would be picked.
       let layer = null;
@@ -337,18 +354,22 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       // marker hollow, a light bubble with a dashed edge and the glyph's outline, no number.
       // While the last pointer was a finger or a pen (P119), each marker takes the pointer in a
       // box of at least 44 by 44 px centred on its own (an invisible ::before; 100% is its padding
-      // box, its border 1 px), so a tap a few px off still lands on the shell's layer.
-      const STYLE = ".mark{position:absolute;border-radius:2px;background:rgba(250,204,21,.18);box-shadow:inset 0 -2px 0 rgba(234,179,8,.95)}.mark.element{background:rgba(250,204,21,.07);box-shadow:none;outline:2px solid rgba(234,179,8,.9);outline-offset:1px}.mark.active{background:rgba(250,204,21,.26);box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 2px rgba(234,179,8,.45)}.mark.element.active{background:rgba(250,204,21,.12);box-shadow:none;outline-width:3px}.mark.element.quiet{background:rgba(250,204,21,.05);outline:1px solid rgba(234,179,8,.6);outline-offset:2px}.mark.element.quiet.active{background:rgba(250,204,21,.1);outline:2px solid rgba(234,179,8,.9)}.mark.draft{box-sizing:border-box;background:rgba(250,204,21,.08);box-shadow:none;border-bottom:2px dashed rgba(202,138,4,.95)}.mark.draft.active{background:rgba(250,204,21,.16);box-shadow:0 0 0 2px rgba(234,179,8,.45);border-bottom-width:3px}.mark.element.draft{background:rgba(250,204,21,.04);border-bottom:0;outline-style:dashed}.mark.element.draft.active{background:rgba(250,204,21,.08);box-shadow:none;outline-style:dashed}.marker{position:absolute;box-sizing:border-box;height:18px;min-width:18px;display:flex;align-items:center;justify-content:center;gap:3px;margin:0;padding:0 5px;border:1px solid rgba(161,98,7,.6);border-radius:9px 9px 9px 2px;background:#fde68a;color:#422006;box-shadow:0 1px 2px rgba(0,0,0,.3);font:600 11px/16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-style:normal;letter-spacing:0;word-spacing:0;text-transform:none;text-indent:0;text-shadow:none;direction:ltr;writing-mode:horizontal-tb;white-space:nowrap;user-select:none;-webkit-user-select:none;cursor:pointer;pointer-events:auto}.marker:hover{background:#fcd34d}.marker.active{background:#facc15;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.3)}.marker.compact{padding:0 4px}.marker.draft{border:1px dashed rgb(202,138,4);background:#fffdf5;color:#a16207;box-shadow:0 1px 2px rgba(0,0,0,.2)}.marker.draft:hover{background:#fef9e7}.marker.draft.active{background:#fef3c7;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.2)}.marker.inert{pointer-events:none}.touch>.marker::before{content:'';position:absolute;left:50%;top:50%;width:max(100% + 2px,44px);height:max(100% + 2px,44px);transform:translate(-50%,-50%)}.marker svg{display:block;width:11px;height:11px;flex:none}.mark.flash{animation:flash 1.8s ease-out}@keyframes flash{from{box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 6px rgba(250,204,21,.6)}}.hover{position:absolute;outline:2px solid #2563eb;outline-offset:1px;background:rgba(37,99,235,.12)}.tag{position:absolute;max-width:70vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace;padding:0 6px;border-radius:4px;background:#1e293b;color:#fff}";
+      // box, its border 1 px), so a tap a few px off still lands on the shell's layer. A marker is
+      // a real button (P133): what a browser gives one is taken off, a ring says it has the focus.
+      const STYLE = ".mark{position:absolute;border-radius:2px;background:rgba(250,204,21,.18);box-shadow:inset 0 -2px 0 rgba(234,179,8,.95)}.mark.element{background:rgba(250,204,21,.07);box-shadow:none;outline:2px solid rgba(234,179,8,.9);outline-offset:1px}.mark.active{background:rgba(250,204,21,.26);box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 2px rgba(234,179,8,.45)}.mark.element.active{background:rgba(250,204,21,.12);box-shadow:none;outline-width:3px}.mark.element.quiet{background:rgba(250,204,21,.05);outline:1px solid rgba(234,179,8,.6);outline-offset:2px}.mark.element.quiet.active{background:rgba(250,204,21,.1);outline:2px solid rgba(234,179,8,.9)}.mark.draft{box-sizing:border-box;background:rgba(250,204,21,.08);box-shadow:none;border-bottom:2px dashed rgba(202,138,4,.95)}.mark.draft.active{background:rgba(250,204,21,.16);box-shadow:0 0 0 2px rgba(234,179,8,.45);border-bottom-width:3px}.mark.element.draft{background:rgba(250,204,21,.04);border-bottom:0;outline-style:dashed}.mark.element.draft.active{background:rgba(250,204,21,.08);box-shadow:none;outline-style:dashed}.marker{position:absolute;box-sizing:border-box;height:18px;min-width:18px;display:flex;align-items:center;justify-content:center;gap:3px;margin:0;padding:0 5px;border:1px solid rgba(161,98,7,.6);border-radius:9px 9px 9px 2px;background:#fde68a;color:#422006;box-shadow:0 1px 2px rgba(0,0,0,.3);font:600 11px/16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-style:normal;letter-spacing:0;word-spacing:0;text-transform:none;text-indent:0;text-shadow:none;direction:ltr;writing-mode:horizontal-tb;white-space:nowrap;user-select:none;-webkit-user-select:none;cursor:pointer;pointer-events:auto;appearance:none;-webkit-appearance:none}.marker:focus-visible{outline:2px solid #2563eb;outline-offset:1px}.marker:hover{background:#fcd34d}.marker.active{background:#facc15;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.3)}.marker.compact{padding:0 4px}.marker.draft{border:1px dashed rgb(202,138,4);background:#fffdf5;color:#a16207;box-shadow:0 1px 2px rgba(0,0,0,.2)}.marker.draft:hover{background:#fef9e7}.marker.draft.active{background:#fef3c7;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.2)}.marker.inert,[data-placing]>.marker{pointer-events:none}.touch>.marker::before{content:'';position:absolute;left:50%;top:50%;width:max(100% + 2px,44px);height:max(100% + 2px,44px);transform:translate(-50%,-50%)}.marker svg{display:block;width:11px;height:11px;flex:none}.mark.flash{animation:flash 1.8s ease-out}@keyframes flash{from{box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 6px rgba(250,204,21,.6)}}.hover{position:absolute;outline:2px solid #2563eb;outline-offset:1px;background:rgba(37,99,235,.12)}.tag{position:absolute;max-width:70vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace;padding:0 6px;border-radius:4px;background:#1e293b;color:#fff}";
       // Inline and important: the content's own style sheets can't hide, shrink or move it by
       // accident. Set again at each draw, since its scripts can rewrite it (narrowing only: the
-      // content can still cover the layer, or move it with its ancestors, P104).
-      const LAYER_STYLE = "position:fixed!important;inset:0!important;width:auto!important;height:auto!important;min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;display:block!important;visibility:visible!important;opacity:1!important;pointer-events:none!important;z-index:2147483647!important;overflow:hidden!important;margin:0!important;padding:0!important;border:0!important;background:none!important;transform:none!important;scale:none!important;translate:none!important;rotate:none!important;zoom:1!important;clip-path:none!important;mask:none!important;filter:none!important;content-visibility:visible!important;contain:none!important";
+      // content can still cover the layer, or move it with its ancestors, P104). Clipped, where an
+      // engine has it, not hidden: hidden is a box a focused marker out of view would scroll (P133).
+      const LAYER_STYLE = "position:fixed!important;inset:0!important;width:auto!important;height:auto!important;min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;display:block!important;visibility:visible!important;opacity:1!important;pointer-events:none!important;z-index:2147483647!important;overflow:hidden!important;overflow:clip!important;margin:0!important;padding:0!important;border:0!important;background:none!important;transform:none!important;scale:none!important;translate:none!important;rotate:none!important;zoom:1!important;clip-path:none!important;mask:none!important;filter:none!important;content-visibility:visible!important;contain:none!important";
       const ensureLayer = () => {
         if (layer === null) {
           layer = createElement.call(document, "div");
-          layer.setAttribute("aria-hidden", "true");
           layer.setAttribute("data-porthole-annotations", "");
           shadow = attachShadow.call(layer, { mode: "closed" });
+          // Within the shadow root: a focus moving from one marker to the next never leaves it.
+          callOf(listenOn, shadow, ["focusin", onMarkerFocus]);
+          callOf(listenOn, shadow, ["focusout", onMarkerFocus]);
         }
         if (layer.style.cssText !== LAYER_STYLE) {
           layer.style.cssText = LAYER_STYLE;
@@ -380,6 +401,13 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const markerWidth = (label) => Math.max(MARKER_HEIGHT, 23 + (label === "" ? 0 : 3 + label.length * 7));
       // Compact (P105): the number alone, or the glyph alone for none, with less padding.
       const compactWidth = (label) => (label === "" ? 21 : Math.max(MARKER_HEIGHT, 10 + label.length * 7));
+      // What a marker is called (P133), to whoever can't see it: what it is, and the words it is
+      // on. In English, whatever the page's language: the shell has no words of the host's.
+      const nameOf = (mark) => {
+        const words = typeof mark.anchor.label === "string" ? squash(mark.anchor.label).slice(0, LIMIT.label) : "";
+        const what = mark.draft ? "Draft comment" : mark.count === 1 ? "1 comment" : mark.count > 1 ? mark.count + " comments" : "Comment";
+        return words === "" ? what : what + " on " + words;
+      };
       // A rect's last line with words on it: its last box with a width, else any with a size.
       const lastBox = (rects) => {
         let any = null;
@@ -403,7 +431,9 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       // in a row of them), just past the line's last word. Markers on one line of one block go
       // together, in the order their words end. Where the bubble with its glyph fits in none of
       // these, the number alone does (compact); where that fits in none either (a full line on a
-      // narrow screen), it goes as far right as it can, over the line's end.
+      // narrow screen), it goes as far right as it can, over the line's end. A posted comment's
+      // marker (P133) is placed the same way on its paragraph's last line instead, where nothing
+      // follows its words, and first tries just past that line's last word.
       const computedOf = window.getComputedStyle;
       const elementsAt = Document.prototype.elementsFromPoint;
       const containsOf = Node.prototype.contains;
@@ -463,6 +493,52 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
         return end;
       };
+      // The end of the paragraph an anchor ends in (P133): a range over the block's last words
+      // that are drawn, from the anchor's end on, as far as a block inside it (a nested list, say:
+      // its words are their own paragraph), 256 text nodes at most. Null if none follow the anchor.
+      const inBlock = (node, block) => {
+        for (let at = node.parentElement; at !== null && at !== block; at = at.parentElement) {
+          if (!INLINE.test(computedOf.call(window, at).display)) {
+            return false;
+          }
+        }
+        return true;
+      };
+      const paragraphEnd = (range, block) => {
+        const start = range.endContainer;
+        if (start.nodeType !== 3) {
+          return null;
+        }
+        const walker = createTreeWalker.call(document, block, NodeFilter.SHOW_TEXT);
+        walker.currentNode = start;
+        let end = null;
+        let node = start;
+        for (let pieces = 0; node !== null && pieces < 256; pieces += 1) {
+          if (node !== start && !inBlock(node, block)) {
+            break;
+          }
+          const words = node.nodeValue;
+          const first = node === start ? range.endOffset : 0;
+          let to = words.length;
+          while (to > first && /\s/.test(words.charAt(to - 1))) {
+            to -= 1;
+          }
+          if (to > first) {
+            const piece = createRange.call(document);
+            try {
+              piece.setStart(node, Math.max(first, to - 2));
+              piece.setEnd(node, to);
+            } catch (_) {
+              return end;
+            }
+            if (lastBox(rangeRects.call(piece)) !== null) {
+              end = piece;
+            }
+          }
+          node = walker.nextNode();
+        }
+        return end;
+      };
       // Nothing of the content's at a point but a box that holds the block (its background); a
       // point out of view hides nothing.
       const clearAt = (x, y, block) => {
@@ -515,7 +591,11 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           return null;
         };
         const gutter = right + gap;
-        let left = fits(gutter, false);
+        // A paragraph's end (P133): just past its last word, where the line leaves the room.
+        let left = line.ending ? fits(line.words + gap, false) : null;
+        if (left === null) {
+          left = fits(gutter, false);
+        }
         if (left === null && gutter > most) {
           left = fits(most, true);
         }
@@ -527,7 +607,8 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const placeLines = (wanted, placed, room) => {
         // One line of one block: markers whose last lines share a middle.
         const lines = [];
-        wanted.sort((a, b) => a.at.top - b.at.top || a.at.right - b.at.right);
+        // In the order their words end, those at one paragraph's end too.
+        wanted.sort((a, b) => a.at.top - b.at.top || a.at.right - b.at.right || a.words.top - b.words.top || a.words.right - b.words.right);
         for (const each of wanted) {
           const middle = each.at.top + each.at.height / 2;
           let line = null;
@@ -537,10 +618,11 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             }
           }
           if (line === null) {
-            line = { block: each.block, middle, height: each.at.height, bottom: each.at.bottom, range: each.range, at: each.at, items: [] };
+            line = { block: each.block, middle, height: each.at.height, bottom: each.at.bottom, range: each.range, at: each.at, ending: false, items: [] };
             lines.push(line);
           }
           line.items.push(each);
+          line.ending = line.ending || each.ending;
           if (each.at.right > line.at.right) {
             line.at = each.at;
             line.range = each.range;
@@ -619,20 +701,24 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         const kept = markerNodes.get(mark.id);
         let marker = kept ? kept.element : null;
         if (marker === null) {
-          marker = createElement.call(document, "div");
-          // A listener of its own makes it a thing to tap: WebKit makes a tap a click only on such
-          // an element (P105, measured: the window's listener isn't enough). It never runs (the
-          // window's first listener stops every click on the layer); the click is told there.
-          callOf(listenOn, marker, ["click", tapTarget]);
+          // A real button (P133): the keyboard reaches it, Enter and Space click it, assistive
+          // technology names it, and WebKit makes a tap a click on it (P105).
+          marker = createElement.call(document, "button");
+          marker.setAttribute("type", "button");
         }
+        // Stepped aside while elements are picked, from the keyboard too. Set, not left to the
+        // button: Safari's Tab skips a button without one, unless the person asked otherwise.
+        marker.tabIndex = mode.elements ? -1 : 0;
         marker.className = "marker" + (mark.draft ? " draft" : "") + (each.compact ? " compact" : "") + (mark.id === active ? " active" : "") + (mode.elements ? " inert" : "");
         marker.style.cssText = "left:" + each.left + "px;top:" + each.top + "px";
         markers.push({ id: mark.id, element: marker });
-        const form = (mark.draft ? "draft:" : "") + (each.compact ? "compact:" : "full:") + label;
+        const name = nameOf(mark);
+        const form = (mark.draft ? "draft:" : "") + (each.compact ? "compact:" : "full:") + label + ":" + name;
         if (kept && kept.form === form) {
           return marker;
         }
         markerNodes.set(mark.id, { element: marker, form });
+        marker.setAttribute("aria-label", name);
         marker.replaceChildren();
         if (!each.compact || label === "") {
           const glyph = createElementNS.call(document, SVG, "svg");
@@ -659,10 +745,9 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
         return marker;
       };
-      const tapTarget = () => {};
       let active = null;
-      // The mark whose marker the pointer is over: its words are lit as the active mark's are, so
-      // a marker in the gutter shows which words it is for (P105).
+      // The mark whose marker the pointer is over, or the focus is on (P133): its words are lit as
+      // the active mark's are, so a marker in the gutter shows which words it is for (P105).
       let hot = null;
       let flashing = null;
       let flashUntil = 0;
@@ -678,6 +763,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             style.nonce = nonce;
           }
           boxes = { style, marks: createElement.call(document, "div"), markers: createElement.call(document, "div"), hover: createElement.call(document, "div") };
+          // Only the markers are for assistive technology (P133): the rest draws what the page
+          // already says.
+          boxes.marks.setAttribute("aria-hidden", "true");
+          boxes.hover.setAttribute("aria-hidden", "true");
           root.replaceChildren(boxes.style, boxes.marks, boxes.markers, boxes.hover);
         }
         if (boxes.style.textContent !== STYLE) {
@@ -699,6 +788,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         // What is measured first, then drawn: no node of the layer changes while the page is read.
         const corners = [];
         const wanted = [];
+        const focused = focusedMarker() !== null;
         markers = [];
         for (const mark of marks) {
           if (mark.found === null) {
@@ -719,14 +809,28 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             if (at !== null) {
               // A draft's marker has no number (P107).
               const label = mark.draft ? "" : labelOf(mark.count);
-              const each = { mark, order: corners.length + wanted.length, label, width: markerWidth(label), small: compactWidth(label), compact: false, at, left: 0, top: 0 };
+              const each = { mark, label, width: markerWidth(label), small: compactWidth(label), compact: false, at, words: at, left: 0, top: 0, ending: false };
               if (mark.found.range) {
                 // Kept while it still holds the words (P105): a change elsewhere doesn't move them.
                 if (mark.block === undefined || !mark.block.isConnected || !containsOf.call(mark.block, mark.found.range.endContainer)) {
                   mark.block = blockOf(mark.found.range);
+                  mark.end = undefined;
                 }
                 each.range = mark.found.range;
                 each.block = mark.block;
+                // A posted comment's, at its paragraph's end (P133); read once for what was found,
+                // since a block's words can be long. A draft's stays by the words being written on.
+                if (!mark.draft) {
+                  each.ending = true;
+                  if (mark.end === undefined) {
+                    mark.end = paragraphEnd(mark.found.range, mark.block);
+                  }
+                  const last = mark.end === null ? null : lastBox(rangeRects.call(mark.end));
+                  if (last !== null) {
+                    each.at = last;
+                    each.range = mark.end;
+                  }
+                }
                 wanted.push(each);
               } else {
                 corners.push(each);
@@ -742,18 +846,25 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
         // The layer's own boxes out of the way while places are hit-tested (P105): each test
         // otherwise walks every mark and marker the last draw left (0.13 ms each, 300 of them).
+        // A marker with the focus would lose it out of the display (P133): while the person is on
+        // one, the markers only stop taking the pointer, which the tests skip but still walk.
         if (wanted.length > 0) {
           into.marks.style.display = "none";
-          into.markers.style.display = "none";
+          if (focused) {
+            into.markers.setAttribute("data-placing", "");
+          } else {
+            into.markers.style.display = "none";
+          }
           try {
             placeLines(wanted, placed, room);
           } finally {
             into.marks.style.display = "";
             into.markers.style.display = "";
+            into.markers.removeAttribute("data-placing");
           }
         }
         const badges = [];
-        for (const each of corners.concat(wanted).sort((a, b) => a.order - b.order)) {
+        for (const each of corners.concat(wanted).sort((a, b) => a.mark.reading - b.mark.reading)) {
           badges.push(markerOf(each));
         }
         for (const id of Array.from(markerNodes.keys())) {
@@ -779,11 +890,14 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             into.markers.removeChild(child);
           }
         }
-        for (const badge of badges) {
-          if (badge.parentNode !== into.markers) {
-            into.markers.appendChild(badge);
+        // In reading order, the Tab key's (P133). A marker that stays in its place isn't touched
+        // (a press spans a redraw, above), and none moves while one has the focus: it would lose it.
+        badges.forEach((badge, at) => {
+          const there = into.markers.childNodes[at] || null;
+          if (badge.parentNode !== into.markers || (!focused && there !== badge)) {
+            into.markers.insertBefore(badge, focused ? null : there);
           }
-        }
+        });
         into.hover.replaceChildren(...outlines);
       };
       let drawing = false;
@@ -819,7 +933,8 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             // Its box moves as the document scrolls, inside the frame or not: each one tells the
             // host the scroll, for every mark it places by its place in the document (P132).
             const scroll = scrollOf();
-            tell(M.tracked, { id: tracking, rect, documentRect: inDocument(rect, scroll), scroll });
+            const lastLineDocumentRect = lastLineOf(mark.found, scroll);
+            tell(M.tracked, Object.assign({ id: tracking, rect, documentRect: inDocument(rect, scroll), scroll }, lastLineDocumentRect === null ? {} : { lastLineDocumentRect }));
           }
         }
         trackFrame = nextFrame(trackTick);
@@ -863,15 +978,16 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         placed.forEach((each, at) => orders.set(each.mark, at));
         return orders;
       };
-      // A mark's result: its box in the viewport, and in the document (P132) by scroll, the
-      // report's one reading of it.
+      // A mark's result: its box in the viewport, and in the document (P132), its last line too
+      // (P133), by scroll, the report's one reading of it.
       const resultOf = (mark, orders, scroll) => {
         if (mark.found === null) {
           return { id: mark.id, state: "orphaned" };
         }
         const order = (orders || ordersOf()).get(mark);
         const rect = box(rectOf(mark.found));
-        return Object.assign({ id: mark.id, state: "attached", rect, documentRect: inDocument(rect, scroll) }, order === undefined ? {} : { order });
+        const lastLineDocumentRect = lastLineOf(mark.found, scroll);
+        return Object.assign({ id: mark.id, state: "attached", rect, documentRect: inDocument(rect, scroll) }, lastLineDocumentRect === null ? {} : { lastLineDocumentRect }, order === undefined ? {} : { order });
       };
       // Two boxes more than 0.5 px apart on any side (or one of them unknown).
       const apart = (a, b) => !a || !b || Math.abs(a.x - b.x) > 0.5 || Math.abs(a.y - b.y) > 0.5 || Math.abs(a.width - b.width) > 0.5 || Math.abs(a.height - b.height) > 0.5;
@@ -913,7 +1029,14 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             changed = true;
           }
           mark.found = found;
+          mark.end = undefined;
           mark.state = state;
+        }
+        // Where each starts, once for each finding: the markers' reading order (P133).
+        const orders = ordersOf();
+        for (const mark of marks) {
+          const reading = orders.get(mark);
+          mark.reading = reading === undefined ? marks.length : reading;
         }
         if (all || changed) {
           const scroll = scrollOf();
@@ -1075,9 +1198,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
 
       // A marker's click (P104). The layer takes no pointer but on its markers, so a press whose
       // target is the layer is on a marker: the content's handlers never see it (this listener
-      // runs before any of theirs), nor does what lies under it, and a click is reported. No tab
-      // stop, by choice: it would join the page's focus order, which the content controls, and the
-      // layer is hidden from assistive technology; the host's own list of marks is the keyboard way.
+      // runs before any of theirs), nor does what lies under it, and a click is reported. A press
+      // of the mouse or a finger moves no focus; the keyboard reaches a marker as any button
+      // (P133, which reverses P104's no tab stop): it joins the page's focus order, which the
+      // content controls, so the host's own list of marks stays the keyboard way it can rely on.
       //
       // A press is read and stopped through the platform's own functions and getters, kept now
       // (P105), as the navigation guard reads its events (P099): content that later patches
@@ -1090,6 +1214,11 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const targetOf = getterOf(Event.prototype, "target");
       const typeOf = getterOf(Event.prototype, "type");
       const buttonOf = getterOf(MouseEvent.prototype, "button");
+      const detailOf = getterOf(UIEvent.prototype, "detail");
+      const keyOf = getterOf(KeyboardEvent.prototype, "key");
+      const repeatOf = getterOf(KeyboardEvent.prototype, "repeat");
+      const activeOf = getterOf(ShadowRoot.prototype, "activeElement");
+      const scrollWindow = window.scrollBy;
       const clientXOf = getterOf(MouseEvent.prototype, "clientX");
       const clientYOf = getterOf(MouseEvent.prototype, "clientY");
       const leftOf = getterOf(DOMRectReadOnly.prototype, "left");
@@ -1106,6 +1235,16 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         const at = markerHit(markers.length, (i) => markerBox(markers[i].element), x, y, touch);
         return at < 0 ? null : markers[at];
       };
+      const markerOfNode = (element) => {
+        for (let i = 0; i < markers.length; i += 1) {
+          if (markers[i].element === element) {
+            return markers[i];
+          }
+        }
+        return null;
+      };
+      // The marker with the focus (P133), or null.
+      const focusedMarker = () => (shadow === null || activeOf === null ? null : markerOfNode(callOf(activeOf, shadow, [])));
       const isShown = (id) => {
         for (let i = 0; i < marks.length; i += 1) {
           if (marks[i].id === id) {
@@ -1135,9 +1274,54 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
         // isTrusted is the event's own, unforgeable.
         if (type === "click" && event.isTrusted && callOf(buttonOf, event, []) === 0) {
+          // From the keyboard or assistive technology (P133) a click has no count and no place:
+          // it is the focused marker's. Not while elements are picked: the markers step aside.
+          const keyed = callOf(detailOf, event, []) === 0 ? focusedMarker() : null;
+          if (keyed !== null) {
+            if (!mode.elements && isShown(keyed.id)) {
+              tell(M.activated, { id: keyed.id, rect: markerBox(keyed.element) });
+            }
+            return;
+          }
           const hit = markerAt(callOf(clientXOf, event, []), callOf(clientYOf, event, []));
           if (hit !== null && isShown(hit.id)) {
             tell(M.activated, { id: hit.id, rect: markerBox(hit.element) });
+          }
+        }
+      };
+      // The keys that click a focused marker (P133), each stopped as a press is, so the content
+      // neither hears them nor cancels the click they make; it keeps every other key, Tab and
+      // Escape too, as it would on a button of its own, and the host's find shortcut stays. A key
+      // held down clicks once: each repeat would spend the bridge's rate on one press.
+      const onMarkerKey = (event) => {
+        if (layer === null || callOf(targetOf, event, []) !== layer) {
+          return;
+        }
+        const key = callOf(keyOf, event, []);
+        if (key === "Enter" || key === " ") {
+          callOf(stopPress, event, []);
+          if (callOf(repeatOf, event, [])) {
+            callOf(cancelPress, event, []);
+          }
+        }
+      };
+      for (const type of ["keydown", "keypress", "keyup"]) {
+        window.addEventListener(type, onMarkerKey, true);
+      }
+      // The focus on a marker (P133) lights its words, as the pointer does, and brings it into view:
+      // a marker out of view is out of the layer's box, which never scrolls, so the document must.
+      const onMarkerFocus = (event) => {
+        const on = callOf(typeOf, event, []) === "focusin" ? markerOfNode(callOf(targetOf, event, [])) : null;
+        const id = on === null ? null : on.id;
+        if (id !== hot) {
+          hot = id;
+          redraw();
+        }
+        if (on !== null) {
+          const rect = markerBox(on.element);
+          const seen = document.documentElement.clientHeight || window.innerHeight;
+          if (rect.y < 0 || rect.y + rect.height > seen) {
+            callOf(scrollWindow, window, [0, rect.y - (seen - rect.height) / 2]);
           }
         }
       };
@@ -1260,7 +1444,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
               return;
             }
             swallowUntil = performance.now() + 2000;
-            tell(M.selected, { anchor, rect: box(elementRect.call(element)) });
+            tell(M.selected, Object.assign({ anchor, rect: box(elementRect.call(element)) }, placeOf({ element })));
           }, HOLD_MS),
         };
       }, true);
@@ -1308,7 +1492,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         hover = null;
         setCursor(false);
         draw();
-        tell(M.selected, { anchor, rect: box(elementRect.call(element)) });
+        tell(M.selected, Object.assign({ anchor, rect: box(elementRect.call(element)) }, placeOf({ element })));
       }, true);
       window.addEventListener("keydown", (event) => {
         if (event.key !== "Escape") {
@@ -1367,7 +1551,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
         reported = key;
         reportedBox = rect;
-        tell(M.selected, { anchor, rect });
+        tell(M.selected, Object.assign({ anchor, rect }, placeOf({ range })));
         return true;
       };
       document.addEventListener("selectionchange", () => {

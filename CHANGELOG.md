@@ -4,6 +4,26 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **Annotations: markers are buttons (P133).** A marker is a real button in the frame's Tab order,
+  after the page's own stops and in reading order, named for what it is ("3 comments on …"; in
+  English). Enter or Space on it reports `activated` through the path a click takes, the same
+  gesture check included, unheard by the page's scripts, once for a key held down. The focus on a
+  marker lights its words and brings it into view. This reverses P104's "no tab stop": the page
+  shares that focus order, so a host keeps its own list of marks as the keyboard way that holds.
+- **Annotations: a posted comment's marker sits at its paragraph's end (P133).** On the last line
+  of the block its words end in, just past the last word, or in the line's gutter where that
+  doesn't fit. A draft's stays beside its own words, and an element's on its corner.
+- **Annotations: the last line (P133).** `selected`, each attached result of `anchored`, and
+  `tracked` now carry a `lastLineDocumentRect`, the last line with words on it (an element's whole
+  box) in the coordinates of `documentRect`, and `selected` carries the `scroll` it was read at, so
+  a host places its UI after the last line. Optional: an older shell sends neither (test for them),
+  and an older host drops them. Upgrade the content server (the shell) for all three.
+- **Security (P133):** `lastLineDocumentRect` is the page's word, checked as any box and not clamped
+  to the frame: clip what you draw from it (THREAT_MODEL §6, ADOPTING). `rect` is clamped as before.
+  The keyboard on a marker is new (THREAT_MODEL §7): no CSP, sandbox, egress or gate changes.
+
 ## 0.14.10
 
 - **Annotations: a mark's place in the document (P132).** Each attached result of an `anchored`

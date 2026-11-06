@@ -407,12 +407,12 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "            found = { left: line.at.right + 2 };",
     },
   ],
-  // A marker's tap (P105): without a listener of its own, WebKit makes no click of a tap on it.
-  "marker-tap": [
+  // The keys that click a focused marker (P133): the content hears them, and can cancel the click.
+  "marker-key": [
     {
       file: "src/shell/annotate.ts",
-      find: '          callOf(listenOn, marker, ["click", tapTarget]);\n',
-      replace: "",
+      find: '        if (key === "Enter" || key === " ") {\n          callOf(stopPress, event, []);\n',
+      replace: '        if (key === "Enter" || key === " ") {\n',
     },
   ],
   // A marker's press (P104, P105): what the browser would do with it (focus, selection) goes on.

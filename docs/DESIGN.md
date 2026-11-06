@@ -1047,13 +1047,13 @@ chooses), and the annotation runtime is in the shell only then.
 | host → frame | `porthole/annotate.focus` | `{ id }`: scrolled into view inside the frame, made the active mark, flashed |
 | host → frame | `porthole/annotate.clear` | — |
 | host → frame | `porthole/annotate.clearSelection` | —: the page's text selection is taken away (the DOM's own `removeAllRanges`, taken before content runs) with what the shell held of it, and nothing is reported back; marks, drafts and the mode stay (P115) |
-| frame → host | `porthole/annotate.selected` | `{ anchor, rect }`; after a scroll, the same selection again only if its box moved more than 0.5 px, on the follow-ups' clock (P105) |
+| frame → host | `porthole/annotate.selected` | `{ anchor, rect, lastLineDocumentRect?, scroll? }` (a newer shell's last two: P133, below); after a scroll, the same selection again only if its box moved more than 0.5 px, on the follow-ups' clock (P105) |
 | frame → host | `porthole/annotate.unselected` | — (the text selection went away) |
 | frame → host | `porthole/annotate.cancelled` | — (Escape) |
-| frame → host | `porthole/annotate.anchored` | `{ results: [{ id, state: "attached" \| "orphaned", rect?, documentRect?, order? }], scroll? }` (a newer shell's `documentRect` and `scroll`: P132, below): every mark after `show`, the one after `focus`, every mark when the content changed a state, and, while any mark has a marker (a `count` or a draft, P107), once a scroll, a resize or a run of content changes has settled (150 ms quiet), only the marks that moved more than 0.5 px since the host was last told, at most one a second together with the selection's (P104, P105) |
+| frame → host | `porthole/annotate.anchored` | `{ results: [{ id, state: "attached" \| "orphaned", rect?, documentRect?, lastLineDocumentRect?, order? }], scroll? }` (a newer shell's `documentRect` and `scroll`: P132, below; `lastLineDocumentRect`: P133): every mark after `show`, the one after `focus`, every mark when the content changed a state, and, while any mark has a marker (a `count` or a draft, P107), once a scroll, a resize or a run of content changes has settled (150 ms quiet), only the marks that moved more than 0.5 px since the host was last told, at most one a second together with the selection's (P104, P105) |
 | host → frame | `porthole/annotate.track` | `{ id }` or `{ id: null }`: follow one shown mark, or none (P112) |
-| frame → host | `porthole/annotate.tracked` | `{ id, rect, documentRect?, scroll? }`: the followed mark's box at an animation frame where it moved, at most one every 16 ms; the host takes 60 a second, for that mark only (P112); a newer shell adds its place in the document and the document's scroll (P132) |
-| frame → host | `porthole/annotate.activated` | `{ id, rect }`: the person clicked a mark's marker; `rect` is the marker's (P104); taken only while the host's page has transient activation (P105) |
+| frame → host | `porthole/annotate.tracked` | `{ id, rect, documentRect?, lastLineDocumentRect?, scroll? }`: the followed mark's box at an animation frame where it moved, at most one every 16 ms; the host takes 60 a second, for that mark only (P112); a newer shell adds its place in the document and the document's scroll (P132), and its last line's (P133) |
+| frame → host | `porthole/annotate.activated` | `{ id, rect }`: the person clicked a mark's marker, or pressed Enter or Space on it (P133); `rect` is the marker's (P104); taken only while the host's page has transient activation (P105) |
 
 - **Anchors** are W3C Web Annotation selectors, at most one of each:
   `CssSelector` (unique: the nearest id, else a path of `nth-of-type` steps),
@@ -1083,10 +1083,20 @@ chooses), and the annotation runtime is in the shell only then.
   negative; a malformed one drops the report) and clamps neither: the host clips what it
   draws from them. A page that scrolls a box of its own rather than its document moves
   its marks' places with it, as their `rect` does; those are told as before.
+- **The last line** (P133). A newer shell says where a selection or a mark ends, for a
+  host's UI after it: `lastLineDocumentRect`, on `selected` (with `scroll`, read with
+  it), on each attached result of `anchored` and on `tracked`, in the coordinates of
+  `documentRect`, checked and left unclamped as it is. It is the last box with a width
+  of the words' client rects, the box a text marker's place starts from; an element,
+  which has no lines of its own, gives its whole box. Its place in the frame's viewport
+  is it less `scroll`. Absent from an older shell, and where nothing of it is drawn.
 - **Markers** (P104). A mark with a `count` gets a bubble glyph and its number ("99+"
-  above 99; 0 the bubble alone) on an element's top right corner, inside the frame's
-  width, and beside a text anchor's last line, centred on it (P105, #36): in the
-  line's gutter, just past the right edge of the anchor's block; at the frame's right
+  above 99; 0 the bubble alone), a real button (P133, below), on an element's top right
+  corner, inside the frame's width, and at the end of a text anchor's paragraph (P133):
+  on the last line of the block its words end in, read as far as a block inside it,
+  just past that line's last word, or where that doesn't fit at the places a draft's
+  takes. A draft's goes beside its anchor's own last line, centred on it (P105, #36): in
+  the line's gutter, just past the right edge of the anchor's block; at the frame's right
   edge where the frame is too narrow for that; just past the line's last word where
   something else is beside the block (a table's next cell, a card in a row). Each
   place must be clear of that line's words and of anything of the content's but a box
@@ -1101,8 +1111,8 @@ chooses), and the annotation runtime is in the shell only then.
   is a thin line. The layer takes no pointer but on markers: a press on one, and the pointer's
   moves over it, are stopped in the shell's first window listener, read through the
   platform's own functions kept before content runs (P105), and a trusted click is
-  reported `activated`; a tap too, on WebKit as well, since each marker has a click
-  listener of its own (WebKit makes a tap a click only on such an element, P105). On
+  reported `activated`; a tap too, on WebKit as well, since a button is an element it
+  makes a tap a click on (P105). On
   touch (P119), while the last pointer down or moved was a finger or a pen (before any,
   where `(any-pointer: coarse)` matches), each marker also takes the pointer in a box of
   at least 44 by 44 px centred on its bubble (an invisible `::before` in the layer), the
@@ -1113,10 +1123,26 @@ chooses), and the annotation runtime is in the shell only then.
   its handlers, nor what is under the marker, gets them; content that patches others
   can reach the layer's nodes (P105). Either way the content can tell a press
   happened, by `:active`, `relatedTarget` and user activation. Markers step aside
-  while elements are picked. No tab stop, and the layer stays `aria-hidden`: the
-  host's own list of marks is the keyboard path.
+  while elements are picked, the keyboard's Tab too.
+- **Markers from the keyboard** (P133). Each marker is a `<button>` with a tab stop,
+  in the page's reading order after the page's own stops (the layer is the document's
+  last child), named for what it is (`aria-label`: "3 comments on …", "Draft comment on
+  …", with the mark's `anchor.label`, in English); only the markers are exposed to
+  assistive technology, the layer no longer `aria-hidden`, its marks and outline are.
+  A press of a pointer still moves no focus. Enter and Space make the button's own
+  trusted click, which goes the way a pointer's does, but has no count and no place, so
+  it is the focused marker's (read through the shadow root's `activeElement`, kept
+  before content runs); those two keys are stopped at the window as a press is, a
+  repeat of them cancelled (a key held down clicks once), and every other key stays the
+  page's. A real key gives the host's page transient activation as a click does. The
+  focus on a marker lights its words and, out of view, scrolls the document to it: the
+  layer clips rather than hides, so it never scrolls itself. While one has the focus a
+  draw takes the markers out of hit tests by `pointer-events`, not `display` (which
+  would lose it), and moves none. The page shares the focus order: the host's own list
+  of marks stays the keyboard path it can rely on.
 - **Drafts** (P107). A mark with `kind: "draft"` (a comment not yet posted) has a
-  marker whether or not it has a count, placed as a posted one's, and drawn apart: a
+  marker whether or not it has a count, placed by its own words (not at its paragraph's
+  end, P133), and drawn apart: a
   dashed underline (a dashed outline on an element), a lighter fill, and a hollow
   marker (a light bubble with a dashed edge and the glyph's outline) with no number.
   `checkMarks` sends a posted mark as before (no `kind`), a draft without its count,
@@ -1160,7 +1186,12 @@ they change; an MCP Apps view; and a hostile page faking every report (not asked
 malformed, too large, the wrong kind, no such mark, a flood), whose negative
 control is `annotation-checks`. Markers (P104): drawn with their numbers, a click
 reported with its id and box and heard by none of the content's listeners, nor a
-double, right or middle click (`marker-click` → those two cases), focus and
+double, right or middle click (`marker-click` → those two cases), by the keyboard
+too (P133: a button in reading order and named for what it is, Enter and Space
+reported once, a key held down once, none of it heard, nothing while elements are
+picked; `marker-key`, `marker-click` too), brought into view by the focus and keeping
+it through redraws, at its paragraph's end past the last word, a nested block's
+words not its own, a draft's by its words; focus and
 selection kept, a drag from a marker too (`marker-prevent` → the press case), none
 without a count, stepping aside while picking, drawn whole at the frame's top; a
 run of scrolls reported with only the marks that moved, a fixed one never; marks
@@ -1177,9 +1208,9 @@ the layer itself (`annotation-activated`, `annotation-activated-count`,
 `MouseEvent`'s prototypes neither hearing a marker's press nor stopping its report
 (`marker-originals`; `marker-click` too); a tap on a marker reported on each
 engine, a touch screen and a phone's emulation (iPhone 13, Pixel 5), content hearing
-none of it (`marker-tap` → WebKit; `marker-click` too); on a 640 px column and a phone page's lines
+none of it (`marker-click`); on a 640 px column and a phone page's lines
 with one marker each, no marker covering a word (`marker-place`, the marker just
-past its words as 0.9.0 had it); drafts (P107) drawn apart from posted marks on the
+past its words as 0.9.0 had it, which a draft's in a line's middle shows); drafts (P107) drawn apart from posted marks on the
 same anchors (the frame's pixels and the words' own differ; on Chromium every draft's
 marker and line drawn as a draft's, no number though given a count), a draft's and a
 posted marker's clicks reported beside each other, none reaching the content
@@ -1497,10 +1528,10 @@ control the tables above name to the registry):
 | `annotation-activated` | `annotate.spec.ts` | `a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker` | — | — |
 | `annotation-activated-count` | `annotate.spec.ts` | `a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker` | — | — |
 | `marker-trusted` | `annotate.spec.ts` | `a hostile page fakes a marker's click: the host takes it only for a mark it shows with a marker` | — | — |
-| `marker-click` | `annotate.spec.ts` | `markers: a mark with a count gets a numbered bubble; its click is reported and never reaches the content`, `a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection`, `a page that patches the event's built-ins neither hears a marker's press nor stops its report (P105)`, `a tap on a marker is reported on every engine, and the content hears none of it (P105)`, `drafts (P107): a dashed line and a hollow marker with no number, apart from posted marks; their clicks are reported the same`, `on touch, a marker takes a tap a few px off its bubble (44 by 44), after the page scrolled itself; a tap past that is the page's (P119)`, `on touch, where two markers' 44 px boxes overlap, a tap is the nearest bubble's (P119)`, `a paragraph's marker pinned at the frame's top once its start scrolled away takes a mouse click and a tap where it is drawn (P119, porthole#42)` | — | — |
+| `marker-click` | `annotate.spec.ts` | `markers: a mark with a count gets a numbered bubble; its click is reported and never reaches the content`, `a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection`, `a page that patches the event's built-ins neither hears a marker's press nor stops its report (P105)`, `a tap on a marker is reported on every engine, and the content hears none of it (P105)`, `a marker is a button the keyboard reaches: Tab in reading order, Enter and Space report it once, the content hears neither, and it steps aside while elements are picked (P133)`, `drafts (P107): a dashed line and a hollow marker with no number, apart from posted marks; their clicks are reported the same`, `on touch, a marker takes a tap a few px off its bubble (44 by 44), after the page scrolled itself; a tap past that is the page's (P119)`, `on touch, where two markers' 44 px boxes overlap, a tap is the nearest bubble's (P119)`, `a paragraph's marker pinned at the frame's top once its start scrolled away takes a mouse click and a tap where it is drawn (P119, porthole#42)` | — | — |
 | `marker-prevent` | `annotate.spec.ts` | `a marker's press, of any kind, moves nothing of the content's: no handler, no focus, no selection` | — | — |
 | `marker-place` | `annotate.spec.ts` | `text markers cover no word: on a column page, and on a phone's lines with one marker each (P105, #36)` | — | — |
-| `marker-tap` | `annotate.spec.ts` | nothing | WebKit: `a tap on a marker is reported on every engine, and the content hears none of it (P105)`, `on touch, a marker takes a tap a few px off its bubble (44 by 44), after the page scrolled itself; a tap past that is the page's (P119)`, `on touch, where two markers' 44 px boxes overlap, a tap is the nearest bubble's (P119)`, `a paragraph's marker pinned at the frame's top once its start scrolled away takes a mouse click and a tap where it is drawn (P119, porthole#42)` | no probe can see it on Chromium and Firefox: they make a tap a click on the marker without a listener of its own (measured, P105) |
+| `marker-key` | `annotate.spec.ts` | `a marker is a button the keyboard reaches: Tab in reading order, Enter and Space report it once, the content hears neither, and it steps aside while elements are picked (P133)` | — | — |
 | `marker-originals` | `annotate.spec.ts` | `a page that patches the event's built-ins neither hears a marker's press nor stops its report (P105)` | — | — |
 | `follow-throttle` | `annotate.spec.ts` | `an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second` | — | — |
 | `selection-follow` | `annotate.spec.ts` | `an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second` | — | — |
@@ -1508,7 +1539,7 @@ control the tables above name to the registry):
 | `draft-count` | `annotate.spec.ts` | `what the page reads of a draft (P107): that it is one, never its count; a posted mark as before` | — | — |
 | `draft-shell-checks` | `annotate.spec.ts` | `the shell's own checks on a raw show (P107): a draft draws no number, a kind it doesn't know is no mark` | — | — |
 | `annotation-activated-gesture` | `annotate.spec.ts` | `a hostile page's marker click with no gesture is dropped; one on the person's own press is the host's view to guard (P105)` | — | — |
-| `annotation-rect-clamp` | `annotate.spec.ts` | `a hostile page reports a box outside its frame: the host gets it clamped to the frame's viewport`, `marks: drawn over their anchors, one brought into view, an unfound one orphaned, all cleared`, `following: once a scroll settles, one report with only the marks that moved`, `every attached mark's place in the document comes with the scroll it was read at, offscreen ones too, and the followed mark's as the document scrolls (P132)` | — | — |
+| `annotation-rect-clamp` | `annotate.spec.ts` | `a hostile page reports a box outside its frame: the host gets it clamped to the frame's viewport`, `marks: drawn over their anchors, one brought into view, an unfound one orphaned, all cleared`, `following: once a scroll settles, one report with only the marks that moved`, `every attached mark's place in the document comes with the scroll it was read at, offscreen ones too, and the followed mark's as the document scrolls (P132)`, `a selection's and a mark's last line come in the document's coordinates with the scroll, offscreen ones too; rect stays clamped (P133)` | — | — |
 | `authorize` | `served/authorize.spec.ts` | `a revoked subject's ticket opens nothing: a page and an app are denied, and the host is told`, `in a tab of its own, a revoked app and page are denied from the next request on`, `a framed page mid-session: its next load after revocation is denied where the engine keeps its cookie` | Chromium, Firefox: `a framed app mid-session: its next request after revocation is denied, and its next load tells the host` | — |
 | `url-permissions` | `served/permissions.spec.ts` | `a url-mode frame gets no clipboard writes or full screen unless the host delegates them` | — | — |
 | `navigate-guard` | `served/live.spec.ts`, `served/files.spec.ts`, `served/served.spec.ts`, `served/tab.spec.ts` | `served.domain.self-navigation`, `served.domain.tab-navigation`, `served.domain.tab-links`, `can't navigate itself away (location): to a site, or to another content origin`, `can't navigate itself away (replace): to a site, or to another content origin`, `can't navigate itself away (open-self): to a site, or to another content origin`, `can't navigate itself away (navigation-api): to a site, or to another content origin`, `a link to another page of the set opens it in the frame; the display goes on`, `a link to another page of the set opens it in the frame when the leaving page's notice is dropped (P098)`, `a link to another page of the set opens it in the frame when the leaving page's notice is late (P098)`, `a page opens nothing else: not a file that isn't a page, not another path of its origin`, `no report, content error or blocked navigation names the frame's sealed address (P083)` | — | — |

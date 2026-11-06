@@ -196,8 +196,9 @@ Whatever the use:
   log them, show nothing for them. A url-mode app can still say any outcome (S6).
 - Take what the frame reports about annotations as UI hints (where to draw, what to open), never
   as permissions, and put nothing in a mark the page may not know (§7). A mark's place in the
-  document (`documentRect`, with the report's `scroll`, P132) isn't clamped to the frame: clip
-  whatever you draw from it to the frame's box, or to your own region beside the frame.
+  document (`documentRect`, with the report's `scroll`, P132) and its last line's
+  (`lastLineDocumentRect`, P133) aren't clamped to the frame: clip whatever you draw from them to
+  the frame's box, or to your own region beside the frame.
 - Under `find` (P131), know that the page reads every query your find bar sends it, and declare
   `find` only for displays whose pages may learn what the person searches for (not a third-party
   app with egress, S5, unless you accept it). Take its counts as the bar's numbers, and open your
@@ -824,7 +825,9 @@ own frame, below the shell, P111), so:
   what they are for: a host that maps a `documentRect` onto its own page without clipping to the
   frame's box (or to its own region beside it) lets the page choose where that UI goes, outside
   the frame as well (accepted, P132; the host's duty in §6). They say nothing else: the page knows
-  where its words are anyway.
+  where its words are anyway. Where a selection or a mark's words end (`lastLineDocumentRect` in
+  `selected`, `anchored` and `tracked`, P133) is one more such box, read, checked and left unclamped
+  the same way, with the same duty; `selected` also carries `scroll` now.
 - *What holds, against content that patches none of the DOM's or JavaScript's built-ins.* A real
   press or click on a marker reaches none of the content's handlers (the shell's first listener
   stops it; control `marker-click`) and moves neither focus nor a selection (control
@@ -837,6 +840,21 @@ own frame, below the shell, P111), so:
   loses a tap within 13 px of a bubble (a few px of its words above and below it), as it loses
   one on the bubble. Which pointer is used is read from trusted pointer events only; a page that
   makes its own up changes nothing, and a real `activated` still needs a real click.
+- *The keyboard on a marker* (P133, reversing P104's point 6). A marker is a button with a tab
+  stop. Enter and Space on it are stopped in the shell's first listener, as a press is (control
+  `marker-key`), and the click they make is a trusted one the content doesn't get (`marker-click`):
+  it can neither hear nor cancel them. Every other key on a marker is the page's, as on a button of
+  its own, Tab too. So what P104 feared stands, and is accepted: the markers join a focus order the
+  content controls. It can take the focus from a marker (`focus()` from any handler or timer), keep
+  the person from reaching one (a trap on Tab in its own elements), draw its own look-alike with
+  its own tab stop, and tell that the person is on one (`document.activeElement` is the layer, its
+  own element's `focusout` names it). None of that gives it what it lacks: a marker's press has no
+  power but `activated`, which it can fake anyway within the host's checks, keys go to a marker only
+  while the frame has the focus, so nothing typed in the host passes through it (P109 is unchanged),
+  and a page's made-up key or `click()` is no trusted click. Assistive technology now reads the
+  marker's name, the page's own words (`anchor.label`, the host's copy with what can't be seen taken
+  out) after the shell's. A host can't rely on a marker being reached, as it can't on one being
+  seen: its own list of marks is the keyboard way that holds.
 - *What doesn't hold against content that does.* The shell shares the content's realm. It reads
   and stops a marker's press through the platform's own functions and getters, kept before
   content runs (P105, control `marker-originals`), so patching `Event`'s or `MouseEvent`'s
