@@ -2713,8 +2713,18 @@ test("a focusMark parked with the focus in the frame doesn't land once the perso
   await expect
     .poll(() => frame.evaluate(() => document.hasFocus()), { message: "the frame has the focus" })
     .toBe(true);
+  // The first change now, not at the first tick: the observer runs before this evaluation answers,
+  // so the word is sure to find the page changing. And the page notes a landing as it happens: if
+  // the word lands before the person moves on, the move can take the marker's focus with it, and
+  // a look at the end would see nothing.
   await frame.evaluate(() => {
+    document.addEventListener("focusin", (event) => {
+      if (event.target === document.querySelector("[data-porthole-annotations]")) {
+        document.body.dataset.landed = "yes";
+      }
+    });
     const until = Date.now() + 700;
+    document.body.append(document.createElement("i"));
     const changing = setInterval(() => {
       document.body.append(document.createElement("i"));
       if (Date.now() > until) {
@@ -2728,7 +2738,11 @@ test("a focusMark parked with the focus in the frame doesn't land once the perso
   await moveOn(page);
   await expect(frame.locator("body")).toHaveAttribute("data-calm", "yes");
   await page.waitForTimeout(500);
-  expect(await onLayer(frame), "probe: moved on while it waited, it didn't land").toBe(false);
+  expect(
+    await frame.locator("body").getAttribute("data-landed"),
+    "probe: moved on while it waited, it didn't land",
+  ).toBeNull();
+  expect(await onLayer(frame), "probe: and the marker doesn't hold the page's focus").toBe(false);
   expect(await hostActive(page), "probe: the keyboard stayed on the host's button").toBe("next");
 });
 
