@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.14.13
 
 - **Annotations: a `focusMark` that had to wait (P135).** While the frame finds its marks, `focusMark`
   waits, and is now dropped unless the focus is in the frame by then, so it takes no keyboard from a
