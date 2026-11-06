@@ -329,6 +329,14 @@ export interface AnnotationControls {
    * Call it once the view is closed: from one of the page's text fields that still has focus, the
    * move is the frame's own to the focus guard, undone and counted (P109). The page can take the
    * focus back at once. Not kept for a frame that runs later.
+   *
+   * On a calm page it lands at once, from anywhere on the host's page. While the frame is finding
+   * its marks (a `show` just sent, the content just changed) it waits, and is then dropped unless
+   * the focus is in the frame by then (P135), so a word that comes late takes no keyboard from a
+   * person who moved on. Nothing says it was dropped: if the frame isn't your page's
+   * `document.activeElement` soon after and the person hasn't moved on, call `focus()` and then
+   * `focusMark(id)` again. Known gap: on a nested page that had the focus, `focus()` doesn't bring
+   * it back into the page, so a second call that waits is dropped too (ADOPTING).
    */
   focusMark(id: string): void;
 }

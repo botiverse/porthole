@@ -462,6 +462,39 @@ composer.onClose(() => display.annotations.clearSelection());
   Close the view first: from one of your text fields that still has focus, the focus guard takes
   the move for the page's, undoes it and counts it (`focusTaken`). Keep your own list of marks as
   the way that holds.
+  On a calm page that lands at once, from your `<body>`. While the frame is finding its marks (a
+  `show` just sent, which many hosts send as a card closes, or content that just changed) the word
+  waits, up to a second, and is then dropped unless the focus is in the frame by then, so it takes no
+  keyboard from a person who moved on ([P135](DECISIONS.md)). As your card has just closed, the focus
+  is on your `<body>`, so a word that waited is dropped, and nothing tells you: **call `focusMark`
+  again after your own move of the focus into the frame.**
+
+  ```js
+  closeCard();
+  display.annotations.focusMark(id);
+  setTimeout(() => {
+    // Not on the marker, and the person hasn't moved on: the frame was busy.
+    if (document.activeElement === document.body) {
+      display.focus();
+      display.annotations.focusMark(id);
+    }
+  }, 200);
+  ```
+
+  Keep the check: on a button of yours, the person has moved on, and `display.focus()` would take the
+  keyboard from them. With React, whose `ref` has no `focus()`, call the frame's own `focus()` for
+  that step: it is only ever taken for the page's from a text field, and this one starts on `<body>`.
+  An id with no marker then leaves the focus in the frame, with the keys going to the page.
+
+  **Known gap, nested pages (P135).** On a nested page that had the focus, `display.focus()` doesn't
+  bring it back into the page (measured on Chromium, WebKit and Firefox), so a `focusMark` that waits
+  is dropped even after it, and the person is left without the marker. On a calm page the second
+  call doesn't wait and lands. On a page that is changing, it doesn't, and nothing tells you: keep
+  your own list of marks as the way back. A fix to the shell is open; this paragraph goes with it.
+
+  Without the second call, nothing changes on a calm page. On a busy one, a word that the frame
+  finishes with before your own move is lost where it used to land, so the person gets the frame and
+  not the marker. That is the cost of never pulling the keyboard into the page.
 - **Labels and quotes are the page's text**: shown only as text. Porthole takes out of a label what
   the person can't see; a quote (`exact`) keeps it, to be found again. Hand either to a model only
   as the page's words.

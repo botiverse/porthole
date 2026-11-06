@@ -240,7 +240,10 @@ export const ANNOTATE_METHODS = {
   tracked: "porthole/annotate.tracked",
   /** Host → frame: take the page's text selection away, telling nothing back (P115). */
   clearSelection: "porthole/annotate.clearSelection",
-  /** Host → frame: put the focus on one mark's marker (`{ id }`), telling nothing back (P134). */
+  /**
+   * Host → frame: put the focus on one mark's marker (`{ id }`), telling nothing back (P134); one
+   * that waited for the marks is dropped unless the focus is in the frame's document by then (P135).
+   */
   focusMark: "porthole/annotate.focusMark",
 } as const;
 

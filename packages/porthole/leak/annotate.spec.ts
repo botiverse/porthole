@@ -2572,7 +2572,7 @@ test("focusMark puts the focus on that mark's marker and tells nothing; no such 
   await leftAlone("fell", "markers step aside while elements are picked");
 });
 
-test("focusMark right after a show waits for the marker, and the focus brings it into view (P134)", async ({
+test("focusMark right after a show, with the focus in the frame, waits for the marker, and the focus brings it into view (P134, P135)", async ({
   page,
 }) => {
   const display = await referenceHost.launch(page, {
@@ -2587,8 +2587,9 @@ test("focusMark right after a show waits for the marker, and the focus brings it
   });
   const frame = await display.frame();
   await expect(frame.locator("#far")).toBeAttached();
-  await display.annotate("show", [textMark("near", "near", 1), textMark("far", "far", 2)]);
-  await display.annotate("focusMark", "far");
+  await display.showAndFocusMark([textMark("near", "near", 1), textMark("far", "far", 2)], "far", {
+    focus: true,
+  });
   await expect
     .poll(() => onLayer(frame), { message: "probe: the marker got the focus once it was drawn" })
     .toBe(true);
@@ -2597,6 +2598,219 @@ test("focusMark right after a show waits for the marker, and the focus brings it
       message: "probe: the document scrolled to the marker",
     })
     .toBeGreaterThan(1_500);
+});
+
+/** What holds the focus on the host's page: an element's id, or its tag. */
+const hostActive = (page: Page) =>
+  page.evaluate(() => document.activeElement?.id || document.activeElement?.localName);
+
+/** The person moves on: the focus goes to a button of the host's own, beside the frame. */
+async function moveOn(page: Page) {
+  await page.evaluate(() => {
+    const button = document.getElementById("next") ?? document.createElement("button");
+    button.id = "next";
+    button.textContent = "Next";
+    document.body.append(button);
+    button.focus({ preventScroll: true });
+  });
+  await expect
+    .poll(() => hostActive(page), { message: "the host's button has the focus" })
+    .toBe("next");
+}
+
+/** A host's card closes as P134's does: its field had the focus, and goes, leaving the `<body>`. */
+async function closeCard(page: Page) {
+  await page.evaluate(() => {
+    const card = document.createElement("textarea");
+    card.id = "card";
+    document.body.append(card);
+    card.focus();
+  });
+  await expect.poll(() => hostActive(page), { message: "the card has the focus" }).toBe("card");
+  await page.evaluate(() => document.getElementById("card")?.remove());
+  await expect.poll(() => hostActive(page), { message: "the focus is on the body" }).toBe("body");
+}
+
+/**
+ * Past the moment a focusMark parked by a `show` of `id` lands or is dropped: the shell does that in
+ * the task that reports the mark, so the report (by what it says), then a task of the frame's.
+ */
+async function pastLanding(page: Page, display: ReferenceDisplay, frame: Frame, id: string) {
+  await expect
+    .poll(
+      async () =>
+        (await reports(display)).some(
+          (report) => report.type === "anchored" && report.results.some((one) => one.id === id),
+        ),
+      { message: `the frame found ${id}` },
+    )
+    .toBe(true);
+  await frame.evaluate(() => 0);
+  await page.waitForTimeout(300);
+}
+
+test("document.hasFocus() in a frame says where a host's moves leave the focus, on each engine: what a parked focusMark reads (P135)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, { config: annotated(), content: KEYED });
+  const frame = await display.frame();
+  await expect(frame.locator("#field")).toBeVisible();
+  await showAndDraw(display, frame, [textMark("fell", "fell", 1)]);
+  const inFrame = (message: string, expected: boolean) =>
+    expect
+      .poll(() => frame.evaluate(() => document.hasFocus()), { message: `probe: ${message}` })
+      .toBe(expected);
+
+  await closeCard(page);
+  await inFrame("a host's card closed: the focus on its body isn't in the frame", false);
+  await display.focus();
+  await inFrame("the host's own move puts it in the frame", true);
+  await frame.locator("#field").focus();
+  await inFrame("the page's own field is in the frame", true);
+  await moveOn(page);
+  await inFrame("a host's button isn't", false);
+  await display.focus();
+  await inFrame("the host's move brings it back to a frame that had it", true);
+  await closeCard(page);
+  await inFrame("from the frame, a card that opens and closes leaves it out again", false);
+  await display.annotate("focusMark", "fell");
+  await expect
+    .poll(() => onLayer(frame), { message: "probe: an unparked call lands from the body" })
+    .toBe(true);
+  await inFrame("a marker the host moved to is in the frame", true);
+});
+
+test("a parked focusMark doesn't land once the person has moved on to the host's button (P135)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, { config: annotated(), content: KEYED });
+  const frame = await display.frame();
+  await expect(frame.locator("#field")).toBeVisible();
+  await showAndDraw(display, frame, [textMark("fell", "fell", 1)]);
+
+  // On the host's button before the frame took the word: parked while the show's marks are found.
+  await moveOn(page);
+  await display.showAndFocusMark(
+    [textMark("fell", "fell", 1), textMark("rose", "rose", 2)],
+    "rose",
+  );
+  await pastLanding(page, display, frame, "rose");
+  expect(await onLayer(frame), "probe: the parked mark didn't land").toBe(false);
+  expect(await hostActive(page), "probe: the keyboard stayed on the host's button").toBe("next");
+});
+
+test("a focusMark parked with the focus in the frame doesn't land once the person moves on while it waits (P135)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, { config: annotated(), content: KEYED });
+  const frame = await display.frame();
+  await expect(frame.locator("#field")).toBeVisible();
+  await showAndDraw(display, frame, [textMark("fell", "fell", 1)]);
+
+  // On a page that keeps changing, so the word waits: what counts is where the focus is as it
+  // would land, not as it came.
+  await frame.locator("#field").focus();
+  await expect
+    .poll(() => frame.evaluate(() => document.hasFocus()), { message: "the frame has the focus" })
+    .toBe(true);
+  // The first change now, not at the first tick: the observer runs before this evaluation answers,
+  // so the word is sure to find the page changing. And the page notes a landing as it happens: if
+  // the word lands before the person moves on, the move can take the marker's focus with it, and
+  // a look at the end would see nothing.
+  await frame.evaluate(() => {
+    document.addEventListener("focusin", (event) => {
+      if (event.target === document.querySelector("[data-porthole-annotations]")) {
+        document.body.dataset.landed = "yes";
+      }
+    });
+    const until = Date.now() + 700;
+    document.body.append(document.createElement("i"));
+    const changing = setInterval(() => {
+      document.body.append(document.createElement("i"));
+      if (Date.now() > until) {
+        clearInterval(changing);
+        document.body.dataset.calm = "yes";
+      }
+    }, 40);
+  });
+  await display.annotate("focusMark", "fell");
+  await frame.evaluate(() => 0);
+  await moveOn(page);
+  await expect(frame.locator("body")).toHaveAttribute("data-calm", "yes");
+  await page.waitForTimeout(500);
+  expect(
+    await frame.locator("body").getAttribute("data-landed"),
+    "probe: moved on while it waited, it didn't land",
+  ).toBeNull();
+  expect(await onLayer(frame), "probe: and the marker doesn't hold the page's focus").toBe(false);
+  expect(await hostActive(page), "probe: the keyboard stayed on the host's button").toBe("next");
+});
+
+test("a parked focusMark with the focus on the host's body is dropped; after the host's own move into the frame a second one, parked too, lands on the marker (P135)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, { config: annotated(), content: KEYED });
+  const frame = await display.frame();
+  await expect(frame.locator("#field")).toBeVisible();
+  await showAndDraw(display, frame, [textMark("fell", "fell", 1)]);
+
+  await closeCard(page);
+  await display.showAndFocusMark(
+    [textMark("fell", "fell", 1), textMark("rose", "rose", 2)],
+    "rose",
+  );
+  await pastLanding(page, display, frame, "rose");
+  expect(await onLayer(frame), "probe: no focus in the frame, no grab").toBe(false);
+  expect(await hostActive(page), "probe: the focus stayed on the body").toBe("body");
+
+  await display.showAndFocusMark(
+    [
+      textMark("fell", "fell", 1),
+      textMark("rose", "rose", 2),
+      textMark("again", "three percent", 3),
+    ],
+    "rose",
+    { focus: true },
+  );
+  await pastLanding(page, display, frame, "again");
+  await expect
+    .poll(() => onLayer(frame), { message: "probe: the second, parked too, landed on a marker" })
+    .toBe(true);
+  expect(await hostActive(page), "probe: the frame holds the host's page's focus").toBe("iframe");
+  const told = (await reports(display)).length;
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(
+      async () =>
+        (await reports(display))
+          .slice(told)
+          .some((report) => report.type === "activated" && report.id === "rose"),
+      { message: "probe: it is the marker asked for" },
+    )
+    .toBe(true);
+});
+
+test("a page that patched hasFocus to say yes gets no landing the platform's own answer refuses (P135)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: annotated(),
+    content: `${KEYED}<script>Document.prototype.hasFocus = () => true;</script>`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#field")).toBeVisible();
+  await showAndDraw(display, frame, [textMark("fell", "fell", 1)]);
+  await moveOn(page);
+  expect(await frame.evaluate(() => document.hasFocus()), "the page's own hasFocus says yes").toBe(
+    true,
+  );
+  await display.showAndFocusMark(
+    [textMark("fell", "fell", 1), textMark("rose", "rose", 2)],
+    "rose",
+  );
+  await pastLanding(page, display, frame, "rose");
+  expect(await onLayer(frame), "probe: the page's word didn't land the mark").toBe(false);
+  expect(await hostActive(page), "probe: the keyboard stayed on the host's button").toBe("next");
 });
 
 test("a page that patched focus isn't handed the marker the host's focusMark moves to (P134)", async ({

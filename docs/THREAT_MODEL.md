@@ -243,6 +243,14 @@ Whatever the use:
   your composer with `focusField(field)`, not the field's own `focus()` (Firefox ignores that while
   a fighting frame holds focus); and with a platform of your own, implement its focus guard
   (`focused`, `onFocusTaken`, `focus`) or accept that a display can read what is typed beside it.
+- Call `annotations.focusMark(id)` only as the person's key closes your view of that mark, and know
+  it can be dropped (P135): one that has to wait while the frame finds its marks lands only if the
+  focus is in the frame by then, and in the normal flow it is on your `<body>`. Nothing says so. If
+  the focus is still on your body a moment later, the person hasn't moved on: `display.focus()`,
+  then `focusMark(id)` again. Look first: that move is yours, the focus guard doesn't judge it, and
+  a move after the person went on to a button of yours takes the keyboard from them. A known gap
+  (P135): on a nested page that had the focus, `display.focus()` doesn't bring it back, so a word
+  that waits is dropped even then. Nothing leaks: the keyboard stays out of the page.
 - List every app origin in `appOrigins` (`hostOrigins` in `/server`): only those may frame content,
   and only those are checked against the content domain for a shared site.
 - Under the app runtime, run `defineRuntimeConformance` with `api` in CI (§7).
@@ -887,12 +895,22 @@ own frame, below the shell, P111), so:
   a host can't rely on the focus landing. To the focus guard the move is the frame's own, so from a
   host's text field that still has focus it is undone and counted (P109), not passed as the host's:
   no window was opened in the guard for it.
+  A word that has to wait while the frame finds its marks is up to a second old when it could land
+  (P135), and a marker's `focus()` takes the keyboard with no gesture on Chromium and WebKit, past a
+  guard that defends only text fields: a person gone on to a host's button would be pulled back. So
+  the shell drops a parked word unless the focus is in its document as it lands, by `hasFocus` as it
+  was before content ran (control `marker-has-focus`: a page that replaced it to say yes gets the
+  landing otherwise; `marker-late` takes the test out). A word that doesn't wait isn't asked: it is
+  the host's word of this moment, and the frame has no focus then on the very path it is for. A page
+  can really take the focus and so pass the test, which gives it nothing, since it then has the
+  keyboard; and a parked word can still move the focus off the page's own field onto a marker, inside
+  the frame. §6 has the host's side: a second `focusMark` after its own `display.focus()`.
   The word is a message, so from the host's close until the frame moves, the focus rests on the host's
   body. A forged `activated` in that gap finds no frame focused, so a host that gates a view on "the
   frame had the focus" doesn't gate that one. That is accepted, on the host's side of the wall: such
   a view takes no focus and keeps keys out until the focus has reached the frame (in Raft, content
   inert for 500 ms, and the focus handed back to the frame within 150 ms if the marker didn't take
-  it), so the keys go to the page and nothing is written.
+  it, with `focusMark` again after it, P135), so the keys go to the page and nothing is written.
 - *What doesn't hold against content that does.* The shell shares the content's realm. It reads
   and stops a marker's press through the platform's own functions and getters, kept before
   content runs (P105, control `marker-originals`), so patching `Event`'s or `MouseEvent`'s

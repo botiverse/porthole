@@ -1140,6 +1140,23 @@ describe("the shell", () => {
     expect(body).not.toContain("report(");
   });
 
+  test("a parked focusMark lands only by the kept hasFocus; a call that isn't parked reads no focus (P135)", () => {
+    const taken = ANNOTATE_RUNTIME.indexOf("const hasFocus = Document.prototype.hasFocus;");
+    expect(taken).toBeGreaterThan(-1);
+    const parked = ANNOTATE_RUNTIME.indexOf("if (pendingMarker !== null) {");
+    expect(parked).toBeGreaterThan(taken);
+    const landing = ANNOTATE_RUNTIME.slice(parked, ANNOTATE_RUNTIME.indexOf("}, wait);", parked));
+    expect(landing).toContain(
+      "if (callOf(hasFocus, document, []) === true) {\n              focusMark(id);",
+    );
+    // The only read: nothing goes through the live function, and focusMark itself asks nothing.
+    expect(ANNOTATE_RUNTIME).not.toContain("document.hasFocus");
+    const moved = ANNOTATE_RUNTIME.indexOf("const focusMark = (id) => {");
+    const body = ANNOTATE_RUNTIME.slice(moved, ANNOTATE_RUNTIME.indexOf("      };", moved));
+    expect(body).not.toContain("hasFocus");
+    expect(body).not.toContain("activeElement");
+  });
+
   test("a marker's name is what it is and its words, quoted, without an element's tag (P134)", () => {
     type Named = { anchor: AnnotationAnchor; count: number | null; draft: boolean };
     const name = runInNewContext(MARKER_NAME) as (mark: Named) => string;

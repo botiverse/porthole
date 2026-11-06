@@ -161,6 +161,14 @@ const MARKER_KEYS =
   "a marker is a button the keyboard reaches: Tab in reading order, Enter and Space report it once, the content hears neither, and it steps aside while elements are picked (P133)";
 const MARKER_FOCUS =
   "a page that patched focus isn't handed the marker the host's focusMark moves to (P134)";
+const MARKER_MOVED_ON =
+  "a parked focusMark doesn't land once the person has moved on to the host's button (P135)";
+const MARKER_MOVED_ON_WAITING =
+  "a focusMark parked with the focus in the frame doesn't land once the person moves on while it waits (P135)";
+const MARKER_SECOND =
+  "a parked focusMark with the focus on the host's body is dropped; after the host's own move into the frame a second one, parked too, lands on the marker (P135)";
+const MARKER_PATCHED_FOCUS =
+  "a page that patched hasFocus to say yes gets no landing the platform's own answer refuses (P135)";
 const HONEST_SCROLL =
   "an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second";
 /** A served page's own frames (P128): a frame of elsewhere stays out of the tree (files.spec.ts). */
@@ -371,6 +379,12 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   "marker-key": { specs: [ANNOTATE], fails: all(MARKER_KEYS) },
   // P134: the host's move to a marker, through the platform's focus, kept before content runs.
   "marker-focus": { specs: [ANNOTATE], fails: all(MARKER_FOCUS) },
+  // P135: a parked focusMark lands only with the focus still in the document, by the kept hasFocus.
+  "marker-late": {
+    specs: [ANNOTATE],
+    fails: all(MARKER_MOVED_ON, MARKER_MOVED_ON_WAITING, MARKER_SECOND, MARKER_PATCHED_FOCUS),
+  },
+  "marker-has-focus": { specs: [ANNOTATE], fails: all(MARKER_PATCHED_FOCUS) },
   "marker-originals": { specs: [ANNOTATE], fails: all(PATCHED_PRESS) },
   "follow-throttle": { specs: [ANNOTATE], fails: all(HONEST_SCROLL) },
   "selection-follow": { specs: [ANNOTATE], fails: all(HONEST_SCROLL) },
