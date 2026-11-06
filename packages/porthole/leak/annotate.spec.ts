@@ -2461,12 +2461,15 @@ test("a marker out of view brings itself into view as the keyboard reaches it, a
   await expect(frame.locator("#far")).toBeAttached();
   await showAndDraw(display, frame, [textMark("near", "near", 1), textMark("far", "far", 2)]);
   await frame.locator("#field").focus();
-  await page.keyboard.press("Tab");
-  await page.keyboard.press("Tab");
+  // Key by key until the far marker has it: a press a busy Firefox loses is pressed again.
   await expect
-    .poll(() => frame.evaluate(() => Math.round(window.scrollY)), {
-      message: "probe: the document scrolled to the marker",
-    })
+    .poll(
+      async () => {
+        await page.keyboard.press("Tab");
+        return frame.evaluate(() => Math.round(window.scrollY));
+      },
+      { message: "probe: the document scrolled to the marker", intervals: [250], timeout: 10_000 },
+    )
     .toBeGreaterThan(1_500);
   await expect
     .poll(async () => (await markersOnLine(frame, "#far")).runs.length, {
