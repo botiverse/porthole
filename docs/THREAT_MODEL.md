@@ -5,7 +5,7 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes Porthole 0.14.12 (2026-11-06). A review on 2026-10-19 found gaps, and every decision it led to
+**Status.** This describes Porthole 0.14.13 (2026-11-06). A review on 2026-10-19 found gaps, and every decision it led to
 has merged ([§8](#8-fixes-in-flight) lists them). P096 changed the negative-control runner and CI,
 and the shipped conformance probes' messages and timing, not what they check. P104 (0.9.0's
 annotation markers) had a review of its own, and P105, in 0.10.0, is what it led to. 0.11.0 was
@@ -36,7 +36,9 @@ order, so it can steer or spoil the focus, and a host keeps its own list of mark
 reports `activated`, which the page could already fake; `lastLineDocumentRect` is unclamped, for a
 host to clip as P132's are; no wall moves. 0.14.12: P134 adds `annotations.focusMark(id)`, the host's
 word to put the keyboard back on a marker, and a second exception to "takes no focus" whose conditions
-are the host's own (§6, §7); no wall moves.
+are the host's own (§6, §7); no wall moves. 0.14.13: P135 drops a `focusMark` that had to wait unless the focus is
+in the frame's document by then; a call on a calm page is unchanged. Known gap: a nested page that had the
+focus doesn't get it back from `display.focus()` (§6).
 
 ## 1. Two layers
 
