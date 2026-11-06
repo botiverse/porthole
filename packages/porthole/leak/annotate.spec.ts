@@ -2803,7 +2803,16 @@ test("every attached mark's place in the document comes with the scroll it was r
     ],
     scroll: { x: 0, y: -5_000 },
   });
-  const far = await next(display, "anchored", before);
+  // Found by its words: with a control's follow-ups on, the shell's own `anchored` can come first.
+  const pageSaid = async () =>
+    (await reports(display))
+      .slice(before)
+      .find(
+        (each): each is Extract<AnnotationReport, { type: "anchored" }> =>
+          each.type === "anchored" && each.results[0]?.documentRect?.y === 9_000_000,
+      );
+  await expect.poll(async () => (await pageSaid()) !== undefined).toBe(true);
+  const far = (await pageSaid()) as Extract<AnnotationReport, { type: "anchored" }>;
   expect(far.results, "a place far down the document, as the page said").toEqual([
     {
       id: "top",
