@@ -173,6 +173,9 @@ export const NESTED_MOVED_ON =
 /** The host's word takes no focus that has left the shell (P136). */
 export const NESTED_WORD_LATE =
   "the host's move takes no keyboard from where the host's page went on to in the same task (P136)";
+/** A second host's move finds the focus handed on (P136): the page hears nothing of it. */
+export const NESTED_SECOND_MOVE =
+  "a second host's move into a page it just handed the focus to leaves it there: no blur, and its field keeps the keyboard (P136)";
 const MARKER_PATCHED_FOCUS =
   "a page that patched hasFocus to say yes gets no landing the platform's own answer refuses (P135)";
 const HONEST_SCROLL =
@@ -720,7 +723,7 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     ),
   },
   // The host's word (P136) moves only a focus that is on the shell.
-  "shell-focus-held": { specs: [NESTED], fails: all(NESTED_WORD_LATE) },
+  "shell-focus-held": { specs: [NESTED], fails: all(NESTED_WORD_LATE, NESTED_SECOND_MOVE) },
   // A nested page's shell on a label of its own (P114, porthole#56): on its scope's, a same-scope
   // inline widget or artifact reads the shell's document, and in it the page's sealed address.
   // Alone, the host's mount refuses the scope's label (P121), and the shell wouldn't run there: run

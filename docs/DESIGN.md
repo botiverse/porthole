@@ -1588,7 +1588,7 @@ control the tables above name to the registry):
 | `door-opaque` | `served/siblings-status.spec.ts` | `[door-reach]` | — | — |
 | `frame-status-order` | `served/outcome.spec.ts` | `a nested page that says it is blocked, through its shell or past it, is told nothing and shown nothing (P124)` | — | — |
 | `shell-namespace` | `served/nested.spec.ts` | `the shell's words are the shell's alone: a page that says them, to its parent or to the host's window, moves nothing` | — | — |
-| `shell-focus-held` | `served/nested.spec.ts` | `the host's move takes no keyboard from where the host's page went on to in the same task (P136)` | — | — |
+| `shell-focus-held` | `served/nested.spec.ts` | `the host's move takes no keyboard from where the host's page went on to in the same task (P136)`, `a second host's move into a page it just handed the focus to leaves it there: no blur, and its field keeps the keyboard (P136)` | — | — |
 | `shell-label,nested-host-label,nested-shell-origin` | `served/nested-siblings.spec.ts` | `[nested-siblings]`, `[nested-label]` | — | — |
 | `nested-host-label` | `served/nested-siblings.spec.ts` | `[nested-label]` | — | — |
 | `nested-shell-origin` | `served/nested-siblings.spec.ts` | nothing | — | the host's mount refuses a shell located on any other label first, and /server serves none there (`shell-label,nested-host-label,nested-shell-origin`) |
