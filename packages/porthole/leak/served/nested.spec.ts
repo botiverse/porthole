@@ -738,6 +738,50 @@ test.describe("a nested page (P111)", () => {
       .toBe(true);
   });
 
+  test("the host's move from its own text field reaches the page, and the focus guard takes nothing back (P136)", async ({
+    page,
+  }) => {
+    const shown = await show(page);
+    const child = await pageFrame(shown);
+    await page.mouse.click(composer.x, composer.y);
+    await expect
+      .poll(() => hostActive(page), { message: "the composer has the focus" })
+      .toBe("host-composer");
+    await hostMove(page);
+    await landed(child, "probe: the move reached the page");
+    await page.waitForTimeout(400);
+    expect(await hostActive(page), "probe: the guard left it in the frame").toBe("IFRAME");
+    expect((await seen(page)).taken, "probe: nothing was taken back").toEqual([]);
+    expect((await seen(page)).errors, "probe: the display wasn't stopped").toEqual([]);
+  });
+
+  test("the host's move from inside a key's own handler reaches the page, but on Firefox (P136)", async ({
+    page,
+    browserName,
+  }) => {
+    const shown = await show(page);
+    await pressPage(page, shown);
+    await moveOn(page);
+    const child = await pageFrame(shown);
+    await page.evaluate(() =>
+      addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          (window as unknown as Driven).portholeHost.displays.at(-1)?.focus();
+        }
+      }),
+    );
+    // Marked here, so a failure of the steps above is a failure. Known gap on Firefox alone (P136,
+    // measured): the host's own frame.focus() in a key's handler moves nothing, the host's
+    // activeElement staying where it was, so there is no move for the shell to pass on. When this
+    // passes there, the run fails: take it off, and the Firefox lines in ADOPTING and THREAT_MODEL.
+    test.fail(
+      browserName === "firefox",
+      "Gecko: no focus into a cross-origin frame in a key event",
+    );
+    await page.keyboard.press("Escape");
+    await landed(child, "probe: the move in Escape's keydown reached the page");
+  });
+
   // `shell-focus-held`'s probe: the word is on its way as the host's page goes on, so the shell
   // finds the focus gone.
   test(NESTED_WORD_LATE, async ({ page }) => {

@@ -287,10 +287,13 @@ const shellAt = (at = ORIGIN) => {
       listener({ source: page, origin: "null", data });
     }
   };
+  // The shell's `window`: a script in the context reads the sandbox back as its global proxy, so
+  // the sandbox object itself isn't `window` to it.
+  const self: unknown = vm.runInContext("window", context);
   /** The focus comes to the shell, told as Chromium and WebKit tell it, or Firefox from a button. */
   const focusOnWindow = () => {
     for (const listener of onWindow.focus ?? []) {
-      listener({ target: context });
+      listener({ target: self });
     }
   };
   const focusOnDocument = () => {
@@ -300,7 +303,7 @@ const shellAt = (at = ORIGIN) => {
   };
   const blurWindow = () => {
     for (const listener of onWindow.blur ?? []) {
-      listener({ target: context });
+      listener({ target: self });
     }
   };
   const runLater = () => {

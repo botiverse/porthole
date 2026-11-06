@@ -185,7 +185,7 @@ export const FRAME_SHELL_RUNTIME = String.raw`(() => {
   addEventListener("focus", (event) => {
     if (event.target === window) {
       came();
-      // The host's move into the frame (or a Tab) lands here: on to the page.
+      // Where a move can go on from inside this event (P136): Firefox, from the host's <body>.
       if (document.activeElement !== frame) {
         frame.focus();
       }
