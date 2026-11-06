@@ -1047,7 +1047,7 @@ chooses), and the annotation runtime is in the shell only then.
 | host → frame | `porthole/annotate.focus` | `{ id }`: scrolled into view inside the frame, made the active mark, flashed |
 | host → frame | `porthole/annotate.clear` | — |
 | host → frame | `porthole/annotate.clearSelection` | —: the page's text selection is taken away (the DOM's own `removeAllRanges`, taken before content runs) with what the shell held of it, and nothing is reported back; marks, drafts and the mode stay (P115) |
-| host → frame | `porthole/annotate.focusMark` | `{ id }`: the DOM focus goes to that mark's marker (the DOM's own `focus`, taken before content runs), once the marks of a `show` are found; nothing is reported back, and with no such marker, or while elements are picked, nothing happens. For after Escape closed the host's view (P134) |
+| host → frame | `porthole/annotate.focusMark` | `{ id }`: the DOM focus goes to that mark's marker (the DOM's own `focus`, taken before content runs), once the marks of a `show` are found; nothing is reported back, and with no such marker, or while elements are picked, nothing happens. For after the keyboard closed the host's view: Escape, or a Tab past its ends (P134) |
 | frame → host | `porthole/annotate.selected` | `{ anchor, rect, lastLineDocumentRect?, scroll? }` (a newer shell's last two: P133, below); after a scroll, the same selection again only if its box moved more than 0.5 px, on the follow-ups' clock (P105) |
 | frame → host | `porthole/annotate.unselected` | — (the text selection went away) |
 | frame → host | `porthole/annotate.cancelled` | — (Escape) |
