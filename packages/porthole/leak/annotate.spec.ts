@@ -2461,7 +2461,8 @@ test("a marker out of view brings itself into view as the keyboard reaches it, a
   await expect(frame.locator("#far")).toBeAttached();
   await showAndDraw(display, frame, [textMark("near", "near", 1), textMark("far", "far", 2)]);
   await frame.locator("#field").focus();
-  // Key by key until the far marker has it: a press a busy Firefox loses is pressed again.
+  // Key by key until the far marker has it: on Firefox under the controls two presses in a row
+  // sometimes didn't get there. Why isn't known.
   await expect
     .poll(
       async () => {
