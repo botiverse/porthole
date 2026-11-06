@@ -1539,7 +1539,7 @@ control the tables above name to the registry):
 | `marker-place` | `annotate.spec.ts` | `text markers cover no word: on a column page, and on a phone's lines with one marker each (P105, #36)` | — | — |
 | `marker-key` | `annotate.spec.ts` | `a marker is a button the keyboard reaches: Tab in reading order, Enter and Space report it once, the content hears neither, and it steps aside while elements are picked (P133)` | — | — |
 | `marker-focus` | `annotate.spec.ts` | `a page that patched focus isn't handed the marker the host's focusMark moves to (P134)` | — | — |
-| `marker-late` | `annotate.spec.ts` | `a parked focusMark doesn't land once the person has moved on to the host's button (P135)`, `a focusMark parked with the focus in the frame doesn't land once the person moves on while it waits (P135)`, `a parked focusMark with the focus on the host's body is dropped; after the host's own move into the frame a second one, parked too, lands on the marker (P135)`, `a page that patched hasFocus to say yes gets no landing the platform's own answer refuses (P135)` | — | — |
+| `marker-late` | `annotate.spec.ts`, `served/nested.spec.ts` | `a parked focusMark doesn't land once the person has moved on to the host's button (P135)`, `a focusMark parked with the focus in the frame doesn't land once the person moves on while it waits (P135)`, `a parked focusMark with the focus on the host's body is dropped; after the host's own move into the frame a second one, parked too, lands on the marker (P135)`, `a page that patched hasFocus to say yes gets no landing the platform's own answer refuses (P135)`, `a parked focusMark doesn't land on a nested page once the person has moved on to the host's button (P135)` | — | — |
 | `marker-has-focus` | `annotate.spec.ts` | `a page that patched hasFocus to say yes gets no landing the platform's own answer refuses (P135)` | — | — |
 | `marker-originals` | `annotate.spec.ts` | `a page that patches the event's built-ins neither hears a marker's press nor stops its report (P105)` | — | — |
 | `follow-throttle` | `annotate.spec.ts` | `an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second` | — | — |
@@ -1585,6 +1585,7 @@ control the tables above name to the registry):
 | `door-opaque` | `served/siblings-status.spec.ts` | `[door-reach]` | — | — |
 | `frame-status-order` | `served/outcome.spec.ts` | `a nested page that says it is blocked, through its shell or past it, is told nothing and shown nothing (P124)` | — | — |
 | `shell-namespace` | `served/nested.spec.ts` | `the shell's words are the shell's alone: a page that says them, to its parent or to the host's window, moves nothing` | — | — |
+| `shell-focus-held` | `served/nested.spec.ts` | `the host's move takes no keyboard from where the host's page went on to in the same task (P136)` | — | — |
 | `shell-label,nested-host-label,nested-shell-origin` | `served/nested-siblings.spec.ts` | `[nested-siblings]`, `[nested-label]` | — | — |
 | `nested-host-label` | `served/nested-siblings.spec.ts` | `[nested-label]` | — | — |
 | `nested-shell-origin` | `served/nested-siblings.spec.ts` | nothing | — | the host's mount refuses a shell located on any other label first, and /server serves none there (`shell-label,nested-host-label,nested-shell-origin`) |

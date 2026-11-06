@@ -693,6 +693,20 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "false) {",
     },
   ],
+  // The host's word (P136) moves the focus wherever it is: out of a host's button the host moved
+  // to in the same task, say.
+  "shell-focus-held": [
+    {
+      file: "src/shell/frame.ts",
+      find: "    if (holds && document.hasFocus()) {\n",
+      replace: "    if (true) {\n",
+    },
+    {
+      file: "src/shell/frame.ts",
+      find: "          if (holds) {\n            handOn();\n          } else {\n            wordUntil = performance.now() + 250;\n          }\n",
+      replace: "          handOn();\n",
+    },
+  ],
   // A shell's stall (P111, after its review) not seen: an activation it saw late is fresh.
   "shell-stall": [
     {
@@ -858,7 +872,10 @@ const SERVED = [
   "own-frame-rule",
   // A nested page's shell (P111), made in the harness's process like the documents' shells.
   "shell-namespace",
+  "shell-focus-held",
   "nested-shell-origin",
+  // A parked focusMark on a nested page (P135): annotate's script is in the page's served shell.
+  "marker-late",
 ];
 
 /** Whether a control asked for edits the served documents' shell (`weakenServed`). */

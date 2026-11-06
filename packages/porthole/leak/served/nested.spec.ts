@@ -1,6 +1,7 @@
 import { expect, test, type Frame, type Page } from "@playwright/test";
 import type { PortholeConfig } from "../../src/index.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
+import { NESTED_MOVED_ON, NESTED_WORD_LATE } from "../controls.ts";
 import { mount, outcomeOf, runtimeCalls } from "./porthole-host.ts";
 import { storedFiles } from "./files.ts";
 import { harness } from "./harness.ts";
@@ -593,7 +594,7 @@ test.describe("a nested page (P111)", () => {
     await expect.poll(async () => (await seen(page)).activated).toEqual(["m1"]);
   });
 
-  test("a parked focusMark lands on a nested page's marker while the focus is in the page, and not once the person has moved on (P135)", async ({
+  test("a parked focusMark lands on a nested page's marker while the focus is in the page (P135)", async ({
     page,
   }) => {
     const shown = await show(page);
@@ -608,15 +609,39 @@ test.describe("a nested page (P111)", () => {
     await expect
       .poll(() => onMarker(child), { message: "probe: parked, it landed on its marker" })
       .toBe(true);
+  });
 
+  // `marker-late`'s nested probe (P135, and #proj-workspace:#214: nothing proved this could fail).
+  // The page's own focus must not start on a marker, or a landing wouldn't show: so no earlier
+  // landing here, and what decides is the page's `activeElement` as well as the host's, in case an
+  // engine moves the focus inside a frame that doesn't hold the host's page's focus.
+  test(NESTED_MOVED_ON, async ({ page }) => {
+    const shown = await show(page);
+    await page.evaluate(
+      ([mark]) =>
+        (window as unknown as Driven).portholeHost.displays.at(-1)?.annotations.show([mark]),
+      [elementMark("m1", "#target")],
+    );
+    await expect
+      .poll(async () => (await seen(page)).anchored, { message: "the frame found m1" })
+      .toContain("m1");
+    await pressPage(page, shown);
+    const child = await pageFrame(shown);
     await moveOn(page);
     await expect
       .poll(() => child.evaluate(() => document.hasFocus()), {
-        message: "probe: on the host's button, the focus is out of the page",
+        message: "on the host's button, the focus is out of the page",
       })
       .toBe(false);
+    expect(await onMarker(child), "no marker holds the page's focus yet").toBe(false);
+
     await park(page, [elementMark("m1", "#target"), elementMark("m2", "#go")], "m2");
-    await page.waitForTimeout(600);
+    // The shell lands or drops the word in the task that reports its mark.
+    await expect
+      .poll(async () => (await seen(page)).anchored, { message: "the frame found m2" })
+      .toContain("m2");
+    await page.waitForTimeout(300);
+    expect(await onMarker(child), "probe: the parked mark didn't land").toBe(false);
     expect(await hostActive(page), "probe: the keyboard stayed on the host's button").toBe(
       "host-button",
     );
@@ -656,28 +681,80 @@ test.describe("a nested page (P111)", () => {
     expect(await hostActive(page), "probe: the frame holds the host's page's focus").toBe("IFRAME");
   });
 
-  test("a page that had the focus gets it back by the host's own move (P135, #proj-workspace:#214)", async ({
+  /** The host's own move: `display.focus()`, as a host calls it. */
+  const hostMove = (page: Page) =>
+    page.evaluate(() => (window as unknown as Driven).portholeHost.displays.at(-1)?.focus());
+
+  /** Where the page's focus is, polled until it is in the page. */
+  const landed = (child: Frame, message: string) =>
+    expect.poll(() => child.evaluate(() => document.hasFocus()), { message }).toBe(true);
+
+  test("a page that had the focus gets it back by the host's own move, and a parked focusMark then lands on its marker (P135, P136)", async ({
     page,
   }) => {
     const shown = await show(page);
     await pressPage(page, shown);
     await moveOn(page);
     const child = await pageFrame(shown);
-    // Marked here, not on the test, so a failure of the steps above is a failure. Known gap,
-    // #proj-workspace:#214: failed on all four of CI's Chromium, oopif, WebKit and Firefox, the
-    // page's hasFocus false after the host's move. This is the only step it covers: when #214
-    // lands this passes, which fails the run: take this off, and assert a parked focusMark
-    // landing after the move here, as the case above does without it.
-    test.fail(
-      true,
-      "#proj-workspace:#214: the host's move doesn't reach a page that had the focus",
-    );
-    await page.evaluate(() => (window as unknown as Driven).portholeHost.displays.at(-1)?.focus());
+    await hostMove(page);
+    await landed(child, "probe: the host's move reached the page through its shell");
+    expect(await hostActive(page), "probe: the host's page's focus is the frame").toBe("IFRAME");
+    await park(page, [elementMark("m1", "#target")], "m1");
+    await expect
+      .poll(() => onMarker(child), { message: "probe: parked after the move, it landed" })
+      .toBe(true);
+  });
+
+  test("a page that never had the focus gets it by the host's own move, from the host's body and from its button (P136)", async ({
+    page,
+  }) => {
+    const shown = await show(page);
+    const child = await pageFrame(shown);
+    await hostMove(page);
+    await landed(child, "probe: from the host's body, the move reached the page");
+    await moveOn(page);
+    await expect
+      .poll(() => child.evaluate(() => document.hasFocus()), { message: "the person moved on" })
+      .toBe(false);
+    await hostMove(page);
+    await landed(child, "probe: from the host's button, the move reached the page");
+  });
+
+  test("the host's move into a page that holds the focus leaves it there (P136)", async ({
+    page,
+  }) => {
+    const shown = await show(page);
+    await pressPage(page, shown);
+    const child = await pageFrame(shown);
+    await landed(child, "a press puts the focus in the page");
+    await hostMove(page);
+    await page.waitForTimeout(300);
+    await landed(child, "probe: the focus is in the page after the move");
+    await page.keyboard.press("k");
     await expect
       .poll(() => child.evaluate(() => document.hasFocus()), {
-        message: "probe: the host's move reached the page through its shell",
+        message: "probe: and still after a key",
       })
       .toBe(true);
+  });
+
+  // `shell-focus-held`'s probe: the word is on its way as the host's page goes on, so the shell
+  // finds the focus gone.
+  test(NESTED_WORD_LATE, async ({ page }) => {
+    const shown = await show(page);
+    const child = await pageFrame(shown);
+    await page.evaluate(() => {
+      (window as unknown as Driven).portholeHost.displays.at(-1)?.focus();
+      document.getElementById("host-button")?.focus();
+    });
+    await page.waitForTimeout(600);
+    expect(await hostActive(page), "probe: the keyboard stayed on the host's button").toBe(
+      "host-button",
+    );
+    expect(
+      await child.evaluate(() => document.hasFocus()),
+      "probe: the page got no focus from a word that came late",
+    ).toBe(false);
   });
 
   test("the host's clearSelection reaches the nested page through its shell (P115)", async ({
@@ -734,8 +811,11 @@ test.describe("a nested page (P111)", () => {
           parent.postMessage({ jsonrpc: "2.0", id, method: "porthole/call", params: { capability: "comments", method: "open", args: { anchor: { name: "chart", label: "Chart" } } } }, "*");
         }
         if (event.data && event.data.test === "forge-focus") {
+          const word = { jsonrpc: "2.0", method: "porthole/shell/focus" };
           parent.postMessage(forged, "*");
           top.postMessage(forged, "*");
+          parent.postMessage(word, "*");
+          top.postMessage(word, "*");
           field.focus();
           say("took");
         }

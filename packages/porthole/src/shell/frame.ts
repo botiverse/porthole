@@ -26,7 +26,12 @@ import { hostOriginProblem, onNestedLabel } from "../isolation/served.ts";
  * - renews the page's sealed files' address before it ends, and gives the page the new one
  *   (`porthole/files-renewed`): the page's own loads aren't its origin's (an opaque origin's never
  *   are), so only the shell, on that origin, may renew it (P083);
- * - passes its focus to the page (the host's own move into the frame, or a Tab).
+ * - passes its focus to the page: at the focus event where that takes (Firefox, from the host's
+ *   `<body>`), and on the host's word that it moved it there (`porthole/shell/focus`, P136), where
+ *   it doesn't: a frame's move inside the focus event that made it the focused frame sets the
+ *   shell's `activeElement` and goes no further (Chromium, WebKit), and from a focused element of
+ *   the host's the window hears no focus event at all (Firefox). A later task's `frame.focus()`
+ *   goes through on all of them, the frame blurred first as the failed one left it active.
  *
  * Plain ES2020, no imports and no build step, like the runtime. `__PLAN__` is its plan.
  */
@@ -152,11 +157,38 @@ export const FRAME_SHELL_RUNTIME = String.raw`(() => {
   };
   requestAnimationFrame(tick);
   setInterval(look, 50);
-  addEventListener("blur", look);
-  addEventListener("focus", (event) => {
-    // The host's move into the frame (or a Tab) lands here: on to the page.
-    if (event.target === window && document.activeElement !== frame) {
+
+  // Whether the focus is on the shell's own document, not through it on the page's (P136). Firefox
+  // tells a move from a focused element of the host's on the document alone. The host's word needs
+  // this: it never moves a focus that isn't here, and a page that has it hears no blur.
+  let holds = false;
+  // Until when a word that came ahead of the focus it speaks of holds (it crosses processes too).
+  let wordUntil = 0;
+  const handOn = () => {
+    if (holds && document.hasFocus()) {
+      frame.blur();
       frame.focus();
+    }
+  };
+  const came = () => {
+    holds = true;
+    if (performance.now() < wordUntil) {
+      wordUntil = 0;
+      setTimeout(handOn, 0);
+    }
+  };
+  document.addEventListener("focus", came);
+  addEventListener("blur", () => {
+    holds = false;
+    look();
+  });
+  addEventListener("focus", (event) => {
+    if (event.target === window) {
+      came();
+      // The host's move into the frame (or a Tab) lands here: on to the page.
+      if (document.activeElement !== frame) {
+        frame.focus();
+      }
     }
     look();
   });
@@ -183,6 +215,14 @@ export const FRAME_SHELL_RUNTIME = String.raw`(() => {
         const n = data.params !== null && typeof data.params === "object" ? data.params.n : undefined;
         if (data.method === PREFIX + "look" && typeof n === "number" && n >= 0 && Math.floor(n) === n) {
           look(n);
+        }
+        // The host's own move into the frame, done (P136): on to the page.
+        if (data.method === PREFIX + "focus") {
+          if (holds) {
+            handOn();
+          } else {
+            wordUntil = performance.now() + 250;
+          }
         }
         return;
       }

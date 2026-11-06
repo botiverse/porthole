@@ -2,6 +2,7 @@ import { DOOR_SANDBOX_TOKENS } from "../compile/policy.ts";
 import type { ColorScheme } from "../config/schema.ts";
 import {
   SHELL_BEAT_METHOD,
+  SHELL_FOCUS_METHOD,
   SHELL_LOOK_METHOD,
   SHELL_METHOD_PREFIX,
   SHELL_STATE_METHOD,
@@ -194,6 +195,11 @@ export const webPlatform: PlatformHost = {
       },
       focus() {
         guard.focus(frame);
+        // A nested page (P136): the move stops at its shell on every engine, one way or another,
+        // and only the shell can pass it on. Only a move that landed: the shell asks no more of it.
+        if (nested && view.document.activeElement === frame) {
+          opened.send({ jsonrpc: "2.0", method: SHELL_FOCUS_METHOD });
+        }
       },
       onLoad(listener) {
         loaded.add(listener);

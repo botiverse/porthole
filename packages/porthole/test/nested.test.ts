@@ -226,26 +226,44 @@ const shellAt = (at = ORIGIN) => {
   const page = { postMessage: (message: never) => said.push({ to: "page", message }) };
   const parent = { postMessage: (message: never) => said.push({ to: "host", message }) };
   const style = {};
+  const moves: string[] = [];
+  const clock = { now: 1_000 };
+  const focus = { inDocument: true };
+  const later: (() => void)[] = [];
+  const onDocument: ((event: unknown) => void)[] = [];
+  const onWindow: Record<string, ((event: unknown) => void)[]> = { focus: [], blur: [] };
+  const frame = {
+    style,
+    setAttribute() {},
+    contentWindow: page,
+    focus: () => moves.push("focus"),
+    blur: () => moves.push("blur"),
+  };
   const context: Record<string, unknown> = {
     parent,
     location: { origin: at, hostname: new URL(at).hostname, ancestorOrigins: [HOST] },
     document: {
       documentElement: { style },
       body: { style, append: () => said.push({ to: "page", message: { framed: true } }) },
-      createElement: () => ({ style, setAttribute() {}, contentWindow: page, focus() {} }),
-      hasFocus: () => true,
+      createElement: () => frame,
+      hasFocus: () => focus.inDocument,
       activeElement: null,
-      addEventListener() {},
+      addEventListener: (type: string, listener: (event: unknown) => void) => {
+        if (type === "focus") {
+          onDocument.push(listener);
+        }
+      },
     },
     navigator: { userActivation: { isActive: false } },
-    performance: { now: () => 1_000 },
+    performance: { now: () => clock.now },
     requestAnimationFrame: () => 0,
     setInterval: () => 0,
-    setTimeout: () => 0,
+    setTimeout: (run: () => void) => later.push(run),
     addEventListener: (type: string, listener: (event: unknown) => void) => {
       if (type === "message") {
         heard.push(listener);
       }
+      onWindow[type]?.push(listener);
     },
     URL,
   };
@@ -264,8 +282,130 @@ const shellAt = (at = ORIGIN) => {
       listener({ source: parent, origin: HOST, data });
     }
   };
-  return { said, fromHost };
+  const fromPage = (data: unknown) => {
+    for (const listener of heard) {
+      listener({ source: page, origin: "null", data });
+    }
+  };
+  /** The focus comes to the shell, told as Chromium and WebKit tell it, or Firefox from a button. */
+  const focusOnWindow = () => {
+    for (const listener of onWindow.focus ?? []) {
+      listener({ target: context });
+    }
+  };
+  const focusOnDocument = () => {
+    for (const listener of onDocument) {
+      listener({ target: context.document });
+    }
+  };
+  const blurWindow = () => {
+    for (const listener of onWindow.blur ?? []) {
+      listener({ target: context });
+    }
+  };
+  const runLater = () => {
+    for (const run of later.splice(0)) {
+      run();
+    }
+  };
+  return {
+    said,
+    fromHost,
+    fromPage,
+    focusOnWindow,
+    focusOnDocument,
+    blurWindow,
+    runLater,
+    moves,
+    clock,
+    focus,
+  };
 };
+
+describe("the host's word that it moved the focus into a nested page's frame (P136)", () => {
+  const word = { jsonrpc: "2.0", method: "porthole/shell/focus" };
+  /** What a move past the listener's own `frame.focus()` does, on a focus event. */
+  const pastEvent = (moves: string[]) => moves.join(",").replace(/^focus,?/u, "");
+
+  test("with the focus on the shell, it hands on in that task, blurring first; the page hears none of it", () => {
+    const { said, fromHost, focusOnWindow, moves } = shellAt();
+    focusOnWindow();
+    said.length = 0;
+    fromHost(word);
+    expect(pastEvent(moves)).toBe("blur,focus");
+    expect(said.filter((each) => each.to === "page")).toEqual([]);
+  });
+
+  test("Firefox's move from a focused element of the host's, told on the document alone, is as good", () => {
+    const { fromHost, focusOnDocument, moves } = shellAt();
+    focusOnDocument();
+    expect(moves, "no focus event on the window, nothing done yet").toEqual([]);
+    fromHost(word);
+    expect(moves).toEqual(["blur", "focus"]);
+  });
+
+  test("with the focus handed on, or not on the shell at all, it moves nothing", () => {
+    const { fromHost, focusOnWindow, blurWindow, moves, focus } = shellAt();
+    fromHost(word);
+    expect(moves, "the shell never had the focus").toEqual([]);
+    focusOnWindow();
+    blurWindow();
+    moves.length = 0;
+    fromHost(word);
+    expect(moves, "the page has it: it hears no blur").toEqual([]);
+    focusOnWindow();
+    focus.inDocument = false;
+    moves.length = 0;
+    fromHost(word);
+    expect(moves, "the shell's document says it hasn't the focus").toEqual([]);
+  });
+
+  test("a word ahead of the focus it speaks of waits a moment, once, in a task of its own", () => {
+    const { fromHost, focusOnWindow, blurWindow, runLater, moves, clock } = shellAt();
+    fromHost(word);
+    clock.now += 100;
+    focusOnWindow();
+    moves.length = 0;
+    runLater();
+    expect(moves).toEqual(["blur", "focus"]);
+    blurWindow();
+    moves.length = 0;
+    focusOnWindow();
+    moves.length = 0;
+    runLater();
+    expect(moves, "spent").toEqual([]);
+  });
+
+  test("a word too old for the focus that comes later moves nothing", () => {
+    const { fromHost, focusOnWindow, runLater, moves, clock } = shellAt();
+    fromHost(word);
+    clock.now += 300;
+    focusOnWindow();
+    moves.length = 0;
+    runLater();
+    expect(moves).toEqual([]);
+  });
+
+  test("a word gone stale as its task ran finds the focus gone", () => {
+    const { fromHost, focusOnWindow, blurWindow, runLater, moves } = shellAt();
+    fromHost(word);
+    focusOnWindow();
+    blurWindow();
+    moves.length = 0;
+    runLater();
+    expect(moves).toEqual([]);
+  });
+
+  test("the page saying it moves nothing, and is told to no one", () => {
+    const { said, fromPage, focusOnWindow, moves } = shellAt();
+    focusOnWindow();
+    said.length = 0;
+    moves.length = 0;
+    fromPage(word);
+    expect(moves).toEqual([]);
+    expect(said).toEqual([]);
+  });
+});
 
 describe("a nested page's shell on its own label alone (P121)", () => {
   test("frameShellScript and nestedShellResponse refuse any origin but a shell's own label", () => {

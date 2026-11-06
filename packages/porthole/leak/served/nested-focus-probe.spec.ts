@@ -1,36 +1,24 @@
 import { test, type Page } from "@playwright/test";
-import { field, hostActive, hostButton, seen, show, tell, valueOf } from "./nested-pages.ts";
+import { field, hostActive, seen, show, tell, valueOf } from "./nested-pages.ts";
 
 /**
- * A measurement, not a check (#proj-workspace:#214): where the host's `display.focus()` stops on a
- * nested page (P111) that had the focus, and what a shell's candidate does on each engine. Nothing
- * here asserts: each case prints one `PROBE214` line for reading out of CI's log, and this file goes
- * when that is read.
+ * A measurement, not a check (#proj-workspace:#214, round two): with the host's word in (P136), what
+ * a Tab does, what a move in a key's handler does (Gecko's `IsHandlingKeyBoardEvent`), and what the
+ * rejected alternative would have let a page do. Nothing here asserts: each case prints one
+ * `PROBE214` line for reading out of CI's log, and this file goes when that is read.
  *
- * Every frame logs by itself, on the console, from an init script: its window's and elements'
- * focus and blur as they fire, each `focus()` and `blur()` called, where a key landed, and each
- * change of its own `activeElement` and `hasFocus`. Nothing is evaluated in the shell or the page
- * while a case runs, because an evaluation there is a gesture (nested.spec.ts).
+ * Every frame logs by itself, on the console, from an init script: nothing is evaluated in the
+ * shell or the page while a case runs, because an evaluation there is a gesture (nested.spec.ts).
  *
- * A candidate runs in the shell from the same init script, ahead of the shell's own listener, so
- * `frame.ts` is as it is on main:
- * - `blur-first`: in the focus listener, the page's frame blurred, then focused;
- * - `blur-task`: the same a task later, if the shell's document still has the focus;
- * - `word-plain`, `word-blur`, `word-window`: not in a focus event, on a message from the host 300 ms
- *   after its move (`frame.focus()`; blurred first; the page's window's own `focus()`);
- * - `page-field`: nothing in the shell: the page calls its own field's `focus()` on that message.
+ * - `page-parent`: the page calls `parent.focus()`, as frame.ts stands.
+ * - `page-parent-task`: the same, with the shell modelled as passing any focus on a task later,
+ *   blurred first: the rejected fix, which a page can start with no gesture.
+ * - `page-field`: the page's own `field.focus()`, what it can do without any of this.
  */
 
 test.use({ trace: "off" });
 
-type Variant =
-  | "none"
-  | "blur-first"
-  | "blur-task"
-  | "word-plain"
-  | "word-blur"
-  | "word-window"
-  | "page-field";
+type Variant = "none" | "page-parent" | "page-parent-task" | "page-field";
 
 /** Runs in every frame before its scripts. */
 const recorder = (variant: Variant) => {
@@ -85,50 +73,22 @@ const recorder = (variant: Variant) => {
     }
   }, 25);
 
-  if (role !== "shell") {
+  if (role !== "shell" || variant !== "page-parent-task") {
     return;
   }
-  const frameOf = () => document.querySelector("iframe");
   addEventListener("focus", (event) => {
-    const frame = frameOf();
-    if (event.target !== window || frame === null || document.activeElement !== frame) {
-      return;
-    }
-    if (variant === "blur-first") {
-      frame.blur();
-      frame.focus();
-    }
-    if (variant === "blur-task") {
+    const frame = document.querySelector("iframe");
+    if (event.target === window && frame !== null) {
       setTimeout(() => {
-        if (document.hasFocus()) {
-          frame.blur();
-          frame.focus();
-        }
+        frame.blur();
+        frame.focus();
       }, 0);
-    }
-  });
-  addEventListener("message", (event) => {
-    const frame = frameOf();
-    const data = event.data as { test?: unknown } | null;
-    if (event.source !== window.parent || data?.test !== "shell-focus" || frame === null) {
-      return;
-    }
-    say("word");
-    if (variant === "word-plain") {
-      frame.focus();
-    }
-    if (variant === "word-blur") {
-      frame.blur();
-      frame.focus();
-    }
-    if (variant === "word-window") {
-      frame.contentWindow?.focus();
     }
   });
 };
 
 /** How the case stands before the host's move. */
-type Scenario = "had" | "had-pressed-away" | "had-body" | "in-page" | "never-body" | "never-button";
+type Scenario = "had" | "never-button" | "tab" | "tab-had" | "key-handler";
 
 const display = (page: Page) =>
   page.evaluate(() =>
@@ -141,24 +101,22 @@ const toButton = async (page: Page) => {
   await page.evaluate(() => document.getElementById("host-button")?.focus());
 };
 
-for (const [scenario, variant] of [
+const CASES: readonly (readonly [Scenario, Variant])[] = [
   ["had", "none"],
-  ["had-pressed-away", "none"],
-  ["had-body", "none"],
-  ["in-page", "none"],
-  ["never-body", "none"],
   ["never-button", "none"],
-  ["had", "blur-first"],
-  ["had-pressed-away", "blur-first"],
-  ["had-body", "blur-first"],
-  ["in-page", "blur-first"],
-  ["never-button", "blur-first"],
-  ["had", "blur-task"],
-  ["had", "word-plain"],
-  ["had", "word-blur"],
-  ["had", "word-window"],
-  ["had", "page-field"],
-] as readonly [Scenario, Variant][]) {
+  ["tab", "none"],
+  ["tab-had", "none"],
+  ["key-handler", "none"],
+  ["never-button", "page-parent"],
+  ["never-button", "page-parent-task"],
+  ["never-button", "page-field"],
+];
+
+const PAGE = `addEventListener("message", (event) => {
+  if (event.data && event.data.test === "parent-focus") parent.focus();
+});`;
+
+for (const [scenario, variant] of CASES) {
   test(`probe ${scenario} ${variant}`, async ({ page }, info) => {
     test.setTimeout(60_000);
     const lines: string[] = [];
@@ -169,45 +127,49 @@ for (const [scenario, variant] of [
       }
     });
     await page.addInitScript(recorder, variant);
-    const shown = await show(page);
+    const shown = await show(page, PAGE);
     const mark = (what: string) => lines.push(`---- ${what}`);
 
-    if (scenario.startsWith("had") || scenario === "in-page") {
+    if (scenario === "had" || scenario === "tab-had" || scenario === "key-handler") {
       await page.mouse.click(field(shown).x, field(shown).y);
       await page.waitForTimeout(300);
       mark("pressed the page");
     }
-    if (scenario === "had" || scenario === "had-body" || scenario === "never-button") {
-      await toButton(page);
-      await page.waitForTimeout(300);
-      mark("host's button");
-    }
-    if (scenario === "had-pressed-away") {
-      await page.mouse.click(hostButton.x, hostButton.y);
-      await page.waitForTimeout(300);
-      mark("pressed the host's button");
-    }
-    if (scenario === "had-body") {
-      await page.evaluate(() => (document.activeElement as HTMLElement).blur());
-      await page.waitForTimeout(300);
-      mark("host's body");
+    await toButton(page);
+    await page.waitForTimeout(300);
+    mark("host's button");
+    if (scenario === "key-handler") {
+      await page.evaluate(() => {
+        addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            (
+              window as unknown as { portholeHost: { displays: { focus(): void }[] } }
+            ).portholeHost.displays
+              .at(-1)
+              ?.focus();
+          }
+        });
+      });
     }
     // Past the activation of the host's own evaluations and any press: a gesture isn't the cause.
     await page.waitForTimeout(5_500);
-    mark("display.focus()");
-    await display(page);
-    await page.waitForTimeout(300);
-    if (variant.startsWith("word-")) {
-      mark("the host's word");
-      await tell(page, { test: "shell-focus" });
-      await page.waitForTimeout(300);
-    }
-    if (variant === "page-field") {
+    if (scenario === "tab" || scenario === "tab-had") {
+      mark("Tab");
+      await page.keyboard.press("Tab");
+    } else if (scenario === "key-handler") {
+      mark("Escape, display.focus() in its keydown");
+      await page.keyboard.press("Escape");
+    } else if (variant === "page-parent" || variant === "page-parent-task") {
+      mark("the page's parent.focus()");
+      await tell(page, { test: "parent-focus" });
+    } else if (variant === "page-field") {
       mark("the page's field.focus()");
       await tell(page, { test: "focus" });
-      await page.waitForTimeout(300);
+    } else {
+      mark("display.focus()");
+      await display(page);
     }
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(800);
     mark("a key");
     await page.keyboard.press("k");
     await page.waitForTimeout(300);
