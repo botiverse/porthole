@@ -7729,6 +7729,7 @@ anchor's line now look on its paragraph's last line. New control `marker-key`.
 
 **Revisit when** a host's UI isn't in English and its marker names should be (a host's `label` on a
 mark, sent into the frame, the page reading it); an engine's or a screen reader's click on a marker
-it didn't focus is missed (give the layer a way to learn its target); a right-to-left paragraph's
+it didn't focus is missed, or reported as the marker that has the focus, so the wrong comment opens
+(give the layer a way to learn its target); a right-to-left paragraph's
 end should be on its left (P105's places aren't direction-aware either); paragraphs split by `<br>`
 should count as many; or a host wants a picked paragraph's marker at its end.

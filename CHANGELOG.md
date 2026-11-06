@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.14.11
 
 - **Annotations: markers are buttons (P133).** A marker is a real button in the frame's Tab order,
   after the page's own stops and in reading order, named for what it is ("3 comments on …"; in
