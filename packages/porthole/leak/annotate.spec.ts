@@ -2819,7 +2819,7 @@ test("a selection's and a mark's last line come in the document's coordinates wi
     widthPx: 480,
     heightPx: 300,
     content: `<!doctype html><html><head><title>Lines</title></head><body style="margin: 0">
-<div style="height: 700px">spacer</div>
+<div style="height: 1400px">spacer</div>
 <p id="lines" style="margin: 8px; font-size: 16px; white-space: pre-line">The first line of words
 the second line of words
 the third one ends here</p>
@@ -2859,9 +2859,9 @@ the third one ends here</p>
   ).toBe(true);
   // Scrolled to it: told again, the place in the document the same, less the scroll in view.
   let count = (await reports(display)).length;
-  await frame.evaluate(() => window.scrollBy(0, 650));
+  await frame.evaluate(() => window.scrollBy(0, 1350));
   const moved = await next(display, "selected", count);
-  expect(moved.scroll?.y, "probe: the selection's report tells the scroll").toBe(650);
+  expect(moved.scroll?.y, "probe: the selection's report tells the scroll").toBe(1350);
   expect(near(moved.lastLineDocumentRect), "probe: its last line stays where it is").toBe(true);
   await display.annotate("stop");
   await frame.evaluate(() => window.scrollTo(0, 0));
