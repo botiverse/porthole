@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.14.12
 
 - **Annotations: the keyboard back on a marker (P134).** `annotations.focusMark(id)` (React:
   `focusMark(id)` on the `ref`) moves the DOM focus to that mark's marker in the frame. It is for
