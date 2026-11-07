@@ -420,9 +420,11 @@ composer.onClose(() => display.annotations.clearSelection());
   their whole box (a composer's button, a card), a newer shell gives `selected`, each attached
   result and `tracked` a `lastLineDocumentRect`: the last line with words on it, in the document's
   coordinates (an element's whole box: it has no lines), unclamped as `documentRect` is. `selected`
-  carries the `scroll` it was read at too; an `anchored` report and `tracked` already do. A line's
-  end in the frame's viewport is `x + width - scroll.x`, its bottom `y + height - scroll.y`. Clip
-  what you draw from it, as above, and keep `rect` where it is absent (an older shell):
+  carries the `scroll` it was read at too; an `anchored` report and `tracked` already do, and
+  `createHost` drops a report with a last line and no `scroll`, so where you have the line you have
+  the scroll (P137). A line's end in the frame's viewport is `x + width - scroll.x`, its bottom
+  `y + height - scroll.y`. Clip what you draw from it, as above, and keep `rect` where it is absent
+  (an older shell):
 
   ```js
   display.on("annotation", (report) => {

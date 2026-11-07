@@ -137,7 +137,8 @@ export interface AnchorResult {
    * Where its last line is in the document (P133), in the coordinates of `documentRect` and as
    * unclamped: its last line with words on it for text, its whole box for an element, which has no
    * lines of its own. For a host's UI after the last line (its right, or its bottom). Absent from
-   * an older shell, and where nothing of the mark is drawn. The page's word.
+   * an older shell, and where nothing of the mark is drawn. Never without its report's `scroll`
+   * (a report that tries is dropped, P137). The page's word.
    */
   readonly lastLineDocumentRect?: AnnotationRect;
   /**
@@ -154,7 +155,8 @@ export type AnnotationReport =
    * The person pointed at an element or settled a text selection. A newer shell (P133) adds where
    * it ends, for a host's UI after its last line: `lastLineDocumentRect` as a result's is, with
    * how far the document was scrolled as it was read (so its place in the frame's viewport is the
-   * one less the other, unclamped). Both absent from an older shell.
+   * one less the other, unclamped). Both absent from an older shell, and never one alone (a report
+   * that tries is dropped, P137).
    */
   | {
       readonly type: "selected";
@@ -196,7 +198,8 @@ export type AnnotationReport =
    * document scrolls, so a host following one mark hears the scroll at every animation frame where
    * it changed, whether that mark is in the frame or not, and places every mark it holds a
    * `documentRect` for (an `anchored` report's) without asking again. A newer one still (P133) adds
-   * its `lastLineDocumentRect`.
+   * its `lastLineDocumentRect`, never without `scroll` (a report that tries is dropped, P137), though
+   * `scroll` comes without it.
    */
   | {
       readonly type: "tracked";

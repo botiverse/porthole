@@ -29,6 +29,9 @@ P-numbers below.
   its own clock can't make a late word look fresh (controls `marker-busy`, `marker-clock`;
   `marker-has-focus` covers this test too). No CSP, sandbox, egress or gate changes; the focus guard
   is untouched.
+- **Annotations: a last line comes with its scroll (P137).** A report with `lastLineDocumentRect` and
+  no `scroll` is dropped, so ADOPTING's sample can't throw on a forged one. Only a forged one goes:
+  `scroll` without a last line still passes on `tracked` and `anchored`, as older shells send it.
 
 ## 0.14.13
 

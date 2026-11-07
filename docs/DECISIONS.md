@@ -7597,7 +7597,7 @@ control: nothing here is a defense; the bound is `parseRect`'s, which existing p
 box, and its scroll), the scroll without following a mark (a page with no marks the host follows),
 or a host draws from `documentRect` inside the frame's own area and wants Porthole to clip for it.
 
-## P133 · 2026-11-06 · Markers are labelled buttons, a posted comment's sits at its paragraph's end, and reports say where the last line is · Accepted; amended by P134
+## P133 · 2026-11-06 · Markers are labelled buttons, a posted comment's sits at its paragraph's end, and reports say where the last line is · Accepted; amended by P134, P137
 
 Amends P104 (its point 6, and its "Revisit when" on a keyboard inside the frame) and P105 (its
 point 3, for posted text marks, and P2-B's click listener on each marker). Three follow-ups for
@@ -8118,7 +8118,7 @@ page, which would lose its field. UX, not security; Firefox the likeliest.
 the page and the blur shows; Firefox's key rule moves; or an engine lets a frame move inside the focus
 event that made it the focused one (then the word can go).
 
-## P137 · 2026-11-07 · A `focusMark` is judged by when the host sent it, not by whether it was parked · Accepted
+## P137 · 2026-11-07 · A `focusMark` is judged by when the host sent it, not by whether it was parked; a last line comes with its scroll · Accepted
 
 Amends P134 and P135. From the audit of 0.14.11 to 0.14.13, #proj-workspace:#215.
 
@@ -8241,6 +8241,32 @@ Safari; Safari and iOS are unmeasured.
   whether to ask. A parked word still doesn't expire.
 - A round trip (the frame asks the host if the word still stands): a report and a wait, for a moment
   where failing is fine (P135).
+
+### A last line comes with its scroll
+
+The shell sends `lastLineDocumentRect` and the `scroll` it was read at together (`placeOf`, P133), and
+ADOPTING's sample reads `report.scroll.x` wherever the line is set. `parseReport` checked each alone, so
+a forged `selected` or `tracked` with the line and no scroll got through, and that sample threw in
+the host's listener. `emit` doesn't catch a listener's throw, so the listeners after it missed that
+report. A page can stop a composer opening by not reporting a selection, so that is all it gained.
+
+**Decision.** `parseReport` drops a report with a last line and no scroll, as one malformed part drops
+the whole. On `selected` the two are a strict pair. On `tracked` and `anchored` the rule goes one
+way, since **the scroll alone is a shell's own**: 0.14.10's `tracked` and `anchored` have it with no
+last line (P132 came a release before P133), and a newer shell's `tracked` and results have it where
+`lastLineOf` finds nothing drawn. A strict pair there would have dropped those two, every report of
+a 0.14.10 shell, and left a host following a mark with nothing. `anchored` wasn't in the audit: a
+result's last line is read with its report's `scroll` the same way, so it has the same hole.
+
+**Older shells, read from their tags.** 0.14.9: `selected` and `tracked` with `rect` alone. 0.14.10: the
+same `selected`; `tracked` and `anchored` with `documentRect` and `scroll`. 0.14.11 on: as now. None
+sends a last line without a scroll, so an honest shell of any age loses no report (`test/annotate.test.ts`).
+
+**Compatibility.** Only a forged report goes, so a host reads what it read. Raft's `selectionPlace`
+reads these two; its source wasn't in reach here, and nothing a real shell sends changes for it.
+
+**Not done.** `documentRect` on `tracked` and on results, without `scroll`, still passes: ADOPTING tells
+a host to test for `scroll` there, and its sample does.
 
 **Revisit when** a host's calm closes are seen dropped (the word's age on a real machine); people are
 seen moving on inside 100 ms; a platform gives frames a clock that is shared and monotonic; or the

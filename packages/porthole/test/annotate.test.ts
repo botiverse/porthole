@@ -797,6 +797,78 @@ describe("places in the document (P132): a result's documentRect and the report'
       });
     });
 
+    test("a last line comes with its scroll, so ADOPTING's sample can't throw on a report that passes (P137)", () => {
+      expect(
+        parseReport({ type: "selected", anchor: text, rect, lastLineDocumentRect }),
+      ).toBeNull();
+      expect(parseReport({ type: "selected", anchor: text, rect, scroll })).toBeNull();
+      expect(
+        parseReport({ type: "tracked", id: "a", rect, documentRect, lastLineDocumentRect }),
+      ).toBeNull();
+      expect(
+        parseReport({
+          type: "anchored",
+          results: [{ id: "a", state: "attached", rect, documentRect, lastLineDocumentRect }],
+        }),
+      ).toBeNull();
+
+      // ADOPTING's "After the last line": `report.scroll` read wherever `line` is set.
+      const placed = parseReport({
+        type: "selected",
+        anchor: text,
+        rect,
+        lastLineDocumentRect,
+        scroll,
+      });
+      if (placed?.type !== "selected" || placed.lastLineDocumentRect === undefined) {
+        throw new Error("the pair passes");
+      }
+      const line = placed.lastLineDocumentRect;
+      expect(line.x + line.width - placed.scroll!.x).toBe(
+        lastLineDocumentRect.x + lastLineDocumentRect.width - scroll.x,
+      );
+    });
+
+    test("what older shells send still passes: the scroll without a last line is theirs (P137)", () => {
+      // 0.14.9: `rect` alone.
+      expect(parseReport({ type: "tracked", id: "a", rect })).toStrictEqual({
+        type: "tracked",
+        id: "a",
+        rect,
+      });
+      // 0.14.10 (P132): a document's place and its scroll, no last line, and on no `selected`.
+      expect(parseReport({ type: "tracked", id: "a", rect, documentRect, scroll })).toStrictEqual({
+        type: "tracked",
+        id: "a",
+        rect,
+        documentRect,
+        scroll,
+      });
+      expect(
+        parseReport({
+          type: "anchored",
+          results: [{ id: "a", state: "attached", rect, documentRect }],
+          scroll,
+        }),
+      ).toStrictEqual({
+        type: "anchored",
+        results: [{ id: "a", state: "attached", rect, documentRect }],
+        scroll,
+      });
+      expect(parseReport({ type: "selected", anchor: text, rect })).toStrictEqual({
+        type: "selected",
+        anchor: text,
+        rect,
+      });
+      // An orphan has no last line to read: the field goes, not the report.
+      expect(
+        parseReport({
+          type: "anchored",
+          results: [{ id: "a", state: "orphaned", lastLineDocumentRect }],
+        }),
+      ).toStrictEqual({ type: "anchored", results: [{ id: "a", state: "orphaned" }] });
+    });
+
     test("a malformed one, or a selection's malformed scroll, drops the whole report", () => {
       for (const bad of [
         { ...lastLineDocumentRect, height: -1 },

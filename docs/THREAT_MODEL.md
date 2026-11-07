@@ -851,7 +851,8 @@ own frame, below the shell, P111), so:
   the frame as well (accepted, P132; the host's duty in §6). They say nothing else: the page knows
   where its words are anyway. Where a selection or a mark's words end (`lastLineDocumentRect` in
   `selected`, `anchored` and `tracked`, P133) is one more such box, read, checked and left unclamped
-  the same way, with the same duty; `selected` also carries `scroll` now.
+  the same way, with the same duty; `selected` also carries `scroll` now. A report with a last line
+  and no `scroll` is dropped (P137), as a malformed part drops one.
 - *What holds, against content that patches none of the DOM's or JavaScript's built-ins.* A real
   press or click on a marker reaches none of the content's handlers (the shell's first listener
   stops it; control `marker-click`) and moves neither focus nor a selection (control
