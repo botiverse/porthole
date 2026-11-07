@@ -428,17 +428,33 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "marker-late": [
     {
       file: "src/shell/annotate.ts",
-      find: "            if (callOf(hasFocus, document, []) === true) {\n              focusMark(id);\n            }\n",
-      replace: "            focusMark(id);\n",
+      find: "            if (focusIsHere()) {\n              focusMark(id, false);\n            }\n",
+      replace: "            focusMark(id, false);\n",
     },
   ],
-  // The landing's question (P135) through the live prototype: a page that patched hasFocus answers
-  // it, and gets the landing the platform would refuse.
+  // A word a busy page took late (P137): it lands from wherever the person went, as it did before.
+  "marker-busy": [
+    {
+      file: "src/shell/annotate.ts",
+      find: "        if (late && !focusIsHere()) {\n          return;\n        }\n",
+      replace: "",
+    },
+  ],
+  // The word's age (P137) by the live clock: a page that stopped it makes a late word look fresh.
+  "marker-clock": [
+    {
+      file: "src/shell/annotate.ts",
+      find: "wordLate(params.at, callOf(wallClock, undefined, []))",
+      replace: "wordLate(params.at, Date.now())",
+    },
+  ],
+  // The question (P135, P137) through the live prototype: a page that patched hasFocus answers it,
+  // and gets the landing the platform would refuse.
   "marker-has-focus": [
     {
       file: "src/shell/annotate.ts",
-      find: "            if (callOf(hasFocus, document, []) === true) {\n",
-      replace: "            if (document.hasFocus() === true) {\n",
+      find: "      const focusIsHere = () => callOf(hasFocus, document, []) === true;\n",
+      replace: "      const focusIsHere = () => document.hasFocus() === true;\n",
     },
   ],
   // A marker's press (P104, P105): what the browser would do with it (focus, selection) goes on.
@@ -874,8 +890,10 @@ const SERVED = [
   "shell-namespace",
   "shell-focus-held",
   "nested-shell-origin",
-  // A parked focusMark on a nested page (P135): annotate's script is in the page's served shell.
+  // A focusMark on a nested page, parked (P135) or late (P137): annotate's script is in the page's
+  // served shell.
   "marker-late",
+  "marker-busy",
 ];
 
 /** Whether a control asked for edits the served documents' shell (`weakenServed`). */

@@ -91,6 +91,7 @@ const TAB = "leak/served/tab.spec.ts";
 const OUTCOME = "leak/served/outcome.spec.ts";
 const SIBLINGS_STATUS = "leak/served/siblings-status.spec.ts";
 const ANNOTATE = "leak/annotate.spec.ts";
+const LATE_WORD = "leak/nested-late-word.spec.ts";
 
 /** The keyboard's probes (P109). */
 const TAKE =
@@ -178,6 +179,16 @@ export const NESTED_SECOND_MOVE =
   "a second host's move into a page it just handed the focus to leaves it there: no blur, and its field keeps the keyboard (P136)";
 const MARKER_PATCHED_FOCUS =
   "a page that patched hasFocus to say yes gets no landing the platform's own answer refuses (P135)";
+/** A word a busy page takes late (P137); `nested-late-word.spec.ts` takes these titles here. */
+export const LATE_WORD_MOVED_ON =
+  "a focusMark a busy page takes late doesn't land once the host's page has moved on (P137)";
+export const LATE_WORD_PATCHED_CLOCK =
+  "a page that stopped Date.now gets no landing for a word it took late (P137)";
+export const LATE_WORD_PATCHED_FOCUS =
+  "a page that patched hasFocus to say yes gets no landing for a word it took late (P137)";
+/** The nested page's own case of it: the word through the shell, the same test in the page. */
+export const NESTED_LATE_WORD =
+  "a focusMark a busy nested page takes late doesn't land once the host's page has moved on (P137)";
 const HONEST_SCROLL =
   "an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second";
 /** A served page's own frames (P128): a frame of elsewhere stays out of the tree (files.spec.ts). */
@@ -399,7 +410,24 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       NESTED_MOVED_ON,
     ),
   },
-  "marker-has-focus": { specs: [ANNOTATE], fails: all(MARKER_PATCHED_FOCUS) },
+  // P137: a word a busy page took late is held to the same test, by the host's stamp and the kept
+  // clock. An engine with one thread for the frames can't show a person's click in that wait, so
+  // the probes move the focus in the task that sends the word. The click's own case needs
+  // `chromium-oopif`, which no control runs.
+  "marker-busy": {
+    specs: [LATE_WORD, NESTED],
+    fails: all(
+      LATE_WORD_MOVED_ON,
+      LATE_WORD_PATCHED_CLOCK,
+      LATE_WORD_PATCHED_FOCUS,
+      NESTED_LATE_WORD,
+    ),
+  },
+  "marker-clock": { specs: [LATE_WORD], fails: all(LATE_WORD_PATCHED_CLOCK) },
+  "marker-has-focus": {
+    specs: [ANNOTATE, LATE_WORD],
+    fails: all(MARKER_PATCHED_FOCUS, LATE_WORD_PATCHED_FOCUS),
+  },
   "marker-originals": { specs: [ANNOTATE], fails: all(PATCHED_PRESS) },
   "follow-throttle": { specs: [ANNOTATE], fails: all(HONEST_SCROLL) },
   "selection-follow": { specs: [ANNOTATE], fails: all(HONEST_SCROLL) },

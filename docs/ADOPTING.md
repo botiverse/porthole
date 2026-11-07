@@ -420,9 +420,11 @@ composer.onClose(() => display.annotations.clearSelection());
   their whole box (a composer's button, a card), a newer shell gives `selected`, each attached
   result and `tracked` a `lastLineDocumentRect`: the last line with words on it, in the document's
   coordinates (an element's whole box: it has no lines), unclamped as `documentRect` is. `selected`
-  carries the `scroll` it was read at too; an `anchored` report and `tracked` already do. A line's
-  end in the frame's viewport is `x + width - scroll.x`, its bottom `y + height - scroll.y`. Clip
-  what you draw from it, as above, and keep `rect` where it is absent (an older shell):
+  carries the `scroll` it was read at too; an `anchored` report and `tracked` already do, and
+  `createHost` drops a report with a last line and no `scroll`, so where you have the line you have
+  the scroll (P137). A line's end in the frame's viewport is `x + width - scroll.x`, its bottom
+  `y + height - scroll.y`. Clip what you draw from it, as above, and keep `rect` where it is absent
+  (an older shell):
 
   ```js
   display.on("annotation", (report) => {
@@ -453,7 +455,10 @@ composer.onClose(() => display.annotations.clearSelection());
   can forge `activated` while the person really is there, which this doesn't stop. So moving the
   keyboard into your view on it is your own step outside "takes no focus" above, and a page can
   bring it about: gate whatever posts from that view (a Reply in a frame-opened card) yourself;
-  Porthole can't. When the person's key closes your view of that mark from inside it (Escape, or a
+  Porthole can't. That goes for keys too: with the focus in your view the person's next keys reach
+  your document, so the view's own key handlers and your page-wide shortcuts that write (an `r` that
+  resolves, Cmd+Enter that posts) need the same gate (P137). When the person's key closes your view
+  of that mark from inside it (Escape, or a
   Tab past its first or last control), whether or not the keyboard got there through `activated`,
   and only then, close it and call
   `display.annotations.focusMark(id)` (React: `focusMark(id)` on the `ref`) to put the keyboard back
@@ -464,10 +469,14 @@ composer.onClose(() => display.annotations.clearSelection());
   the way that holds.
   On a calm page that lands at once, from your `<body>`. While the frame is finding its marks (a
   `show` just sent, which many hosts send as a card closes, or content that just changed) the word
-  waits, up to a second, and is then dropped unless the focus is in the frame by then, so it takes no
-  keyboard from a person who moved on ([P135](DECISIONS.md)). As your card has just closed, the focus
-  is on your `<body>`, so a word that waited is dropped, and nothing tells you: **call `focusMark`
-  again after your own move of the focus into the frame.**
+  waits, up to a second, and is then dropped unless the focus is in the frame by then. A word the
+  frame takes more than 100 ms after you sent it, because its page is busy, is held to the same
+  test. So a late word takes no keyboard from a person who moved on ([P135](DECISIONS.md),
+  [P137](DECISIONS.md)). As your card has just closed, the focus is on your `<body>`, so a word that
+  waited or came late is dropped, and nothing tells you: **call `focusMark` again after your own
+  move of the focus into the frame.** Call it as your close runs, not after other work: its age
+  starts when you call it, and where the browser runs the frame on your thread, what your task does
+  next counts too.
 
   ```js
   closeCard();
@@ -497,7 +506,9 @@ composer.onClose(() => display.annotations.clearSelection());
 
   Without the second call, nothing changes on a calm page. On a busy one, a word that the frame
   finishes with before your own move is lost where it used to land, so the person gets the frame and
-  not the marker. That is the cost of never pulling the keyboard into the page.
+  not the marker. That is the cost of never pulling the keyboard into the page. Upgrade the host and
+  the content server together: a newer shell takes a word from an older `createHost`, which has no
+  stamp, as a late one (the second call still lands), and an older shell ignores the stamp.
 - **Labels and quotes are the page's text**: shown only as text. Porthole takes out of a label what
   the person can't see; a quote (`exact`) keeps it, to be found again. Hand either to a model only
   as the page's words.

@@ -1,7 +1,12 @@
 import { expect, test, type Frame, type Page } from "@playwright/test";
 import type { PortholeConfig } from "../../src/index.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
-import { NESTED_MOVED_ON, NESTED_SECOND_MOVE, NESTED_WORD_LATE } from "../controls.ts";
+import {
+  NESTED_LATE_WORD,
+  NESTED_MOVED_ON,
+  NESTED_SECOND_MOVE,
+  NESTED_WORD_LATE,
+} from "../controls.ts";
 import { mount, outcomeOf, runtimeCalls } from "./porthole-host.ts";
 import { storedFiles } from "./files.ts";
 import { harness } from "./harness.ts";
@@ -45,7 +50,11 @@ interface Driven {
   readonly portholeHost: {
     readonly displays: readonly {
       focus(): void;
-      annotations: { show(marks: unknown[]): void; focusMark(id: string): void };
+      annotations: {
+        show(marks: unknown[]): void;
+        track(id: string | null): void;
+        focusMark(id: string): void;
+      };
     }[];
   };
 }
@@ -679,6 +688,60 @@ test.describe("a nested page (P111)", () => {
       .poll(() => onMarker(child), { message: "probe: it landed on its marker" })
       .toBe(true);
     expect(await hostActive(page), "probe: the frame holds the host's page's focus").toBe("IFRAME");
+  });
+
+  // `marker-busy`'s nested probe (P137): the host's word through the shell, with its stamp, to a
+  // page that works on the word before it, changing no DOM, so nothing parks it. The person moves
+  // on in the task that sends it, which an engine with one thread for the frames can show too.
+  test(NESTED_LATE_WORD, async ({ page }) => {
+    const shown = await show(
+      page,
+      `addEventListener("message", (event) => {
+        if (event.data !== null && typeof event.data === "object" && event.data.method === "porthole/annotate.track") {
+          const end = performance.now() + 400;
+          while (performance.now() < end) {}
+          say("worked");
+        }
+      });`,
+    );
+    await page.evaluate(
+      ([mark]) =>
+        (window as unknown as Driven).portholeHost.displays.at(-1)?.annotations.show([mark]),
+      [elementMark("m1", "#target")],
+    );
+    await expect
+      .poll(async () => (await seen(page)).anchored, { message: "the frame found m1" })
+      .toContain("m1");
+    const child = await pageFrame(shown);
+    await expect
+      .poll(
+        () => child.evaluate(() => document.querySelector("[data-porthole-annotations]") !== null),
+        { message: "the marker drawn" },
+      )
+      .toBe(true);
+    await page.waitForTimeout(400);
+    expect(await onMarker(child), "no marker holds the page's focus yet").toBe(false);
+
+    await page.evaluate(() => {
+      const display = (window as unknown as Driven).portholeHost.displays.at(-1);
+      display?.annotations.track(null);
+      display?.annotations.focusMark("m1");
+      document.getElementById("host-button")?.focus();
+    });
+    await expect
+      .poll(() => shown.said.some((each) => each.type === "worked"), {
+        message: "the page did its work",
+      })
+      .toBe(true);
+    await page.waitForTimeout(300);
+    expect(await onMarker(child), "probe: the late word didn't land").toBe(false);
+    expect(await hostActive(page), "probe: the keyboard stayed on the host's button").toBe(
+      "host-button",
+    );
+    expect(
+      await child.evaluate(() => document.hasFocus()),
+      "probe: the late word didn't take the focus into the page",
+    ).toBe(false);
   });
 
   /** The host's own move: `display.focus()`, as a host calls it. */

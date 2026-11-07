@@ -332,8 +332,9 @@ export interface AnnotationControls {
    *
    * On a calm page it lands at once, from anywhere on the host's page. While the frame is finding
    * its marks (a `show` just sent, the content just changed) it waits, and is then dropped unless
-   * the focus is in the frame by then (P135), so a word that comes late takes no keyboard from a
-   * person who moved on. Nothing says it was dropped: if the frame isn't your page's
+   * the focus is in the frame by then (P135). One the frame takes more than 100 ms after you sent
+   * it (its page is busy) is held to the same test (P137), so a word that comes late takes no
+   * keyboard from a person who moved on. Nothing says it was dropped: if the frame isn't your page's
    * `document.activeElement` soon after and the person hasn't moved on, call `focus()` and then
    * `focusMark(id)` again. On a nested page only `focus()` reaches the page (P136): the frame's own
    * `focus()` stops at its shell, and a second call that waits is dropped.

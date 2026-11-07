@@ -7597,7 +7597,7 @@ control: nothing here is a defense; the bound is `parseRect`'s, which existing p
 box, and its scroll), the scroll without following a mark (a page with no marks the host follows),
 or a host draws from `documentRect` inside the frame's own area and wants Porthole to clip for it.
 
-## P133 · 2026-11-06 · Markers are labelled buttons, a posted comment's sits at its paragraph's end, and reports say where the last line is · Accepted; amended by P134
+## P133 · 2026-11-06 · Markers are labelled buttons, a posted comment's sits at its paragraph's end, and reports say where the last line is · Accepted; amended by P134, P137
 
 Amends P104 (its point 6, and its "Revisit when" on a keyboard inside the frame) and P105 (its
 point 3, for posted text marks, and P2-B's click listener on each marker). Three follow-ups for
@@ -7734,7 +7734,7 @@ it didn't focus is missed, or reported as the marker that has the focus, so the 
 end should be on its left (P105's places aren't direction-aware either); paragraphs split by `<br>`
 should count as many; or a host wants a picked paragraph's marker at its end.
 
-## P134 · 2026-11-06 · The keyboard back on a marker after the host's card closes, and a marker's name without an element's tag · Accepted; amended by P135
+## P134 · 2026-11-06 · The keyboard back on a marker after the host's card closes, and a marker's name without an element's tag · Accepted; amended by P135, P137
 
 Amends P133 (its point 1, the name) and adds to P104's host API. Two follow-ups for comment markers,
 from a host (Raft web): a person who pressed Enter on a marker reads the host's card, presses
@@ -7806,7 +7806,8 @@ nothing. The shell is the content server's: upgrade that.
   after P112's): a page can time a forged `activated` and put the person's next keys in that view.
   All three conditions are the host's: the signal read on its own page, focus only on a container
   that takes no input, and its own gate on every control there that can write, so a forged opening
-  and the keys after it can't submit. Porthole can't do that for it.
+  and the keys after it can't submit (and on the key handlers and shortcuts that can write while the
+  focus is there, P137). Porthole can't do that for it.
 
 **Tested.** `test/annotate.test.ts`: what `createHost` sends and for which ids, kept for no later
 frame, the throw without `annotate`; the kept `focus` and no `tell` in the shell's; every name
@@ -7838,7 +7839,7 @@ focusMark…". Reports are found by what they say, and a control's own follow-up
 reason to stay open while the keyboard goes back; or a platform's guard should take a host's own word
 for a move into a frame it can't make itself.
 
-## P135 · 2026-11-06 · A parked `focusMark` lands only while the focus is in the frame's document · Accepted; amended by P136
+## P135 · 2026-11-06 · A parked `focusMark` lands only while the focus is in the frame's document · Accepted; amended by P136, P137
 
 Amends P134 (its points 3 and 4: a `focusMark` that waits, and the host's `display.focus()`).
 
@@ -7862,12 +7863,13 @@ the moment P134 is for.
 1. **Where `pendingMarker` lands, it is dropped unless `document.hasFocus()` is true**, asked in the
    anchor timer, at the landing, not when the word came: where the focus was when it was parked says
    nothing of where the person is now. Dropped is dropped: not parked again, and nothing is told.
-2. **The test is on the parked path only.** It sits at the landing, not in `focusMark`, so an unparked
-   call is as P134 left it. In `focusMark` it would refuse every call of P134's normal flow on a calm
-   page, and Escape would stop reaching the marker. The two paths differ in what the word is: unparked,
-   it is the host's word of this moment, about a focus the host can see on its own page; parked, it
-   is up to a second old, and the frame can't know what happened on the host's page since. All the
-   shell can ask then is whether the focus is still its own.
+2. **The test is on the parked path only** (P137 adds a word the frame took late: not parked says
+   nothing of a word's age, and what follows held only for a calm page). It sits at the landing, not
+   in `focusMark`, so an unparked call is as P134 left it. In `focusMark` it would refuse every call
+   of P134's normal flow on a calm page, and Escape would stop reaching the marker. The two paths
+   differ in what the word is: fresh, it is the host's word of this moment, about a focus the host
+   can see on its own page; parked, it is up to a second old, and the frame can't know what happened
+   on the host's page since. All the shell can ask then is whether the focus is still its own.
 3. **That is the intended logic, with this consequence: no focus, no grab.** In the normal flow the
    focus is on the host's body, so a first `focusMark` that happens to park is dropped, and a host
    that sends a `show` as its card closes (P134's point 3 says many do) parks every time. Only a call
@@ -7886,7 +7888,8 @@ the moment P134 is for.
 **What gets worse for a host that adds no second call.** The trade is the accuracy of "back on the
 marker" against never pulling the keyboard into the page. Read against the shell's anchor timer and
 Raft's `backToMark` (`focusMark` once, then after 150 ms, from `<body>` only, the frame's own
-`focus()`, and no second call). A call that doesn't wait is unchanged. A call that waits meets the
+`focus()`, and no second call). A call that doesn't wait is unchanged (on a calm page: P137). A call
+that waits meets the
 timer, which fires 150 ms after the last change or `show`, or at its run's one-second deadline
 whichever is first, so on a page still changing too, and a change after the call pushes it later:
 - **Normal frame, the timer fires before the host's fallback:** dropped, since the focus is on the
@@ -7921,8 +7924,10 @@ frame's document and not on the marker.
   keyboard taken from the host, and a page's own focus order is not the host's to defend (P133).
 - It still doesn't expire. Nothing here bounds a word parked while the content isn't in: it is only
   held to the same test when it lands, however late.
-- An unparked call lands from anywhere on the host's page, a host's button too, as in P134: it is the
+- A fresh call lands from anywhere on the host's page, a host's button too, as in P134: it is the
   host's own word, for one moment, and calling it after the person moved on is the host's mistake.
+  (This said "an unparked call", which was wrong: a busy page takes one late, with no mistake of the
+  host's, and that landing took the keyboard from a person who had moved on. P137.)
   The fallback above must look before it moves. The focus guard is unchanged.
 
 **Known gap: a nested page (#proj-workspace:#214; closed by P136, which also found the explanation
@@ -8113,3 +8118,172 @@ page, which would lose its field. UX, not security; Firefox the likeliest.
 **Revisit when** a host of nested pages uses React; a host calls `display.focus()` with the person in
 the page and the blur shows; Firefox's key rule moves; or an engine lets a frame move inside the focus
 event that made it the focused one (then the word can go).
+
+## P137 · 2026-11-07 · A `focusMark` is judged by when the host sent it, not by whether it was parked; a last line comes with its scroll; a host's shortcuts are under the second focus exception · Accepted
+
+Amends P134 and P135. From the audit of 0.14.11 to 0.14.13, #proj-workspace:#215.
+
+**Context.** P135 asks where the focus is only of a word parked while the marks are found, and
+whether a word is parked is decided as the frame takes it, not as the host sends it. A page busy with
+something that changes no DOM isn't settling, so the word comes late, unparked, and lands unasked.
+A frame out of process doesn't stop the host's page, so the person goes on meanwhile. If the same
+page changes the DOM as it wakes, the word is parked and dropped: the page's last act decided, not
+the word's age. So what P135 and §7 said of a word that doesn't wait ("the host's word of this
+moment", a late landing "the host's mistake") and what 0.14.13's changelog promised ("takes no
+keyboard from a person who moved on") held only on a calm page.
+
+**Measured.** `leak/nested-late-word.spec.ts` and the new case in `served/nested.spec.ts`, against
+main's shell, CI runs 42330653613 and 42331677092 (Playwright 1.63). With a real click on a host's
+button 200 ms into 1 s of page work, on `chromium-oopif` the host's `activeElement` was that button
+after the click, the frame once the page was done, and the marker held the frame's focus. With the
+focus moved to that button in the task that sends the word, the word landed on all four projects,
+a nested page's too.
+The real click passes on the three in-process projects: the host's page freezes with the frame, and
+the click comes after the landing. From a host's text field the focus guard takes the move back (the
+audit's measure, not repeated here), so this is about buttons, links and a host's own lists.
+
+**Decision.**
+
+1. **`createHost` stamps the word**: `{ id, at: Date.now() }`, as it is sent.
+2. **A word 100 ms old or more is held to P135's test where it comes**: dropped unless the shell's
+   document has the focus. The test is the same function, through the kept `hasFocus`, so a word that
+   passes lands as a parked one does, and one that doesn't is dropped and nothing is told. A word
+   the shell parks is still asked at its landing, whatever its age, and only there.
+3. **Below that, nothing is asked**, as P134 needs: the focus is on the host's `<body>` on a calm
+   page's Esc path, so a test there would stop Escape reaching the marker. A second word after the
+   host's own move (Raft's `backToMark`, 150 ms on) is fresh and lands; if the page is still busy
+   it is late, the focus is in the frame by then, and it lands too.
+4. **The clock.** `Date.now`, on both sides: one machine's wall clock, the only clock two realms can
+   compare (`performance.now()` counts from each realm's start). The shell's is `Date.now` taken
+   before content runs, called with `callOf`, as the kept `hasFocus` is. Comparing is all it does with
+   the numbers, and nothing there can be patched.
+5. **What counts as old.** No stamp, or one that makes no number, is old: it can't be known fresh.
+   A stamp ahead of the shell's clock gets the same 100 ms: two processes can read a clock a little
+   apart, and past that the clock was set back and the age says nothing. A word dropped by a clock
+   that moved is a word dropped, and the fallback asks again.
+
+**The number.** It has to clear what a calm page's word takes to arrive, and it has to end before a
+host's own fallback looks, since a word landing after that look can pull back a person the host
+just saw move on.
+- **Measured from below.** How old a word is as a page takes it, on CI's four-core runners with the
+  suite's other workers running, from the host's `Date.now()` to the page's in its `message`
+  listener (a probe in run 42330653613, not kept): 8,400 words, 2,100 on each of `chromium`,
+  `chromium-oopif`, `webkit` and `firefox`, on a plain frame, a nested page (two hops) and a page
+  drawing to a canvas for 8 ms of every animation frame, posted from a timer and from a real
+  Escape's `keydown`.
+
+  | | median, worst round | 99th, worst round | most |
+  | --- | --- | --- | --- |
+  | Plain frame or nested page, from a timer | 0 to 1 ms | 1 to 3 ms | 10 ms |
+  | The same, from a real Escape | 0 to 10 ms | 1 to 17 ms | 17 ms |
+  | The page drawing every frame | 0 to 2 ms | 7 to 13 ms | 30 ms (WebKit) |
+
+  No word was read ahead of its stamp, and the shell reads it before the page does.
+- **From above.** Raft's fallback looks at 150 ms, ADOPTING's sample at 200.
+- **So 100 ms**: over three times the worst of those 8,400, for machines slower than CI's, and clear
+  of the first fallback. A person who moves on inside it isn't defended, and P135's objection stands
+  (a word 100 ms old can land on a person who moved on at 90). This narrows that, it doesn't end it.
+  How soon people go on after a close isn't measured, nor what these numbers are on a person's busy
+  machine: 100 ms is taken as faster than a person from an Escape to a click, not shown to be.
+
+**Compatibility.** An older shell ignores `at`, and behaves as it did. **An older host with a newer
+shell loses the calm landing**: its word has no stamp, so from `<body>` it is dropped. That is the
+choice in point 5. Taking no stamp as fresh would keep that landing and leave this bug for every
+such host. Failing is fine here (P134), and pulling the keyboard is what P135 set out to end; a host
+with P135's fallback still lands, the frame focused by then. A shell is the content server's, so
+upgrade the two together. Nothing a host stores or reads changes.
+
+**What gets worse for a host.** A word delayed past the bound with the person still on `<body>` used
+to land and is now dropped: on a busy page, and, where the frame shares the host's thread (as CI's
+headless shell and Firefox do, and WebKit by the click's result), when the host's own task runs on
+past 100 ms after the call (a heavy render as its card closes). The host's fallback picks that up.
+Hosts should call `focusMark` as their close runs. How long a real host's close takes wasn't measured.
+
+**Threat.**
+- A page that stops or replaces `Date.now` gets nothing: the kept clock is what's read (control
+  `marker-clock`). A page that patches `hasFocus` gets no landing here either (`marker-has-focus`, now
+  on both tests through one function).
+- The word's stamp is the host's clock, and the page reads it. It tells the page how late it took the
+  word, which it could tell from its own work, and the time, which it has.
+- A page can forge the word with a fresh stamp, or patch `MessageEvent`'s `data` so a real word reads
+  fresh (the shell reads `event.data` live, as for every word here). It then lands its own marker,
+  which P134 accepts: it can `focus()` an element of its own. P137 protects the person from a page
+  that is only busy, not from one that means it: `focus()` was never closed to a page, off the host's
+  text fields (P109).
+- A page can get a word dropped by staying busy past the bound, as P135's page can by changing its
+  content. Failing is fine, and it reads the message anyway.
+- A person's move inside the bound isn't caught, above. The focus guard is unchanged, and still
+  all that defends a host's text field.
+
+**Controls.** `marker-busy` takes the new test out, and must fail, by `probe:`, on Chromium, WebKit and
+Firefox: "a focusMark a busy page takes late doesn't land once the host's page has moved on", its
+`Date.now` and `hasFocus` cases, and the nested case. Those move the focus in the task that sends the
+word, since an engine with one thread for the frames can't show a click in that wait. The real click
+is its own case, for `chromium-oopif`, which no control runs (P136). `marker-clock` reads the live clock
+and must fail the `Date.now` case. `marker-late` still takes out only the parked test: the landing
+calls `focusMark` as not late, or that control would go blind behind the new test.
+
+**Tested.** `test/annotate.test.ts`: the stamp; the kept clock and the handler's read; the rule itself
+at its bounds and with no usable stamp (`WORD_LATE`, spliced as `MARKER_HIT` is, and run); one read of
+`hasFocus`. `leak/nested-late-word.spec.ts`, in a `nested*` file so `chromium-oopif` runs it, though
+its frames aren't nested: the click; the moved-on case, with a patched `Date.now` and `hasFocus`; a
+late word with the focus in the frame lands; five calm closes from the `<body>` land; Raft's fallback
+lands, with the first word 130 ms late. `leak/served/nested.spec.ts`: the word through the shell.
+Written on a host where test runs are paused: CI is the run. CI's WebKit is Playwright's build, not
+Safari; Safari and iOS are unmeasured.
+
+**Rejected.**
+- Asking `hasFocus` of every word: Escape stops reaching the marker (P135's point 2).
+- The message's own `event.timeStamp`: the frame's, made after the wait this is about, and nothing of
+  when the host sent it.
+- `performance.timeOrigin + performance.now()` on both sides, to survive a clock set back: two more
+  originals to keep, for a case where a word is only dropped.
+- A time limit that drops a word (P135's rejected one): age here doesn't drop a word, it decides
+  whether to ask. A parked word still doesn't expire.
+- A round trip (the frame asks the host if the word still stands): a report and a wait, for a moment
+  where failing is fine (P135).
+
+### A last line comes with its scroll
+
+The shell sends `lastLineDocumentRect` and the `scroll` it was read at together (`placeOf`, P133), and
+ADOPTING's sample reads `report.scroll.x` wherever the line is set. `parseReport` checked each alone, so
+a forged `selected` or `tracked` with the line and no scroll got through, and that sample threw in
+the host's listener. `emit` doesn't catch a listener's throw, so the listeners after it missed that
+report. A page can stop a composer opening by not reporting a selection, so that is all it gained.
+
+**Decision.** `parseReport` drops a report with a last line and no scroll, as one malformed part drops
+the whole. On `selected` the two are a strict pair. On `tracked` and `anchored` the rule goes one
+way, since **the scroll alone is a shell's own**: 0.14.10's `tracked` and `anchored` have it with no
+last line (P132 came a release before P133), and a newer shell's `tracked` and results have it where
+`lastLineOf` finds nothing drawn. A strict pair there would have dropped those two, every report of
+a 0.14.10 shell, and left a host following a mark with nothing. `anchored` wasn't in the audit: a
+result's last line is read with its report's `scroll` the same way, so it has the same hole.
+
+**Older shells, read from their tags.** 0.14.9: `selected` and `tracked` with `rect` alone. 0.14.10: the
+same `selected`; `tracked` and `anchored` with `documentRect` and `scroll`. 0.14.11 on: as now. None
+sends a last line without a scroll, so an honest shell of any age loses no report (`test/annotate.test.ts`).
+
+**Compatibility.** Only a forged report goes, so a host reads what it read. Raft's `selectionPlace`
+reads these two; its source wasn't in reach here, and nothing a real shell sends changes for it.
+
+**Not done.** `documentRect` on `tracked` and on results, without `scroll`, still passes: ADOPTING tells
+a host to test for `scroll` there, and its sample does.
+
+### The second exception names keys
+
+P134's second exception to "takes no focus" lists "every control in that view that can write". Once the
+focus is on that `tabindex="-1"` container, the person's next keys go to the host's document: the
+container's key handlers and the host's page-wide shortcuts, neither of them a control in that view.
+Before P134 keys typed in the frame stayed in the frame. With the exception a page can forge `activated`
+while the person types in its own field and move their keys to the host, and a host whose single key
+writes (an `r` that resolves, Cmd+Enter that posts) could meet all three conditions as worded and still
+act on keys meant for the page.
+
+**Decision.** §6 and ADOPTING's "Key or pointer" say so: a key handler or page-wide shortcut that can
+write while the focus is in that view needs the same gate. The third condition's purpose already
+covered it, and its list didn't. By reading: no host with such shortcuts was built to show it. A duty
+of the host's, like the rest of the exception. No code changes.
+
+**Revisit when** a host's calm closes are seen dropped (the word's age on a real machine); people are
+seen moving on inside 100 ms; a platform gives frames a clock that is shared and monotonic; or the
+parked word's own age should count.

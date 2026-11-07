@@ -235,7 +235,10 @@ Whatever the use:
   it reads its own page's `document.activeElement` and that is this frame; the focus goes only to a
   container that takes no input (`tabindex="-1"`), never a field or a button; and every control in
   that view that can write has the host's own gate, so that a forged opening and the keys right after
-  it can't submit. That's the host's duty: Porthole doesn't guarantee it.
+  it can't submit. The gate covers keys as well as controls: with the focus in that view the person's
+  next keys reach the host's document, so the view's own key handlers and the host's page-wide
+  shortcuts that write (an `r` that resolves, Cmd+Enter that posts) need it too (P137). That's the
+  host's duty: Porthole doesn't guarantee it.
 - Know that a display can take the keyboard: a page calls `focus()` on its own input whenever it
   likes (on Chromium and WebKit with no gesture), and what the person goes on typing goes to it.
   `createHost` (every `PortholeView` too) gives focus back when it leaves one of the page's text
@@ -246,8 +249,9 @@ Whatever the use:
   a fighting frame holds focus); and with a platform of your own, implement its focus guard
   (`focused`, `onFocusTaken`, `focus`) or accept that a display can read what is typed beside it.
 - Call `annotations.focusMark(id)` only as the person's key closes your view of that mark, and know
-  it can be dropped (P135): one that has to wait while the frame finds its marks lands only if the
-  focus is in the frame by then, and in the normal flow it is on your `<body>`. Nothing says so. If
+  it can be dropped (P135, P137): one that has to wait while the frame finds its marks, or that the
+  frame takes more than 100 ms after you sent it because its page is busy, lands only if the focus
+  is in the frame by then, and in the normal flow it is on your `<body>`. Nothing says so. If
   the focus is still on your body a moment later, the person hasn't moved on: `display.focus()`,
   then `focusMark(id)` again. Look first: that move is yours, the focus guard doesn't judge it, and
   a move after the person went on to a button of yours takes the keyboard from them. On a nested
@@ -850,7 +854,8 @@ own frame, below the shell, P111), so:
   the frame as well (accepted, P132; the host's duty in §6). They say nothing else: the page knows
   where its words are anyway. Where a selection or a mark's words end (`lastLineDocumentRect` in
   `selected`, `anchored` and `tracked`, P133) is one more such box, read, checked and left unclamped
-  the same way, with the same duty; `selected` also carries `scroll` now.
+  the same way, with the same duty; `selected` also carries `scroll` now. A report with a last line
+  and no `scroll` is dropped (P137), as a malformed part drops one.
 - *What holds, against content that patches none of the DOM's or JavaScript's built-ins.* A real
   press or click on a marker reaches none of the content's handlers (the shell's first listener
   stops it; control `marker-click`) and moves neither focus nor a selection (control
@@ -888,7 +893,7 @@ own frame, below the shell, P111), so:
   `activated` while the person really is in the frame, and this signal doesn't stop that.** A host
   that moves the keyboard into its view on the signal takes §6's second exception, with its
   conditions: a page can put the person's next keys in that view, and keeping those keys from posting
-  is the host's own gate on that view's controls, not Porthole's.
+  is the host's own gate on that view's controls and on its shortcuts, not Porthole's.
 - *Back to a marker* (P134). `annotations.focusMark(id)` is the host's word to the frame
   (`porthole/annotate.focusMark`, `{ id }`), for one moment only: after the keyboard closed the host's
   own view of that mark, by Escape or by a Tab past its first or last control. No content goes with it, beyond an id the frame has, and nothing comes back. The
@@ -900,15 +905,23 @@ own frame, below the shell, P111), so:
   host's text field that still has focus it is undone and counted (P109), not passed as the host's:
   no window was opened in the guard for it.
   A word that has to wait while the frame finds its marks is up to a second old when it could land
-  (P135), and a marker's `focus()` takes the keyboard with no gesture on Chromium and WebKit, past a
-  guard that defends only text fields: a person gone on to a host's button would be pulled back. So
-  the shell drops a parked word unless the focus is in its document as it lands, by `hasFocus` as it
-  was before content ran (control `marker-has-focus`: a page that replaced it to say yes gets the
-  landing otherwise; `marker-late` takes the test out). A word that doesn't wait isn't asked: it is
-  the host's word of this moment, and the frame has no focus then on the very path it is for. A page
+  (P135). A word the shell doesn't park can be as old: the frame takes it when its thread is free, a
+  busy page changes nothing the shell can see, and a frame out of process doesn't stop the host's
+  page meanwhile (P137). A marker's `focus()` takes the keyboard with no gesture on Chromium and
+  WebKit, past a guard that defends only text fields: a person gone on to a host's button would be
+  pulled back. So the shell drops a parked word unless the focus is in its document as it lands, and
+  a word older than 100 ms unless the focus is there as it comes, by `hasFocus` as it was before
+  content ran (control `marker-has-focus`: a page that replaced it to say yes gets the landing
+  otherwise; `marker-late` takes the first test out, `marker-busy` the second). A word's age is the
+  shell's `Date.now` as it was before content ran, less the stamp `createHost` put on it as it was
+  sent (`at`): one machine's wall clock (control `marker-clock`: a page that stopped its own clock
+  makes a late word look fresh otherwise). A word with no stamp, from an older host, is old. A fresh
+  word isn't asked: the frame has no focus then on the very path it is for. That leaves a person who
+  moves on within those 100 ms, faster than a person does, and a page that forges the whole word with
+  a fresh stamp, as it can forge the word at all, which gives it nothing (P134). A page
   can really take the focus and so pass the test, which gives it nothing, since it then has the
-  keyboard; and a parked word can still move the focus off the page's own field onto a marker, inside
-  the frame. §6 has the host's side: a second `focusMark` after its own `display.focus()`.
+  keyboard; and a word that passes it can still move the focus off the page's own field onto a marker,
+  inside the frame. §6 has the host's side: a second `focusMark` after its own `display.focus()`.
   The word is a message, so from the host's close until the frame moves, the focus rests on the host's
   body. A forged `activated` in that gap finds no frame focused, so a host that gates a view on "the
   frame had the focus" doesn't gate that one. That is accepted, on the host's side of the wall: such

@@ -21,7 +21,7 @@ import {
   type DisplayHandle,
   type PlatformHost,
 } from "../src/index.ts";
-import { ANNOTATE_RUNTIME, MARKER_HIT, MARKER_NAME } from "../src/shell/annotate.ts";
+import { ANNOTATE_RUNTIME, MARKER_HIT, MARKER_NAME, WORD_LATE } from "../src/shell/annotate.ts";
 import { SHELL_RUNTIME } from "../src/shell/runtime.ts";
 
 /** Annotations (P053): what the host takes from a frame, and what the shell is given. */
@@ -614,17 +614,28 @@ describe("clearSelection (P115) and focusMark (P134), on createHost over a stand
     expect(plain.annotateSent()).toEqual([]);
   });
 
-  test("focusMark sends a shown marker's id and nothing else, and is kept for no later frame", () => {
+  test("focusMark sends a shown marker's id and when it was sent, nothing else, and is kept for no later frame (P137)", () => {
     const t = mount(true);
     t.handshake();
     t.display.annotations.show([
       { id: "c1", anchor: text, count: 1 },
       { id: "d1", anchor: element, kind: "draft" },
     ]);
+    const earliest = Date.now();
     t.display.annotations.focusMark("c1");
-    expect(t.sent.at(-1)).toEqual({ method: "porthole/annotate.focusMark", params: { id: "c1" } });
+    const latest = Date.now();
+    expect(t.sent.at(-1)).toEqual({
+      method: "porthole/annotate.focusMark",
+      params: { id: "c1", at: expect.any(Number) },
+    });
+    const { at } = t.sent.at(-1)!.params as { at: number };
+    expect(at).toBeGreaterThanOrEqual(earliest);
+    expect(at).toBeLessThanOrEqual(latest);
     t.display.annotations.focusMark("d1");
-    expect(t.sent.at(-1)).toEqual({ method: "porthole/annotate.focusMark", params: { id: "d1" } });
+    expect(t.sent.at(-1)).toEqual({
+      method: "porthole/annotate.focusMark",
+      params: { id: "d1", at: expect.any(Number) },
+    });
     const before = t.sent.length;
     t.display.reload();
     t.handshake();
@@ -784,6 +795,78 @@ describe("places in the document (P132): a result's documentRect and the report'
         anchor: text,
         rect,
       });
+    });
+
+    test("a last line comes with its scroll, so ADOPTING's sample can't throw on a report that passes (P137)", () => {
+      expect(
+        parseReport({ type: "selected", anchor: text, rect, lastLineDocumentRect }),
+      ).toBeNull();
+      expect(parseReport({ type: "selected", anchor: text, rect, scroll })).toBeNull();
+      expect(
+        parseReport({ type: "tracked", id: "a", rect, documentRect, lastLineDocumentRect }),
+      ).toBeNull();
+      expect(
+        parseReport({
+          type: "anchored",
+          results: [{ id: "a", state: "attached", rect, documentRect, lastLineDocumentRect }],
+        }),
+      ).toBeNull();
+
+      // ADOPTING's "After the last line": `report.scroll` read wherever `line` is set.
+      const placed = parseReport({
+        type: "selected",
+        anchor: text,
+        rect,
+        lastLineDocumentRect,
+        scroll,
+      });
+      if (placed?.type !== "selected" || placed.lastLineDocumentRect === undefined) {
+        throw new Error("the pair passes");
+      }
+      const line = placed.lastLineDocumentRect;
+      expect(line.x + line.width - placed.scroll!.x).toBe(
+        lastLineDocumentRect.x + lastLineDocumentRect.width - scroll.x,
+      );
+    });
+
+    test("what older shells send still passes: the scroll without a last line is theirs (P137)", () => {
+      // 0.14.9: `rect` alone.
+      expect(parseReport({ type: "tracked", id: "a", rect })).toStrictEqual({
+        type: "tracked",
+        id: "a",
+        rect,
+      });
+      // 0.14.10 (P132): a document's place and its scroll, no last line, and on no `selected`.
+      expect(parseReport({ type: "tracked", id: "a", rect, documentRect, scroll })).toStrictEqual({
+        type: "tracked",
+        id: "a",
+        rect,
+        documentRect,
+        scroll,
+      });
+      expect(
+        parseReport({
+          type: "anchored",
+          results: [{ id: "a", state: "attached", rect, documentRect }],
+          scroll,
+        }),
+      ).toStrictEqual({
+        type: "anchored",
+        results: [{ id: "a", state: "attached", rect, documentRect }],
+        scroll,
+      });
+      expect(parseReport({ type: "selected", anchor: text, rect })).toStrictEqual({
+        type: "selected",
+        anchor: text,
+        rect,
+      });
+      // An orphan has no last line to read: the field goes, not the report.
+      expect(
+        parseReport({
+          type: "anchored",
+          results: [{ id: "a", state: "orphaned", lastLineDocumentRect }],
+        }),
+      ).toStrictEqual({ type: "anchored", results: [{ id: "a", state: "orphaned" }] });
     });
 
     test("a malformed one, or a selection's malformed scroll, drops the whole report", () => {
@@ -1132,7 +1215,7 @@ describe("the shell", () => {
     expect(ANNOTATE_RUNTIME).toContain('focusMark: "porthole/annotate.focusMark"');
     const taken = ANNOTATE_RUNTIME.indexOf("const focusElement = HTMLElement.prototype.focus;");
     expect(taken).toBeGreaterThan(-1);
-    const moved = ANNOTATE_RUNTIME.indexOf("const focusMark = (id) => {");
+    const moved = ANNOTATE_RUNTIME.indexOf("const focusMark = (id, late) => {");
     expect(moved).toBeGreaterThan(taken);
     const body = ANNOTATE_RUNTIME.slice(moved, ANNOTATE_RUNTIME.indexOf("      };", moved));
     expect(body).toContain("callOf(focusElement, markers[i].element");
@@ -1140,21 +1223,46 @@ describe("the shell", () => {
     expect(body).not.toContain("report(");
   });
 
-  test("a parked focusMark lands only by the kept hasFocus; a call that isn't parked reads no focus (P135)", () => {
+  test("a parked focusMark, and one taken late, land only by the kept hasFocus; a fresh one reads no focus (P135, P137)", () => {
     const taken = ANNOTATE_RUNTIME.indexOf("const hasFocus = Document.prototype.hasFocus;");
     expect(taken).toBeGreaterThan(-1);
     const parked = ANNOTATE_RUNTIME.indexOf("if (pendingMarker !== null) {");
     expect(parked).toBeGreaterThan(taken);
     const landing = ANNOTATE_RUNTIME.slice(parked, ANNOTATE_RUNTIME.indexOf("}, wait);", parked));
-    expect(landing).toContain(
-      "if (callOf(hasFocus, document, []) === true) {\n              focusMark(id);",
+    expect(landing).toContain("if (focusIsHere()) {\n              focusMark(id, false);");
+    // One read, through the kept function; focusMark asks it only of a word that came late.
+    expect(ANNOTATE_RUNTIME).toContain(
+      "const focusIsHere = () => callOf(hasFocus, document, []) === true;",
     );
-    // The only read: nothing goes through the live function, and focusMark itself asks nothing.
+    expect(ANNOTATE_RUNTIME.split("hasFocus,")).toHaveLength(2);
     expect(ANNOTATE_RUNTIME).not.toContain("document.hasFocus");
-    const moved = ANNOTATE_RUNTIME.indexOf("const focusMark = (id) => {");
+    const moved = ANNOTATE_RUNTIME.indexOf("const focusMark = (id, late) => {");
     const body = ANNOTATE_RUNTIME.slice(moved, ANNOTATE_RUNTIME.indexOf("      };", moved));
-    expect(body).not.toContain("hasFocus");
+    expect(body).toContain("if (late && !focusIsHere()) {");
+    expect(body.split("focusIsHere")).toHaveLength(2);
     expect(body).not.toContain("activeElement");
+  });
+
+  test("a focusMark's age comes from the host's stamp and the clock kept before content runs (P137)", () => {
+    const taken = ANNOTATE_RUNTIME.indexOf("const wallClock = Date.now;");
+    expect(taken).toBeGreaterThan(-1);
+    expect(ANNOTATE_RUNTIME.indexOf("window.addEventListener")).toBeGreaterThan(taken);
+    expect(ANNOTATE_RUNTIME).toContain(`const wordLate = ${WORD_LATE};`);
+    expect(ANNOTATE_RUNTIME).toContain(
+      "focusMark(String(params.id), wordLate(params.at, callOf(wallClock, undefined, [])));",
+    );
+
+    const late = runInNewContext(WORD_LATE) as (at: unknown, now: number) => boolean;
+    const now = 1_800_000_000_000;
+    expect(late(now, now), "just sent").toBe(false);
+    expect(late(now - 99, now), "within the bound").toBe(false);
+    expect(late(now - 100, now), "at the bound").toBe(true);
+    expect(late(now - 1_500, now), "a busy page's").toBe(true);
+    expect(late(now + 5, now), "two processes' reads, a little apart").toBe(false);
+    expect(late(now + 100, now), "the clock set back").toBe(true);
+    for (const stamp of [undefined, null, "1800000000000", {}, Number.NaN, Infinity, -Infinity]) {
+      expect(late(stamp, now), `no usable stamp: ${JSON.stringify(stamp)}`).toBe(true);
+    }
   });
 
   test("a marker's name is what it is and its words, quoted, without an element's tag (P134)", () => {

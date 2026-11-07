@@ -667,9 +667,10 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         focusMark(id) {
           // Host → frame only, and kept for no later frame (P134). A mark that has gone, or has no
           // marker, is nothing to ask for, and no fault: the host's card closed with the mark's.
+          // Stamped as it is sent: a frame judges by that how old the word is as it takes it (P137).
           needsAnnotate("focusMark");
           if (marks.some((mark) => mark.id === id && hasMarker(mark))) {
-            toFrame(ANNOTATE_METHODS.focusMark, { id });
+            toFrame(ANNOTATE_METHODS.focusMark, { id, at: Date.now() });
           }
         },
       };

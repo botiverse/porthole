@@ -192,6 +192,15 @@ function results(value: unknown): AnchorResult[] | null {
   return out;
 }
 
+/**
+ * A last line with nothing to read it by (P137): its place in the frame's viewport is its own less
+ * the scroll it was read at, so a shell sends no last line without one, and a host needn't test for
+ * both. The scroll alone is a shell's own: 0.14.10's `tracked` and `anchored` (P132, no last line yet),
+ * and a newer one's where nothing of the mark is drawn.
+ */
+const lineWithoutScroll = (line: AnnotationRect | undefined, scroll: unknown): boolean =>
+  line !== undefined && scroll === undefined;
+
 /** A report from the frame, checked; null if malformed (it is then dropped). */
 export function parseReport(value: unknown): AnnotationReport | null {
   if (!isRecord(value)) {
@@ -210,6 +219,10 @@ export function parseReport(value: unknown): AnnotationReport | null {
       if (anchor === null || rect === null || lastLineDocumentRect === null || scroll === null) {
         return null;
       }
+      // A pair, here (P137): a selection has never had one without the other.
+      if ((lastLineDocumentRect === undefined) !== (scroll === undefined)) {
+        return null;
+      }
       return {
         type: "selected",
         anchor,
@@ -225,9 +238,14 @@ export function parseReport(value: unknown): AnnotationReport | null {
     case "anchored": {
       const checked = results(value.results);
       const scroll = value.scroll === undefined ? undefined : parseScroll(value.scroll);
-      return checked === null || scroll === null
-        ? null
-        : { type: "anchored", results: checked, ...(scroll === undefined ? {} : { scroll }) };
+      if (
+        checked === null ||
+        scroll === null ||
+        checked.some((each) => lineWithoutScroll(each.lastLineDocumentRect, scroll))
+      ) {
+        return null;
+      }
+      return { type: "anchored", results: checked, ...(scroll === undefined ? {} : { scroll }) };
     }
     case "activated": {
       const rect = parseRect(value.rect);
@@ -248,7 +266,8 @@ export function parseReport(value: unknown): AnnotationReport | null {
         rect === null ||
         documentRect === null ||
         lastLineDocumentRect === null ||
-        scroll === null
+        scroll === null ||
+        lineWithoutScroll(lastLineDocumentRect, scroll)
       ) {
         return null;
       }
