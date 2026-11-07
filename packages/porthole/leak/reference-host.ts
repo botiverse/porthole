@@ -63,6 +63,17 @@ export interface ReferenceDisplay extends LaunchedDisplay {
     options?: { readonly focus?: boolean },
   ): Promise<void>;
   /**
+   * Sends a `track(null)` and a `focusMark` in one task of the host's page, as a card that follows
+   * its mark does as it closes, so a page that works on `track` takes the second late (P137). With
+   * `moveTo`, the focus goes to that element of the host's in the same task: the person moved on
+   * before the frame took the word, on any engine. With `fallback`, that many ms later, from the
+   * `<body>` only, the frame's own `focus()` and a second `focusMark`, as Raft's `backToMark`.
+   */
+  untrackAndFocusMark(
+    id: string,
+    options?: { readonly moveTo?: string; readonly fallback?: number },
+  ): Promise<void>;
+  /**
    * Runs a find control: `query`'s answer (or what it threw), null for the others. `argument` is
    * the query, or whether the host takes the shortcut.
    */
@@ -190,6 +201,26 @@ export function referenceHostWith(setup: {
               reference.annotate(each, "focusMark", which);
             },
             [id, marks, mark, options?.focus === true] as const,
+          ),
+        untrackAndFocusMark: (mark, options) =>
+          page.evaluate(
+            ([each, which, moveTo, fallback]) => {
+              const { reference } = window as unknown as WithReference;
+              reference.annotate(each, "track", null);
+              reference.annotate(each, "focusMark", which);
+              if (moveTo !== null) {
+                document.getElementById(moveTo)?.focus({ preventScroll: true });
+              }
+              if (fallback !== null) {
+                setTimeout(() => {
+                  if (document.activeElement === document.body) {
+                    document.querySelector("iframe")?.focus();
+                    reference.annotate(each, "focusMark", which);
+                  }
+                }, fallback);
+              }
+            },
+            [id, mark, options?.moveTo ?? null, options?.fallback ?? null] as const,
           ),
         annotate: (operation, argument) =>
           page.evaluate(

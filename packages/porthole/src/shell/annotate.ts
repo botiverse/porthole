@@ -58,6 +58,23 @@ export const MARKER_NAME = String.raw`(mark) => {
       }`;
 
 /**
+ * Whether a host's `focusMark` is too old to land unasked (P137): `at` is the host's `Date.now()` as
+ * it sent the word, `now` the shell's, kept before content runs. Both read the one wall clock of
+ * this machine, the only clock two realms share (`performance.now()` counts from each one's own
+ * start). No number is an older host's word, which can't be known fresh. A word from ahead of the
+ * clock has the same bound behind it: two processes can read the clock a little apart, and past
+ * that the clock was set back, and the age says nothing. Comparisons only, nothing a page can
+ * patch, and a word that makes no number (`NaN`, `Infinity`) passes neither test.
+ */
+export const WORD_LATE = String.raw`(at, now) => {
+  if (typeof at !== "number") {
+    return true;
+  }
+  const age = now - at;
+  return !(age > -100 && age < 100);
+}`;
+
+/**
  * The shell's annotation runtime (P053), spliced into the shell's runtime (`__ANNOTATE__`) when
  * the config declares `annotate`, so it runs before any content does, with the DOM's own
  * functions as they were. Plain ES2020 like the rest of the shell; no template literals (it sits
@@ -80,8 +97,8 @@ export const MARKER_NAME = String.raw`(mark) => {
  *   focus on it (P133), is reported (`activated`), and the content's own handlers never see it; a
  *   draft is drawn apart, a dashed line and a hollow bubble with no number, and has a marker with
  *   or without a count; the host's `focusMark` (P134) puts the focus on a marker that is there, and
- *   tells nothing back; one that had to wait for the marks lands only if the focus is still in this
- *   document (P135);
+ *   tells nothing back; one that had to wait for the marks (P135), or that this document took late
+ *   (P137), lands only if the focus is in this document by then;
  * - following: while a mark has a marker, once a scroll, a resize or a change of the content
  *   settles, the marks that moved since the host was last told are reported, at most once a
  *   second, so the host's own UI beside a mark can follow;
@@ -125,6 +142,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const removeAllRanges = Selection.prototype.removeAllRanges;
       const focusElement = HTMLElement.prototype.focus;
       const hasFocus = Document.prototype.hasFocus;
+      const wallClock = Date.now;
       const elementRect = Element.prototype.getBoundingClientRect;
       const rangeRect = Range.prototype.getBoundingClientRect;
       const rangeRects = Range.prototype.getClientRects;
@@ -1077,6 +1095,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       let waitingForContent = false;
       let pendingFocus = null;
       let pendingMarker = null;
+      // Asked through the kept function: a page that says it has the focus gets no landing the
+      // platform would refuse (P135).
+      const focusIsHere = () => callOf(hasFocus, document, []) === true;
+      const wordLate = ${WORD_LATE};
       const settling = () => anchorTimer !== 0 || waitingForContent || marks.some((mark) => mark.state === null);
       const scheduleAnchor = (all) => {
         if (all) {
@@ -1120,10 +1142,9 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             pendingMarker = null;
             // Parked, the host's word is old: the person may have moved on, and a marker's focus
             // takes the keyboard with no gesture. So it lands only if the focus is still in this
-            // document, asked through the kept function: a page that says it has the focus gets
-            // no landing the platform would refuse. Otherwise it is dropped (P135).
-            if (callOf(hasFocus, document, []) === true) {
-              focusMark(id);
+            // document. Otherwise it is dropped (P135).
+            if (focusIsHere()) {
+              focusMark(id, false);
             }
           }
         }, wait);
@@ -1234,15 +1255,19 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       // markers yet, so it waits for them, as focus does; then a marker that isn't there, or has
       // stepped aside for picking, is nothing to do. The kept function, so a page that patched
       // focus isn't handed the marker from inside the closed root. The shell's focus listener
-      // lights it and brings it into view; nothing is told. A call that isn't parked reads no
-      // focus: it is the host's word just now, and after its card closed the focus is on the
-      // host's body, so this document has none yet. Only the landing of a parked one asks (P135).
-      const focusMark = (id) => {
+      // lights it and brings it into view; nothing is told. A fresh word reads no focus: after the
+      // host's card closed the focus is on the host's body, so this document has none yet. One
+      // parked is asked as it lands (P135), and one this document took late (P137: late, by when
+      // the host sent it: a busy page doesn't park it) is asked here: its moment has passed.
+      const focusMark = (id, late) => {
         if (settling()) {
           pendingMarker = id;
           return;
         }
         if (mode.elements || !isShown(id)) {
+          return;
+        }
+        if (late && !focusIsHere()) {
           return;
         }
         for (let i = 0; i < markers.length; i += 1) {
@@ -1688,7 +1713,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             break;
           }
           case M.focusMark:
-            focusMark(String(params.id));
+            focusMark(String(params.id), wordLate(params.at, callOf(wallClock, undefined, [])));
             break;
           case M.clear:
             track(null);

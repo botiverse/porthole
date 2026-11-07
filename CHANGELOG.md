@@ -17,13 +17,27 @@ P-numbers below.
   `display.focus()`. The shell acts on it only while the focus is on its own document, and no page
   can say it (control `shell-focus-held`). `marker-late` now covers nested pages too. No CSP, sandbox,
   egress or gate changes; the focus guard is untouched.
+- **Annotations: a `focusMark` that came late (P137).** 0.14.13's promise held only for a word that
+  waited for marks. A word a busy page took late landed unasked, and on a frame out of process it
+  pulled the keyboard off a host's button the person had gone on to. `createHost` now stamps the
+  word, and one 100 ms old or more is dropped unless the focus is in the frame, as a parked one is. A
+  calm close still lands from your `<body>`, and a second call after your own move still lands. So
+  P135's fallback covers a busy page too (ADOPTING). Upgrade the content server and the host
+  together: a newer shell takes an older host's word, which has no stamp, as late, so without
+  the fallback it stops landing from `<body>`.
+- **Security (P137):** the shell's clock is `Date.now`, kept before content runs, so a page that stops
+  its own clock can't make a late word look fresh (controls `marker-busy`, `marker-clock`;
+  `marker-has-focus` covers this test too). No CSP, sandbox, egress or gate changes; the focus guard
+  is untouched.
 
 ## 0.14.13
 
 - **Annotations: a `focusMark` that had to wait (P135).** While the frame finds its marks, `focusMark`
   waits, and is now dropped unless the focus is in the frame by then, so it takes no keyboard from a
-  person who moved on. A call on a calm page is unchanged. After your card closes the focus is on your
-  `<body>`, so a call that waited is dropped: if the focus is still there a moment later, call
+  person who moved on. (Corrected: that held for a word that waited, not for one a busy page took
+  late, which could still take it. P137.) A call on a calm page is unchanged. After your card closes
+  the focus is on your `<body>`, so a call that waited is dropped: if the focus is still there a
+  moment later, call
   `display.focus()` and `focusMark(id)` again (ADOPTING). Known gap: on a nested page that had the
   focus, `display.focus()` doesn't bring it back, so a call that waits is dropped even then.
 - **Security (P135):** the shell asks through the platform's `hasFocus`, kept before content runs

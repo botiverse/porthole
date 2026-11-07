@@ -246,8 +246,9 @@ Whatever the use:
   a fighting frame holds focus); and with a platform of your own, implement its focus guard
   (`focused`, `onFocusTaken`, `focus`) or accept that a display can read what is typed beside it.
 - Call `annotations.focusMark(id)` only as the person's key closes your view of that mark, and know
-  it can be dropped (P135): one that has to wait while the frame finds its marks lands only if the
-  focus is in the frame by then, and in the normal flow it is on your `<body>`. Nothing says so. If
+  it can be dropped (P135, P137): one that has to wait while the frame finds its marks, or that the
+  frame takes more than 100 ms after you sent it because its page is busy, lands only if the focus
+  is in the frame by then, and in the normal flow it is on your `<body>`. Nothing says so. If
   the focus is still on your body a moment later, the person hasn't moved on: `display.focus()`,
   then `focusMark(id)` again. Look first: that move is yours, the focus guard doesn't judge it, and
   a move after the person went on to a button of yours takes the keyboard from them. On a nested
@@ -900,15 +901,23 @@ own frame, below the shell, P111), so:
   host's text field that still has focus it is undone and counted (P109), not passed as the host's:
   no window was opened in the guard for it.
   A word that has to wait while the frame finds its marks is up to a second old when it could land
-  (P135), and a marker's `focus()` takes the keyboard with no gesture on Chromium and WebKit, past a
-  guard that defends only text fields: a person gone on to a host's button would be pulled back. So
-  the shell drops a parked word unless the focus is in its document as it lands, by `hasFocus` as it
-  was before content ran (control `marker-has-focus`: a page that replaced it to say yes gets the
-  landing otherwise; `marker-late` takes the test out). A word that doesn't wait isn't asked: it is
-  the host's word of this moment, and the frame has no focus then on the very path it is for. A page
+  (P135). A word the shell doesn't park can be as old: the frame takes it when its thread is free, a
+  busy page changes nothing the shell can see, and a frame out of process doesn't stop the host's
+  page meanwhile (P137). A marker's `focus()` takes the keyboard with no gesture on Chromium and
+  WebKit, past a guard that defends only text fields: a person gone on to a host's button would be
+  pulled back. So the shell drops a parked word unless the focus is in its document as it lands, and
+  a word older than 100 ms unless the focus is there as it comes, by `hasFocus` as it was before
+  content ran (control `marker-has-focus`: a page that replaced it to say yes gets the landing
+  otherwise; `marker-late` takes the first test out, `marker-busy` the second). A word's age is the
+  shell's `Date.now` as it was before content ran, less the stamp `createHost` put on it as it was
+  sent (`at`): one machine's wall clock (control `marker-clock`: a page that stopped its own clock
+  makes a late word look fresh otherwise). A word with no stamp, from an older host, is old. A fresh
+  word isn't asked: the frame has no focus then on the very path it is for. That leaves a person who
+  moves on within those 100 ms, faster than a person does, and a page that forges the whole word with
+  a fresh stamp, as it can forge the word at all, which gives it nothing (P134). A page
   can really take the focus and so pass the test, which gives it nothing, since it then has the
-  keyboard; and a parked word can still move the focus off the page's own field onto a marker, inside
-  the frame. §6 has the host's side: a second `focusMark` after its own `display.focus()`.
+  keyboard; and a word that passes it can still move the focus off the page's own field onto a marker,
+  inside the frame. §6 has the host's side: a second `focusMark` after its own `display.focus()`.
   The word is a message, so from the host's close until the frame moves, the focus rests on the host's
   body. A forged `activated` in that gap finds no frame focused, so a host that gates a view on "the
   frame had the focus" doesn't gate that one. That is accepted, on the host's side of the wall: such

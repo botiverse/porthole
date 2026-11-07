@@ -464,10 +464,14 @@ composer.onClose(() => display.annotations.clearSelection());
   the way that holds.
   On a calm page that lands at once, from your `<body>`. While the frame is finding its marks (a
   `show` just sent, which many hosts send as a card closes, or content that just changed) the word
-  waits, up to a second, and is then dropped unless the focus is in the frame by then, so it takes no
-  keyboard from a person who moved on ([P135](DECISIONS.md)). As your card has just closed, the focus
-  is on your `<body>`, so a word that waited is dropped, and nothing tells you: **call `focusMark`
-  again after your own move of the focus into the frame.**
+  waits, up to a second, and is then dropped unless the focus is in the frame by then. A word the
+  frame takes more than 100 ms after you sent it, because its page is busy, is held to the same
+  test. So a late word takes no keyboard from a person who moved on ([P135](DECISIONS.md),
+  [P137](DECISIONS.md)). As your card has just closed, the focus is on your `<body>`, so a word that
+  waited or came late is dropped, and nothing tells you: **call `focusMark` again after your own
+  move of the focus into the frame.** Call it as your close runs, not after other work: its age
+  starts when you call it, and where the browser runs the frame on your thread, what your task does
+  next counts too.
 
   ```js
   closeCard();
@@ -497,7 +501,9 @@ composer.onClose(() => display.annotations.clearSelection());
 
   Without the second call, nothing changes on a calm page. On a busy one, a word that the frame
   finishes with before your own move is lost where it used to land, so the person gets the frame and
-  not the marker. That is the cost of never pulling the keyboard into the page.
+  not the marker. That is the cost of never pulling the keyboard into the page. Upgrade the host and
+  the content server together: a newer shell takes a word from an older `createHost`, which has no
+  stamp, as a late one (the second call still lands), and an older shell ignores the stamp.
 - **Labels and quotes are the page's text**: shown only as text. Porthole takes out of a label what
   the person can't see; a quote (`exact`) keeps it, to be found again. Hand either to a model only
   as the page's words.
