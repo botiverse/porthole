@@ -455,7 +455,10 @@ composer.onClose(() => display.annotations.clearSelection());
   can forge `activated` while the person really is there, which this doesn't stop. So moving the
   keyboard into your view on it is your own step outside "takes no focus" above, and a page can
   bring it about: gate whatever posts from that view (a Reply in a frame-opened card) yourself;
-  Porthole can't. When the person's key closes your view of that mark from inside it (Escape, or a
+  Porthole can't. That goes for keys too: with the focus in your view the person's next keys reach
+  your document, so the view's own key handlers and your page-wide shortcuts that write (an `r` that
+  resolves, Cmd+Enter that posts) need the same gate (P137). When the person's key closes your view
+  of that mark from inside it (Escape, or a
   Tab past its first or last control), whether or not the keyboard got there through `activated`,
   and only then, close it and call
   `display.annotations.focusMark(id)` (React: `focusMark(id)` on the `ref`) to put the keyboard back

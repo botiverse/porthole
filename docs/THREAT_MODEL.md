@@ -235,7 +235,10 @@ Whatever the use:
   it reads its own page's `document.activeElement` and that is this frame; the focus goes only to a
   container that takes no input (`tabindex="-1"`), never a field or a button; and every control in
   that view that can write has the host's own gate, so that a forged opening and the keys right after
-  it can't submit. That's the host's duty: Porthole doesn't guarantee it.
+  it can't submit. The gate covers keys as well as controls: with the focus in that view the person's
+  next keys reach the host's document, so the view's own key handlers and the host's page-wide
+  shortcuts that write (an `r` that resolves, Cmd+Enter that posts) need it too (P137). That's the
+  host's duty: Porthole doesn't guarantee it.
 - Know that a display can take the keyboard: a page calls `focus()` on its own input whenever it
   likes (on Chromium and WebKit with no gesture), and what the person goes on typing goes to it.
   `createHost` (every `PortholeView` too) gives focus back when it leaves one of the page's text
@@ -890,7 +893,7 @@ own frame, below the shell, P111), so:
   `activated` while the person really is in the frame, and this signal doesn't stop that.** A host
   that moves the keyboard into its view on the signal takes §6's second exception, with its
   conditions: a page can put the person's next keys in that view, and keeping those keys from posting
-  is the host's own gate on that view's controls, not Porthole's.
+  is the host's own gate on that view's controls and on its shortcuts, not Porthole's.
 - *Back to a marker* (P134). `annotations.focusMark(id)` is the host's word to the frame
   (`porthole/annotate.focusMark`, `{ id }`), for one moment only: after the keyboard closed the host's
   own view of that mark, by Escape or by a Tab past its first or last control. No content goes with it, beyond an id the frame has, and nothing comes back. The

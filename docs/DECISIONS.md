@@ -7734,7 +7734,7 @@ it didn't focus is missed, or reported as the marker that has the focus, so the 
 end should be on its left (P105's places aren't direction-aware either); paragraphs split by `<br>`
 should count as many; or a host wants a picked paragraph's marker at its end.
 
-## P134 · 2026-11-06 · The keyboard back on a marker after the host's card closes, and a marker's name without an element's tag · Accepted; amended by P135
+## P134 · 2026-11-06 · The keyboard back on a marker after the host's card closes, and a marker's name without an element's tag · Accepted; amended by P135, P137
 
 Amends P133 (its point 1, the name) and adds to P104's host API. Two follow-ups for comment markers,
 from a host (Raft web): a person who pressed Enter on a marker reads the host's card, presses
@@ -7806,7 +7806,8 @@ nothing. The shell is the content server's: upgrade that.
   after P112's): a page can time a forged `activated` and put the person's next keys in that view.
   All three conditions are the host's: the signal read on its own page, focus only on a container
   that takes no input, and its own gate on every control there that can write, so a forged opening
-  and the keys after it can't submit. Porthole can't do that for it.
+  and the keys after it can't submit (and on the key handlers and shortcuts that can write while the
+  focus is there, P137). Porthole can't do that for it.
 
 **Tested.** `test/annotate.test.ts`: what `createHost` sends and for which ids, kept for no later
 frame, the throw without `annotate`; the kept `focus` and no `tell` in the shell's; every name
@@ -8118,7 +8119,7 @@ page, which would lose its field. UX, not security; Firefox the likeliest.
 the page and the blur shows; Firefox's key rule moves; or an engine lets a frame move inside the focus
 event that made it the focused one (then the word can go).
 
-## P137 · 2026-11-07 · A `focusMark` is judged by when the host sent it, not by whether it was parked; a last line comes with its scroll · Accepted
+## P137 · 2026-11-07 · A `focusMark` is judged by when the host sent it, not by whether it was parked; a last line comes with its scroll; a host's shortcuts are under the second focus exception · Accepted
 
 Amends P134 and P135. From the audit of 0.14.11 to 0.14.13, #proj-workspace:#215.
 
@@ -8267,6 +8268,21 @@ reads these two; its source wasn't in reach here, and nothing a real shell sends
 
 **Not done.** `documentRect` on `tracked` and on results, without `scroll`, still passes: ADOPTING tells
 a host to test for `scroll` there, and its sample does.
+
+### The second exception names keys
+
+P134's second exception to "takes no focus" lists "every control in that view that can write". Once the
+focus is on that `tabindex="-1"` container, the person's next keys go to the host's document: the
+container's key handlers and the host's page-wide shortcuts, neither of them a control in that view.
+Before P134 keys typed in the frame stayed in the frame. With the exception a page can forge `activated`
+while the person types in its own field and move their keys to the host, and a host whose single key
+writes (an `r` that resolves, Cmd+Enter that posts) could meet all three conditions as worded and still
+act on keys meant for the page.
+
+**Decision.** §6 and ADOPTING's "Key or pointer" say so: a key handler or page-wide shortcut that can
+write while the focus is in that view needs the same gate. The third condition's purpose already
+covered it, and its list didn't. By reading: no host with such shortcuts was built to show it. A duty
+of the host's, like the rest of the exception. No code changes.
 
 **Revisit when** a host's calm closes are seen dropped (the word's age on a real machine); people are
 seen moving on inside 100 ms; a platform gives frames a clock that is shared and monotonic; or the

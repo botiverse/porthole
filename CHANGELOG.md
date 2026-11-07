@@ -32,6 +32,9 @@ P-numbers below.
 - **Annotations: a last line comes with its scroll (P137).** A report with `lastLineDocumentRect` and
   no `scroll` is dropped, so ADOPTING's sample can't throw on a forged one. Only a forged one goes:
   `scroll` without a last line still passes on `tracked` and `anchored`, as older shells send it.
+- **Docs (P137):** the second exception to "takes no focus" now names keys: if you move the focus into
+  a view on `activated`, the view's key handlers and your page-wide shortcuts that write need the
+  same gate as its controls (THREAT_MODEL §6, ADOPTING).
 
 ## 0.14.13
 
