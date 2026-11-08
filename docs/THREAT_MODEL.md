@@ -213,8 +213,9 @@ Whatever the use:
   app with egress, S5, unless you accept it). Take its counts as the bar's numbers, and open your
   bar on `findRequested`, nothing more (§7 "Find in page").
 - Guard a view that a frame's report opens or moves (`activated`, `anchored`, `selected`,
-  `tracked`: a comment's bubble, a composer, a card that follows its mark, which the page moves
-  at will, up to 60 times a second). The content chooses when it appears and where, so it can bring it
+  `tracked`, `selectionTracked`: a comment's bubble, a composer, a card that follows its mark, a
+  composer that follows the selection (P138), which the page moves at will, up to 60 times a
+  second, and hides and shows again with `inView`). The content chooses when it appears and where, so it can bring it
   under a press the person meant for the content (a double click on the content's own button whose
   second click lands on the bubble's). Such a view takes no press of any kind for 500 ms after it
   appears or moves (not a `click` only: menu triggers act on `pointerdown`, and menu items click
@@ -856,7 +857,13 @@ own frame, below the shell, P111), so:
   where its words are anyway. Where a selection or a mark's words end (`lastLineDocumentRect` in
   `selected`, `anchored` and `tracked`, P133) is one more such box, read, checked and left unclamped
   the same way, with the same duty; `selected` also carries `scroll` now. A report with a last line
-  and no `scroll` is dropped (P137), as a malformed part drops one.
+  and no `scroll` is dropped (P137), as a malformed part drops one. A followed selection's reports
+  (`selectionTracked`, P138) are the same boxes, checked and clamped the same way, taken only while
+  the host follows the selection and within `tracked`'s 60 a second (control
+  `track-selection-checks`); their `inView` is false unless the box reaches the frame's viewport as
+  the host reads it. They carry nothing of the page's words. The page reads the host's word that
+  starts and ends the following, so it learns when a composer is open on its selection, as it
+  learns which card is open from `track` (P112): end it on every close, kept or dismissed.
 - *What holds, against content that patches none of the DOM's or JavaScript's built-ins.* A real
   press or click on a marker reaches none of the content's handlers (the shell's first listener
   stops it; control `marker-click`) and moves neither focus nor a selection (control

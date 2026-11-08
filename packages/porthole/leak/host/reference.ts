@@ -2,6 +2,7 @@ import {
   createHost,
   type AnnotateMode,
   type AnnotationMark,
+  type AnnotationTrackTarget,
   type FindOptions,
   type FindResult,
 } from "../../src/index.ts";
@@ -153,7 +154,7 @@ const reference = {
       | "clear"
       | "clearSelection"
       | "focusMark",
-    argument?: AnnotateMode | readonly AnnotationMark[] | string,
+    argument?: AnnotateMode | readonly AnnotationMark[] | AnnotationTrackTarget,
   ): string | null {
     const controls = displays.get(id)?.handle.annotations;
     if (controls === undefined) {
@@ -174,7 +175,8 @@ const reference = {
           controls.focus(argument as string);
           break;
         case "track":
-          controls.track(argument as string | null);
+          // A mark's id, null, or { selection: true } (P138).
+          controls.track(argument as AnnotationTrackTarget);
           break;
         case "clear":
           controls.clear();

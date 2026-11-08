@@ -1,4 +1,9 @@
-import type { AnnotateMode, AnnotationMark, AnnotationReport } from "../annotate/types.ts";
+import type {
+  AnnotateMode,
+  AnnotationMark,
+  AnnotationReport,
+  AnnotationTrackTarget,
+} from "../annotate/types.ts";
 import type { FindOptions, FindResult } from "../find/types.ts";
 import type { Refused } from "../bridge/refusal.ts";
 import type {
@@ -309,8 +314,19 @@ export interface AnnotationControls {
    * Throws for an id no shown mark has; a `show` without it, or `clear`, stops it. From a newer
    * shell (P132) each also carries the mark's `documentRect` and the document's `scroll`, so
    * following one mark tells how far the document scrolled, for every mark placed by `documentRect`.
+   *
+   * `{ selection: true }` (P138) follows the selection the frame last reported as `selected` (the
+   * element picked, or the words selected) instead, for a composer that stays beside it: the frame
+   * highlights it while it is followed (an element in the outline it had while it was picked) and
+   * reports `{ type: "selectionTracked", ... }` with the same boxes as `tracked` and `inView`, or
+   * `state: "orphaned"` while it isn't in the page; at most 60 a second together with `tracked`.
+   * A `show` leaves it, and `stop` (or a pick ending) too: it ends with `track(null)`, `track(id)`
+   * or `clear` (comment posted, composer dismissed, Escape in it), and the highlight with it. A
+   * newer shell answers at its next animation frame; an older one sends nothing (it reads the
+   * message as `track(null)`), so until a `selectionTracked` comes, place by `selected`'s boxes.
+   * Kept for a frame that runs later, which has no selection: it answers `orphaned`.
    */
-  track(id: string | null): void;
+  track(target: AnnotationTrackTarget): void;
   /** Removes every mark. */
   clear(): void;
   /**

@@ -4,6 +4,22 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **Annotations: the selection followed (P138).** `annotations.track({ selection: true })` (React:
+  `trackedSelection`) follows what the last `selected` reported, the element picked or the words
+  selected, so your composer can stay beside it: `selectionTracked` reports come as `tracked` ones
+  do (at most 60 a second, the same boxes), with `inView` to hide the composer while it is out of
+  view, and `state: "orphaned"` while it isn't in the page. While it is followed the frame
+  highlights it, a picked element in the picking outline, so the page shows what the comment is
+  for. `track(null)`, a mark's id or `clear` ends it and the highlight (React: `trackedSelection`
+  false gives `trackedAnnotation` back). An older shell sends nothing and draws nothing: place by
+  `selected` until a `selectionTracked` comes. Upgrade the content server for the shell's part.
+- **Security (P138):** no CSP, sandbox, egress or gate changes. The host takes `selectionTracked`
+  only while it follows the selection, on `tracked`'s 60 a second (control
+  `track-selection-checks`). It carries boxes only. A composer that follows is a view a report
+  moves: guard it as THREAT_MODEL §6 says, and end the following on every close.
+
 ## 0.14.14
 
 - **Nested pages: `display.focus()` reaches the page (P136).** It stopped at the page's shell on every

@@ -5985,7 +5985,7 @@ answer needs its sandbox taken off for a worker, and none is: the narrowest fix 
 `Sec-Fetch-Dest: worker` answer) would fix nothing. The agent manual already teaches workers from
 `blob:` URLs only.
 
-## P112 · 2026-10-28 · 0.14's comment UX: what annotations add for a host's comment modes · Accepted
+## P112 · 2026-10-28 · 0.14's comment UX: what annotations add for a host's comment modes · Accepted; amended by P138
 
 **Context.** Raft's comment design (its modes A–C, a card that follows its mark, a list in document
 order, block selection on touch) needs more from `annotate` than 0.13 has. Each addition is the
@@ -6260,7 +6260,7 @@ Tested: `test/shell.test.ts` (`<`, `</`, `</di`, inside an attribute, and whole 
 unchanged); `leak/react.spec.ts` "content streams through props…" (a draft cut after `</` and
 after `<` draws neither).
 
-## P118 · 2026-10-28 · React: `trackedAnnotation` and a handle with `clearSelection` · Accepted; amended by P131
+## P118 · 2026-10-28 · React: `trackedAnnotation` and a handle with `clearSelection` · Accepted; amended by P131, P138
 
 **Context.** Raft's web app (Kirby) shows displays through `PortholeFrame` and `PortholeView`,
 which hold the display handle inside: it could not follow a mark (`annotations.track`, P112) or
@@ -8287,3 +8287,127 @@ of the host's, like the rest of the exception. No code changes.
 **Revisit when** a host's calm closes are seen dropped (the word's age on a real machine); people are
 seen moving on inside 100 ms; a platform gives frames a clock that is shared and monotonic; or the
 parked word's own age should count.
+
+## P138 · 2026-11-08 · The selection followed: a composer stays beside what it is for, and what was picked stays lit · Accepted
+
+Amends P112 (`track` follows the selection too) and P118 (`trackedSelection`). From a Raft user's
+report, Kirby's design.
+
+**Context.** A host opens its composer on `selected`, where the selection is at that moment. A pick
+ends with element mode, and its outline with it (`hover = null`), so after the click nothing in the
+page says which element the composer is for. `selected` is sent once for a pick, and for words again
+only once a scroll settles, at most a second apart (P105). So a composer drawn as a popover at the
+report's box stays where the element was as the page scrolls, resizes or lays itself out again, and
+covers whatever comes there. A posted comment's card has what the composer lacks: `track(id)` follows
+its mark at every animation frame (P112), with its place in the document (P132), and `anchored` says
+when it is orphaned. But it follows a mark by id, and the selection has none.
+
+**Decision.**
+
+1. **`annotations.track({ selection: true })`** follows the selection the frame last reported as
+   `selected` (the element picked, by a click or a held block, or the words selected) instead of a
+   mark. One followed thing at a time, as before: a mark's id, `null` or `clear` ends it; a `show`, a
+   `stop` and a pick's end leave it. It is kept for a frame that runs later, as a followed mark is.
+   On the wire it is `porthole/annotate.track` with `{ id: null, selection: true }`.
+2. **The shell keeps what each `selected` reported**: the element, or a copy of the range (the DOM's
+   own `cloneRange`, taken before content runs), which the page's changes keep up to date and which
+   outlives the page's own selection (a click elsewhere, the host's `clearSelection`, P115). A newer
+   `selected` replaces it, and a followed selection follows the new one from the next frame. Taken
+   out of the page (a re-render), it is found again by its anchor, as a mark is, at most twice a
+   second while it is gone.
+3. **`porthole/annotate.selectionTracked`** reports it as `tracked` reports a mark, on the same clock
+   (an animation frame where it moved, at most one every 16 ms), and also when the frame's viewport
+   changed size: `{ state: "attached", rect, documentRect, lastLineDocumentRect?, scroll, inView }`,
+   or `{ state: "orphaned" }` once while it isn't in the page (or the frame has nothing to follow, a
+   new frame after a reload). The first comes at the frame after the host asks. `inView` is whether
+   any of its box is inside the viewport. It is a new method, not `tracked` with another shape, so
+   that `tracked`'s `id: string` stays as hosts read it and an older host drops it unread (an unknown
+   method is no report, and not a malformed one).
+4. **`createHost` takes it only while it follows the selection**, at most 60 a second together with
+   `tracked` (one array: one followed thing, one rate), outside the bridge's rate as `tracked` is
+   (P112). Its `rect` is clamped (P104); `documentRect` and `lastLineDocumentRect` are checked and
+   left unclamped (P132, P133); `inView` is the page's word and the host's together: false unless
+   its box as reported reaches the viewport as the host reads it (`inViewport`), so a page can't say
+   "in view" of a box the clamp puts on an edge. Every field but the last line is required: the
+   method is new with its shell, which always has them.
+5. **The followed selection is drawn** in the shell's layer while it is followed: an element in the
+   picking outline (blue, lighter, without the tag that names it), words with a light blue fill and
+   a line under them, apart from the marks' yellow, since no comment is there yet. In the layer's
+   `aria-hidden` outlines, under the layer's `pointer-events: none`: no pointer, no Tab stop, no
+   name. It goes when the following ends.
+6. **React**: `trackedSelection?: boolean`. While true the selection is followed in
+   `trackedAnnotation`'s place; false gives that mark back. A separate prop, not a wider
+   `trackedAnnotation`, so the composer's state and the open card's are each a host's own value and
+   the precedence is Porthole's, once.
+
+**How a host tells, and what an older shell does.** A shell that follows a selection answers at its
+next animation frame, `attached` or `orphaned`. An older shell reads `{ id: null, selection: true }`
+as `track(null)`: it follows nothing, sends nothing, and draws nothing, which is today's behaviour,
+and a host that places by `selected`'s boxes until a `selectionTracked` comes keeps it there. An
+older host never asks, so a newer shell never sends it; a page that sends it anyway to an older host
+sends a method that host doesn't know.
+
+**Not a loosening.** No CSP, sandbox flag, egress, gate or allowlist changes, and no new budget:
+- *Frame to host.* The same boxes the frame already sends in `selected` and `tracked` (`rect`,
+  `documentRect`, `lastLineDocumentRect`, `scroll`) and a boolean, through the same checks, the same
+  clamp and the same 60 a second as `tracked`, which it shares, since one thing is followed at a
+  time: a host that followed a card and now follows a composer takes what it took. No anchor, label
+  or words go with it: those went with `selected`. The host takes it only after it asked.
+- *Host to frame.* The page reads the host's messages (it shares the shell's realm, P053). It learns
+  that the host follows its selection, and when that ends: that a composer is open on it, and closed.
+  That is P112's `track(id)` (which card is open) and P121's `clearSelection` (when the person was done)
+  for the composer: end it on every close, posted or dismissed, so the end says nothing of what came
+  of it, as P121 asks of the clear.
+- *What the page can do with it.* It moves the host's composer, within its frame, as often as 60
+  times a second, and can say it is out of view or gone. P112 accepted that for a card that follows
+  its mark, under THREAT_MODEL §6's guard of a view a report moves (no press for 500 ms after it
+  appears or moves, beside the frame where it can, no focus but by §6's exceptions); a composer that
+  follows is such a view, and a composer hidden for `inView: false` and shown again appears again.
+  `selectionTracked` joins §6's list. A forged `orphaned` or `inView: false` is no more than a page
+  that never reports a selection, which it can already do; a host keeps the person's words in the
+  composer either way.
+- *The layer.* A closed shadow root the page can't read, as for marks; the highlight takes no
+  pointer, so the page's clicks and selections reach it as before.
+
+**Focus and keys.** Following reads boxes and draws; it calls no `focus()`, changes no selection,
+adds no listener, and prevents and stops no event. Markers' tab stops, `focusMark` and its tests
+(P134, P135, P137), `display.focus()` on a nested page (P136), the hold gesture (P112) and Escape (a
+pick's, and text mode's `cancelled`) are as they were. Escape in the frame doesn't end the following:
+the host ends it from its composer's own Escape, and a frame's Escape while text is selected is
+`cancelled` as before (P112).
+
+**Rejected.**
+- *A draft mark for the composer* (`show` with `kind: "draft"` and `track` its id), which works today:
+  a draft is a comment the author kept, drawn with a marker, a button in the page's Tab order and
+  named "Draft comment" (P107, P133), anchored again from its selectors (best-effort, 150 ms after a
+  change), and it reaches the page as a draft; the composer is none of those until the person keeps
+  it.
+- *`selected` re-sent at every frame*: it carries the anchor and its words, which the bridge's rate
+  is for, and an older host would open its composer again at each one.
+- *`tracked` with `selection: true` and no `id`*: `tracked`'s `id` is a string hosts read, and an
+  older host would count each as a malformed report against the page.
+- *`inView` computed by the host alone*: the shell can say more (a box its page clips), and the
+  host's test still bounds it.
+
+**Tested.** `test/annotate.test.ts` "the followed selection (P138)": `parseReport` rebuilds it from
+known fields (an anchor, a label or an id a page adds are dropped), drops a malformed or incomplete
+one; `inViewport` and `followsSelection`; through `createHost`, the wire message, an older shell's
+reading of it, reports taken only while followed, a show leaving it, a mark's id, `null` and `clear`
+ending it, the clamp and `inView`, 60 a second, and the following kept for a new frame; the shell's
+runtime: only `selection === true` follows it, a mark's id wins, its tells carry no words and it
+calls no focus, selection or listener, the kept `cloneRange`, every `selected` kept, the highlight in
+the aria-hidden outlines. `leak/annotate.spec.ts` "a followed selection's place comes as it moves…"
+(three engines): a picked element followed and lit, out of view and back as the document scrolls,
+orphaned when the page takes it out and found again when it puts it back, a page's own word taken
+neither unasked nor after `track(null)` nor past 60 a second, the highlight gone with the following;
+"following the selection moves no focus…": with the page's field focused, nothing moves the focus,
+the page hears every key, Escape is `cancelled` as before, and the words stay followed after the
+host's `clearSelection`, where the layout moves them. `leak/react.spec.ts` "trackedSelection follows
+the picked element…": in `trackedAnnotation`'s place, and false gives the mark back;
+`test/react-ssr.test.ts` its type. Negative control `track-selection-checks` (taken unasked, at any
+rate).
+
+**Revisit when** a host needs two things followed at once (a composer beside an open card); the
+selection inside a page's own scrolling box (its `inView` there is the viewport's, not the box's);
+Escape in the frame should end a composer by itself; or `inView` on a followed mark's `tracked` too.
+

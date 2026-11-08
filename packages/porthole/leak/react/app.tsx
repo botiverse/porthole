@@ -69,6 +69,7 @@ export interface FrameSpec {
   readonly annotations?: readonly AnnotationMark[];
   readonly focusedAnnotation?: string | null;
   readonly trackedAnnotation?: string | null;
+  readonly trackedSelection?: boolean;
   /** The frame's consent: a Refused, new on every render (P080). */
   readonly consent?: "refused";
 }
@@ -142,6 +143,9 @@ function render(state: AppState): void {
         ...(frame.trackedAnnotation === undefined
           ? {}
           : { trackedAnnotation: frame.trackedAnnotation }),
+        ...(frame.trackedSelection === undefined
+          ? {}
+          : { trackedSelection: frame.trackedSelection }),
         ref: handleOf(frame.displayId),
         onAnnotation: (report) => record(frame.displayId, "annotation", report),
         ...(frame.consent === "refused" ? { consent: refusedHere() } : {}),

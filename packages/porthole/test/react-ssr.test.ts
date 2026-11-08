@@ -96,6 +96,9 @@ describe("trackedAnnotation and the handle (P118)", () => {
     expectTypeOf<PortholeViewProps["trackedAnnotation"]>().toEqualTypeOf<
       string | null | undefined
     >();
+    // The selection followed in the mark's place (P138).
+    expectTypeOf<PortholeFrameProps["trackedSelection"]>().toEqualTypeOf<boolean | undefined>();
+    expectTypeOf<PortholeViewProps["trackedSelection"]>().toEqualTypeOf<boolean | undefined>();
     // The display's calls, never the display: one method, nothing more.
     expectTypeOf<keyof PortholeFrameHandle>().toEqualTypeOf<
       "clearSelection" | "focusMark" | "find" | "clearFind"

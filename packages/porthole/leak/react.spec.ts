@@ -886,6 +886,68 @@ test("trackedAnnotation follows its mark through onAnnotation's `tracked`, and n
   await expect(inside.locator("#near")).toBeVisible();
 });
 
+test("trackedSelection follows the picked element through onAnnotation's `selectionTracked` in trackedAnnotation's place, and false gives the mark back (P138)", async ({
+  page,
+}) => {
+  const notes = (more: Partial<FrameSpec>) =>
+    frame({
+      displayId: "notes",
+      title: "Notes",
+      config: "notes",
+      content: LONG,
+      fill: true,
+      annotations: [quoteMark("c1", "The near paragraph.")],
+      trackedAnnotation: "c1",
+      ...more,
+    });
+  await open(page, {
+    provider: "default",
+    frames: [notes({ annotating: { elements: true, text: false } })],
+  });
+  const inside = frameOf(page, "notes");
+  await expect(inside.locator("#near")).toBeVisible();
+  const of = async (type: string) =>
+    (await events(page, "notes", "annotation"))
+      .map((entry) => entry.detail as { type: string; id?: string; state?: string })
+      .filter((detail) => detail.type === type);
+  await expect
+    .poll(async () => {
+      await inside.locator("#near").click();
+      return (await of("selected")).length;
+    })
+    .toBeGreaterThan(0);
+
+  // The composer opens: the selection is followed, and the mark isn't.
+  await open(page, {
+    provider: "default",
+    frames: [notes({ annotating: null, trackedSelection: true })],
+  });
+  await expect.poll(async () => (await of("selectionTracked")).length).toBeGreaterThan(0);
+  expect((await of("selectionTracked")).at(-1)?.state).toBe("attached");
+  const marks = (await of("tracked")).length;
+  const scroll = async (by: number) => {
+    for (let i = 0; i < 5; i += 1) {
+      await inside.locator("body").evaluate((_, dy) => window.scrollBy(0, dy), by);
+      await page.waitForTimeout(50);
+    }
+  };
+  const followed = (await of("selectionTracked")).length;
+  await scroll(20);
+  await expect.poll(async () => (await of("selectionTracked")).length).toBeGreaterThan(followed);
+  expect((await of("tracked")).length, "the mark isn't followed meanwhile").toBe(marks);
+
+  // It closes: no more of the selection, and the mark is followed again.
+  await open(page, { provider: "default", frames: [notes({ annotating: null })] });
+  await page.waitForTimeout(300);
+  const closed = (await of("selectionTracked")).length;
+  await scroll(-20);
+  await expect.poll(async () => (await of("tracked")).length).toBeGreaterThan(marks);
+  expect((await of("selectionTracked")).length, "nothing after trackedSelection: false").toBe(
+    closed,
+  );
+  expect(await events(page, "notes", "host-error")).toEqual([]);
+});
+
 const PARAGRAPHS = `<!doctype html><html><head><title>Notes</title></head><body>
 <h2 id="title">Quarterly notes</h2><p id="p1">Costs fell by 3%.</p></body></html>`;
 

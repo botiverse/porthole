@@ -8,6 +8,7 @@ import {
   type AnnotationReport,
   type AnnotationScroll,
   type AnnotationSelector,
+  type AnnotationTrackTarget,
 } from "./types.ts";
 import { withoutUnseen } from "../bridge/unseen.ts";
 
@@ -145,6 +146,25 @@ export function clampRect(
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
+/**
+ * Whether a box the frame reported overlaps the frame's viewport (P138), before it is clamped: a
+ * box of no width or height counts where it lies strictly inside. Where the viewport isn't known,
+ * nothing is in it, as `clampRect` puts every box at the corner then.
+ */
+export function inViewport(
+  rect: AnnotationRect,
+  viewport: { readonly width: number; readonly height: number } | null | undefined,
+): boolean {
+  if (viewport === null || typeof viewport !== "object") {
+    return false;
+  }
+  const { width, height } = viewport;
+  if (!Number.isFinite(width) || !Number.isFinite(height)) {
+    return false;
+  }
+  return rect.x < width && rect.x + rect.width > 0 && rect.y < height && rect.y + rect.height > 0;
+}
+
 const markId = (value: unknown): value is string => text(value, LIMITS.id, 1);
 
 function results(value: unknown): AnchorResult[] | null {
@@ -280,6 +300,40 @@ export function parseReport(value: unknown): AnnotationReport | null {
         ...(scroll === undefined ? {} : { scroll }),
       };
     }
+    case "selectionTracked": {
+      // The followed selection (P138): gone, or where it is. New with its shell, so every box but
+      // the last line, and the scroll, are there; nothing about the page's words is.
+      if (value.state === "orphaned") {
+        return { type: "selectionTracked", state: "orphaned" };
+      }
+      if (value.state !== "attached" || typeof value.inView !== "boolean") {
+        return null;
+      }
+      const rect = parseRect(value.rect);
+      const documentRect = parseRect(value.documentRect);
+      const scroll = parseScroll(value.scroll);
+      const lastLineDocumentRect =
+        value.lastLineDocumentRect === undefined
+          ? undefined
+          : parseRect(value.lastLineDocumentRect);
+      if (
+        rect === null ||
+        documentRect === null ||
+        scroll === null ||
+        lastLineDocumentRect === null
+      ) {
+        return null;
+      }
+      return {
+        type: "selectionTracked",
+        state: "attached",
+        rect,
+        documentRect,
+        ...(lastLineDocumentRect === undefined ? {} : { lastLineDocumentRect }),
+        scroll,
+        inView: value.inView,
+      };
+    }
     default:
       return null;
   }
@@ -345,3 +399,16 @@ export function checkMarks(marks: readonly AnnotationMark[]): AnnotationMark[] {
     };
   });
 }
+
+/**
+ * Whether what `annotations.track` is given names the selection (P138): an object whose own
+ * `selection` is `true`, and nothing else does (a mark's id is a string).
+ */
+export const followsSelection = (
+  target: AnnotationTrackTarget | undefined,
+): target is { readonly selection: true } =>
+  typeof target === "object" &&
+  target !== null &&
+  Object.hasOwn(target, "selection") &&
+  // A caller's word, untyped as JavaScript passes it: `true` and nothing else.
+  (target as { readonly selection?: unknown }).selection === true;

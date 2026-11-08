@@ -81,7 +81,7 @@ export const WORD_LATE = String.raw`(at, now) => {
  * in one).
  *
  * The host drives it (`porthole/annotate.start|stop|show|focus|clear|track|clearSelection|focusMark`)
- * and it reports (`porthole/annotate.selected|unselected|cancelled|anchored|activated|tracked`):
+ * and it reports (`porthole/annotate.selected|unselected|cancelled|anchored|activated|tracked|selectionTracked`):
  * - picking an element: the element under the pointer (or finger) is outlined with its name; a
  *   click or tap picks it, and the content's own handlers never see that click (unless the content
  *   patched the DOM's built-ins, P105); Escape cancels (while selecting text too, P112);
@@ -107,7 +107,11 @@ export const WORD_LATE = String.raw`(at, now) => {
  *   followed mark's (`tracked`) too, so a host places marks scrolled out of the frame, and keeps
  *   them placed as the document scrolls, from one report and the followed mark's scroll;
  * - the last line (P133): where a selection or a mark's words end, in the document's coordinates
- *   too (`lastLineDocumentRect`), so a host places its UI after them.
+ *   too (`lastLineDocumentRect`), so a host places its UI after them;
+ * - the selection followed (P138): what the last `selected` reported (the element picked, or the
+ *   words selected) is kept, and while the host follows it (`track` with `selection`) it is drawn
+ *   in the layer and its boxes are reported as a followed mark's are (`selectionTracked`), with
+ *   whether it is in view, or that it is gone; it takes no pointer, no focus and no key.
  *
  * It shares the realm with the content, which can interfere with all of it: the host takes its
  * reports as UI hints only.
@@ -128,6 +132,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         activated: "porthole/annotate.activated",
         track: "porthole/annotate.track",
         tracked: "porthole/annotate.tracked",
+        selectionTracked: "porthole/annotate.selectionTracked",
         clearSelection: "porthole/annotate.clearSelection",
         focusMark: "porthole/annotate.focusMark",
       };
@@ -146,6 +151,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const elementRect = Element.prototype.getBoundingClientRect;
       const rangeRect = Range.prototype.getBoundingClientRect;
       const rangeRects = Range.prototype.getClientRects;
+      const cloneRange = Range.prototype.cloneRange;
       const setStart = Range.prototype.setStart;
       const setStartBefore = Range.prototype.setStartBefore;
       const compareBoundaryPoints = Range.prototype.compareBoundaryPoints;
@@ -402,7 +408,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       // box of at least 44 by 44 px centred on its own (an invisible ::before; 100% is its padding
       // box, its border 1 px), so a tap a few px off still lands on the shell's layer. A marker is
       // a real button (P133): what a browser gives one is taken off, a ring says it has the focus.
-      const STYLE = ".mark{position:absolute;border-radius:2px;background:rgba(250,204,21,.18);box-shadow:inset 0 -2px 0 rgba(234,179,8,.95)}.mark.element{background:rgba(250,204,21,.07);box-shadow:none;outline:2px solid rgba(234,179,8,.9);outline-offset:1px}.mark.active{background:rgba(250,204,21,.26);box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 2px rgba(234,179,8,.45)}.mark.element.active{background:rgba(250,204,21,.12);box-shadow:none;outline-width:3px}.mark.element.quiet{background:rgba(250,204,21,.05);outline:1px solid rgba(234,179,8,.6);outline-offset:2px}.mark.element.quiet.active{background:rgba(250,204,21,.1);outline:2px solid rgba(234,179,8,.9)}.mark.draft{box-sizing:border-box;background:rgba(250,204,21,.08);box-shadow:none;border-bottom:2px dashed rgba(202,138,4,.95)}.mark.draft.active{background:rgba(250,204,21,.16);box-shadow:0 0 0 2px rgba(234,179,8,.45);border-bottom-width:3px}.mark.element.draft{background:rgba(250,204,21,.04);border-bottom:0;outline-style:dashed}.mark.element.draft.active{background:rgba(250,204,21,.08);box-shadow:none;outline-style:dashed}.marker{position:absolute;box-sizing:border-box;height:18px;min-width:18px;display:flex;align-items:center;justify-content:center;gap:3px;margin:0;padding:0 5px;border:1px solid rgba(161,98,7,.6);border-radius:9px 9px 9px 2px;background:#fde68a;color:#422006;box-shadow:0 1px 2px rgba(0,0,0,.3);font:600 11px/16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-style:normal;letter-spacing:0;word-spacing:0;text-transform:none;text-indent:0;text-shadow:none;direction:ltr;writing-mode:horizontal-tb;white-space:nowrap;user-select:none;-webkit-user-select:none;cursor:pointer;pointer-events:auto;appearance:none;-webkit-appearance:none}.marker:focus-visible{outline:2px solid #2563eb;outline-offset:1px}.marker:hover{background:#fcd34d}.marker.active{background:#facc15;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.3)}.marker.compact{padding:0 4px}.marker.draft{border:1px dashed rgb(202,138,4);background:#fffdf5;color:#a16207;box-shadow:0 1px 2px rgba(0,0,0,.2)}.marker.draft:hover{background:#fef9e7}.marker.draft.active{background:#fef3c7;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.2)}.marker.inert,[data-placing]>.marker{pointer-events:none}.touch>.marker::before{content:'';position:absolute;left:50%;top:50%;width:max(100% + 2px,44px);height:max(100% + 2px,44px);transform:translate(-50%,-50%)}.marker svg{display:block;width:11px;height:11px;flex:none}.mark.flash{animation:flash 1.8s ease-out}@keyframes flash{from{box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 6px rgba(250,204,21,.6)}}.hover{position:absolute;outline:2px solid #2563eb;outline-offset:1px;background:rgba(37,99,235,.12)}.tag{position:absolute;max-width:70vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace;padding:0 6px;border-radius:4px;background:#1e293b;color:#fff}";
+      // The selection the host follows (P138) is drawn as what is picked is: an element in the
+      // picking outline, a little lighter and without its name; words with a light fill and a line
+      // under them, in the same blue, apart from the marks' yellow (no comment is there yet).
+      const STYLE = ".mark{position:absolute;border-radius:2px;background:rgba(250,204,21,.18);box-shadow:inset 0 -2px 0 rgba(234,179,8,.95)}.mark.element{background:rgba(250,204,21,.07);box-shadow:none;outline:2px solid rgba(234,179,8,.9);outline-offset:1px}.mark.active{background:rgba(250,204,21,.26);box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 2px rgba(234,179,8,.45)}.mark.element.active{background:rgba(250,204,21,.12);box-shadow:none;outline-width:3px}.mark.element.quiet{background:rgba(250,204,21,.05);outline:1px solid rgba(234,179,8,.6);outline-offset:2px}.mark.element.quiet.active{background:rgba(250,204,21,.1);outline:2px solid rgba(234,179,8,.9)}.mark.draft{box-sizing:border-box;background:rgba(250,204,21,.08);box-shadow:none;border-bottom:2px dashed rgba(202,138,4,.95)}.mark.draft.active{background:rgba(250,204,21,.16);box-shadow:0 0 0 2px rgba(234,179,8,.45);border-bottom-width:3px}.mark.element.draft{background:rgba(250,204,21,.04);border-bottom:0;outline-style:dashed}.mark.element.draft.active{background:rgba(250,204,21,.08);box-shadow:none;outline-style:dashed}.marker{position:absolute;box-sizing:border-box;height:18px;min-width:18px;display:flex;align-items:center;justify-content:center;gap:3px;margin:0;padding:0 5px;border:1px solid rgba(161,98,7,.6);border-radius:9px 9px 9px 2px;background:#fde68a;color:#422006;box-shadow:0 1px 2px rgba(0,0,0,.3);font:600 11px/16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-style:normal;letter-spacing:0;word-spacing:0;text-transform:none;text-indent:0;text-shadow:none;direction:ltr;writing-mode:horizontal-tb;white-space:nowrap;user-select:none;-webkit-user-select:none;cursor:pointer;pointer-events:auto;appearance:none;-webkit-appearance:none}.marker:focus-visible{outline:2px solid #2563eb;outline-offset:1px}.marker:hover{background:#fcd34d}.marker.active{background:#facc15;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.3)}.marker.compact{padding:0 4px}.marker.draft{border:1px dashed rgb(202,138,4);background:#fffdf5;color:#a16207;box-shadow:0 1px 2px rgba(0,0,0,.2)}.marker.draft:hover{background:#fef9e7}.marker.draft.active{background:#fef3c7;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.2)}.marker.inert,[data-placing]>.marker{pointer-events:none}.touch>.marker::before{content:'';position:absolute;left:50%;top:50%;width:max(100% + 2px,44px);height:max(100% + 2px,44px);transform:translate(-50%,-50%)}.marker svg{display:block;width:11px;height:11px;flex:none}.mark.flash{animation:flash 1.8s ease-out}@keyframes flash{from{box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 6px rgba(250,204,21,.6)}}.hover{position:absolute;outline:2px solid #2563eb;outline-offset:1px;background:rgba(37,99,235,.12)}.held{position:absolute;outline:2px solid #2563eb;outline-offset:1px;background:rgba(37,99,235,.06)}.held.text{outline:0;border-radius:2px;background:rgba(37,99,235,.12);box-shadow:inset 0 -2px 0 #2563eb}.tag{position:absolute;max-width:70vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace;padding:0 6px;border-radius:4px;background:#1e293b;color:#fff}";
       // Inline and important: the content's own style sheets can't hide, shrink or move it by
       // accident. Set again at each draw, since its scripts can rewrite it (narrowing only: the
       // content can still cover the layer, or move it with its ancestors, P104). Clipped, where an
@@ -428,6 +437,16 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
 
       let mode = { elements: false, text: false, hold: false };
       let hover = null;
+      // The selection last reported as selected (P138): its anchor, and what it is in the page (the
+      // element picked, or a copy of the selection's range, which the page's changes keep up to
+      // date and which stays when the page's own selection goes). Followed while the host asks
+      // (track with selection), and drawn then. Each new selected replaces it.
+      let held = null;
+      let followingSelection = false;
+      // What the host was last told of it: "attached", "orphaned", or null (nothing yet).
+      let heldTold = null;
+      const heldGone = (found) => (found.range ? found.range.collapsed || !found.range.startContainer.isConnected : !found.element.isConnected);
+      const heldShown = () => followingSelection && held !== null && heldTold !== "orphaned" && !heldGone(held.found);
       let marks = [];
       // The markers as last drawn, for a click to find: { id, element }. Each mark keeps its
       // marker's node across draws, so a press that spans a redraw ends on the node it began on.
@@ -818,7 +837,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         return boxes;
       };
       const draw = () => {
-        if (marks.length === 0 && hover === null && layer === null) {
+        if (marks.length === 0 && hover === null && layer === null && !heldShown()) {
           return;
         }
         const root = ensureLayer();
@@ -913,6 +932,19 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           }
         }
         const outlines = [];
+        // The followed selection (P138), under the picking outline: no pointer, no focus, no name.
+        if (heldShown()) {
+          const rects = held.found.range ? Array.from(rangeRects.call(held.found.range)).slice(0, LIMIT.boxes) : [elementRect.call(held.found.element)];
+          for (const rect of rects) {
+            if (rect.width === 0 && rect.height === 0) {
+              continue;
+            }
+            const each = createElement.call(document, "div");
+            each.className = held.found.range ? "held text" : "held";
+            each.style.cssText = "left:" + rect.left + "px;top:" + rect.top + "px;width:" + rect.width + "px;height:" + rect.height + "px";
+            outlines.push(each);
+          }
+        }
         if (hover !== null && hover.isConnected) {
           const rect = elementRect.call(hover);
           const outline = createElement.call(document, "div");
@@ -958,9 +990,17 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       let trackedBox = null;
       let trackedAt = 0;
       let trackFrame = 0;
+      // The followed selection's viewport as last told (P138): a frame made smaller can leave it
+      // out of view without moving it.
+      let trackedView = null;
       const trackTick = () => {
         trackFrame = 0;
-        if (tracking === null) {
+        if (tracking === null && !followingSelection) {
+          return;
+        }
+        if (followingSelection) {
+          followHeld();
+          trackFrame = nextFrame(trackTick);
           return;
         }
         const mark = marks.find((each) => each.id === tracking);
@@ -979,11 +1019,74 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
         trackFrame = nextFrame(trackTick);
       };
-      const track = (id) => {
+      // The followed selection (P138), as a followed mark is, and on its clock: where it is at each
+      // animation frame where it moved, or the viewport changed size, with whether any of it is in
+      // the viewport; orphaned once while it isn't in the page (a page that took the element out,
+      // a re-render, the words gone), found again by its anchor at most twice a second meanwhile.
+      // Geometry only: its anchor and words went with selected. Reads boxes, nothing else: no
+      // focus, no selection, no listener.
+      const followHeld = () => {
+        const now = performance.now();
+        if (held !== null && heldGone(held.found) && now - held.tried >= 500) {
+          held.tried = now;
+          let found = null;
+          try {
+            found = find(held.anchor, textIndex());
+          } catch (_) {
+            found = null;
+          }
+          if (found !== null && !heldGone(found)) {
+            held.found = found;
+          }
+        }
+        if (held === null || heldGone(held.found)) {
+          if (heldTold !== "orphaned") {
+            heldTold = "orphaned";
+            trackedBox = null;
+            tell(M.selectionTracked, { state: "orphaned" });
+            redraw();
+          }
+          return;
+        }
+        const rect = box(rectOf(held.found));
+        const root = document.documentElement;
+        const view = { width: root ? root.clientWidth : 0, height: root ? root.clientHeight : 0 };
+        const resized = trackedView === null || trackedView.width !== view.width || trackedView.height !== view.height;
+        if ((heldTold !== "attached" || resized || apart(trackedBox, rect)) && now - trackedAt >= 16) {
+          heldTold = "attached";
+          trackedBox = rect;
+          trackedView = view;
+          trackedAt = now;
+          const scroll = scrollOf();
+          const lastLineDocumentRect = lastLineOf(held.found, scroll);
+          const inView = rect.x < view.width && rect.x + rect.width > 0 && rect.y < view.height && rect.y + rect.height > 0;
+          tell(M.selectionTracked, Object.assign({ state: "attached", rect, documentRect: inDocument(rect, scroll), scroll, inView }, lastLineDocumentRect === null ? {} : { lastLineDocumentRect }));
+          // The highlight goes with it (a layout change moves it without a scroll).
+          redraw();
+        }
+      };
+      // A mark, the selection (P138), or nothing: one at a time, each replacing the last.
+      const track = (id, selection) => {
+        const was = heldShown();
         tracking = typeof id === "string" ? id : null;
+        followingSelection = tracking === null && selection === true;
         trackedBox = null;
-        if (tracking !== null && trackFrame === 0) {
+        trackedView = null;
+        heldTold = null;
+        if ((tracking !== null || followingSelection) && trackFrame === 0) {
           trackFrame = nextFrame(trackTick);
+        }
+        if (heldShown() !== was) {
+          draw();
+        }
+      };
+      // A new selected (P138): what is followed, if the selection is, from the next frame on.
+      const holdSelected = (anchor, found) => {
+        held = { anchor, found, tried: 0 };
+        if (followingSelection) {
+          trackedBox = null;
+          heldTold = null;
+          redraw();
         }
       };
 
@@ -1526,6 +1629,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
               return;
             }
             swallowUntil = performance.now() + 2000;
+            holdSelected(anchor, { element });
             tell(M.selected, Object.assign({ anchor, rect: box(elementRect.call(element)) }, placeOf({ element })));
           }, HOLD_MS),
         };
@@ -1573,6 +1677,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         mode = { elements: false, text: mode.text };
         hover = null;
         setCursor(false);
+        holdSelected(anchor, { element });
         draw();
         tell(M.selected, Object.assign({ anchor, rect: box(elementRect.call(element)) }, placeOf({ element })));
       }, true);
@@ -1633,6 +1738,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
         reported = key;
         reportedBox = rect;
+        holdSelected(anchor, { range: cloneRange.call(range) });
         tell(M.selected, Object.assign({ anchor, rect }, placeOf({ range })));
         return true;
       };
@@ -1693,7 +1799,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             focus(String(params.id));
             break;
           case M.track:
-            track(params.id);
+            track(params.id, params.selection === true);
             break;
           case M.clearSelection: {
             // The host used the person's selection (P115): it goes, and with it what the shell
