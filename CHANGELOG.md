@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.14.15
 
 - **Annotations: the selection followed (P138).** `annotations.track({ selection: true })` (React:
   `trackedSelection`) follows what the last `selected` reported, the element picked or the words
