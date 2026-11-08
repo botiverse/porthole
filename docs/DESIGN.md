@@ -684,6 +684,10 @@ the bridge, `ui/message` and `ui/open-link` into the bridge, `ui/resource-teardo
 Content may also use the official App SDK directly; the adapter answers a second
 `ui/initialize` from the same frame, and the shell numbers its own requests with
 strings (`porthole-shell-1`) so neither takes the other's answers.
+The shell asks `ui/initialize` up to 40 times, 250 ms apart (the host may listen after it runs);
+on a tab of its own it asks nothing, since no host can hear it, and its runtime has nothing to
+offer from the start. The document's root says how the handshake ended (`data-porthole-host`:
+`"answered"`, or `"none"`), for a tool that shoots a page to wait on (P139).
 
 The host context carries in `styles.variables` only the names MCP Apps defines
 (`MCP_APPS_STYLE_VARIABLES`): the official SDK refuses any other name there and fails

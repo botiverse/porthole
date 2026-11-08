@@ -93,6 +93,43 @@ export const ONCE = String.raw`(passesAsIs, toText) => (value) => {
   }`;
 
 /**
+ * The shell's handshake with its host (P085, P139), spliced into the runtime as
+ * `HANDSHAKE(topLevel, ask, answered, none, later)`. On a tab of its own (`topLevel`: the window is
+ * its own top, so its parent is itself and no host can hear it) there is no host to ask: `none()`
+ * at once, and nothing is asked. In a frame it asks (`ask()`, a promise of the host's answer) up to
+ * 40 times, 250 ms apart (`later(run, ms)`), since the host may start listening after the shell
+ * runs; the first answer is taken (`answered(result)`), once. After the 40th try with no answer,
+ * `none()`; an answer that comes later still is taken.
+ */
+export const HANDSHAKE = String.raw`(topLevel, ask, answered, none, later) => {
+    if (topLevel === true) {
+      none();
+      return;
+    }
+    let initialized = false;
+    let tries = 0;
+    const initialize = () => {
+      if (initialized) {
+        return;
+      }
+      if (tries >= 40) {
+        none();
+        return;
+      }
+      tries += 1;
+      ask().then((result) => {
+        if (initialized) {
+          return;
+        }
+        initialized = true;
+        answered(result);
+      }, () => {});
+      later(initialize, 250);
+    };
+    initialize();
+  }`;
+
+/**
  * The shell's runtime: the code that runs first in the frame, before any content. Plain ES2020,
  * no imports and no build step, so every engine (a browser frame now, a native web view later)
  * runs it as it is. `__PLAN__` is replaced with the frame's plan (`ShellPlan` plus the origins it
@@ -155,6 +192,9 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // such name goes on the shell's own script element (data-porthole-unfixed, for a test or a
   // person to see) and, once the shell can speak, to the host as an error report.
   const shellScript = document.currentScript;
+  // The platform's own, kept before the shell's guards wrap it: the shell marks the document's root
+  // with it (data-porthole-host, P139).
+  const setAttributeOfShell = Element.prototype.setAttribute;
   const unfixed = [];
   let tellUnfixed = (_name) => {};
   const lock = (target, name, value) => {
@@ -2232,36 +2272,43 @@ export const SHELL_RUNTIME = String.raw`(() => {
     whenLoaded(() => void render({ html: plan.document }));
   }
 
-  // Ask until answered: the host may start listening after this runs.
-  let initialized = false;
-  let tries = 0;
-  const initialize = () => {
-    if (initialized) {
-      return;
-    }
-    if (tries >= 40) {
-      // No host answered: the runtime has nothing to offer.
-      runtimeOffer(null);
-      return;
-    }
-    tries += 1;
-    request("ui/initialize", {
-      protocolVersion: plan.protocolVersion,
-      appInfo: { name: "porthole-shell", version: "1" },
-      appCapabilities: {},
-    }).then((result) => {
-      if (initialized) {
-        return;
-      }
-      initialized = true;
+  // The handshake (HANDSHAKE, P085): asked until answered, since the host may start listening
+  // after this runs; on a tab of its own, not asked at all (P139): its parent is itself, so no host
+  // hears it, and the runtime has nothing to offer from the start. How it ended goes on the
+  // document's root element (data-porthole-host: "answered", or "none" where no host answered), for
+  // a test, a person or a tool that shoots the page to see (P139): not on the shell's own script,
+  // which a whole document's render takes out with the body it replaces, while the root stays (the
+  // render adds the page's own attributes to it and removes none). The page's own word, never a
+  // gate, set through the platform's setAttribute kept before the guards (setAttributeOfShell).
+  const shellRoot = document.documentElement;
+  const settled = (how) => {
+    try {
+      callOf(setAttributeOfShell, shellRoot, ["data-porthole-host", how]);
+    } catch (_) {}
+  };
+  const handshake = ${HANDSHAKE};
+  handshake(
+    window.top === window,
+    () =>
+      request("ui/initialize", {
+        protocolVersion: plan.protocolVersion,
+        appInfo: { name: "porthole-shell", version: "1" },
+        appCapabilities: {},
+      }),
+    (result) => {
+      settled("answered");
       const capabilities = result && result.hostCapabilities;
       const experimental = capabilities && capabilities.experimental;
       runtimeOffer(experimental && typeof experimental === "object" ? experimental["porthole/runtime"] : null);
       applyTheme(result && result.hostContext);
       notify("ui/notifications/initialized", {});
       schedule();
-    }, () => {});
-    setTimeout(initialize, 250);
-  };
-  initialize();
+    },
+    () => {
+      // No host answered (or none can): the runtime has nothing to offer.
+      settled("none");
+      runtimeOffer(null);
+    },
+    (run, ms) => setTimeout(run, ms),
+  );
 })();`;

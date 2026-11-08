@@ -4,6 +4,20 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **On a tab the shell asks no host (P139).** A page opened on a tab of its own no longer asks
+  `ui/initialize` 40 times over 10 s before the runtime says it has nothing to offer: there is no
+  host there to answer, so it says so at once, with no request and no timer. In a frame nothing
+  changes. `porthole.use` was already null at once on a tab, so pages draw as before.
+- **The shell says how its handshake ended (P139).** The document's root (`<html>`) carries
+  `data-porthole-host`, kept when a whole page replaces the shell's body: `"none"` once no host
+  will answer (on a tab, before the page's own scripts run), `"answered"` once one has. A tool that shoots pages on a tab (a publish check) can wait for
+  it instead of a fixed 10 s, keeping the fixed wait where it is absent (an older shell). It is the
+  page's word, never a gate. Upgrade the content server for it.
+- **Security (P139):** no CSP, sandbox, egress, gate or message changes. On a tab the shell sent
+  nothing before either (its parent is itself).
+
 ## 0.14.15
 
 - **Annotations: the selection followed (P138).** `annotations.track({ selection: true })` (React:
