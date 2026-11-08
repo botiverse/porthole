@@ -447,6 +447,21 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       let heldTold = null;
       const heldGone = (found) => (found.range ? found.range.collapsed || !found.range.startContainer.isConnected : !found.element.isConnected);
       const heldShown = () => followingSelection && held !== null && heldTold !== "orphaned" && !heldGone(held.found);
+      // The element just picked (P138, Tenny's review): it keeps its outline after selected, so
+      // there is no gap before the host follows it, and the follow's highlight takes over where it
+      // does. Without a follow (an older host) it ends as a selection does: the next pick or
+      // selection, the host's clearSelection, a mode started or stopped, clear, Escape, or the
+      // element leaving the page. Not unselected: a selection made after the pick has already
+      // ended it as it was reported, so the one unselected can clear is one from before, which
+      // the pick's own click takes away when text is selected too.
+      let picked = null;
+      const endPick = () => {
+        if (picked !== null) {
+          picked = null;
+          redraw();
+        }
+      };
+      const pickShown = () => picked !== null && !followingSelection && picked.isConnected;
       let marks = [];
       // The markers as last drawn, for a click to find: { id, element }. Each mark keeps its
       // marker's node across draws, so a press that spans a redraw ends on the node it began on.
@@ -837,7 +852,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         return boxes;
       };
       const draw = () => {
-        if (marks.length === 0 && hover === null && layer === null && !heldShown()) {
+        if (marks.length === 0 && hover === null && layer === null && !heldShown() && !pickShown()) {
           return;
         }
         const root = ensureLayer();
@@ -932,15 +947,20 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           }
         }
         const outlines = [];
-        // The followed selection (P138), under the picking outline: no pointer, no focus, no name.
-        if (heldShown()) {
-          const rects = held.found.range ? Array.from(rangeRects.call(held.found.range)).slice(0, LIMIT.boxes) : [elementRect.call(held.found.element)];
+        // The followed selection (P138), under the picking outline: no pointer, no focus, no name;
+        // before the host follows it, the element just picked, drawn the same way.
+        if (picked !== null && !picked.isConnected) {
+          picked = null;
+        }
+        const lit = heldShown() ? held.found : pickShown() ? { element: picked } : null;
+        if (lit !== null) {
+          const rects = lit.range ? Array.from(rangeRects.call(lit.range)).slice(0, LIMIT.boxes) : [elementRect.call(lit.element)];
           for (const rect of rects) {
             if (rect.width === 0 && rect.height === 0) {
               continue;
             }
             const each = createElement.call(document, "div");
-            each.className = held.found.range ? "held text" : "held";
+            each.className = lit.range ? "held text" : "held";
             each.style.cssText = "left:" + rect.left + "px;top:" + rect.top + "px;width:" + rect.width + "px;height:" + rect.height + "px";
             outlines.push(each);
           }
@@ -1067,16 +1087,20 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       };
       // A mark, the selection (P138), or nothing: one at a time, each replacing the last.
       const track = (id, selection) => {
-        const was = heldShown();
+        const was = heldShown() || pickShown();
         tracking = typeof id === "string" ? id : null;
         followingSelection = tracking === null && selection === true;
+        // The follow's highlight takes the pick's outline over, in this draw (Tenny's review).
+        if (followingSelection) {
+          picked = null;
+        }
         trackedBox = null;
         trackedView = null;
         heldTold = null;
         if ((tracking !== null || followingSelection) && trackFrame === 0) {
           trackFrame = nextFrame(trackTick);
         }
-        if (heldShown() !== was) {
+        if (heldShown() || pickShown() || was) {
           draw();
         }
       };
@@ -1290,9 +1314,11 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             sent += 1;
           }
         }
+        // Not while the host follows the selection (P138, Tenny's review): its reports carry where
+        // it is; a scroll after the following ends is re-sent as before.
         if (selectionScrolled) {
           selectionScrolled = false;
-          if (reportSelection(true)) {
+          if (!followingSelection && reportSelection(true)) {
             sent += 1;
           }
         }
@@ -1562,6 +1588,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const stop = () => {
         mode = { elements: false, text: false };
         hover = null;
+        picked = null;
         reported = null;
         reportedBox = null;
         setCursor(false);
@@ -1630,6 +1657,8 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             }
             swallowUntil = performance.now() + 2000;
             holdSelected(anchor, { element });
+            picked = followingSelection ? null : element;
+            redraw();
             tell(M.selected, Object.assign({ anchor, rect: box(elementRect.call(element)) }, placeOf({ element })));
           }, HOLD_MS),
         };
@@ -1678,6 +1707,8 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         hover = null;
         setCursor(false);
         holdSelected(anchor, { element });
+        // Its outline stays (P138), now without its name, until the host follows it or it ends.
+        picked = followingSelection ? null : element;
         draw();
         tell(M.selected, Object.assign({ anchor, rect: box(elementRect.call(element)) }, placeOf({ element })));
       }, true);
@@ -1685,6 +1716,8 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         if (event.key !== "Escape") {
           return;
         }
+        // The person wants out: a pick's outline goes (P138). The key is untouched by it.
+        endPick();
         if (mode.elements) {
           event.preventDefault();
           event.stopImmediatePropagation();
@@ -1739,6 +1772,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         reported = key;
         reportedBox = rect;
         holdSelected(anchor, { range: cloneRange.call(range) });
+        endPick();
         tell(M.selected, Object.assign({ anchor, rect }, placeOf({ range })));
         return true;
       };
@@ -1749,6 +1783,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
       });
       window.addEventListener("scroll", () => {
+        // Not while the host follows the selection (P138, Tenny's review).
+        if (followingSelection) {
+          return;
+        }
         if (reported !== null) {
           selectionScrolled = true;
           settle();
@@ -1768,6 +1806,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           case M.start:
             mode = { elements: params.elements === true, text: params.text === true, hold: params.elements === "hold" };
             hover = null;
+            picked = null;
             reported = null;
             reportedBox = null;
             setCursor(mode.elements);
@@ -1805,12 +1844,13 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             // The host used the person's selection (P115): it goes, and with it what the shell
             // held of it (a report waiting to settle, the one last told, a scroll's follow-up), so
             // nothing is told back: the host knows, and the selectionchange this makes finds
-            // nothing to report. Marks, a pick and the mode stay as they are. With nothing
-            // selected, nothing changes.
+            // nothing to report. Marks, a pick and the mode stay as they are, but a pick's outline
+            // goes (P138). With nothing selected, nothing changes.
             cancelLater(selectionTimer);
             selectionTimer = 0;
             reported = null;
             reportedBox = null;
+            endPick();
             selectionScrolled = false;
             const selection = selectionOf.call(document);
             if (selection !== null) {
@@ -1823,6 +1863,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             break;
           case M.clear:
             track(null);
+            picked = null;
             pendingFocus = null;
             pendingMarker = null;
             marks = [];

@@ -1050,7 +1050,7 @@ chooses), and the annotation runtime is in the shell only then.
 | host → frame | `porthole/annotate.clear` | — |
 | host → frame | `porthole/annotate.clearSelection` | —: the page's text selection is taken away (the DOM's own `removeAllRanges`, taken before content runs) with what the shell held of it, and nothing is reported back; marks, drafts and the mode stay (P115) |
 | host → frame | `porthole/annotate.focusMark` | `{ id, at }`, `at` the host's `Date.now()` as it sent it (P137): the DOM focus goes to that mark's marker (the DOM's own `focus`, taken before content runs), once the marks of a `show` are found; a call that had to wait for them is dropped unless the focus is in the frame's document as it lands (the DOM's own `hasFocus`, taken before content runs; P135), and so is one the frame takes 100 ms or more after `at` by its own clock (the DOM's own `Date.now`, taken before content runs) or with no `at` (P137); a fresh one isn't asked; nothing is reported back, and with no such marker, or while elements are picked, nothing happens. For after the keyboard closed the host's view: Escape, or a Tab past its ends (P134); a host calls it again after its own `display.focus()` |
-| frame → host | `porthole/annotate.selected` | `{ anchor, rect, lastLineDocumentRect?, scroll? }` (a newer shell's last two, only as a pair: P133, below, P137); after a scroll, the same selection again only if its box moved more than 0.5 px, on the follow-ups' clock (P105) |
+| frame → host | `porthole/annotate.selected` | `{ anchor, rect, lastLineDocumentRect?, scroll? }` (a newer shell's last two, only as a pair: P133, below, P137); after a scroll, the same selection again only if its box moved more than 0.5 px, on the follow-ups' clock (P105), and not while the host follows the selection (P138) |
 | frame → host | `porthole/annotate.unselected` | — (the text selection went away) |
 | frame → host | `porthole/annotate.cancelled` | — (Escape) |
 | frame → host | `porthole/annotate.anchored` | `{ results: [{ id, state: "attached" \| "orphaned", rect?, documentRect?, lastLineDocumentRect?, order? }], scroll? }` (a newer shell's `documentRect` and `scroll`: P132, below; `lastLineDocumentRect`: P133, never without `scroll`, P137): every mark after `show`, the one after `focus`, every mark when the content changed a state, and, while any mark has a marker (a `count` or a draft, P107), once a scroll, a resize or a run of content changes has settled (150 ms quiet), only the marks that moved more than 0.5 px since the host was last told, at most one a second together with the selection's (P104, P105) |
@@ -1106,7 +1106,13 @@ chooses), and the annotation runtime is in the shell only then.
   the viewport). Taken out of the page, it is `orphaned` once, and found again by its
   anchor as a mark is. It reads boxes only: no focus moves, no selection changes, no
   listener is added, and nothing about the words goes with it (they went with
-  `selected`). A newer `selected` replaces it, followed from the next frame.
+  `selected`). A newer `selected` replaces it, followed from the next frame. Before the host
+  follows it, the element just picked keeps an outline drawn the same way, so nothing changes on
+  screen when the follow takes over; without a follow it ends as a selection does (the next pick or
+  selection, `clearSelection`, `start`, `stop`, `clear`, Escape, the element leaving the page), on
+  no timer (Tenny's review). While followed, a scroll re-sends no `selected` (P105's follow-up):
+  once the following ends, it does again. The React binding sends the following before a mode
+  change made in the same render.
 - **Markers** (P104). A mark with a `count` gets a bubble glyph and its number ("99+"
   above 99; 0 the bubble alone), a real button (P133, below), on an element's top right
   corner, inside the frame's width, and at the end of a text anchor's paragraph (P133):

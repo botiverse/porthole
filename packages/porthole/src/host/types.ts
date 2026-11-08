@@ -324,7 +324,10 @@ export interface AnnotationControls {
    * or `clear` (comment posted, composer dismissed, Escape in it), and the highlight with it. A
    * newer shell answers at its next animation frame; an older one sends nothing (it reads the
    * message as `track(null)`), so until a `selectionTracked` comes, place by `selected`'s boxes.
-   * Kept for a frame that runs later, which has no selection: it answers `orphaned`.
+   * Kept for a frame that runs later, which has no selection: it answers `orphaned`. The element
+   * just picked stays outlined until then, so call it before a `start` or `stop` sent with it (a
+   * stop ends that outline); while followed, `selected` isn't re-sent after a scroll (Tenny's
+   * review).
    */
   track(target: AnnotationTrackTarget): void;
   /** Removes every mark. */

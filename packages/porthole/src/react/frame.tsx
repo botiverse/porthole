@@ -1298,20 +1298,6 @@ function Mount({
       : JSON.stringify([annotating.elements ?? true, annotating.text ?? true]);
   useEffect(() => {
     const display = handle.current;
-    if (!annotates || display === null) {
-      return;
-    }
-    const wanted = mode === "" ? null : (JSON.parse(mode) as [boolean, boolean]);
-    attempt(
-      () =>
-        wanted === null
-          ? display.annotations.stop()
-          : display.annotations.start({ elements: wanted[0], text: wanted[1] }),
-      latest(),
-    );
-  }, [annotates, mode]);
-  useEffect(() => {
-    const display = handle.current;
     if (annotates && display !== null) {
       attempt(() => {
         display.annotations.show(annotations ?? []);
@@ -1343,6 +1329,23 @@ function Mount({
       following.current = followed;
     }, latest());
   }, [followed, annotations]);
+  // The mode follows its prop, after the following above (P138, Tenny's review): a host that
+  // follows the selection and ends picking in one render has the frame follow it first, so the
+  // pick's outline goes straight to the follow's highlight, never through the stop's gap.
+  useEffect(() => {
+    const display = handle.current;
+    if (!annotates || display === null) {
+      return;
+    }
+    const wanted = mode === "" ? null : (JSON.parse(mode) as [boolean, boolean]);
+    attempt(
+      () =>
+        wanted === null
+          ? display.annotations.stop()
+          : display.annotations.start({ elements: wanted[0], text: wanted[1] }),
+      latest(),
+    );
+  }, [annotates, mode]);
   useEffect(() => {
     const display = handle.current;
     const id = focusOf(latest().focusedAnnotation);

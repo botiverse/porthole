@@ -1682,10 +1682,67 @@ describe("the followed selection (P138): track({ selection: true }) and selectio
       expect(ANNOTATE_RUNTIME.split("holdSelected(anchor,")).toHaveLength(4);
     });
 
+    test("a pick keeps its outline until the host follows it, the follow's highlight taking over in one draw (Tenny's review)", () => {
+      // Both picks, the click's and the held block's, keep the element, unless already followed.
+      expect(ANNOTATE_RUNTIME.split("picked = followingSelection ? null : element;")).toHaveLength(
+        3,
+      );
+      expect(ANNOTATE_RUNTIME).toContain(
+        "const pickShown = () => picked !== null && !followingSelection && picked.isConnected;",
+      );
+      const track = body("const track = (id, selection) => {", "\n      };");
+      expect(track).toContain("const was = heldShown() || pickShown();");
+      expect(track).toContain("if (followingSelection) {\n          picked = null;\n        }");
+      expect(track).toContain("if (heldShown() || pickShown() || was) {\n          draw();");
+    });
+
+    test("without a follow, a pick's outline ends as a selection does: the next pick or selection, clearSelection, a mode, clear, Escape (Tenny's review)", () => {
+      // A selection reported after it replaces it.
+      expect(ANNOTATE_RUNTIME).toContain(
+        "holdSelected(anchor, { range: cloneRange.call(range) });\n        endPick();",
+      );
+      // The host's words: a mode started or stopped, clear, clearSelection.
+      expect(body("const stop = () => {", "\n      };")).toContain("picked = null;");
+      expect(body("case M.start:", "break;")).toContain("picked = null;");
+      expect(body("case M.clear:", "break;")).toContain("picked = null;");
+      expect(body("case M.clearSelection: {", "break;")).toContain("endPick();");
+      // Escape, before anything else is decided, and the key left as it was.
+      const escape = body('if (event.key !== "Escape") {', "if (mode.elements) {");
+      expect(escape).toContain("endPick();");
+      expect(escape).not.toMatch(/preventDefault|stopImmediatePropagation|stopPropagation/u);
+      // An element taken out of the page isn't drawn, and goes.
+      expect(ANNOTATE_RUNTIME).toContain(
+        "if (picked !== null && !picked.isConnected) {\n          picked = null;\n        }",
+      );
+      // No timer keeps or ends it, and unselected doesn't (the pick's own click clears an older
+      // selection where text is selected too).
+      const ending = body("const endPick = () => {", "\n      };");
+      expect(ending).not.toMatch(/setTimeout|later\(/u);
+      const unselected = body(
+        "if (reported !== null) {\n            reported = null;",
+        "tell(M.unselected",
+      );
+      expect(unselected).not.toContain("endPick");
+    });
+
+    test("while the selection is followed, a scroll re-sends no selected; once it ends, as before (P105; Tenny's review)", () => {
+      expect(ANNOTATE_RUNTIME).toContain("if (!followingSelection && reportSelection(true)) {");
+      expect(ANNOTATE_RUNTIME).toContain(
+        'window.addEventListener("scroll", () => {\n        // Not while the host follows the selection (P138, Tenny\'s review).\n        if (followingSelection) {\n          return;\n        }\n        if (reported !== null) {\n          selectionScrolled = true;',
+      );
+      // A new selection is still told while followed: only the re-send is held back.
+      const told = body('document.addEventListener("selectionchange"', "});");
+      expect(told).toContain("reportSelection(false)");
+      expect(told).not.toContain("followingSelection");
+    });
+
     test("draws it in the layer's outlines, which take no pointer and say nothing to assistive technology", () => {
       expect(ANNOTATE_RUNTIME).toContain(".held{position:absolute;");
-      const drawn = body("if (heldShown()) {", "if (hover !== null && hover.isConnected) {");
-      expect(drawn).toContain('each.className = held.found.range ? "held text" : "held";');
+      const drawn = body("const lit = heldShown()", "if (hover !== null && hover.isConnected) {");
+      expect(drawn).toContain(
+        "const lit = heldShown() ? held.found : pickShown() ? { element: picked } : null;",
+      );
+      expect(drawn).toContain('each.className = lit.range ? "held text" : "held";');
       expect(drawn).toContain("outlines.push(each);");
       expect(drawn).not.toMatch(/tabIndex|button|aria-label|focus/u);
       expect(ANNOTATE_RUNTIME).toContain('boxes.hover.setAttribute("aria-hidden", "true");');

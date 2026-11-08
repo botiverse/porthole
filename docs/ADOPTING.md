@@ -453,7 +453,12 @@ composer.onClose(() => display.annotations.clearSelection());
   of what came of it. The composer moves at the page's word: guard it as below, armed again each
   time it moves or shows again. An older shell sends nothing (and draws nothing): place by
   `selected` until the first `selectionTracked`, which a newer one sends at its next animation
-  frame.
+  frame. A newer shell keeps the picked element outlined from the pick on, so there is no gap
+  before the follow's highlight; ask for the follow before a `start` or `stop` you send as the
+  composer opens (React orders them so), or the stop ends that outline a moment before the follow
+  draws it again. Without a follow the outline ends as a selection does (the next pick, Escape,
+  `clearSelection`, `start`, `stop`, `clear`). While you follow the selection, `selected` isn't
+  re-sent after a scroll: read where it is from `selectionTracked`.
 
   ```js
   display.on("annotation", (report) => {

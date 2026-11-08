@@ -3104,13 +3104,17 @@ test("a followed selection's place comes as it moves, highlighted, out of view a
     inView: true,
   };
 
-  // The person picks the paragraph; the pick ends, and its outline with it.
+  // The person picks the paragraph: the pick ends, and its outline stays (Tenny's review).
+  const unlit = await look(page, frame, "#near");
   await display.annotate("start", { elements: true, text: false });
   await frame.locator("#near").click();
   await next(display, "selected");
   await page.mouse.move(0, 0);
-  await page.waitForTimeout(100);
-  const unlit = await look(page, frame, "#near");
+  await expect
+    .poll(async () => (await look(page, frame, "#near")).equals(unlit), {
+      message: "the picked element keeps its outline before the host follows it",
+    })
+    .toBe(false);
 
   // Not followed: a page's own word isn't taken.
   await forge(fake, 3);
@@ -3197,6 +3201,125 @@ test("a followed selection's place comes as it moves, highlighted, out of view a
       message: "the highlight goes with the following",
     })
     .toBe(true);
+});
+
+test("a pick keeps its outline until the host follows it, and without a follow it ends as a selection does: Escape, a mode, clearSelection, the next pick, stop (P138)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, { config: annotated(), content: WIDGET });
+  const frame = await display.frame();
+  await expect(frame.locator("#more")).toBeVisible();
+  // Nothing drawn: what each looks like before any pick, the pointer outside the frame.
+  await page.mouse.move(0, 0);
+  const plain = { p1: await look(page, frame, "#p1"), more: await look(page, frame, "#more") };
+  const lit = async (which: "p1" | "more") =>
+    !(await look(page, frame, `#${which}`)).equals(plain[which]);
+  const pick = async (which: "p1" | "more") => {
+    const before = (await reports(display)).length;
+    await display.annotate("start", { elements: true, text: false });
+    await frame.locator(`#${which}`).click();
+    await next(display, "selected", before);
+    await page.mouse.move(0, 0);
+    await expect.poll(() => lit(which), { message: `${which} keeps its outline` }).toBe(true);
+  };
+
+  // An older host: no follow comes, and the outline stays a while, on no timer.
+  await pick("p1");
+  await page.waitForTimeout(1_500);
+  expect(await lit("p1"), "still outlined").toBe(true);
+  // Escape: the person wants out; the page still hears the key.
+  await frame.locator("body").evaluate(() => {
+    addEventListener("keydown", (event) => {
+      if (event.key === "Escape") document.body.dataset.escape = "yes";
+    });
+  });
+  await frame.locator("#title").evaluate((title) => {
+    title.setAttribute("tabindex", "-1");
+    (title as HTMLElement).focus();
+  });
+  await page.keyboard.press("Escape");
+  await expect.poll(() => lit("p1"), { message: "Escape ends it" }).toBe(false);
+  await expect(frame.locator("body")).toHaveAttribute("data-escape", "yes");
+
+  // A mode started again, or stopped.
+  await pick("p1");
+  await display.annotate("start", { elements: false, text: true });
+  await expect.poll(() => lit("p1"), { message: "a mode started ends it" }).toBe(false);
+  await pick("p1");
+  await display.annotate("stop", {});
+  await expect.poll(() => lit("p1"), { message: "stop ends it" }).toBe(false);
+  // The host's clearSelection.
+  await pick("p1");
+  await display.annotate("clearSelection");
+  await expect.poll(() => lit("p1"), { message: "clearSelection ends it" }).toBe(false);
+  // The next pick moves it; a selection made after a pick replaces it, with no mode change between.
+  await pick("p1");
+  await pick("more");
+  expect(await lit("p1"), "the last pick's outline is gone").toBe(false);
+  const before = (await reports(display)).length;
+  await display.annotate("start", { elements: true, text: true });
+  await frame.locator("#p1").click();
+  await next(display, "selected", before);
+  await page.mouse.move(0, 0);
+  await expect.poll(() => lit("p1"), { message: "picked with text on too" }).toBe(true);
+  expect(await select(frame, "#title", "Quarterly")).toBe(true);
+  await expect
+    .poll(
+      async () =>
+        (await reports(display)).slice(before).filter((each) => each.type === "selected").length,
+    )
+    .toBe(2);
+  await expect.poll(() => lit("p1"), { message: "the next selection ends it" }).toBe(false);
+  await pick("more");
+  // clear.
+  await display.annotate("clear");
+  await expect.poll(() => lit("more"), { message: "clear ends it" }).toBe(false);
+
+  // A newer host: the follow takes it over, lit all along, and its end ends both.
+  await pick("p1");
+  expect(await display.annotate("track", { selection: true })).toBeNull();
+  await next(display, "selectionTracked");
+  expect(await lit("p1"), "lit as the follow takes over").toBe(true);
+  await display.annotate("track", null);
+  await expect.poll(() => lit("p1"), { message: "the follow's end ends it" }).toBe(false);
+});
+
+test("while the selection is followed a scroll re-sends no selected, and once the following ends it does again (P105, P138)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    content: SCROLLING,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#near")).toBeVisible();
+  await display.annotate("start", { elements: false, text: true });
+  expect(await select(frame, "#near", "near paragraph")).toBe(true);
+  await next(display, "selected");
+  const of = async (type: AnnotationReport["type"]) =>
+    (await reports(display)).filter((each) => each.type === type).length;
+  const scroll = async (by: number) => {
+    for (let i = 0; i < 4; i += 1) {
+      await frame.evaluate((dy) => window.scrollBy(0, dy), by);
+      await page.waitForTimeout(50);
+    }
+  };
+
+  expect(await display.annotate("track", { selection: true })).toBeNull();
+  await next(display, "selectionTracked");
+  const selected = await of("selected");
+  const followed = await of("selectionTracked");
+  await scroll(30);
+  // Past the settle (150 ms) and the follow-ups' clock (a second).
+  await page.waitForTimeout(1_800);
+  expect(await of("selectionTracked"), "the follow tells where it went").toBeGreaterThan(followed);
+  expect(await of("selected"), "no re-send while followed").toBe(selected);
+
+  await display.annotate("track", null);
+  await scroll(30);
+  await expect
+    .poll(() => of("selected"), { message: "re-sent once the following ended", timeout: 5_000 })
+    .toBeGreaterThan(selected);
 });
 
 test("following the selection moves no focus and leaves every key to the page; the words stay followed when the page's selection goes (P138)", async ({

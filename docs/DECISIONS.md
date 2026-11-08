@@ -8407,7 +8407,46 @@ the picked element…": in `trackedAnnotation`'s place, and false gives the mark
 `test/react-ssr.test.ts` its type. Negative control `track-selection-checks` (taken unasked, at any
 rate).
 
+*After Tenny's review (porthole#116), two changes, decided by the reviewer:*
+
+- **No gap at pick time.** A pick's outline went with the pick, and the follow's highlight came only
+  once the host's `track` arrived: a frame or two with nothing drawn. Now the element just picked (a
+  click's, or a held block's) keeps an outline after `selected`, drawn as the follow's highlight is,
+  until the host follows it (the follow takes it over in the same draw, so nothing changes on
+  screen) or the pick ends as a selection does: the next pick, or a selection reported after it;
+  the host's `clearSelection`; a mode started or stopped (`start`, `stop`); `clear`; Escape in the
+  frame (the key is left as it was: nothing prevents or stops it); or the element leaving the page.
+  There is no timer. Not `unselected`: a selection made after the pick already ended it as it was
+  reported, so the only selection `unselected` can be about is one from before the pick, which the
+  pick's own click takes away where text is selected too, and ending on it would take the outline
+  away a moment after the pick. An older host never follows, so its people now see the picked
+  element outlined until one of those, where before the outline went at once: the shell's change
+  alone, bounded by the events that end a selection today.
+  So the follow comes before a mode change that a host makes in the same moment (it ends picking
+  as its composer opens), the React binding sends the following before the mode (the mode's effect
+  now runs after the following's); a host on the core calls `track({ selection: true })` before
+  `start` or `stop`. The other way round, the stop ends the outline and the follow draws it again a
+  task later, which is the gap this removes.
+- **No re-sent `selected` while followed.** While the selection is followed, a scroll sets no
+  follow-up for it (P105's re-send once a scroll settles): the follow's reports already say where it
+  is, and the re-send spent the bridge's 120 reports a minute, which the person's clicks need. A new
+  selection is still reported, as ever. Once the following ends, a scroll re-sends it as before (its
+  box is compared with the one last told, so one that moved meanwhile is told then).
+
+*Tested.* `test/annotate.test.ts` "a pick keeps its outline until the host follows it…", "without a
+follow, a pick's outline ends as a selection does…", "while the selection is followed, a scroll
+re-sends no selected…" (the shell's runtime, as its other tests read it), and the highlight test
+reads the outline drawn for either. `leak/annotate.spec.ts` "a pick keeps its outline until the host
+follows it, and without a follow it ends as a selection does…" (three engines: outlined after the
+pick and 1.5 s on, then gone at Escape, which the page still hears, at a mode started, at stop, at
+`clearSelection`, at the next pick, at a selection after a pick, at `clear`; lit as the follow takes
+over and gone at its end); "while the selection is followed a scroll re-sends no selected…" (no
+`selected` past the settle and the follow-ups' clock while `selectionTracked` comes, then a re-send
+once the following ends); the follow's test now finds the picked element outlined before the host
+follows it. No new negative control: neither is a defense.
+
 **Revisit when** a host needs two things followed at once (a composer beside an open card); the
 selection inside a page's own scrolling box (its `inView` there is the viewport's, not the box's);
-Escape in the frame should end a composer by itself; or `inView` on a followed mark's `tracked` too.
+Escape in the frame should end a composer by itself; `inView` on a followed mark's `tracked` too; or
+an older host's people are seen confused by a pick's outline that stays.
 
