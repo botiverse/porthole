@@ -182,11 +182,21 @@ test("the shell fixes each of its walls in place, and says which it couldn't", a
           .querySelector("script[data-porthole-unfixed]")
           ?.getAttribute("data-porthole-unfixed") ?? null,
     );
-  // In a frame and on a tab, as every page is: each one fixed.
+  const host = (where: Page | Frame) =>
+    where.evaluate(
+      () =>
+        document.querySelector("script[data-porthole-host]")?.getAttribute("data-porthole-host") ??
+        null,
+    );
+  // In a frame and on a tab, as every page is: each one fixed. And how the handshake ended (P139):
+  // answered by the frame's host; on a tab, no host, said at once.
   const shown = await servedHost.show(page, instance);
-  expect(await unfixed(await shown.frame()), "in a frame").toBeNull();
-  await page.goto((await servedHost.locate(instance)).url);
+  const frame = await shown.frame();
+  expect(await unfixed(frame), "in a frame").toBeNull();
+  await expect.poll(() => host(frame), { message: "in a frame" }).toBe("answered");
+  await page.goto((await servedHost.locate(instance)).url, { waitUntil: "domcontentloaded" });
   expect(await unfixed(page), "on a tab").toBeNull();
+  expect(await host(page), "on a tab").toBe("none");
   // A property fixed before the shell ran (an extension's, an engine's own): the shell says so.
   // WebRTC's constructor, which no control here touches (its removal is the shell's from start).
   await page.addInitScript(() => {

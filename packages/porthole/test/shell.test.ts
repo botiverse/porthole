@@ -3,7 +3,14 @@ import { describe, expect, test } from "vitest";
 import { compile, MCP_APPS_METHODS, presets, resolveTheme, DEFAULT_THEME } from "../src/index.ts";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { HELD_BACK, ONCE, OWN_FRAME, PASSES_AS_IS, SHELL_RUNTIME } from "../src/shell/runtime.ts";
+import {
+  HANDSHAKE,
+  HELD_BACK,
+  ONCE,
+  OWN_FRAME,
+  PASSES_AS_IS,
+  SHELL_RUNTIME,
+} from "../src/shell/runtime.ts";
 
 const ORIGIN = "https://host.example.com";
 
@@ -55,6 +62,99 @@ describe("the shell runtime", () => {
     expect(SHELL_RUNTIME).toContain(`const heldBack = ${HELD_BACK};`);
     expect(SHELL_RUNTIME.match(/heldBack\(/gu)).toHaveLength(1);
     expect(SHELL_RUNTIME).toContain('parseInert(heldBack(String(input.html || "")))');
+  });
+});
+
+type Handshake = (
+  topLevel: boolean,
+  ask: () => Promise<unknown>,
+  answered: (result: unknown) => void,
+  none: () => void,
+  later: (run: () => void, ms: number) => void,
+) => void;
+
+/** The handshake run with its every effect recorded, its timers run by hand. */
+function handshakeOf(topLevel: boolean) {
+  const handshake = runInNewContext(HANDSHAKE) as Handshake;
+  const said: string[] = [];
+  const asks: { resolve: (result: unknown) => void; reject: (error: unknown) => void }[] = [];
+  const timers: { run: () => void; ms: number }[] = [];
+  handshake(
+    topLevel,
+    () =>
+      new Promise((resolve, reject) => {
+        said.push("ask");
+        asks.push({ resolve, reject });
+      }),
+    (result) => said.push(`answered ${JSON.stringify(result)}`),
+    () => said.push("none"),
+    (run, ms) => timers.push({ run, ms }),
+  );
+  /** The next timer, as the browser would run it 250 ms on. */
+  const tick = () => {
+    const next = timers.shift();
+    expect(next?.ms).toBe(250);
+    next?.run();
+  };
+  return { said, asks, timers, tick };
+}
+
+describe("the shell's handshake with its host (P085, P139)", () => {
+  test("on a tab of its own, asks nothing and offers nothing at once: no retry, no timer", () => {
+    const { said, asks, timers } = handshakeOf(true);
+    expect(said).toEqual(["none"]);
+    expect(asks).toHaveLength(0);
+    expect(timers).toHaveLength(0);
+  });
+
+  test("in a frame, asks up to 40 times, 250 ms apart, then offers nothing", () => {
+    const { said, timers, tick } = handshakeOf(false);
+    expect(said).toEqual(["ask"]);
+    for (let i = 1; i < 40; i += 1) {
+      tick();
+    }
+    expect(said.filter((each) => each === "ask")).toHaveLength(40);
+    expect(said).not.toContain("none");
+    tick();
+    expect(said.at(-1)).toBe("none");
+    expect(said.filter((each) => each === "ask")).toHaveLength(40);
+    expect(timers).toHaveLength(0);
+  });
+
+  test("in a frame, takes the first answer once and stops asking", async () => {
+    const { said, asks, timers, tick } = handshakeOf(false);
+    tick();
+    asks[1]?.resolve({ hostCapabilities: {} });
+    await Promise.resolve();
+    asks[0]?.resolve({ late: true });
+    await Promise.resolve();
+    tick();
+    expect(said).toEqual(["ask", "ask", 'answered {"hostCapabilities":{}}']);
+    expect(timers).toHaveLength(0);
+  });
+
+  test("in a frame, a refusal is no answer, and an answer after it gave up is still taken", async () => {
+    const { said, asks, tick } = handshakeOf(false);
+    asks[0]?.reject(new Error("refused"));
+    await Promise.resolve();
+    for (let i = 0; i < 40; i += 1) {
+      tick();
+    }
+    expect(said.at(-1)).toBe("none");
+    asks[39]?.resolve({ hostCapabilities: {} });
+    await Promise.resolve();
+    expect(said.at(-1)).toBe('answered {"hostCapabilities":{}}');
+  });
+
+  test("is the runtime's own: told the top by the window itself, its end marked on the shell's script", () => {
+    expect(SHELL_RUNTIME).toContain(`const handshake = ${HANDSHAKE};`);
+    expect(SHELL_RUNTIME).toContain("handshake(\n    window.top === window,");
+    expect(SHELL_RUNTIME.match(/request\("ui\/initialize"/gu)).toHaveLength(1);
+    expect(SHELL_RUNTIME).toContain(
+      'callOf(setAttributeOfShell, shellScript, ["data-porthole-host", how]);',
+    );
+    expect(SHELL_RUNTIME).toContain('settled("none");\n      runtimeOffer(null);');
+    expect(SHELL_RUNTIME).toContain('settled("answered");');
   });
 });
 

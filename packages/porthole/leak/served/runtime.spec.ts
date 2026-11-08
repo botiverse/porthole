@@ -1181,7 +1181,9 @@ test.describe("a 0.6 page without a declaration behaves as before (P085)", () =>
     expect((await runtimeCalls(page, key)).map((each) => each.capability)).toEqual(["readData"]);
   });
 
-  test("on a tab, with no host, use resolves null at once", async ({ context }) => {
+  test("on a tab, with no host, use resolves null at once, and the shell says so before the page loaded", async ({
+    context,
+  }) => {
     const served = await harness();
     const pageId = unique("page");
     served.pages.set(`${pageId}@1`, PAGE);
@@ -1191,6 +1193,16 @@ test.describe("a 0.6 page without a declaration behaves as before (P085)", () =>
     };
     const location = await served.porthole.issue(instance, { viewer: "probe" });
     const tab = await context.newPage();
+    // The shell said no host answers before the page had loaded (P139): it asked nobody, and
+    // waited for nobody: read once the document is parsed (an older shell never says).
+    await tab.addInitScript(() => {
+      document.addEventListener("DOMContentLoaded", () => {
+        document.documentElement.dataset.probeHost =
+          document
+            .querySelector("script[data-porthole-host]")
+            ?.getAttribute("data-porthole-host") ?? "unmarked";
+      });
+    });
     await tab.goto(location.url);
     const timed = await tab.evaluate(async () => {
       const started = performance.now();
@@ -1200,6 +1212,7 @@ test.describe("a 0.6 page without a declaration behaves as before (P085)", () =>
       return { db, fast: performance.now() - started < 500 };
     });
     expect(timed).toEqual({ db: null, fast: true });
+    expect(await tab.evaluate(() => document.documentElement.dataset.probeHost)).toBe("none");
     await tab.close();
   });
 });

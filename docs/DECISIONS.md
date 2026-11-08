@@ -2740,7 +2740,7 @@ artifact's display, not one sent eleven seconds before the load, and never for a
 Porthole supports lacks the Navigation API (then `frame-src` is the wall, and a set's pages restart
 the display).
 
-## P085 · 2026-10-18 · The capability runtime: one global, `porthole.use(name)`, under a contract pinned per artifact · Accepted; amended by P091
+## P085 · 2026-10-18 · The capability runtime: one global, `porthole.use(name)`, under a contract pinned per artifact · Accepted; amended by P091, P139
 
 Task #124 (contract §7): a page published as an artifact is an app, and an app needs more of its host
 than 0.6's host functions: who is viewing, its comments, a new version of itself, an asset library,
@@ -4376,7 +4376,7 @@ aren't offered.
 the issue); a host needs image blocks (show them, then offer `image`); or a host's composer is the
 common surface (the React binding could offer a chip there).
 
-## P099 · 2026-10-19 · A served page carries its frame's sandbox in its own CSP; on a tab the shell opens no window · Accepted
+## P099 · 2026-10-19 · A served page carries its frame's sandbox in its own CSP; on a tab the shell opens no window · Accepted; amended by P139
 
 The 2026-10-19 review of value and scenarios, S4 and its first P0 (baseline 264b12f): a served
 page opened on a tab of its own (a public link, "open in a new tab", a bookmark, a frame's address
@@ -8450,3 +8450,71 @@ selection inside a page's own scrolling box (its `inView` there is the viewport'
 Escape in the frame should end a composer by itself; `inView` on a followed mark's `tracked` too; or
 an older host's people are seen confused by a pick's outline that stays.
 
+
+## P139 · 2026-11-08 · On a tab the shell asks no host, and says how its handshake ended · Accepted
+
+Amends P085 (the handshake's give-up) and P099 (a page on a tab). From Raft's publish check (task
+#proj-workspace:#232): its Worker opens each version's ticket top-level in a headless browser and
+waits a fixed 10.5 s before it shoots, for the shell to give up.
+
+**Context.** The shell asks its host `ui/initialize` up to 40 times, 250 ms apart, before the
+runtime is told there is nothing to offer (`runtimeOffer(null)`), since a host may start listening
+after the frame's shell runs. It did that on a tab of its own too (`window.top === window`), where
+its parent is the window itself: `post` sends nothing there (`window.parent !== window` is false),
+so 40 requests sat unanswered in `pending` and the handshake ended 10 s after the page started,
+every time. `porthole.use` was null at once on a tab already (P085: it checks the window itself),
+so a page drew the same either way; but a tool that shoots a page on a tab can't know when the
+shell has settled, and waited for the worst case.
+
+**Decision.**
+1. **On a tab the shell asks nothing.** `HANDSHAKE` (`shell/runtime.ts`, spliced into the runtime
+   as `HELD_BACK` is) is the handshake as it was, with one first step: given `window.top === window`
+   (read as the shell starts, before any content runs; `top` is unforgeable), it ends at once with
+   no host (`runtimeOffer(null)`), no request and no timer. In a frame it is as before, unchanged:
+   40 tries, 250 ms apart, the first answer taken once, a refusal no answer, and an answer after
+   the give-up still taken.
+2. **The shell says how its handshake ended**, on its own script element (where it already says
+   which locks didn't take, `data-porthole-unfixed`): `data-porthole-host="none"` once no host will
+   answer (on a tab, as the shell starts, so before the page's own scripts run; in a frame after
+   the 40th try), `"answered"` once one has (a late answer after `"none"` changes it). A tool that
+   shoots a page on a tab waits for it instead of a fixed time, and a shell without it (before this
+   version) is told apart by its absence: such a tool keeps its fixed wait as the fallback and as
+   the most it waits. The attribute is set through `setAttribute` kept before content runs.
+
+**Not a loosening.** No CSP, sandbox flag, egress, gate or allowlist changes, and no message
+changes:
+- *Egress.* On a tab the shell sent nothing before either: `post` goes nowhere when the parent is
+  the window itself. Now it builds no request either. In a frame every message is as it was.
+- *The runtime.* On a tab `porthole.use` was null at once already, and every capability with it;
+  `runtimeOffer(null)` now comes at the start instead of 10 s in, which wakes nothing on a tab
+  (`use` never waits there). The host functions a page reaches are the bridge's, which a tab has
+  none of: nothing was offered there, and nothing is.
+- *The attribute.* It is the page's own word and decides nothing: the shell reads it nowhere, and
+  no host or gate trusts it. A page can set, change or remove it, as it can any element's
+  attribute; all that changes is when a tool that reads it shoots the page, which the page could
+  already decide by when it draws. It says nothing the page couldn't learn already (`window.top`,
+  and in a frame the host's answer, which the page shares the shell's realm to hear, P053).
+- *A frame that claims to be a tab* can't: `window.top` is the browser's own (unforgeable), and a
+  frame that reads itself as a tab is one.
+
+**Rejected.**
+- *An event (`porthole:standalone`)*: a tool that attaches after it fired misses it; an attribute
+  can be read at any time, and its absence says "an older shell" at once.
+- *On `document.documentElement`*: the page's own element, which pages and frameworks rewrite; the
+  shell's script element is the shell's, where it already reports.
+- *Shortening the frame's retries too*: a host that mounts the frame before it listens is the reason
+  for them, and no tool waits on a frame's handshake.
+
+**Tested.** `test/shell.test.ts` "the shell's handshake with its host (P085, P139)": `HANDSHAKE` run
+with its effects recorded and its timers by hand: on a tab, nothing asked, no timer, no host at
+once; in a frame, 40 asks 250 ms apart then no host; the first answer once and no more asks; a
+refusal no answer, and an answer after the give-up taken; the runtime splices it, gives it
+`window.top === window`, asks `ui/initialize` in one place and marks the script. `leak/served/tab.spec.ts`
+"the shell fixes each of its walls in place…": `"answered"` in a frame, `"none"` on a tab once its
+document is parsed; `leak/served/runtime.spec.ts` "on a tab, with no host, use resolves null at
+once, and the shell says so before the page loaded": `"none"` at `DOMContentLoaded`. No negative
+control: it is no defense.
+
+**Revisit when** a tab gets a host of its own (an opener that answers, a web view's native bridge),
+which would need it asked; or a tool needs to know more of the shell's state than its handshake
+(the page drawn, its scripts run), for which this attribute is no model.
