@@ -3122,8 +3122,9 @@ test("a followed selection's place comes as it moves, highlighted, out of view a
   expect(await followed(), "probe: nothing taken while the host follows no selection").toEqual([]);
 
   // Followed: where it is, at once, in view, and drawn.
-  expect(await display.annotate("track", { selection: true })).toBeNull();
+  // Counted before asking: the first report may land before `track` returns.
   const first = (await followed()).length;
+  expect(await display.annotate("track", { selection: true })).toBeNull();
   await expect.poll(async () => (await followed()).length).toBeGreaterThan(first);
   const at = (await followed()).at(-1);
   expect(at?.state).toBe("attached");
