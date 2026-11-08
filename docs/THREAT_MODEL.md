@@ -5,7 +5,7 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes Porthole 0.14.14 (2026-11-07). A review on 2026-10-19 found gaps, and every decision it led to
+**Status.** This describes Porthole 0.14.15 (2026-11-08). A review on 2026-10-19 found gaps, and every decision it led to
 has merged ([§8](#8-fixes-in-flight) lists them). P096 changed the negative-control runner and CI,
 and the shipped conformance probes' messages and timing, not what they check. P104 (0.9.0's
 annotation markers) had a review of its own, and P105, in 0.10.0, is what it led to. 0.11.0 was
@@ -39,7 +39,9 @@ word to put the keyboard back on a marker, and a second exception to "takes no f
 are the host's own (§6, §7); no wall moves. 0.14.13: P135 drops a `focusMark` that had to wait unless the focus is
 in the frame's document by then; a call on a calm page is unchanged. 0.14.14: P136 brings `display.focus()`
 through a nested page's shell with a new host-to-shell word no page can say; P137 applies P135's check to a
-word 100 ms old or more; no wall moves.
+word 100 ms old or more; no wall moves. 0.14.15: P138 lets the host follow the current selection
+(`selectionTracked`, the same boxes as `tracked`, on its budget, only while asked) and keeps what was
+picked lit; no wall moves.
 
 ## 1. Two layers
 
