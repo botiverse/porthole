@@ -8,7 +8,9 @@ import {
   annotateMode,
   checkMarks,
   clampRect,
+  followsSelection,
   hasMarker,
+  inViewport,
   parseReport,
 } from "../annotate/validate.ts";
 import { FIND_LIMITS, FIND_METHODS, type FindReport, type FindResult } from "../find/types.ts";
@@ -89,6 +91,7 @@ const REPORTS: Readonly<Record<string, AnnotationReport["type"]>> = {
   [ANNOTATE_METHODS.anchored]: "anchored",
   [ANNOTATE_METHODS.activated]: "activated",
   [ANNOTATE_METHODS.tracked]: "tracked",
+  [ANNOTATE_METHODS.selectionTracked]: "selectionTracked",
 };
 
 /** What the frame says of find in page unasked (P131), by method. */
@@ -234,8 +237,11 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       let annotating: Required<AnnotateMode> | null = null;
       let marks: AnnotationMark[] = [];
       let activeMark: string | null = null;
-      // The mark the host follows (P112), and when it took each `tracked` in the last second.
+      // The mark the host follows (P112), or whether it follows the selection instead (P138), and
+      // when it took each `tracked` or `selectionTracked` in the last second: one followed thing
+      // at a time, one rate for both.
       let tracking: string | null = null;
+      let trackingSelection = false;
       const trackedTimes: number[] = [];
       // Find in page (P131): the query shown (for the content it was asked of only: a new run or
       // other content forgets it), whether the host takes the shortcut (kept for every frame the
@@ -353,6 +359,10 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         if (tracking !== null) {
           toFrame(ANNOTATE_METHODS.track, { id: tracking });
         }
+        // A new frame has no selection: it answers `orphaned` (P138).
+        if (trackingSelection) {
+          toFrame(ANNOTATE_METHODS.track, { id: null, selection: true });
+        }
       };
       /**
        * The frame's viewport as the platform tells it now; undefined where it can't (no
@@ -400,6 +410,16 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           case "activated":
           case "tracked":
             return { ...report, rect: clampRect(report.rect, viewport) };
+          case "selectionTracked":
+            // In view only where the page says so and its box, as the host reads the viewport,
+            // reaches into it (P138): a box the clamp puts on an edge is never in view.
+            return report.state === "orphaned"
+              ? report
+              : {
+                  ...report,
+                  rect: clampRect(report.rect, viewport),
+                  inView: report.inView && inViewport(report.rect, viewport),
+                };
           case "anchored":
             return {
               ...report,
@@ -443,6 +463,23 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         if (report.type === "tracked") {
           const { id } = report;
           if (id !== tracking || !marks.some((mark) => mark.id === id)) {
+            return;
+          }
+          const at = Date.now();
+          while (trackedTimes.length > 0 && at - (trackedTimes[0] as number) >= 1_000) {
+            trackedTimes.shift();
+          }
+          if (trackedTimes.length >= TRACKED_PER_SECOND) {
+            return;
+          }
+          trackedTimes.push(at);
+          emit("annotation", withinFrame(report));
+          return;
+        }
+        // The followed selection (P138): only while the host follows it, on the same 60 a second
+        // (one followed thing at a time), past the bridge's rate as the followed mark's.
+        if (report.type === "selectionTracked") {
+          if (!trackingSelection) {
             return;
           }
           const at = Date.now();
@@ -626,6 +663,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           if (activeMark !== null && !marks.some((mark) => mark.id === activeMark)) {
             activeMark = null;
           }
+          // A followed selection (P138) isn't a mark: a show leaves it.
           if (tracking !== null && !marks.some((mark) => mark.id === tracking)) {
             tracking = null;
             toFrame(ANNOTATE_METHODS.track, { id: null });
@@ -643,12 +681,22 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           activeMark = id;
           toFrame(ANNOTATE_METHODS.focus, { id });
         },
-        track(id) {
+        track(target) {
           needsAnnotate("track");
+          // The selection (P138), under `id: null`: an older shell follows nothing.
+          if (followsSelection(target)) {
+            tracking = null;
+            trackingSelection = true;
+            trackedTimes.length = 0;
+            toFrame(ANNOTATE_METHODS.track, { id: null, selection: true });
+            return;
+          }
+          const id = target;
           if (id !== null && !marks.some((mark) => mark.id === id)) {
             throw new TypeError(`annotations.track: no mark ${JSON.stringify(id)} is shown`);
           }
           tracking = id;
+          trackingSelection = false;
           trackedTimes.length = 0;
           toFrame(ANNOTATE_METHODS.track, { id });
         },
@@ -657,6 +705,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           marks = [];
           activeMark = null;
           tracking = null;
+          trackingSelection = false;
           toFrame(ANNOTATE_METHODS.clear, {});
         },
         clearSelection() {

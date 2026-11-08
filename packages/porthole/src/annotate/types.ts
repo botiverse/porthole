@@ -87,6 +87,13 @@ export interface AnnotateMode {
 }
 
 /**
+ * What `annotations.track` follows (P112, P138): a shown mark, by its id; the selection the frame
+ * last reported as `selected` (the element picked, or the words selected), highlighted in the
+ * frame while followed; or nothing (`null`). One at a time: each replaces the last.
+ */
+export type AnnotationTrackTarget = string | { readonly selection: true } | null;
+
+/**
  * An anchor the host marks in the frame, under its own id. Everything here is sent into the
  * frame, so the content can read it: give ids that say nothing (never a person's name or the
  * comment's words).
@@ -210,6 +217,30 @@ export type AnnotationReport =
       readonly scroll?: AnnotationScroll;
     }
   /**
+   * Where the selection the host follows is (`annotations.track({ selection: true })`, P138): the
+   * element picked or the words selected, as the last `selected` reported them, at an animation
+   * frame where it moved or the frame's viewport changed size; at most 60 a second, together with
+   * `tracked` (one followed thing at a time). The same boxes as `tracked`'s: `rect` clamped to the
+   * frame, `documentRect` and `lastLineDocumentRect` in the document and unclamped, the `scroll`
+   * they were read at, always there. `inView`: whether any of it is inside the frame's viewport
+   * (false where the shell says so, or where `rect` lies wholly outside the viewport as the host
+   * reads it); hide UI attached to it while false. `orphaned`: it isn't in the page now (taken out,
+   * its words gone; or the frame has no selection, a new frame after a reload); `attached` again if
+   * it is found again by its anchor. The first report comes at the frame's next animation frame
+   * after the host asks, which is how a host tells a shell that follows a selection (an older one
+   * sends none). Geometry only, as `tracked`: no anchor, no words. The content's word.
+   */
+  | {
+      readonly type: "selectionTracked";
+      readonly state: "attached";
+      readonly rect: AnnotationRect;
+      readonly documentRect: AnnotationRect;
+      readonly lastLineDocumentRect?: AnnotationRect;
+      readonly scroll: AnnotationScroll;
+      readonly inView: boolean;
+    }
+  | { readonly type: "selectionTracked"; readonly state: "orphaned" }
+  /**
    * The person clicked the marker of a mark the host shows with a `count` (P104), or of a draft
    * (P107), or pressed Enter or Space on it (P133); `rect` is the marker's box, to open the host's
    * own UI beside it. The content can fake
@@ -237,10 +268,16 @@ export const ANNOTATE_METHODS = {
   anchored: "porthole/annotate.anchored",
   /** Frame → host: a mark's marker was clicked, or pressed from the keyboard (P104, P133). */
   activated: "porthole/annotate.activated",
-  /** Host → frame: follow one mark's box (`{ id }`), or none (`{ id: null }`) (P112). */
+  /**
+   * Host → frame: follow one mark's box (`{ id }`), or none (`{ id: null }`) (P112), or the
+   * selection last reported, highlighted while followed (`{ id: null, selection: true }`, P138: an
+   * older shell reads it as none).
+   */
   track: "porthole/annotate.track",
   /** Frame → host: the followed mark's box, as it moves (P112). */
   tracked: "porthole/annotate.tracked",
+  /** Frame → host: where the followed selection is, as it moves (P138). */
+  selectionTracked: "porthole/annotate.selectionTracked",
   /** Host → frame: take the page's text selection away, telling nothing back (P115). */
   clearSelection: "porthole/annotate.clearSelection",
   /**

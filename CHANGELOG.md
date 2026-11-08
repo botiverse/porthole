@@ -4,6 +4,33 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **Annotations: the selection followed (P138).** `annotations.track({ selection: true })` (React:
+  `trackedSelection`) follows what the last `selected` reported, the element picked or the words
+  selected, so your composer can stay beside it: `selectionTracked` reports come as `tracked` ones
+  do (at most 60 a second, the same boxes), with `inView` to hide the composer while it is out of
+  view, and `state: "orphaned"` while it isn't in the page. While it is followed the frame
+  highlights it, a picked element in the picking outline, so the page shows what the comment is
+  for. `track(null)`, a mark's id or `clear` ends it and the highlight (React: `trackedSelection`
+  false gives `trackedAnnotation` back). An older shell sends nothing and draws nothing: place by
+  `selected` until a `selectionTracked` comes. Upgrade the content server for the shell's part.
+- **Annotations: a pick keeps its outline (P138, Tenny's review).** The element just picked stays
+  outlined after `selected`, so nothing flickers before you follow it, and the follow's highlight
+  takes over. Without a follow it ends as a selection does: the next pick or selection,
+  `clearSelection`, `start` or `stop`, `clear`, Escape in the frame, or the element leaving the
+  page. With an older host, this is the one change people see from a newer content server: the
+  outline no longer goes the moment they pick. Call `track({ selection: true })` before a `start` or
+  `stop` you send at the same time (React does).
+- **Annotations: no re-sent `selected` while the selection is followed (P138, Tenny's review).** A
+  scroll no longer re-sends it once it settles (P105) while you follow it: `selectionTracked` says
+  where it is. New selections are reported as before, and once the following ends a scroll re-sends
+  it again.
+- **Security (P138):** no CSP, sandbox, egress or gate changes. The host takes `selectionTracked`
+  only while it follows the selection, on `tracked`'s 60 a second (control
+  `track-selection-checks`). It carries boxes only. A composer that follows is a view a report
+  moves: guard it as THREAT_MODEL §6 says, and end the following on every close.
+
 ## 0.14.14
 
 - **Nested pages: `display.focus()` reaches the page (P136).** It stopped at the page's shell on every

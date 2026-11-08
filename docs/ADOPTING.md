@@ -289,7 +289,8 @@ composer.onClose(() => display.annotations.clearSelection());
 
 - **React** (P118): `PortholeFrame` and `PortholeView` take the same as props: `annotating`,
   `annotations`, `focusedAnnotation` and `trackedAnnotation` (the mark to follow, by value; `null`
-  stops), every report through `onAnnotation` (`tracked` too). The selection is cleared through a
+  stops), `trackedSelection` (true while your composer is open: the selection is followed in the
+  mark's place, P138), every report through `onAnnotation` (`tracked` and `selectionTracked` too). The selection is cleared through a
   ref, which holds `clearSelection()` only (a `PortholeFrameHandle`; never the display, whose life
   is the binding's); with no display running it does nothing. Errors the core's calls throw (an id
   no shown mark has, a config without `annotate`) reach `onHostError`, kind `"annotations"`.
@@ -434,6 +435,45 @@ composer.onClose(() => display.annotations.clearSelection());
       ? { x: line.x + line.width - report.scroll.x, y: line.y + line.height - report.scroll.y }
       : { x: report.rect.x + report.rect.width, y: report.rect.y + report.rect.height };
     composer.openAt(frame, clipToFrame(at), report.anchor); // the frame's px: clip them, then add its position
+  });
+  ```
+- **A composer that stays beside what it is for** (P138): `selected` comes once for a pick (and
+  for words again only once a scroll settles), and a pick's outline goes with it. Follow the
+  selection while your composer is open, `annotations.track({ selection: true })` (React:
+  `trackedSelection`), and the frame highlights it (a picked element in the picking outline) and
+  reports `selectionTracked` as `tracked` reports a mark: at most 60 a second, its `rect` clamped,
+  `documentRect`, `lastLineDocumentRect` and `scroll` as above, and `inView`, so you hide the
+  composer (and show your own marker at the frame's edge, from `documentRect` and `scroll`, clipped)
+  while it is out of view. `state: "orphaned"`: it isn't in the page now (a re-render took it out;
+  a reload); keep the person's words, it may be found again. It follows the latest `selected`, so a
+  new pick or selection moves it. One thing is followed at a time: it takes a followed mark's
+  place, and `track(null)`, a mark's id or `clear` ends it, the highlight with it. End it on every
+  close (posted, dismissed, Escape in your composer: the frame's own Escape doesn't end it), as you
+  clear the selection: the page reads when it starts and ends, so an end on every close says nothing
+  of what came of it. The composer moves at the page's word: guard it as below, armed again each
+  time it moves or shows again. An older shell sends nothing (and draws nothing): place by
+  `selected` until the first `selectionTracked`, which a newer one sends at its next animation
+  frame. A newer shell keeps the picked element outlined from the pick on, so there is no gap
+  before the follow's highlight; ask for the follow before a `start` or `stop` you send as the
+  composer opens (React orders them so), or the stop ends that outline a moment before the follow
+  draws it again. Without a follow the outline ends as a selection does (the next pick, Escape,
+  `clearSelection`, `start`, `stop`, `clear`). While you follow the selection, `selected` isn't
+  re-sent after a scroll: read where it is from `selectionTracked`.
+
+  ```js
+  display.on("annotation", (report) => {
+    if (report.type === "selected") {
+      composer.openBeside(frame, report.rect, report.anchor); // as before: an older shell stops here
+      display.annotations.track({ selection: true });
+    }
+    if (report.type !== "selectionTracked") return;
+    if (report.state === "orphaned") return composer.detach(); // keep its words
+    if (!report.inView) return composer.collapseToMarker(report.documentRect, report.scroll);
+    if (composer.moveBeside(frame, report.rect) > 4) composerGuard.placed();
+  });
+  composer.onClose(() => {
+    display.annotations.track(null); // or the open card's mark: track(cardId)
+    display.annotations.clearSelection();
   });
   ```
 - **The keyboard** (P133): each marker is a button in the frame's Tab order, after the page's own

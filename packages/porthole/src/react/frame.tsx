@@ -707,6 +707,17 @@ export interface PortholeFrameProps {
    * stop the following, as the core's `show` does; it starts again once they have it back.
    */
   readonly trackedAnnotation?: string | null;
+  /**
+   * Follow the selection instead (`annotations.track({ selection: true })`, P138): while true, the
+   * element the person picked, or the words they selected, as the last `selected` reported them, is
+   * highlighted in the frame and `onAnnotation` gets `{ type: "selectionTracked", ... }` as it moves
+   * (the boxes `tracked` has, and `inView`; or `state: "orphaned"` while it isn't in the page), for
+   * a composer that stays beside it. It takes `trackedAnnotation`'s place while true (one followed
+   * thing at a time); false, or leaving it out, ends it and its highlight (the comment posted, the
+   * composer dismissed, Escape in it), and `trackedAnnotation`'s mark is followed again. Until a
+   * `selectionTracked` comes, place by `selected`'s boxes: an older shell sends none.
+   */
+  readonly trackedSelection?: boolean;
   /** The display's imperative calls (`PortholeFrameHandle`, P118): React 19's `ref` prop. */
   readonly ref?: Ref<PortholeFrameHandle>;
   /**
@@ -966,9 +977,10 @@ function Mount({
 }: MountProps): ReactElement {
   const holder = useRef<HTMLDivElement>(null);
   const handle = useRef<DisplayHandle | null>(null);
-  // The mark the display follows now, as the core keeps it (P118), and the prop as last seen.
-  const following = useRef<string | null>(null);
-  const asked = useRef<string | null>(null);
+  // The mark the display follows now, or the selection (P138), as the core keeps it (P118), and
+  // the props as last seen.
+  const following = useRef<Followed>(null);
+  const asked = useRef<Followed>(null);
   const [ready, setReady] = useState(false);
   // The height this display started at: later reports don't make it start again.
   const [startHeight] = useState(initialHeightPx);
@@ -1199,9 +1211,10 @@ function Mount({
     if (config.capabilities.annotate !== undefined) {
       applyAnnotations(display, first);
     }
-    // The followed mark, once the marks are shown; without `annotate`, the core's error.
+    // The followed mark or selection, once the marks are shown; without `annotate`, the core's
+    // error.
     following.current = null;
-    const wanted = first.trackedAnnotation ?? null;
+    const wanted = followedOf(first);
     asked.current = wanted;
     if (wanted !== null) {
       attempt(() => {
@@ -1285,6 +1298,42 @@ function Mount({
       : JSON.stringify([annotating.elements ?? true, annotating.text ?? true]);
   useEffect(() => {
     const display = handle.current;
+    if (annotates && display !== null) {
+      attempt(() => {
+        display.annotations.show(annotations ?? []);
+        // A show without the followed mark stops the following (the core's own); the selection
+        // stays followed (P138).
+        if (typeof following.current === "string" && !shown(annotations, following.current)) {
+          following.current = null;
+        }
+      }, latest());
+    }
+  }, [annotates, annotations]);
+  // The followed mark, or the selection (P138), follows its props (after the marks above, so the
+  // two can change together).
+  const followed = followedOf(frame);
+  useEffect(() => {
+    const display = handle.current;
+    const changed = followed !== asked.current;
+    asked.current = followed;
+    if (display === null || followed === following.current) {
+      return;
+    }
+    // Its mark was taken off (the error, if any, was told when the prop said it): followed again
+    // once the marks have it back.
+    if (!changed && typeof followed === "string" && !shown(annotations, followed)) {
+      return;
+    }
+    attempt(() => {
+      display.annotations.track(followed);
+      following.current = followed;
+    }, latest());
+  }, [followed, annotations]);
+  // The mode follows its prop, after the following above (P138, Tenny's review): a host that
+  // follows the selection and ends picking in one render has the frame follow it first, so the
+  // pick's outline goes straight to the follow's highlight, never through the stop's gap.
+  useEffect(() => {
+    const display = handle.current;
     if (!annotates || display === null) {
       return;
     }
@@ -1297,37 +1346,6 @@ function Mount({
       latest(),
     );
   }, [annotates, mode]);
-  useEffect(() => {
-    const display = handle.current;
-    if (annotates && display !== null) {
-      attempt(() => {
-        display.annotations.show(annotations ?? []);
-        // A show without the followed mark stops the following (the core's own).
-        if (following.current !== null && !shown(annotations, following.current)) {
-          following.current = null;
-        }
-      }, latest());
-    }
-  }, [annotates, annotations]);
-  // The followed mark follows its prop (after the marks above, so the two can change together).
-  const trackedAnnotation = frame.trackedAnnotation ?? null;
-  useEffect(() => {
-    const display = handle.current;
-    const changed = trackedAnnotation !== asked.current;
-    asked.current = trackedAnnotation;
-    if (display === null || trackedAnnotation === following.current) {
-      return;
-    }
-    // Its mark was taken off (the error, if any, was told when the prop said it): followed again
-    // once the marks have it back.
-    if (!changed && trackedAnnotation !== null && !shown(annotations, trackedAnnotation)) {
-      return;
-    }
-    attempt(() => {
-      display.annotations.track(trackedAnnotation);
-      following.current = trackedAnnotation;
-    }, latest());
-  }, [trackedAnnotation, annotations]);
   useEffect(() => {
     const display = handle.current;
     const id = focusOf(latest().focusedAnnotation);
@@ -1437,6 +1455,15 @@ function applyAnnotations(display: DisplayHandle, frame: PortholeFrameProps): vo
 function useByValue<T>(value: T): T {
   const key = value === undefined ? "" : JSON.stringify(value);
   return useMemo(() => (key === "" ? undefined : JSON.parse(key)) as T, [key]);
+}
+
+/** What a display follows (P118, P138): a mark's id, the selection (this one object), or nothing. */
+const SELECTION = Object.freeze({ selection: true } as const);
+type Followed = string | typeof SELECTION | null;
+
+/** What the props ask to follow: the selection while `trackedSelection`, else the mark, if any. */
+function followedOf(frame: PortholeFrameProps): Followed {
+  return frame.trackedSelection === true ? SELECTION : (frame.trackedAnnotation ?? null);
 }
 
 /** Whether `marks` has a mark `id`. */

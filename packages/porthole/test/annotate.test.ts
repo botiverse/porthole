@@ -4,7 +4,9 @@ import {
   annotateMode,
   checkMarks,
   clampRect,
+  followsSelection,
   hasMarker,
+  inViewport,
   parseAnchor,
   parseRect,
   parseReport,
@@ -1376,5 +1378,374 @@ describe("the shell", () => {
     expect(compile(presets.inlineWidget()).guide(["widget"])).toContain(
       "full screen and the clipboard are closed.",
     );
+  });
+});
+
+describe("the followed selection (P138): track({ selection: true }) and selectionTracked", () => {
+  const rect = { x: 8, y: 120, width: 300, height: 40 };
+  const documentRect = { x: 8, y: 1_020, width: 300, height: 40 };
+  const lastLineDocumentRect = { x: 8, y: 1_042, width: 120, height: 18 };
+  const scroll = { x: 0, y: 900 };
+  const attached = { state: "attached", rect, documentRect, scroll, inView: true };
+
+  test("a report is where it is, or that it is gone, rebuilt from known fields: geometry only", () => {
+    expect(
+      parseReport({
+        type: "selectionTracked",
+        ...attached,
+        lastLineDocumentRect,
+        // What a page may add rides nowhere: no anchor, no words.
+        anchor: text,
+        label: "Revenue grew 12%",
+        id: "c1",
+      }),
+    ).toStrictEqual({
+      type: "selectionTracked",
+      state: "attached",
+      rect,
+      documentRect,
+      lastLineDocumentRect,
+      scroll,
+      inView: true,
+    });
+    expect(parseReport({ type: "selectionTracked", ...attached, inView: false })).toStrictEqual({
+      type: "selectionTracked",
+      state: "attached",
+      rect,
+      documentRect,
+      scroll,
+      inView: false,
+    });
+    expect(
+      parseReport({ type: "selectionTracked", state: "orphaned", rect, anchor: text }),
+    ).toStrictEqual({ type: "selectionTracked", state: "orphaned" });
+  });
+
+  test("anything malformed or missing drops the report: every box but the last line, the scroll, and inView are its", () => {
+    const { rect: _rect, ...noRect } = attached;
+    const { documentRect: _place, ...noPlace } = attached;
+    const { scroll: _scroll, ...noScroll } = attached;
+    const { inView: _inView, ...noInView } = attached;
+    for (const bad of [
+      noRect,
+      noPlace,
+      noScroll,
+      noInView,
+      { ...attached, inView: "yes" },
+      { ...attached, inView: 1 },
+      { ...attached, state: "gone" },
+      { ...attached, state: undefined },
+      { ...attached, rect: { ...rect, width: -1 } },
+      { ...attached, documentRect: { ...documentRect, y: Number.NaN } },
+      { ...attached, scroll: { x: 0 } },
+      { ...attached, lastLineDocumentRect: { ...lastLineDocumentRect, height: Infinity } },
+    ]) {
+      expect(parseReport({ type: "selectionTracked", ...bad }), JSON.stringify(bad)).toBeNull();
+    }
+  });
+
+  test("in view: any of the box inside the viewport, before the clamp; an unknown viewport has nothing in it", () => {
+    const viewport = { width: 600, height: 400 };
+    expect(inViewport(rect, viewport)).toBe(true);
+    expect(inViewport({ x: 8, y: 390, width: 300, height: 40 }, viewport), "half in").toBe(true);
+    expect(inViewport({ x: 8, y: -39, width: 300, height: 40 }, viewport), "1 px in").toBe(true);
+    expect(inViewport({ x: 8, y: -40, width: 300, height: 40 }, viewport), "on the edge").toBe(
+      false,
+    );
+    expect(inViewport({ x: 8, y: 400, width: 300, height: 40 }, viewport), "below").toBe(false);
+    expect(inViewport({ x: 600, y: 10, width: 30, height: 40 }, viewport), "right").toBe(false);
+    expect(inViewport({ x: 20, y: 10, width: 0, height: 40 }, viewport), "no width").toBe(true);
+    for (const unknown of [undefined, null, { width: Number.NaN, height: 400 }]) {
+      expect(inViewport(rect, unknown), JSON.stringify(unknown)).toBe(false);
+    }
+  });
+
+  test("only { selection: true } names the selection", () => {
+    expect(followsSelection({ selection: true })).toBe(true);
+    for (const other of ["c1", null, undefined, {}, { selection: "true" }, { selection: 1 }]) {
+      expect(followsSelection(other as never), JSON.stringify(other)).toBe(false);
+    }
+    const inherited = Object.create({ selection: true }) as { selection: true };
+    expect(followsSelection(inherited), "its own field only").toBe(false);
+  });
+
+  describe("on createHost over a stand-in platform", () => {
+    const mounted: DisplayHandle[] = [];
+    afterEach(() => {
+      for (const display of mounted.splice(0)) {
+        display.destroy();
+      }
+    });
+    const mount = () => {
+      const sent: { method: string; params: unknown }[] = [];
+      let listeners = new Set<(message: unknown) => void>();
+      const platform: PlatformHost = {
+        name: "stand-in",
+        createSurface: () => {
+          listeners = new Set();
+          const own = listeners;
+          return {
+            transport: {
+              send: (message) => {
+                const { method, params } = message as { method?: unknown; params?: unknown };
+                if (typeof method === "string") {
+                  sent.push({ method, params });
+                }
+              },
+              listen: (listener) => {
+                own.add(listener);
+                return () => own.delete(listener);
+              },
+              close: () => own.clear(),
+            },
+            element: null,
+            setHeight: () => {},
+            setColorScheme: () => {},
+            userActivation: () => undefined,
+            viewport: () => ({ width: 600, height: 400 }),
+            onNavigated: () => () => {},
+            onLoad: () => () => {},
+            destroy: () => {},
+          };
+        },
+      };
+      const container = {
+        ownerDocument: {
+          defaultView: {
+            location: { origin: "https://app.example" },
+            navigator: { language: "en" },
+          },
+        },
+        getBoundingClientRect: () => ({ width: 600 }),
+      } as unknown as HTMLElement;
+      const display = createHost(presets.artifact({ capabilities: { annotate: {} } }), {
+        platform,
+      }).mount(container, { displayId: "d1", title: "Notes", scheme: "light" });
+      mounted.push(display);
+      const reports: AnnotationReport[] = [];
+      display.on("annotation", (report) => reports.push(report));
+      const handshake = () => {
+        for (const listener of listeners) {
+          listener({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} });
+        }
+      };
+      const say = async (method: string, params: unknown) => {
+        for (const listener of listeners) {
+          listener({ jsonrpc: "2.0", method: `porthole/annotate.${method}`, params });
+        }
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      };
+      const tracks = () =>
+        sent.filter((each) => each.method === "porthole/annotate.track").map((each) => each.params);
+      const followed = () => reports.filter((each) => each.type === "selectionTracked");
+      return { display, sent, reports, handshake, say, tracks, followed };
+    };
+
+    test("asks under id null, which an older shell reads as following nothing; a mark's id or null ends it", () => {
+      const t = mount();
+      t.handshake();
+      t.display.annotations.show([{ id: "c1", anchor: text, count: 1 }]);
+      t.display.annotations.track("c1");
+      t.display.annotations.track({ selection: true });
+      t.display.annotations.track("c1");
+      t.display.annotations.track({ selection: true });
+      t.display.annotations.track(null);
+      expect(t.tracks()).toEqual([
+        { id: "c1" },
+        { id: null, selection: true },
+        { id: "c1" },
+        { id: null, selection: true },
+        { id: null },
+      ]);
+      // Not a mark: another object is no selection, and no mark either.
+      expect(() => t.display.annotations.track({ selection: false } as never)).toThrow(/no mark/u);
+    });
+
+    test("takes reports only while it follows the selection: its box clamped, in view only where the box reaches the viewport", async () => {
+      const t = mount();
+      t.handshake();
+      await t.say("selectionTracked", attached);
+      expect(t.followed(), "not asked: none taken").toEqual([]);
+
+      t.display.annotations.track({ selection: true });
+      await t.say("selectionTracked", { ...attached, lastLineDocumentRect });
+      // Below the frame: its box on the bottom edge, and out of view whatever the page says.
+      await t.say("selectionTracked", {
+        ...attached,
+        rect: { x: 8, y: 2_100, width: 300, height: 40 },
+        documentRect: { x: 8, y: 3_000, width: 300, height: 40 },
+      });
+      await t.say("selectionTracked", { ...attached, inView: false });
+      await t.say("selectionTracked", { state: "orphaned" });
+      expect(t.followed()).toEqual([
+        {
+          type: "selectionTracked",
+          state: "attached",
+          rect,
+          documentRect,
+          lastLineDocumentRect,
+          scroll,
+          inView: true,
+        },
+        {
+          type: "selectionTracked",
+          state: "attached",
+          rect: { x: 8, y: 400, width: 300, height: 0 },
+          documentRect: { x: 8, y: 3_000, width: 300, height: 40 },
+          scroll,
+          inView: false,
+        },
+        { type: "selectionTracked", state: "attached", rect, documentRect, scroll, inView: false },
+        { type: "selectionTracked", state: "orphaned" },
+      ]);
+
+      // A show leaves it; a mark followed, null, or clear ends it.
+      t.display.annotations.show([{ id: "c1", anchor: text, count: 1 }]);
+      await t.say("selectionTracked", attached);
+      expect(t.followed()).toHaveLength(5);
+      for (const end of [
+        () => t.display.annotations.track("c1"),
+        () => t.display.annotations.track(null),
+        () => t.display.annotations.clear(),
+      ]) {
+        t.display.annotations.track({ selection: true });
+        end();
+        await t.say("selectionTracked", attached);
+        expect(t.followed()).toHaveLength(5);
+      }
+      // Following the selection, a mark's box isn't taken.
+      t.display.annotations.show([{ id: "c1", anchor: text, count: 1 }]);
+      t.display.annotations.track({ selection: true });
+      await t.say("tracked", { id: "c1", rect });
+      expect(t.reports.filter((each) => each.type === "tracked")).toEqual([]);
+    });
+
+    test("at most 60 a second, with tracked's (one followed thing at a time)", async () => {
+      const t = mount();
+      t.handshake();
+      t.display.annotations.track({ selection: true });
+      for (let i = 0; i < 100; i += 1) {
+        await t.say("selectionTracked", attached);
+      }
+      expect(t.followed().length).toBe(60);
+    });
+
+    test("is kept for a frame that runs later, which has no selection to follow", () => {
+      const t = mount();
+      t.handshake();
+      t.display.annotations.track({ selection: true });
+      const before = t.sent.length;
+      t.display.reload();
+      t.handshake();
+      expect(
+        t.sent.slice(before).filter((each) => each.method === "porthole/annotate.track"),
+      ).toEqual([{ method: "porthole/annotate.track", params: { id: null, selection: true } }]);
+    });
+  });
+
+  describe("in the shell", () => {
+    const body = (from: string, to: string) => {
+      const start = ANNOTATE_RUNTIME.indexOf(from);
+      expect(start, from).toBeGreaterThan(-1);
+      return ANNOTATE_RUNTIME.slice(start, ANNOTATE_RUNTIME.indexOf(to, start));
+    };
+
+    test("follows the selection only when the host says selection, and a mark's id wins", () => {
+      expect(ANNOTATE_RUNTIME).toContain('selectionTracked: "porthole/annotate.selectionTracked"');
+      expect(ANNOTATE_RUNTIME).toContain("track(params.id, params.selection === true);");
+      const track = body("const track = (id, selection) => {", "\n      };");
+      expect(track).toContain("followingSelection = tracking === null && selection === true;");
+    });
+
+    test("tells geometry only, and moves no focus, no selection and no key", () => {
+      const follow = body("const followHeld = () => {", "\n      // A mark, the selection");
+      for (const told of follow.split("tell(").slice(1)) {
+        expect(told.startsWith("M.selectionTracked, ")).toBe(true);
+        expect(told.slice(0, told.indexOf(");"))).not.toMatch(/anchor|label|exact|quote/u);
+      }
+      for (const part of [follow, body("const track = (id, selection) => {", "\n      };")]) {
+        expect(part).not.toMatch(
+          /focus|removeAllRanges|addRange|preventDefault|addEventListener|listenOn/u,
+        );
+      }
+    });
+
+    test("keeps a copy of the selected range with the DOM's own cloneRange, taken before content runs", () => {
+      const taken = ANNOTATE_RUNTIME.indexOf("const cloneRange = Range.prototype.cloneRange;");
+      expect(taken).toBeGreaterThan(-1);
+      expect(ANNOTATE_RUNTIME.indexOf("window.addEventListener")).toBeGreaterThan(taken);
+      expect(ANNOTATE_RUNTIME).toContain(
+        "holdSelected(anchor, { range: cloneRange.call(range) });",
+      );
+      // Every selected is held: the pick, the held block, the words.
+      expect(ANNOTATE_RUNTIME.split("tell(M.selected,")).toHaveLength(4);
+      expect(ANNOTATE_RUNTIME.split("holdSelected(anchor,")).toHaveLength(4);
+    });
+
+    test("a pick keeps its outline until the host follows it, the follow's highlight taking over in one draw (Tenny's review)", () => {
+      // Both picks, the click's and the held block's, keep the element, unless already followed.
+      expect(ANNOTATE_RUNTIME.split("picked = followingSelection ? null : element;")).toHaveLength(
+        3,
+      );
+      expect(ANNOTATE_RUNTIME).toContain(
+        "const pickShown = () => picked !== null && !followingSelection && picked.isConnected;",
+      );
+      const track = body("const track = (id, selection) => {", "\n      };");
+      expect(track).toContain("const was = heldShown() || pickShown();");
+      expect(track).toContain("if (followingSelection) {\n          picked = null;\n        }");
+      expect(track).toContain("if (heldShown() || pickShown() || was) {\n          draw();");
+    });
+
+    test("without a follow, a pick's outline ends as a selection does: the next pick or selection, clearSelection, a mode, clear, Escape (Tenny's review)", () => {
+      // A selection reported after it replaces it.
+      expect(ANNOTATE_RUNTIME).toContain(
+        "holdSelected(anchor, { range: cloneRange.call(range) });\n        endPick();",
+      );
+      // The host's words: a mode started or stopped, clear, clearSelection.
+      expect(body("const stop = () => {", "\n      };")).toContain("picked = null;");
+      expect(body("case M.start:", "break;")).toContain("picked = null;");
+      expect(body("case M.clear:", "break;")).toContain("picked = null;");
+      expect(body("case M.clearSelection: {", "break;")).toContain("endPick();");
+      // Escape, before anything else is decided, and the key left as it was.
+      const escape = body('if (event.key !== "Escape") {', "if (mode.elements) {");
+      expect(escape).toContain("endPick();");
+      expect(escape).not.toMatch(/preventDefault|stopImmediatePropagation|stopPropagation/u);
+      // An element taken out of the page isn't drawn, and goes.
+      expect(ANNOTATE_RUNTIME).toContain(
+        "if (picked !== null && !picked.isConnected) {\n          picked = null;\n        }",
+      );
+      // No timer keeps or ends it, and unselected doesn't (the pick's own click clears an older
+      // selection where text is selected too).
+      const ending = body("const endPick = () => {", "\n      };");
+      expect(ending).not.toMatch(/setTimeout|later\(/u);
+      const unselected = body(
+        "if (reported !== null) {\n            reported = null;",
+        "tell(M.unselected",
+      );
+      expect(unselected).not.toContain("endPick");
+    });
+
+    test("while the selection is followed, a scroll re-sends no selected; once it ends, as before (P105; Tenny's review)", () => {
+      expect(ANNOTATE_RUNTIME).toContain("if (!followingSelection && reportSelection(true)) {");
+      expect(ANNOTATE_RUNTIME).toContain(
+        'window.addEventListener("scroll", () => {\n        // Not while the host follows the selection (P138, Tenny\'s review).\n        if (followingSelection) {\n          return;\n        }\n        if (reported !== null) {\n          selectionScrolled = true;',
+      );
+      // A new selection is still told while followed: only the re-send is held back.
+      const told = body('document.addEventListener("selectionchange"', "});");
+      expect(told).toContain("reportSelection(false)");
+      expect(told).not.toContain("followingSelection");
+    });
+
+    test("draws it in the layer's outlines, which take no pointer and say nothing to assistive technology", () => {
+      expect(ANNOTATE_RUNTIME).toContain(".held{position:absolute;");
+      const drawn = body("const lit = heldShown()", "if (hover !== null && hover.isConnected) {");
+      expect(drawn).toContain(
+        "const lit = heldShown() ? held.found : pickShown() ? { element: picked } : null;",
+      );
+      expect(drawn).toContain('each.className = lit.range ? "held text" : "held";');
+      expect(drawn).toContain("outlines.push(each);");
+      expect(drawn).not.toMatch(/tabIndex|button|aria-label|focus/u);
+      expect(ANNOTATE_RUNTIME).toContain('boxes.hover.setAttribute("aria-hidden", "true");');
+    });
   });
 });

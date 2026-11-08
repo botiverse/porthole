@@ -344,6 +344,7 @@ export {
   type AnnotationReport,
   type AnnotationScroll,
   type AnnotationSelector,
+  type AnnotationTrackTarget,
   type CssSelector,
   type TextPositionSelector,
   type TextQuoteSelector,
