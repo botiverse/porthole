@@ -8473,13 +8473,17 @@ shell has settled, and waited for the worst case.
    no host (`runtimeOffer(null)`), no request and no timer. In a frame it is as before, unchanged:
    40 tries, 250 ms apart, the first answer taken once, a refusal no answer, and an answer after
    the give-up still taken.
-2. **The shell says how its handshake ended**, on its own script element (where it already says
-   which locks didn't take, `data-porthole-unfixed`): `data-porthole-host="none"` once no host will
+2. **The shell says how its handshake ended**, on the document's root element (`<html>`):
+   `data-porthole-host="none"` once no host will
    answer (on a tab, as the shell starts, so before the page's own scripts run; in a frame after
    the 40th try), `"answered"` once one has (a late answer after `"none"` changes it). A tool that
    shoots a page on a tab waits for it instead of a fixed time, and a shell without it (before this
    version) is told apart by its absence: such a tool keeps its fixed wait as the fallback and as
-   the most it waits. The attribute is set through `setAttribute` kept before content runs.
+   the most it waits. The attribute is set through `setAttribute` kept before content runs, on the
+   root as the shell starts. A whole document (an artifact page) replaces the shell's body once the
+   shell's document has loaded, the shell's own script with it, but keeps the root: the render adds
+   the page's own `<html>` attributes to it and removes none (a page whose `<html>` carries
+   `data-porthole-host` itself says its own word, as it can from a script).
 
 **Not a loosening.** No CSP, sandbox flag, egress, gate or allowlist changes, and no message
 changes:
@@ -8500,8 +8504,12 @@ changes:
 **Rejected.**
 - *An event (`porthole:standalone`)*: a tool that attaches after it fired misses it; an attribute
   can be read at any time, and its absence says "an older shell" at once.
-- *On `document.documentElement`*: the page's own element, which pages and frameworks rewrite; the
-  shell's script element is the shell's, where it already reports.
+- *On the shell's own script element*, where it says which locks didn't take
+  (`data-porthole-unfixed`), as this entry first had it: a whole document's render replaces the
+  body, and the script in it, once the shell's document has loaded, so the word was gone by the
+  time a tool reads a page that has loaded (porthole#118's CI: a probe that read it at
+  `DOMContentLoaded` read nothing, at the event the shell fires again after the page's scripts).
+  The root is the page's too, and frameworks change its attributes, but none removes another's.
 - *Shortening the frame's retries too*: a host that mounts the frame before it listens is the reason
   for them, and no tool waits on a frame's handshake.
 
@@ -8509,10 +8517,14 @@ changes:
 with its effects recorded and its timers by hand: on a tab, nothing asked, no timer, no host at
 once; in a frame, 40 asks 250 ms apart then no host; the first answer once and no more asks; a
 refusal no answer, and an answer after the give-up taken; the runtime splices it, gives it
-`window.top === window`, asks `ui/initialize` in one place and marks the script. `leak/served/tab.spec.ts`
-"the shell fixes each of its walls in place…": `"answered"` in a frame, `"none"` on a tab once its
-document is parsed; `leak/served/runtime.spec.ts` "on a tab, with no host, use resolves null at
-once, and the shell says so before the page loaded": `"none"` at `DOMContentLoaded`. No negative
+`window.top === window`, asks `ui/initialize` in one place and marks the root (with the setAttribute
+kept before the locks; the render removes no root attribute). `leak/served/tab.spec.ts` "the shell
+fixes each of its walls in place…": in a frame nothing until the test answers the shell's
+`ui/initialize` as a host does (the reference host page answers nothing by itself), then
+`"answered"`; `"none"` on a tab once its document is parsed; `leak/served/runtime.spec.ts` "on a
+tab, with no host, use resolves null at once, and the shell says so before the page loaded":
+`"none"` at the parser's `DOMContentLoaded`, and still after the page's document replaced the
+shell's body. No negative
 control: it is no defense.
 
 **Revisit when** a tab gets a host of its own (an opener that answers, a web view's native bridge),

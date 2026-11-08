@@ -146,13 +146,22 @@ describe("the shell's handshake with its host (P085, P139)", () => {
     expect(said.at(-1)).toBe('answered {"hostCapabilities":{}}');
   });
 
-  test("is the runtime's own: told the top by the window itself, its end marked on the shell's script", () => {
+  test("is the runtime's own: told the top by the window itself, its end marked on the document's root", () => {
     expect(SHELL_RUNTIME).toContain(`const handshake = ${HANDSHAKE};`);
     expect(SHELL_RUNTIME).toContain("handshake(\n    window.top === window,");
     expect(SHELL_RUNTIME.match(/request\("ui\/initialize"/gu)).toHaveLength(1);
+    // On the root, which a whole document's render keeps (its body, and the shell's script in it,
+    // are replaced), read when the shell starts.
+    expect(SHELL_RUNTIME).toContain("const shellRoot = document.documentElement;");
     expect(SHELL_RUNTIME).toContain(
-      'callOf(setAttributeOfShell, shellScript, ["data-porthole-host", how]);',
+      'callOf(setAttributeOfShell, shellRoot, ["data-porthole-host", how]);',
     );
+    expect(
+      SHELL_RUNTIME.indexOf("const setAttributeOfShell = Element.prototype.setAttribute;"),
+    ).toBeLessThan(SHELL_RUNTIME.indexOf("const lock = "));
+    // The render adds the page's attributes to the root and removes none.
+    expect(SHELL_RUNTIME).toContain("element.setAttribute(attribute.name, attribute.value);");
+    expect(SHELL_RUNTIME).not.toMatch(/element\.removeAttribute\(attribute/u);
     expect(SHELL_RUNTIME).toContain('settled("none");\n      runtimeOffer(null);');
     expect(SHELL_RUNTIME).toContain('settled("answered");');
   });

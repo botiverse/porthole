@@ -1194,14 +1194,19 @@ test.describe("a 0.6 page without a declaration behaves as before (P085)", () =>
     const location = await served.porthole.issue(instance, { viewer: "probe" });
     const tab = await context.newPage();
     // The shell said no host answers before the page had loaded (P139): it asked nobody, and
-    // waited for nobody: read once the document is parsed (an older shell never says).
+    // waited for nobody: read at the parser's own DOMContentLoaded (an older shell never says).
+    // Only the first: the shell fires the event again once the page's own scripts ran (its whole
+    // document rendered after the shell's loaded, which replaced the body and the shell's script
+    // in it), so the root, which the render keeps, is where the word is read.
     await tab.addInitScript(() => {
-      document.addEventListener("DOMContentLoaded", () => {
-        document.documentElement.dataset.probeHost =
-          document
-            .querySelector("script[data-porthole-host]")
-            ?.getAttribute("data-porthole-host") ?? "unmarked";
-      });
+      document.addEventListener(
+        "DOMContentLoaded",
+        () => {
+          document.documentElement.dataset.probeHost =
+            document.documentElement.getAttribute("data-porthole-host") ?? "unmarked";
+        },
+        { once: true },
+      );
     });
     await tab.goto(location.url);
     const timed = await tab.evaluate(async () => {
@@ -1213,6 +1218,13 @@ test.describe("a 0.6 page without a declaration behaves as before (P085)", () =>
     });
     expect(timed).toEqual({ db: null, fast: true });
     expect(await tab.evaluate(() => document.documentElement.dataset.probeHost)).toBe("none");
+    // And still there once the page's document replaced the shell's body (a reader after load).
+    expect(
+      await tab.evaluate(() => ({
+        host: document.documentElement.getAttribute("data-porthole-host"),
+        page: document.getElementById("artifact") !== null,
+      })),
+    ).toEqual({ host: "none", page: true });
     await tab.close();
   });
 });

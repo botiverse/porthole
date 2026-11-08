@@ -192,8 +192,8 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // such name goes on the shell's own script element (data-porthole-unfixed, for a test or a
   // person to see) and, once the shell can speak, to the host as an error report.
   const shellScript = document.currentScript;
-  // The platform's own, kept before the shell's guards wrap it: the shell marks its own script with
-  // it (data-porthole-host, P139).
+  // The platform's own, kept before the shell's guards wrap it: the shell marks the document's root
+  // with it (data-porthole-host, P139).
   const setAttributeOfShell = Element.prototype.setAttribute;
   const unfixed = [];
   let tellUnfixed = (_name) => {};
@@ -2274,15 +2274,16 @@ export const SHELL_RUNTIME = String.raw`(() => {
 
   // The handshake (HANDSHAKE, P085): asked until answered, since the host may start listening
   // after this runs; on a tab of its own, not asked at all (P139): its parent is itself, so no host
-  // hears it, and the runtime has nothing to offer from the start. How it ended goes on the shell's
-  // own script element (data-porthole-host: "answered", or "none" where no host answered), for a
-  // test, a person or a tool that shoots the page to see (P139); the page's own word, never a gate,
-  // set through the platform's setAttribute kept before the guards (setAttributeOfShell, above).
+  // hears it, and the runtime has nothing to offer from the start. How it ended goes on the
+  // document's root element (data-porthole-host: "answered", or "none" where no host answered), for
+  // a test, a person or a tool that shoots the page to see (P139): not on the shell's own script,
+  // which a whole document's render takes out with the body it replaces, while the root stays (the
+  // render adds the page's own attributes to it and removes none). The page's own word, never a
+  // gate, set through the platform's setAttribute kept before the guards (setAttributeOfShell).
+  const shellRoot = document.documentElement;
   const settled = (how) => {
     try {
-      if (shellScript) {
-        callOf(setAttributeOfShell, shellScript, ["data-porthole-host", how]);
-      }
+      callOf(setAttributeOfShell, shellRoot, ["data-porthole-host", how]);
     } catch (_) {}
   };
   const handshake = ${HANDSHAKE};

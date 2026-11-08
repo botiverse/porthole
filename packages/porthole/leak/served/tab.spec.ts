@@ -183,17 +183,35 @@ test("the shell fixes each of its walls in place, and says which it couldn't", a
           ?.getAttribute("data-porthole-unfixed") ?? null,
     );
   const host = (where: Page | Frame) =>
-    where.evaluate(
-      () =>
-        document.querySelector("script[data-porthole-host]")?.getAttribute("data-porthole-host") ??
-        null,
-    );
+    where.evaluate(() => document.documentElement.getAttribute("data-porthole-host"));
   // In a frame and on a tab, as every page is: each one fixed. And how the handshake ended (P139):
-  // answered by the frame's host; on a tab, no host, said at once.
+  // in a frame, nothing until its host answers (this reference host is a minimal one that answers
+  // nothing by itself: the test answers the shell's ui/initialize as a host does), then
+  // "answered"; on a tab, no host, said at once.
   const shown = await servedHost.show(page, instance);
   const frame = await shown.frame();
   expect(await unfixed(frame), "in a frame").toBeNull();
-  await expect.poll(() => host(frame), { message: "in a frame" }).toBe("answered");
+  const asked = async () =>
+    (await shown.received()).find(
+      (each): each is { id: string } =>
+        typeof each === "object" &&
+        each !== null &&
+        (each as { method?: unknown }).method === "ui/initialize" &&
+        typeof (each as { id?: unknown }).id === "string",
+    ) ?? null;
+  await expect.poll(asked, { message: "the shell asked its host" }).not.toBeNull();
+  expect(await host(frame), "in a frame, before its host answered").toBeNull();
+  await shown.post({
+    jsonrpc: "2.0",
+    id: (await asked())!.id,
+    result: {
+      protocolVersion: "2026-01-26",
+      hostInfo: { name: "probe", version: "1" },
+      hostCapabilities: {},
+      hostContext: {},
+    },
+  });
+  await expect.poll(() => host(frame), { message: "in a frame, once answered" }).toBe("answered");
   await page.goto((await servedHost.locate(instance)).url, { waitUntil: "domcontentloaded" });
   expect(await unfixed(page), "on a tab").toBeNull();
   expect(await host(page), "on a tab").toBe("none");
