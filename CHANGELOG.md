@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.14.16
 
 - **On a tab the shell asks no host (P139).** A page opened on a tab of its own no longer asks
   `ui/initialize` 40 times over 10 s before the runtime says it has nothing to offer: there is no
