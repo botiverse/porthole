@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.14.18
 
 - **A set's pages without the Navigation API, and links within a page (P142).** In Safari before 26
   (no Navigation API), every link to another page of a served artifact's set started the display

@@ -5,7 +5,7 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes Porthole 0.14.17 (2026-11-09). A review on 2026-10-19 found gaps, and every decision it led to
+**Status.** This describes Porthole 0.14.18 (2026-11-09). A review on 2026-10-19 found gaps, and every decision it led to
 has merged ([§8](#8-fixes-in-flight) lists them). P096 changed the negative-control runner and CI,
 and the shipped conformance probes' messages and timing, not what they check. P104 (0.9.0's
 annotation markers) had a review of its own, and P105, in 0.10.0, is what it led to. 0.11.0 was
@@ -47,7 +47,7 @@ host that follows none drops `selectionTracked` unread (§7). 0.14.17: P141 lets
 origins of an outer page that frames its app (`framedBy`): each may be an ancestor of every frame,
 above the host's own page, so it is in every `frame-ancestors`, and nowhere else; it is never a
 host a frame hears or tells, and a page's `*` fallback is held to a parent named as a host origin
-(§6 "What every host must do", S3). Unreleased: P142 keeps a set's pages and links within a page from
+(§6 "What every host must do", S3). 0.14.18: P142 keeps a set's pages and links within a page from
 starting the display again where there is no Navigation API, and where WebKit fires a frame's load
 for a link within its document: the arriving page's notice is sent without the API, and a page
 says it stayed; no wall moves, and the limit without the API is P079's, unchanged.
