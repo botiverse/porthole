@@ -8822,7 +8822,10 @@ gets no events. A served frame can navigate itself to another content origin (`f
 in), and a page on a tab can navigate itself away, or to a `blob:` document of its own. Every
 other navigation without the API is as before. Another path of its origin, a file that isn't a
 page, an outside site (`frame-src` stops it): the display starts again (or, on Firefox, an outside
-site leaves the document as it was). A single-document served artifact (no files, so no version in
+site leaves the document as it was). A link to a page the version doesn't have is one of these:
+the content service's 404 carries no shell, so no notice comes, and the 404 shows until
+`LATE_NOTICE_MS` runs out, then the display starts again at the entry (measured on WebKit 18.2,
+0.14.18: about 2.4 seconds). A single-document served artifact (no files, so no version in
 its notices), and every display that isn't an artifact with files, still starts again at a load
 after the first. On WebKit that includes the first link within the page. A frame can't tell the host
 a load is no new document without a version to name, and none of those waits for a notice
