@@ -274,6 +274,14 @@ export interface ServerOptions {
   /** The host origins that may embed content (`frame-ancestors`) and talk to a served shell. */
   readonly hostOrigins: readonly string[];
   /**
+   * Further origins that may be an ancestor of every frame served here, above a host origin's
+   * page (P141): an outer page that frames the host's app. Added to each `frame-ancestors` after
+   * the host origins, and nowhere else: never an origin a shell, a door or a page takes a message
+   * from or says anything to, never a host origin for `entry` or the handoff. Exact https origins
+   * (`http://` on loopback), none a host origin, none the content domain's site. Default none.
+   */
+  readonly framedBy?: readonly string[];
+  /**
    * The configs a served shell or page is served under, by the name a `ServedDocument` gives
    * (an artifact defaults to `artifact`, the MCP Apps sandbox proxy to `mcpApp`).
    */

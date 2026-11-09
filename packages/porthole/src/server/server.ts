@@ -1,6 +1,7 @@
 import { compile, type CompiledConfig } from "../compile/compile.ts";
 import type { DisplayMode, EgressConfig } from "../config/schema.ts";
 import {
+  framedByProblem,
   hostOriginProblem,
   maybeSameSite,
   originMatchesSource,
@@ -438,7 +439,36 @@ export function createServer(options: ServerOptions): PortholeServer {
       );
     }
   }
-  const frameAncestors = options.hostOrigins.join(" ");
+  // An outer page's origins (P141): ancestors above a host origin's page, in `frame-ancestors` alone.
+  const framedBy: string[] = [];
+  for (const origin of options.framedBy ?? []) {
+    const problem = framedByProblem(origin);
+    if (problem !== null) {
+      throw new TypeError(`framedBy: ${problem}`);
+    }
+    if (options.hostOrigins.includes(origin)) {
+      throw new TypeError(
+        `framedBy: ${origin} is a host origin already: framedBy names an ancestor that never talks to a frame`,
+      );
+    }
+    const parsed = parseOrigin(origin);
+    if (
+      parsed === null ||
+      parsed.host === domain ||
+      parsed.host.endsWith(`.${domain}`) ||
+      maybeSameSite(parsed.host, sampleHost)
+    ) {
+      throw new TypeError(
+        `framedBy: ${origin} may be the same site as the content domain ${domain}: serve content from a registrable domain the host uses for nothing else`,
+      );
+    }
+    if (!framedBy.includes(origin)) {
+      framedBy.push(origin);
+    }
+  }
+  // Who may be an ancestor of a frame served here: the host origins, then the outer pages' (P141).
+  // Every frame's `frame-ancestors` is this; whom a frame hears and tells is `hostOrigins` alone.
+  const frameAncestors = [...options.hostOrigins, ...framedBy].join(" ");
   let authorizeUrl: URL | null = null;
   if (options.entry !== undefined) {
     try {
@@ -1290,6 +1320,7 @@ export function createServer(options: ServerOptions): PortholeServer {
       const shell = nestedShellResponse(served.compiled, {
         origin: access.origin,
         origins: options.hostOrigins,
+        framedBy,
         page: `${access.origin}${sealed.base}${rest}`,
         renew: { url: `${access.origin}${sealed.base}__porthole/renew`, expires: sealed.expires },
         method,

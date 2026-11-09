@@ -43,7 +43,11 @@ word 100 ms old or more; no wall moves. 0.14.15: P138 lets the host follow the c
 (`selectionTracked`, the same boxes as `tracked`, on its budget, only while asked) and keeps what was
 picked lit; no wall moves. 0.14.16: P139 has a shell on a tab of its own ask no host; P140 narrows P138: a pick stays lit, and a
 selection is kept in the frame, only for a host that follows the selection (`keepSelection`), and a
-host that follows none drops `selectionTracked` unread (§7).
+host that follows none drops `selectionTracked` unread (§7). Unreleased: P141 lets a host name the
+origins of an outer page that frames its app (`framedBy`): each may be an ancestor of every frame,
+above the host's own page, so it is in every `frame-ancestors`, and nowhere else; it is never a
+host a frame hears or tells, and a page's `*` fallback is held to a parent named as a host origin
+(§6 "What every host must do", S3).
 
 ## 1. Two layers
 
@@ -266,7 +270,16 @@ Whatever the use:
   `display.focus()` inside a key's own handler moves nothing: call it from a task (measured on a
   nested page). Nothing leaks either way: the keyboard stays out of the page.
 - List every app origin in `appOrigins` (`hostOrigins` in `/server`): only those may frame content,
-  and only those are checked against the content domain for a shared site.
+  only those are a frame's host (heard and told), and only those are checked against the content
+  domain for a shared site.
+- Where another app frames yours (P141), name its origins in `framedBy`, never in `appOrigins`: it
+  may then be an ancestor of your frames, above your own page, and is never their host. Your page
+  must still be the frame's parent: an outer page that frames content directly (with an address it
+  got from somewhere) is let in by the browser, but the frame takes nothing from it (no handshake,
+  no host function), Porthole's own pages and a nested page's shell tell it nothing, and what it
+  can hear is the content's own word to its parent (`*`), which it must treat as untrusted. Your
+  app page's own `frame-ancestors` is yours to set; Porthole never sends it. Name exact origins of
+  that one product, and drop them when it stops framing you.
 - Under the app runtime, run `defineRuntimeConformance` with `api` in CI (§7).
 
 ### S1. Inline widgets in a conversation
@@ -419,7 +432,8 @@ encrypted into the path, since WebKit keeps no cookie in a frame (P083).
   another label's session is never read as this one's, under https or on loopback (P101).
 - Pages, files and status pages carry their CSP in headers and `X-Robots-Tag: noindex`, and
   `frame-ancestors` names the app's origins only (with `nestedFrames: "own"`, P128, a file set's
-  files below its base name the page's own origin too, so its pages frame them).
+  files below its base name the page's own origin too, so its pages frame them), then the host's
+  `framedBy`, if any (P141): ancestors above the app's page, never its host.
 - Files: from the version's manifest only, typed by Porthole's table, `nosniff`; files other than
   pages are `Cross-Origin-Resource-Policy: same-origin`; a file set never registers a service
   worker; a page's CSP opens its own version's path, not its whole origin.

@@ -1,15 +1,54 @@
 import { DOOR_SANDBOX_TOKENS } from "../compile/policy.ts";
+import { framedByProblem } from "../isolation/served.ts";
 import { FRAME_STATUS_METHOD } from "../isolation/types.ts";
 import type { FrameBlock } from "../host/types.ts";
 import { base64url, sha256, utf8 } from "./crypto.ts";
 
 /**
  * The server's own pages on a content origin: why it shows nothing of the content, and the page a
- * framed app is entered through. Plain, framable only by the host origins, never cached. Each tells
- * the page that frames it how loading went (`porthole/notifications/frame-status`, P040), posted to
- * the host origins only, so a host can show its own fallback ("Open in a new tab"). Their words are
- * the host-agnostic mechanism's; a host that wants its own wording serves its own page in front.
+ * framed app is entered through. Plain, framable only by the host origins (and, above them, a
+ * host's `framedBy`, P141), never cached. Each tells the page that frames it how loading went
+ * (`porthole/notifications/frame-status`, P040), posted to the host origins only, so a host can show
+ * its own fallback ("Open in a new tab"). Their words are the host-agnostic mechanism's; a host that
+ * wants its own wording serves its own page in front.
  */
+
+/**
+ * Whether a page's `frame-ancestors` holds its parent to its host origins: it names no one else.
+ * Where it does (a host's `framedBy`, P141), its parent may be an outer page, and the page says
+ * `*` only to a parent the engine names as a host origin (`strictParent`, below).
+ */
+const heldToHosts = (frameAncestors: string, hostOrigins: readonly string[]): boolean =>
+  frameAncestors
+    .split(" ")
+    .filter((each) => each !== "")
+    .every((each) => hostOrigins.includes(each));
+
+/** The attribute that says so, on a page's `<main>`: none where its parent is held to its hosts. */
+const strictParent = (frameAncestors: string, hostOrigins: readonly string[]): string =>
+  heldToHosts(frameAncestors, hostOrigins) ? "" : ' data-porthole-strict-parent=""';
+
+/**
+ * Who may frame a page: the host origins, then a host's `framedBy` (P141), each checked (they go
+ * into a header).
+ */
+export function ancestorsOf(
+  hostOrigins: readonly string[],
+  framedBy: readonly string[] = [],
+): string {
+  for (const origin of framedBy) {
+    const problem = framedByProblem(origin);
+    if (problem !== null) {
+      throw new TypeError(`framedBy: ${problem}`);
+    }
+    if (hostOrigins.includes(origin)) {
+      throw new TypeError(`framedBy: ${origin} is a host origin already`);
+    }
+  }
+  return [...hostOrigins, ...framedBy.filter((each, at) => framedBy.indexOf(each) === at)].join(
+    " ",
+  );
+}
 
 const escape = (text: string): string =>
   text.replace(/[&<>"']/gu, (char) => `&#${char.charCodeAt(0)};`);
@@ -27,17 +66,21 @@ export const SESSION_PATH = "/__porthole/session";
  * Tells the page that frames this one how loading went, at each web host origin. A desktop app's
  * own scheme (`ferry://app`) is no target origin a browser takes (postMessage throws), so where
  * the host origins hold one, and the parent isn't known to be a web host origin, the word goes to
- * the parent as `*`: these pages' `frame-ancestors` already hold their parent to the host origins,
- * and what they say is no secret (P070). One origin failing never stops the page.
+ * the parent as `*`: these pages' `frame-ancestors` hold their parent to the host origins, and what
+ * they say is no secret (P070). Where it names an outer page too (`framedBy`, P141), the parent may be
+ * the outer page: then `*` goes only to a parent the engine names (`location.ancestorOrigins`,
+ * not masked as "null") as one of the host origins, so an outer page is never told. One origin
+ * failing never stops the page.
  */
 const say = (): string =>
-  `const say = (params) => {
+  `const strict = main.dataset.portholeStrictParent !== undefined;
+  const say = (params) => {
     if (window.parent === window) return;
     const message = { jsonrpc: "2.0", method: ${JSON.stringify(FRAME_STATUS_METHOD)}, params };
     const web = hosts.filter((origin) => origin.startsWith("https://") || origin.startsWith("http://"));
     for (const origin of web) { try { window.parent.postMessage(message, origin); } catch (_) {} }
     const parent = location.ancestorOrigins && location.ancestorOrigins.length > 0 ? location.ancestorOrigins[0] : null;
-    if (web.length < hosts.length && (parent === null || !web.includes(parent))) { try { window.parent.postMessage(message, "*"); } catch (_) {} }
+    if (web.length < hosts.length && (parent === null || !web.includes(parent)) && (!strict || (parent !== null && hosts.includes(parent)))) { try { window.parent.postMessage(message, "*"); } catch (_) {} }
   };`;
 
 /** Tells the host the page is blocked, and why (from the page's data attributes). */
@@ -123,7 +166,7 @@ export function statusPage(
   hostOrigins: readonly string[] = [],
   code?: string,
 ): Response {
-  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(title)}</title><style>${STYLE}</style></head><body><main data-porthole-status="${status}" data-porthole-reason="${escape(reason)}"${code === undefined ? "" : ` data-porthole-code="${escape(code)}"`} data-porthole-hosts="${escape(JSON.stringify(hostOrigins))}"><h1>${escape(title)}</h1><p>${escape(detail)}</p></main><script src="${STATUS_SCRIPT_PATH}"></script></body></html>`;
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(title)}</title><style>${STYLE}</style></head><body><main data-porthole-status="${status}" data-porthole-reason="${escape(reason)}"${code === undefined ? "" : ` data-porthole-code="${escape(code)}"`} data-porthole-hosts="${escape(JSON.stringify(hostOrigins))}"${strictParent(frameAncestors, hostOrigins)}><h1>${escape(title)}</h1><p>${escape(detail)}</p></main><script src="${STATUS_SCRIPT_PATH}"></script></body></html>`;
   return new Response(method === "HEAD" ? null : body, {
     status,
     headers: pageHeaders(frameAncestors, false),
@@ -137,7 +180,7 @@ export function enterPage(
   hostOrigins: readonly string[],
   cookie: string,
 ): Response {
-  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Opening the app</title><style>${STYLE}</style></head><body><main data-porthole-enter="" data-porthole-target="${escape(target)}" data-porthole-hosts="${escape(JSON.stringify(hostOrigins))}"><h1>Opening the app…</h1><p></p></main><script src="${ENTER_SCRIPT_PATH}"></script></body></html>`;
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Opening the app</title><style>${STYLE}</style></head><body><main data-porthole-enter="" data-porthole-target="${escape(target)}" data-porthole-hosts="${escape(JSON.stringify(hostOrigins))}"${strictParent(frameAncestors, hostOrigins)}><h1>Opening the app…</h1><p></p></main><script src="${ENTER_SCRIPT_PATH}"></script></body></html>`;
   const headers = new Headers(pageHeaders(frameAncestors, true));
   headers.set("set-cookie", cookie);
   return new Response(body, { status: 200, headers });
@@ -173,7 +216,7 @@ export function appStatusPage(
     link === undefined
       ? ""
       : `<p><a href="${escape(link.href)}" target="_top" rel="noopener">${escape(link.text)}</a></p>`;
-  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(title)}</title><style>${STYLE}a{color:inherit}</style></head><body><main data-porthole-status="${status}" data-porthole-reason="${escape(reason)}" data-porthole-hosts="${escape(JSON.stringify(hostOrigins))}"><h1>${escape(title)}</h1><p>${escape(detail)}</p>${more}</main><script>${STATUS_SCRIPT}</script></body></html>`;
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(title)}</title><style>${STYLE}a{color:inherit}</style></head><body><main data-porthole-status="${status}" data-porthole-reason="${escape(reason)}" data-porthole-hosts="${escape(JSON.stringify(hostOrigins))}"${strictParent(frameAncestors, hostOrigins)}><h1>${escape(title)}</h1><p>${escape(detail)}</p>${more}</main><script>${STATUS_SCRIPT}</script></body></html>`;
   return new Response(method === "HEAD" ? null : body, {
     status,
     headers: {
@@ -198,7 +241,12 @@ export function statusPageOf(options: {
   readonly detail: string;
   readonly reason?: FrameBlock;
   readonly hostOrigins: readonly string[];
-  /** Who may frame it (`frame-ancestors`): default, the host origins. */
+  /**
+   * Origins of an outer page that may be an ancestor above a host origin's page (P141): added to its
+   * `frame-ancestors` after the host origins, never told anything. Default none.
+   */
+  readonly framedBy?: readonly string[];
+  /** Who may frame it (`frame-ancestors`): default, the host origins, then `framedBy`. */
   readonly frameAncestors?: string;
   readonly link?: { readonly href: string; readonly text: string };
   readonly method?: string;
@@ -207,7 +255,7 @@ export function statusPageOf(options: {
     options.status,
     options.title,
     options.detail,
-    options.frameAncestors ?? options.hostOrigins.join(" "),
+    options.frameAncestors ?? ancestorsOf(options.hostOrigins, options.framedBy),
     options.reason ?? "error",
     options.hostOrigins,
     options.link,
@@ -242,9 +290,13 @@ const doorHeaders = (script: string, frameAncestors: string): Headers =>
     "x-robots-tag": "noindex, nofollow",
   });
 
-/** What a door is given: the host origins it tells, and who may frame it (default, those). */
+/**
+ * What a door is given: the host origins it tells, and who may frame it (default, those and then
+ * `framedBy`, P141: an outer page's origins above a host origin's page, never told anything).
+ */
 export interface DoorOptions {
   readonly hostOrigins: readonly string[];
+  readonly framedBy?: readonly string[];
   readonly frameAncestors?: string;
   readonly method?: string;
 }
@@ -257,10 +309,11 @@ export interface DoorOptions {
  */
 export function doorResponse(options: DoorOptions): Response {
   const hosts = escape(JSON.stringify(options.hostOrigins));
-  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Opening</title></head><body><main data-porthole-door="" data-porthole-hosts="${hosts}"></main><script>${DOOR_SCRIPT}</script></body></html>`;
+  const ancestors = options.frameAncestors ?? ancestorsOf(options.hostOrigins, options.framedBy);
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Opening</title></head><body><main data-porthole-door="" data-porthole-hosts="${hosts}"${strictParent(ancestors, options.hostOrigins)}></main><script>${DOOR_SCRIPT}</script></body></html>`;
   return new Response(options.method?.toUpperCase() === "HEAD" ? null : body, {
     status: 200,
-    headers: doorHeaders(hashOfDoor(), options.frameAncestors ?? options.hostOrigins.join(" ")),
+    headers: doorHeaders(hashOfDoor(), ancestors),
   });
 }
 
@@ -279,10 +332,11 @@ export function doorStatusResponse(
 ): Response {
   const { status, reason, code } = options;
   const hosts = escape(JSON.stringify(options.hostOrigins));
-  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Not shown</title></head><body><main data-porthole-status="${status}" data-porthole-reason="${escape(reason)}"${code === undefined ? "" : ` data-porthole-code="${escape(code)}"`} data-porthole-hosts="${hosts}"></main><script>${STATUS_SCRIPT}</script></body></html>`;
+  const ancestors = options.frameAncestors ?? ancestorsOf(options.hostOrigins, options.framedBy);
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Not shown</title></head><body><main data-porthole-status="${status}" data-porthole-reason="${escape(reason)}"${code === undefined ? "" : ` data-porthole-code="${escape(code)}"`} data-porthole-hosts="${hosts}"${strictParent(ancestors, options.hostOrigins)}></main><script>${STATUS_SCRIPT}</script></body></html>`;
   return new Response(options.method?.toUpperCase() === "HEAD" ? null : body, {
     status,
-    headers: doorHeaders(hashOfStatus(), options.frameAncestors ?? options.hostOrigins.join(" ")),
+    headers: doorHeaders(hashOfStatus(), ancestors),
   });
 }
 

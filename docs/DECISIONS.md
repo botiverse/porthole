@@ -8653,3 +8653,115 @@ it fails at the second pick.
 
 **Revisit when** a host needs the pick kept without following it (a host that draws its own
 highlight from `selected`), or a host is seen confused by `orphaned` after an upgrade.
+
+
+## P141 · 2026-11-09 · An app framed by another: its outer page may be an ancestor of its frames, never their host (`framedBy`) · Accepted
+
+From Raft (task #botiverse-raft-deployment:#245, Tenny): Deck (`https://deck.raft.build`, and
+`https://deck-aws-dev.raft.build` on staging) frames the Raft app (`app.raft.build`) in an iframe.
+
+**Context.** `frame-ancestors` is checked against every ancestor, not only the parent: a frame the
+app shows inside Deck has Deck above the app, and every policy Porthole sends names the host
+origins alone (`appOrigins`, `hostOrigins`), so each of the app's frames went blank inside Deck.
+The same list is also who a frame hears and tells: the shell's and the nested shell's message
+origins, the pages' and doors' `data-porthole-hosts`, the host kit's checks for redirect entry and
+the handoff. Adding Deck to `appOrigins` would let it frame content *and* speak to it as its host:
+answer a shell's `ui/initialize`, call host functions on the bridge's word, hear what a frame says
+to its host. The app frames content; Deck frames the app. Only the first is a host.
+
+**Decision.**
+
+1. **`framedBy: readonly string[]`**, on `createServer` and `createContentHost` (and on the helpers
+   a content Worker of its own answers with: `statusPage`, `doorResponse`, `doorStatusResponse`
+   and `nestedShellResponse` take it too), names origins that may be an **ancestor** of every
+   frame Porthole serves, above a host origin's page. Default none: every response is as before,
+   byte for byte.
+2. **They are in every `frame-ancestors` and nowhere else**: after the host origins, in each
+   policy `/server` sends (a shell, an artifact page, a file set's pages and files and their own
+   frames, a nested page's shell, page and files, the MCP Apps proxy, a door and a door that doesn't
+   open, the status, entry and tab-only pages, assets, a renewal, a url-mode app's answers: one
+   list in `createServer`, `frameAncestors`) and in
+   the host kit's authorize route's pages. Never a message origin of a shell, a nested shell, a
+   door or a page; never in `data-porthole-hosts` or a shell's plan; never a host origin for
+   `entry.authorizeUrl`, the handoff's `Origin` check (still `appOrigins` alone) or the content
+   domain's clash rules, which they are checked against apart.
+3. **They are checked as host origins are, more narrowly**: exact origins, `https://host[:port]`
+   (`http://` on loopback alone, for development), lowercase, no path, no wildcard, no keyword, never
+   `"null"` or a desktop scheme (an outer page is a web page); none a host origin (one origin is a
+   host or an outer page, never both); none on, or maybe the same site as, the content domain.
+   A bad one throws (`framedBy: …`), as a bad host origin does, before anything goes into a header;
+   the host kit's fallback makes it a lasting `misconfigured`, as it does a bad app origin.
+4. **The direct parent must still be a host origin, and Porthole holds it so where it can.**
+   `frame-ancestors` can't say "an ancestor but not the parent": with `framedBy`, an outer page
+   that frames content directly is let in by the browser. Such a frame gets no host:
+   - *Heard:* the shell, the nested shell and a door take a message only from a host origin
+     (`event.origin` in its plan's `origins`): the outer page's `ui/initialize` answer is dropped,
+     the handshake ends with no host (`data-porthole-host="none"`, P139), `porthole.use` is null,
+     and the bridge never runs: no host function is called on its word.
+   - *Told:* Porthole's own words go to each web host origin by name, so only a host origin as the
+     parent receives them. The one exception was the `*` fallback where a desktop scheme is a host
+     origin (P070, its item 6), whose premise ("these pages are framable only by the host origins,
+     so their parent is one") `framedBy` breaks. Now, where a page's `frame-ancestors` names anyone
+     beyond its host origins (`data-porthole-strict-parent` on the status, entry and door pages;
+     `strictParent` in a nested shell's plan), `*` goes only to a parent the engine names
+     (`location.ancestorOrigins[0]`, not masked as `"null"`) as one of the host origins: an outer
+     page as the parent, or a parent the engine doesn't name, is never told. Without `framedBy`
+     the rule is P070's, unchanged.
+
+**What it re-opens (PRINCIPLE 1).** An outer page may now be an ancestor of content, which no
+origin but the host's could be.
+- *Clickjacking and framing the app's content from another app*: bounded to the origins the host
+  names, each exact; the host's own page between them stays the host's (its `frame-ancestors` is
+  the app's to set: Raft's in Terraform, not Porthole's).
+- *An outer page framing content directly*: it needs an address to frame. Tickets come from the
+  host's issue endpoint and are used once; a clean address in a frame is the tab-only page (P125);
+  a sealed address is in the frame's own document. If it has one, the frame loads, but as above it
+  is no host. It hears what content says to its parent with `*` itself: the content shell's own
+  notices (its runtime posts to `*`, P053: the content shares that realm and could post anything
+  itself), annotation and find reports. That is the content's word, which any parent of a frame
+  could always hear, and which the outer page must treat as untrusted; on a nested page the shell
+  passes the page's words to host origins alone, by name, so an outer parent hears none of them.
+- *Partitioned cookies*: a frame below the outer page is keyed to the top-level site, the outer
+  page's (CHIPS), as any embedding is. Where the outer page is another site than the app, a
+  session made inside it is that partition's alone; where it is the same site (Deck at
+  `deck.raft.build`, the app at `app.raft.build`: both `raft.build`), it is the partition the app's
+  own tab uses too, as for any page of that site. No sharing is added across sites.
+
+**Rejected.**
+- *Adding the outer page to `appOrigins`*: it would be a host: heard, told, an origin for entry
+  and the handoff. Exactly what Tenny ruled out.
+- *A wildcard, or any https origin*: an outer page is one product's, named.
+- *Refusing an outer page as the parent outright*: no header can, and a shell that refused to draw
+  where `ancestorOrigins[0]` is an outer page would decide nothing on Firefox's masked `"null"`
+  (measured: Firefox masks a `no-referrer` frame's ancestors, Chromium names them), while it is no
+  host already.
+- *The outer origins in the pages' bodies, for the `*` check*: one boolean (`strict`) says enough
+  (the parent must be named, and a host origin), and keeps them out of everything but the header.
+
+**Tested.** `test/framed-by.test.ts`: `framedBy` taken (https, loopback http) and refused (a
+wildcard, a path, uppercase, `*`, `'self'`, a list, a CSP injection, `"null"`, a desktop scheme,
+plain http, a host origin, the content domain and its site), in `createServer`, the helpers and
+the host kit; **the bound**: every answer of 23 (a shell and its used ticket, a 404, a door and a
+used door, an artifact page, the MCP Apps proxy, two file sets' tickets, pages, scripts, files and
+refused renewals, one of them with its own frames, a nested page's shell, page, script and ended
+access, a url-mode app's entry page and answer), under host origins with a desktop scheme and one
+`framedBy`, names it in `frame-ancestors` after the host origins, every
+framed document has `frame-ancestors`, and none says the outer origin in another header or its body
+(not in `data-porthole-hosts`, not in a plan's `origins`); without `framedBy` none is strict and
+none names it; the helpers' defaults are as before; the host kit's content and authorize route's pages name it,
+and the handoff refuses its `Origin` (403) where the app's own is taken. Assets and the tab-only
+page take the same one list (`frameAncestors`), untested apart. **The negative controls**: the status script, strict, says `*` only
+to a parent named as a host origin (desktop: yes; the outer page, `"null"`, unnamed: no), and not
+strict says it as before; the nested shell's script, given `framedBy`, says no `*` to an outer
+parent and passes none of its words to the page, while a host's word passes. Taking the strict
+condition out fails both. `leak/served/framed-by.spec.ts` (Chromium and Firefox here; WebKit not
+run on this machine): below the outer page, the app's frame shows and is answered by the app; below
+a foreign page it is refused; the outer page framing content itself sees the frame load and its
+`ui/initialize` answer refused, the handshake ending `"none"`; a door framed by the app tells it
+`open`, framed by the outer page says nothing to it (with the strict condition taken out it says
+`*`, and the probe fails). No weakening in `leak/weakenings.ts`: the probes above are the
+control, run as mutations.
+
+**Revisit when** an outer page needs to speak to a frame (then it is a host, and needs
+`appOrigins`), browsers give a policy for the parent alone, or a host wants an outer page to frame
+content without its own page between them.

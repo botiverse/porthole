@@ -9,6 +9,7 @@ import {
 import { frameShellDocument, frameShellScript, type FrameShellOptions } from "../shell/frame.ts";
 import { onNestedLabel, PORTHOLE_LABEL_PREFIX } from "../isolation/served.ts";
 import { sha256, utf8 } from "./crypto.ts";
+import { ancestorsOf } from "./pages.ts";
 import { base32 } from "./keys.ts";
 
 export { isNestedLabel, PORTHOLE_LABEL_PREFIX } from "../isolation/served.ts";
@@ -46,13 +47,14 @@ const base64 = (bytes: Uint8Array): string => btoa(String.fromCharCode(...bytes)
 /**
  * The shell's CSP (a header): its own script alone runs (by its hash), it frames and fetches
  * nothing but its origin's sealed files (the page, the renewal), and only the host origins frame
- * it. Nothing of the page's runs here: the page is a document of its own, which inherits none of
- * this (a framed URL's document never does).
+ * it (with, above them, a host's `framedBy`, P141). Nothing of the page's runs here: the page is a
+ * document of its own, which inherits none of this (a framed URL's document never does).
  */
 export function nestedShellCsp(
   script: string,
   origin: string,
   hostOrigins: readonly string[],
+  framedBy: readonly string[] = [],
 ): string {
   const files = `${origin}${NESTED_FILES_PREFIX}`;
   const directives: CspDirective[] = [
@@ -62,7 +64,7 @@ export function nestedShellCsp(
     ["connect-src", files],
     ["base-uri", "'none'"],
     ["form-action", "'none'"],
-    ["frame-ancestors", ...hostOrigins],
+    ["frame-ancestors", ...ancestorsOf(hostOrigins, framedBy).split(" ")],
   ];
   return serializeCsp(directives);
 }
@@ -88,7 +90,12 @@ export function nestedShellResponse(
   const script = frameShellScript(options);
   const headers = new Headers({
     "content-type": "text/html; charset=utf-8",
-    "content-security-policy": nestedShellCsp(script, options.origin, options.origins),
+    "content-security-policy": nestedShellCsp(
+      script,
+      options.origin,
+      options.origins,
+      options.framedBy,
+    ),
     "cache-control": "no-store",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
@@ -107,7 +114,8 @@ export function nestedShellResponse(
 
 /**
  * Who may frame a nested page and its files' answers: its shell (the shell's own origin, P114) and,
- * above it, the host origins (`frame-ancestors` names every ancestor).
+ * above it, the host origins and a host's `framedBy` (`frame-ancestors` names every ancestor; P141):
+ * `frameAncestors` is the server's whole list.
  */
 export const nestedAncestors = (origin: string, frameAncestors: string): string =>
   `${origin} ${frameAncestors}`;

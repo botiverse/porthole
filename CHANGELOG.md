@@ -4,6 +4,25 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **An app framed by another (P141): `framedBy`.** `createContentHost({ framedBy })` and
+  `createServer({ framedBy })` name the origins of an outer page that frames your app (Raft's Deck).
+  `frame-ancestors` is checked against every ancestor, so until now each of your frames was blank
+  inside it. Each may now be an ancestor of every frame Porthole serves (content, nested pages,
+  doors, status, entry and tab-only pages, the authorize route's pages), after the host origins,
+  and is never a host: no frame hears or tells it, it is in no page's `data-porthole-hosts` or
+  shell's plan, and redirect entry and the handoff stay `appOrigins`' alone. Exact https origins
+  (`http://` on loopback); a wildcard, a path, a desktop scheme, an app origin or the content
+  domain's site throws. `statusPage`, `doorResponse`, `doorStatusResponse` and
+  `nestedShellResponse` take `framedBy` for a content Worker of your own. Without it every response
+  is as before.
+- **Security (P141):** a loosening, bounded: the outer origins only in `frame-ancestors`, and
+  checked. Where they are set, a page or a nested page's shell says its `*` fallback (a desktop
+  scheme among the host origins) only to a parent the engine names as a host origin, so an outer
+  page that frames content directly is told nothing by Porthole and heard by nothing; it can hear
+  what the content itself says to its parent.
+
 ## 0.14.16
 
 - **On a tab the shell asks no host (P139).** A page opened on a tab of its own no longer asks
