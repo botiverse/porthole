@@ -84,12 +84,21 @@ export interface AnnotateMode {
   readonly elements?: boolean | "hold";
   /** Text, by selecting it: each settled selection is reported, and its clearing. */
   readonly text?: boolean;
+  /**
+   * That you follow what is selected (P140): `annotations.track({ selection: true })` once
+   * `selected` comes (React sets it while `trackedSelection` is given). Only then does the frame
+   * keep it for you to follow, the element just picked outlined until the follow takes over. Without
+   * it the frame keeps nothing and a pick's outline goes with the pick, as before 0.14.15; a follow
+   * asked before the pick still follows each selection reported while it lasts.
+   */
+  readonly keepSelection?: boolean;
 }
 
 /**
  * What `annotations.track` follows (P112, P138): a shown mark, by its id; the selection the frame
  * last reported as `selected` (the element picked, or the words selected), highlighted in the
- * frame while followed; or nothing (`null`). One at a time: each replaces the last.
+ * frame while followed, and kept for a follow asked after `selected` only under `start`'s
+ * `keepSelection` (P140); or nothing (`null`). One at a time: each replaces the last.
  */
 export type AnnotationTrackTarget = string | { readonly selection: true } | null;
 

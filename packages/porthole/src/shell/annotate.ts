@@ -109,9 +109,11 @@ export const WORD_LATE = String.raw`(at, now) => {
  * - the last line (P133): where a selection or a mark's words end, in the document's coordinates
  *   too (`lastLineDocumentRect`), so a host places its UI after them;
  * - the selection followed (P138): what the last `selected` reported (the element picked, or the
- *   words selected) is kept, and while the host follows it (`track` with `selection`) it is drawn
- *   in the layer and its boxes are reported as a followed mark's are (`selectionTracked`), with
- *   whether it is in view, or that it is gone; it takes no pointer, no focus and no key.
+ *   words selected) is kept while the host follows the selection (`track` with `selection`) or said
+ *   at `start` that it will (`keepSelection`, P140), and nothing is kept otherwise; while followed
+ *   it is drawn in the layer and its boxes are reported as a followed mark's are
+ *   (`selectionTracked`), with whether it is in view, or that it is gone; it takes no pointer, no
+ *   focus and no key.
  *
  * It shares the realm with the content, which can interfere with all of it: the host takes its
  * reports as UI hints only.
@@ -440,20 +442,25 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       // The selection last reported as selected (P138): its anchor, and what it is in the page (the
       // element picked, or a copy of the selection's range, which the page's changes keep up to
       // date and which stays when the page's own selection goes). Followed while the host asks
-      // (track with selection), and drawn then. Each new selected replaces it.
+      // (track with selection), and drawn then. Each new selected replaces it. Kept only while the
+      // host follows the selection, or said at its last start that it will (keepSelection, P140):
+      // for any other host nothing is kept, as before P138.
       let held = null;
       let followingSelection = false;
+      let keeping = false;
+      const keeps = () => followingSelection || keeping;
       // What the host was last told of it: "attached", "orphaned", or null (nothing yet).
       let heldTold = null;
       const heldGone = (found) => (found.range ? found.range.collapsed || !found.range.startContainer.isConnected : !found.element.isConnected);
       const heldShown = () => followingSelection && held !== null && heldTold !== "orphaned" && !heldGone(held.found);
-      // The element just picked (P138, Tenny's review): it keeps its outline after selected, so
-      // there is no gap before the host follows it, and the follow's highlight takes over where it
-      // does. Without a follow (an older host) it ends as a selection does: the next pick or
-      // selection, the host's clearSelection, a mode started or stopped, clear, Escape, or the
-      // element leaving the page. Not unselected: a selection made after the pick has already
-      // ended it as it was reported, so the one unselected can clear is one from before, which
-      // the pick's own click takes away when text is selected too.
+      // The element just picked (P138, Tenny's review): for a host that will follow it
+      // (keepSelection, P140), it keeps its outline after selected, so there is no gap before the
+      // host follows it, and the follow's highlight takes over where it does. For any other host
+      // the outline goes with the pick, as before P138. Until the follow comes it ends as a
+      // selection does: the next pick or selection, the host's clearSelection, a mode started or
+      // stopped, clear, Escape, or the element leaving the page. Not unselected: a selection made
+      // after the pick has already ended it as it was reported, so the one unselected can clear is
+      // one from before, which the pick's own click takes away when text is selected too.
       let picked = null;
       const endPick = () => {
         if (picked !== null) {
@@ -1094,6 +1101,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         if (followingSelection) {
           picked = null;
         }
+        // Its end lets the selection go, unless the host said it follows it again (P140).
+        if (!keeps()) {
+          held = null;
+        }
         trackedBox = null;
         trackedView = null;
         heldTold = null;
@@ -1104,9 +1115,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           draw();
         }
       };
-      // A new selected (P138): what is followed, if the selection is, from the next frame on.
+      // A new selected (P138): what is followed, if the selection is, from the next frame on; kept
+      // only for a host that follows it or will (P140).
       const holdSelected = (anchor, found) => {
-        held = { anchor, found, tried: 0 };
+        held = keeps() ? { anchor, found, tried: 0 } : null;
         if (followingSelection) {
           trackedBox = null;
           heldTold = null;
@@ -1657,7 +1669,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             }
             swallowUntil = performance.now() + 2000;
             holdSelected(anchor, { element });
-            picked = followingSelection ? null : element;
+            picked = keeping && !followingSelection ? element : null;
             redraw();
             tell(M.selected, Object.assign({ anchor, rect: box(elementRect.call(element)) }, placeOf({ element })));
           }, HOLD_MS),
@@ -1707,8 +1719,9 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         hover = null;
         setCursor(false);
         holdSelected(anchor, { element });
-        // Its outline stays (P138), now without its name, until the host follows it or it ends.
-        picked = followingSelection ? null : element;
+        // Its outline stays (P138), now without its name, until the host follows it or it ends;
+        // only for a host that will follow it (P140): for any other it goes with the pick.
+        picked = keeping && !followingSelection ? element : null;
         draw();
         tell(M.selected, Object.assign({ anchor, rect: box(elementRect.call(element)) }, placeOf({ element })));
       }, true);
@@ -1805,6 +1818,13 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         switch (data.method) {
           case M.start:
             mode = { elements: params.elements === true, text: params.text === true, hold: params.elements === "hold" };
+            // Whether the host will follow what is selected (P140): only then is it kept before
+            // the host follows it. A stop leaves it, so a stop sent as the composer opens doesn't
+            // take the selection away before the follow comes.
+            keeping = params.keepSelection === true;
+            if (!keeps()) {
+              held = null;
+            }
             hover = null;
             picked = null;
             reported = null;

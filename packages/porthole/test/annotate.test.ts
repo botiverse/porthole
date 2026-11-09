@@ -317,6 +317,18 @@ describe("the host's checks on what a frame reports", () => {
     expect(annotateMode(undefined)).toEqual({ elements: true, text: true });
     expect(annotateMode({ text: false })).toEqual({ elements: true, text: false });
     expect(() => annotateMode({ elements: false, text: false })).toThrow(/elements, text/u);
+    // Whether the host follows what is selected (P140): there only where it is true.
+    expect(annotateMode({ keepSelection: true })).toStrictEqual({
+      elements: true,
+      text: true,
+      keepSelection: true,
+    });
+    expect(annotateMode({ keepSelection: false })).toStrictEqual({ elements: true, text: true });
+    for (const bad of ["true", 1, {}]) {
+      expect(() => annotateMode({ keepSelection: bad as never }), JSON.stringify(bad)).toThrow(
+        /keepSelection/u,
+      );
+    }
   });
 
   test("a mark's kind (P107): a draft is sent without its count, a posted mark as before, any other kind refused", () => {
@@ -1535,10 +1547,14 @@ describe("the followed selection (P138): track({ selection: true }) and selectio
         }
         await new Promise((resolve) => setTimeout(resolve, 0));
       };
+      const refused: string[] = [];
+      display.on("refused", (detail) => refused.push(detail.refusal));
       const tracks = () =>
         sent.filter((each) => each.method === "porthole/annotate.track").map((each) => each.params);
+      const starts = () =>
+        sent.filter((each) => each.method === "porthole/annotate.start").map((each) => each.params);
       const followed = () => reports.filter((each) => each.type === "selectionTracked");
-      return { display, sent, reports, handshake, say, tracks, followed };
+      return { display, sent, reports, refused, handshake, say, tracks, starts, followed };
     };
 
     test("asks under id null, which an older shell reads as following nothing; a mark's id or null ends it", () => {
@@ -1620,6 +1636,60 @@ describe("the followed selection (P138): track({ selection: true }) and selectio
       expect(t.reports.filter((each) => each.type === "tracked")).toEqual([]);
     });
 
+    test("not following the selection, a selectionTracked is dropped unread: a malformed one is no refusal, as 0.14.14 had it (P140)", async () => {
+      const t = mount();
+      t.handshake();
+      for (const bad of [
+        { state: "gone" },
+        { ...attached, rect: { ...rect, width: -1 } },
+        { ...attached, inView: "yes" },
+        { ...attached, scroll: { x: 0, y: Infinity } },
+        null,
+      ]) {
+        await t.say("selectionTracked", bad);
+      }
+      await t.say("selectionTracked", attached);
+      expect(t.refused, "probe: no refusal while the host follows no selection").toEqual([]);
+      expect(t.followed()).toEqual([]);
+      // Ended (a mark's id, null, clear): dropped unread again.
+      t.display.annotations.track({ selection: true });
+      t.display.annotations.track(null);
+      await t.say("selectionTracked", { state: "gone" });
+      expect(t.refused).toEqual([]);
+      // Following it, the same malformed report is what it was: a refusal.
+      t.display.annotations.track({ selection: true });
+      await t.say("selectionTracked", { state: "gone" });
+      expect(t.refused).toEqual(["invalid"]);
+      expect(t.followed()).toEqual([]);
+    });
+
+    test("start says keepSelection only where the host asks it, and keeps it for a later frame, past a pick (P140)", async () => {
+      const t = mount();
+      t.handshake();
+      t.display.annotations.start({ elements: true, text: false });
+      t.display.annotations.start({ elements: true, text: true, keepSelection: true });
+      expect(t.starts()).toEqual([
+        { elements: true, text: false },
+        { elements: true, text: true, keepSelection: true },
+      ]);
+      expect(() => t.display.annotations.start({ keepSelection: "yes" } as never)).toThrow(
+        /keepSelection/u,
+      );
+      // The pick ends element picking; text goes on, and a later frame is told to keep it too.
+      await t.say("selected", { anchor: element, rect });
+      const before = t.sent.length;
+      t.display.reload();
+      t.handshake();
+      expect(
+        t.sent.slice(before).filter((each) => each.method === "porthole/annotate.start"),
+      ).toEqual([
+        {
+          method: "porthole/annotate.start",
+          params: { elements: false, text: true, keepSelection: true },
+        },
+      ]);
+    });
+
     test("at most 60 a second, with tracked's (one followed thing at a time)", async () => {
       const t = mount();
       t.handshake();
@@ -1683,10 +1753,11 @@ describe("the followed selection (P138): track({ selection: true }) and selectio
     });
 
     test("a pick keeps its outline until the host follows it, the follow's highlight taking over in one draw (Tenny's review)", () => {
-      // Both picks, the click's and the held block's, keep the element, unless already followed.
-      expect(ANNOTATE_RUNTIME.split("picked = followingSelection ? null : element;")).toHaveLength(
-        3,
-      );
+      // Both picks, the click's and the held block's, keep the element for a host that will follow
+      // it (P140), unless already followed.
+      expect(
+        ANNOTATE_RUNTIME.split("picked = keeping && !followingSelection ? element : null;"),
+      ).toHaveLength(3);
       expect(ANNOTATE_RUNTIME).toContain(
         "const pickShown = () => picked !== null && !followingSelection && picked.isConnected;",
       );
@@ -1723,6 +1794,28 @@ describe("the followed selection (P138): track({ selection: true }) and selectio
         "tell(M.unselected",
       );
       expect(unselected).not.toContain("endPick");
+    });
+
+    test("a host that neither follows the selection nor said it will keeps nothing: no outline after a pick, no selection held (P140)", () => {
+      // Kept only while followed, or after a start that said keepSelection.
+      expect(ANNOTATE_RUNTIME).toContain("const keeps = () => followingSelection || keeping;");
+      const start = body("case M.start:", "break;");
+      expect(start).toContain("keeping = params.keepSelection === true;");
+      expect(start).toContain("if (!keeps()) {\n              held = null;\n            }");
+      // Each selected is held only then, and the pick's outline set only for a host that keeps.
+      expect(body("const holdSelected = (anchor, found) => {", "\n      };")).toContain(
+        "held = keeps() ? { anchor, found, tried: 0 } : null;",
+      );
+      expect(ANNOTATE_RUNTIME).not.toContain("picked = element;");
+      expect(
+        ANNOTATE_RUNTIME.split("picked = ").filter((each) => each.startsWith("element")),
+      ).toEqual([]);
+      // The following's end lets it go, unless the host keeps it.
+      expect(body("const track = (id, selection) => {", "\n      };")).toContain(
+        "if (!keeps()) {\n          held = null;\n        }",
+      );
+      // A stop leaves keepSelection as the last start said (a stop as the composer opens).
+      expect(body("const stop = () => {", "\n      };")).not.toContain("keeping");
     });
 
     test("while the selection is followed, a scroll re-sends no selected; once it ends, as before (P105; Tenny's review)", () => {

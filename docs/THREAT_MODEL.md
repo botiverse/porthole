@@ -41,7 +41,9 @@ in the frame's document by then; a call on a calm page is unchanged. 0.14.14: P1
 through a nested page's shell with a new host-to-shell word no page can say; P137 applies P135's check to a
 word 100 ms old or more; no wall moves. 0.14.15: P138 lets the host follow the current selection
 (`selectionTracked`, the same boxes as `tracked`, on its budget, only while asked) and keeps what was
-picked lit; no wall moves.
+picked lit; no wall moves. After 0.14.15 (unreleased), P140 narrows that: a pick stays lit, and a
+selection is kept in the frame, only for a host that follows the selection (`keepSelection`), and a
+host that follows none drops `selectionTracked` unread (§7).
 
 ## 1. Two layers
 
@@ -863,9 +865,25 @@ own frame, below the shell, P111), so:
   (`selectionTracked`, P138) are the same boxes, checked and clamped the same way, taken only while
   the host follows the selection and within `tracked`'s 60 a second (control
   `track-selection-checks`); their `inView` is false unless the box reaches the frame's viewport as
-  the host reads it. They carry nothing of the page's words. The page reads the host's word that
-  starts and ends the following, so it learns when a composer is open on its selection, as it
-  learns which card is open from `track` (P112): end it on every close, kept or dismissed.
+  the host reads it. They carry nothing of the page's words; a host that follows no selection
+  drops them unread, so a malformed one is no refusal either (P140). The page reads the host's word
+  that starts and ends the following, so it learns when a composer is open on its selection, as it
+  learns which card is open from `track` (P112): end it on every close, kept or dismissed. The
+  outline the frame draws over what was picked, or over the followed selection, is in the shell's
+  layer, a closed shadow root that takes no pointer: the page can't read it, and its clicks reach
+  the page as before. What the frame keeps for a follow (a reference to the element picked, or a
+  copy of the selected range) is not in that layer: it is held in the shell's own script, in
+  memory, in a variable no page script can name. It is the page's own DOM all the same (the
+  element is the page's, and the range's copy moves with the page's nodes), so it tells the page
+  nothing it can't read itself, and the page can change or remove what it points at, which is
+  `orphaned`. In 0.14.15 every host's frame kept both after a pick, the outline until the next
+  pick or selection, `clearSelection`, `start`, `stop`, `clear`, Escape or the element leaving the
+  page, and the kept selection until the next `selected`; since P140 only a host that follows the
+  selection (`track({ selection: true })`) or said at `start` that it will (`keepSelection`) gets
+  them, and any other host's frame draws and keeps nothing after a pick, as in 0.14.14. The page
+  reads `keepSelection` in every `start`, so it learns at each one that the host will follow the
+  selection: before any pick, and earlier than the first `track` would tell it. That is a property
+  of the host's UI, not of anything the person did or wrote.
 - *What holds, against content that patches none of the DOM's or JavaScript's built-ins.* A real
   press or click on a marker reaches none of the content's handlers (the shell's first listener
   stops it; control `marker-click`) and moves neither focus nor a selection (control

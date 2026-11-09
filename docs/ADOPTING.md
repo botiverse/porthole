@@ -290,7 +290,8 @@ composer.onClose(() => display.annotations.clearSelection());
 - **React** (P118): `PortholeFrame` and `PortholeView` take the same as props: `annotating`,
   `annotations`, `focusedAnnotation` and `trackedAnnotation` (the mark to follow, by value; `null`
   stops), `trackedSelection` (true while your composer is open: the selection is followed in the
-  mark's place, P138), every report through `onAnnotation` (`tracked` and `selectionTracked` too). The selection is cleared through a
+  mark's place, P138; give it from the first render, `false` until then, so the mode starts with
+  `keepSelection`, P140: it is read as the mode starts, and giving it later restarts nothing), every report through `onAnnotation` (`tracked` and `selectionTracked` too). The selection is cleared through a
   ref, which holds `clearSelection()` only (a `PortholeFrameHandle`; never the display, whose life
   is the binding's); with no display running it does nothing. Errors the core's calls throw (an id
   no shown mark has, a config without `annotate`) reach `onHostError`, kind `"annotations"`.
@@ -437,30 +438,38 @@ composer.onClose(() => display.annotations.clearSelection());
     composer.openAt(frame, clipToFrame(at), report.anchor); // the frame's px: clip them, then add its position
   });
   ```
-- **A composer that stays beside what it is for** (P138): `selected` comes once for a pick (and
-  for words again only once a scroll settles), and a pick's outline goes with it. Follow the
-  selection while your composer is open, `annotations.track({ selection: true })` (React:
-  `trackedSelection`), and the frame highlights it (a picked element in the picking outline) and
+- **A composer that stays beside what it is for** (P138, P140): `selected` comes once for a pick
+  (and for words again only once a scroll settles), and by default a pick's outline goes with it
+  and the frame keeps nothing of it. To follow it, start with `keepSelection: true`
+  (`annotations.start({ elements: true, keepSelection: true })`; React does it while you give
+  `trackedSelection`), so the frame keeps what is picked or selected, then follow the selection
+  while your composer is open, `annotations.track({ selection: true })` (React:
+  `trackedSelection`). The frame highlights it (a picked element in the picking outline) and
   reports `selectionTracked` as `tracked` reports a mark: at most 60 a second, its `rect` clamped,
   `documentRect`, `lastLineDocumentRect` and `scroll` as above, and `inView`, so you hide the
   composer (and show your own marker at the frame's edge, from `documentRect` and `scroll`, clipped)
   while it is out of view. `state: "orphaned"`: it isn't in the page now (a re-render took it out;
-  a reload); keep the person's words, it may be found again. It follows the latest `selected`, so a
-  new pick or selection moves it. One thing is followed at a time: it takes a followed mark's
-  place, and `track(null)`, a mark's id or `clear` ends it, the highlight with it. End it on every
-  close (posted, dismissed, Escape in your composer: the frame's own Escape doesn't end it), as you
-  clear the selection: the page reads when it starts and ends, so an end on every close says nothing
-  of what came of it. The composer moves at the page's word: guard it as below, armed again each
-  time it moves or shows again. An older shell sends nothing (and draws nothing): place by
-  `selected` until the first `selectionTracked`, which a newer one sends at its next animation
-  frame. A newer shell keeps the picked element outlined from the pick on, so there is no gap
-  before the follow's highlight; ask for the follow before a `start` or `stop` you send as the
-  composer opens (React orders them so), or the stop ends that outline a moment before the follow
-  draws it again. Without a follow the outline ends as a selection does (the next pick, Escape,
-  `clearSelection`, `start`, `stop`, `clear`). While you follow the selection, `selected` isn't
-  re-sent after a scroll: read where it is from `selectionTracked`.
+  a reload); keep the person's words, it may be found again. Without `keepSelection`, a follow
+  asked after `selected` has nothing to follow and answers `orphaned`; one asked before the pick
+  follows each selection made while it lasts. It follows the latest `selected`, so a new pick or
+  selection moves it. One thing is followed at a time: it takes a followed mark's place, and
+  `track(null)`, a mark's id or `clear` ends it, the highlight with it. End it on every close
+  (posted, dismissed, Escape in your composer: the frame's own Escape doesn't end it), as you
+  clear the selection: the page reads when it starts and ends, so an end on every close says
+  nothing of what came of it. The composer moves at the page's word: guard it as below, armed
+  again each time it moves or shows again. An older shell sends nothing (and draws nothing): place
+  by `selected` until the first `selectionTracked`, which a newer one sends at its next animation
+  frame. Under `keepSelection` a newer shell keeps the picked element outlined from the pick on,
+  so there is no gap before the follow's highlight; ask for the follow before a `start` or `stop`
+  you send as the composer opens (React orders them so), or the stop ends that outline a moment
+  before the follow draws it again. Until the follow comes, the outline ends as a selection does
+  (the next pick, Escape, `clearSelection`, `start`, `stop`, `clear`). Without `keepSelection` the
+  outline goes with the pick, as before 0.14.15. While you follow the selection, `selected` isn't
+  re-sent after a scroll: read where it is from `selectionTracked`; and while you don't, a
+  `selectionTracked` from the page is dropped unread.
 
   ```js
+  display.annotations.start({ elements: true, text: true, keepSelection: true });
   display.on("annotation", (report) => {
     if (report.type === "selected") {
       composer.openBeside(frame, report.rect, report.anchor); // as before: an older shell stops here
