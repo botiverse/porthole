@@ -26,6 +26,8 @@ export interface FileSetRef {
 interface Notice {
   readonly url: string;
   readonly arrived: boolean;
+  /** The page is where it was: a navigation within its document (P142). */
+  readonly same: boolean;
   /** Whether it names the mounted version (`ok`), another (`other`), or none (a shell before P098). */
   readonly set: "ok" | "other" | "none";
 }
@@ -42,6 +44,7 @@ function noticeOf(raw: unknown, mounted: FileSetRef): Notice | null {
   return {
     url: typeof params.url === "string" ? params.url : "",
     arrived: params.arrived === true,
+    same: params.same === true,
     set:
       named === undefined
         ? "none"
@@ -62,7 +65,9 @@ const isHello = (raw: unknown): boolean =>
  * A notice (`porthole/navigating`, from the frame's window and content origin: the transport
  * takes nothing else) names a page and the version its files are. The leaving page's notice is
  * taken for the next load within `PAGE_OF_SET_MS`; the arriving page's (`arrived`) too, or for the
- * load it came after. A load no notice explained waits `LATE_NOTICE_MS`, holding the frame
+ * load it came after. A page whose document stayed (`same`, a navigation within it: WebKit fires
+ * the frame's load for one, P142) is taken for the load it came after, or for the next one within
+ * `LATE_NOTICE_MS` only. A load no notice explained waits `LATE_NOTICE_MS`, holding the frame
  * (`HELD_MOST` messages each way at most; past them, started again): nothing it says reaches the
  * display (no call is answered, no report taken), nothing is sent to it, and once the wait is
  * over without a notice for the
@@ -137,20 +142,30 @@ export function pagesOfSet(options: {
     }
     const notice = noticeOf(message, set);
     if (notice !== null) {
-      if (notice.set === "other" || (notice.arrived && notice.set !== "ok")) {
+      if (notice.set === "other" || ((notice.arrived || notice.same) && notice.set !== "ok")) {
         // Another version's page, or one that won't say which: never this display's.
         if (waiting > 0) {
           leave();
         }
         return;
       }
-      if (waiting === 0 && notice.url === current) {
+      if (waiting === 0 && notice.url === current && !notice.same) {
         // A late copy for the page the frame is on (its leaving page's, or its own): no new page.
+        // (A document that stayed says so for each navigation within it, the same address again
+        // too: each may come with a load.)
         return;
       }
       if (waiting > 0) {
         if (notice.set === "ok") {
           taken(notice.url);
+        }
+      } else if (notice.same) {
+        // A document that stayed is no page to come: its word is for a load at hand (WebKit fires
+        // it with the navigation within the document, before or after the frame's word, P142),
+        // and never shortens a page's word already given.
+        if (grantUntil <= Date.now()) {
+          grantUntil = Date.now() + LATE_NOTICE_MS;
+          grantFor = notice.url;
         }
       } else {
         // Either page's notice, for the next load within P084's ten seconds: the host hears the

@@ -301,6 +301,11 @@ export const shellAdapter: ProtocolAdapter<ShellConnection> = {
           calls.unwatch(params);
           return;
         case NAVIGATING_METHOD:
+          // A navigation within the page's document (P142): the page, its calls and what it
+          // follows stay.
+          if (params.same === true) {
+            return;
+          }
           // Another page of the set opens in the frame (P084): its next load is that page, which
           // follows nothing yet.
           forget();

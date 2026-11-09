@@ -323,10 +323,11 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // A page of a set that a navigation opened (not its ticket's answer) says so as it arrives
   // (P098), below, once the shell can speak: the notice its last page sent as it left can reach
   // the host after this page's load, or never (Chromium forwards a cross-process message from a
-  // task of the sending document's, which a navigation that commits first drops).
-  let arrived = false;
+  // task of the sending document's, which a navigation that commits first drops). With or without
+  // the Navigation API (P142): where there is none, the leaving page sends nothing, and this is the
+  // page's only word.
+  const arrived = filesBase !== null && typeof plan.files.address !== "string";
   if (navigationApi && typeof navigationApi.addEventListener === "function" && destinationOf !== null && sameDocumentOf !== null && navigationTypeOf !== null) {
-    arrived = filesBase !== null && typeof plan.files.address !== "string";
     navigationApi.addEventListener("navigate", (event) => {
       const destination = applyOf(destinationOf, event, []);
       if (!applyOf(sameDocumentOf, destination, []) && applyOf(navigationTypeOf, event, []) !== "reload") {
@@ -1636,6 +1637,15 @@ export const SHELL_RUNTIME = String.raw`(() => {
   }
   if (arrived) {
     notice(location.href, { arrived: true });
+  }
+  // A navigation within the document (a fragment, history between its entries) says the page
+  // stayed (P142): WebKit fires the frame's load for one (measured, 18.2 and 26.6: a link to
+  // #bottom, the first in a document), which the host would otherwise take for content that left.
+  // Listened for now, before any content runs; each is the content's word, as every notice is.
+  if (filesSet !== null && filesBase !== null) {
+    const stayed = () => notice(location.href, { same: true });
+    window.addEventListener("popstate", stayed, true);
+    window.addEventListener("hashchange", stayed, true);
   }
   // A sealed files' address opens the page's files on its own for a while (P083): renewed before
   // it ends, the page moved to the new one in place (the same page, the same history entry). Its

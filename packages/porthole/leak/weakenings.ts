@@ -50,6 +50,22 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       find: '    return { go: before(target, "#") === before(location.href, "#") || ownPage(target), target };',
       replace: "    return { go: true, target };",
     },
+    // And every notice a set's page sends of its pages (P098): the arriving page's, which it
+    // sends with or without the Navigation API (P142), as the leaving page's above.
+    {
+      file: RUNTIME,
+      find: '  const arrived = filesBase !== null && typeof plan.files.address !== "string";',
+      replace: "  const arrived = false;",
+    },
+  ],
+  // A set's page saying it stayed at a navigation within its document (P142): WebKit fires the
+  // frame's load for one, which the host takes for content that left.
+  "same-document-notice": [
+    {
+      file: RUNTIME,
+      find: "  if (filesSet !== null && filesBase !== null) {\n    const stayed",
+      replace: "  if (false) {\n    const stayed",
+    },
   ],
   // Only the guard's rule asked first (P099): navigation.navigate() and open(…, "_self") start
   // what they're asked, and the navigate event alone stops them (WebKit sends the request anyway).
@@ -895,6 +911,7 @@ export function weaken(relative: string, text: string): string {
  */
 const SERVED = [
   "navigate-guard",
+  "same-document-notice",
   "navigate-ask",
   "link-rule",
   "window-open",

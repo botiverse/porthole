@@ -201,7 +201,11 @@ const IN_SET_LINKS = [
   "a link to another page of the set opens it in the frame; the display goes on",
   "a link to another page of the set opens it in the frame when the leaving page's notice is dropped (P098)",
   "a link to another page of the set opens it in the frame when the leaving page's notice is late (P098)",
+  // Without the Navigation API the arriving page's notice is the only one (P142).
+  "without the Navigation API, a link to another page of the set opens it in the frame; the display goes on",
 ];
+/** A link down a set's page (P142), with and without the Navigation API. */
+const LINK_DOWN = "a link down the page scrolls it; the document stays, and so does the display";
 
 export const CONTROLS: Readonly<Record<string, Control>> = {
   // The shell runtime and the CSP, through the leak suite (DESIGN.md, items 1-13).
@@ -503,9 +507,20 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
         (how) => `can't navigate itself away (${how}): to a site, or to another content origin`,
       ),
       ...IN_SET_LINKS,
+      // Its link down the page is also on a page a link opened.
+      LINK_DOWN,
+      `without the Navigation API, ${LINK_DOWN}`,
       "a page opens nothing else: not a file that isn't a page, not another path of its origin",
       "no report, content error or blocked navigation names the frame's sealed address (P083)",
     ),
+  },
+  // A set's page saying it stayed at a navigation within its document (P142): WebKit fires the
+  // frame's load for the first one, and the host started the display again.
+  "same-document-notice": {
+    specs: [FILES],
+    // Each engine: the page says nothing of the link down it; WebKit also starts the display again
+    // (it fires the frame's load for the first such navigation), Chromium and Firefox fire none.
+    fails: all(LINK_DOWN, `without the Navigation API, ${LINK_DOWN}`),
   },
   // A served page on a tab of its own (P099): its CSP's sandbox is the wall for links and forms
   // in new windows, downloads, browser dialogs and its opener; window.open and picture-in-picture

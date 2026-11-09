@@ -2703,7 +2703,7 @@ moved 56 minutes on, and the page goes on loading its files), on Chromium, WebKi
 **Revisit when** WebKit keeps partitioned cookies in frames (then the cookie, stable addresses and
 the shared cache), or hosts need a version's files cached across sessions (a seal per day).
 
-## P084 · 2026-10-18 · A served page with files opens its set's other pages in its frame · Accepted; amended by P098
+## P084 · 2026-10-18 · A served page with files opens its set's other pages in its frame · Accepted; amended by P098, P142
 
 **Decision.** Amends P079 (no navigation to another document) and P031 (a navigated frame is
 started again) for served pages with files. The shell's plan names the version's files' address
@@ -2738,7 +2738,7 @@ subscriptions a page left keep running until the display ends.
 artifact's display, not one sent eleven seconds before the load, and never for a widget's).
 **Revisit when** hosts annotate multi-page artifacts (give the marks to each page), or an engine
 Porthole supports lacks the Navigation API (then `frame-src` is the wall, and a set's pages restart
-the display).
+the display; since P142 they don't: the arriving page's word is sent without the API).
 
 ## P085 · 2026-10-18 · The capability runtime: one global, `porthole.use(name)`, under a contract pinned per artifact · Accepted; amended by P091, P139
 
@@ -4061,7 +4061,7 @@ origin check stays, for frames on one host page); when an engine stops sending `
 metadata where this relies on them; or when a previewed app needs a write from another site (an
 opt-in per display, with its test).
 
-## P098 · 2026-10-19 · A set's page is taken as one when its notice is late or lost; tests that measure, not wait · Accepted
+## P098 · 2026-10-19 · A set's page is taken as one when its notice is late or lost; tests that measure, not wait · Accepted; amended by P142
 
 The 2026-10-19 audit's flaky tests (baseline 264b12fa), which a release that waits for all of CI
 (P097) can no longer shrug off. Amends P084 (the notice) and P025 (how the suite knows which
@@ -4084,7 +4084,8 @@ browsers keep a framed cookie).
      the access the page is served for; not secret);
    - the shell of a page a navigation opened (a page of files that is not its ticket's answer)
      says `porthole/navigating` with `arrived: true` as it starts. Set inside the guard's own
-     block, so `navigate-guard` (the guard taken out) removes it with every other notice;
+     block, so `navigate-guard` (the guard taken out) removes it with every other notice (since
+     P142 set outside it, with or without the Navigation API; `navigate-guard` still removes it);
    - which loads are the set's own pages is decided by `pagesOfSet` (`host/pages-of-set.ts`) on
      the frame's surface, before anything the frame says reaches the display. The leaving page's
      notice is taken for the next load within ten seconds, as before; the arriving page's too (the
@@ -8765,3 +8766,96 @@ control, run as mutations.
 **Revisit when** an outer page needs to speak to a frame (then it is a host, and needs
 `appOrigins`), browsers give a policy for the parent alone, or a host wants an outer page to frame
 content without its own page between them.
+
+## P142 · 2026-11-09 · A set's pages without the Navigation API, and a page that stays at a link within it · Accepted
+
+From Raft (task #proj-workspace:#251, InNOut): on staging, in a multi-page served artifact, WebKit
+18.2 (Playwright 1.49.1, Safari 18's engine, no Navigation API) started the display again at its
+entry on every link to another page of the set, and on a link to `#bottom` in the same page. Then
+on WebKit 26.6 (Playwright 1.63, with the API): pages fine, `#bottom` started it again about 2.5 s
+after the click. Chromium: both fine. Amends P084 and P098 (its "Revisit when": an engine without
+the Navigation API).
+
+**Measured** (the leak harness; WebKit r2104 = 18.2 run with Playwright 1.49.1 and Ubuntu 24.04's
+libraries, WebKit 26.6, Chromium and Firefox 155 with Playwright 1.63; "without the API" is the
+frame with `navigation` and every `Navigat*` interface deleted before the shell runs, and WebKit
+18.2 itself):
+- *A link to another page, without the API.* The shell said nothing. The leaving page's notice
+  comes from the guard's `navigate` listener (P084), and the arriving page's `arrived: true` was
+  set inside the guard's own block (P098, so `navigate-guard` would take it out). Neither exists
+  without the API. The frame's click handler still opens the page (`location.assign`). The new
+  page's load reached `pagesOfSet` with no notice, and its `ui/initialize` ended the wait at once
+  ("a hello before any notice"): started again at once (failed on Chromium without the API and on
+  WebKit 18.2).
+- *A link to `#bottom`.* Not a navigate event the shell announces: the guard passes a
+  same-document navigation without a word, and the frame's click handler leaves a `#` link to the
+  browser. Not the shell treating `hashchange` as navigation: nothing listened for it. It is a
+  `load`. **WebKit fires the `<iframe>` element's `load` for the first navigation within the
+  frame's document**: a listener on the host page's iframe saw it, no request reached the server,
+  and the document stayed (its globals, its scroll, `location.hash`). On 18.2 the load comes before
+  the frame's `popstate` and `hashchange`; on 26.6 after them. Chromium and Firefox fire none. The
+  web platform takes any load after the first as the content navigating away (P031), and
+  `pagesOfSet` waited `LATE_NOTICE_MS` (2 s) for a notice. None came, so the display started
+  again: the 2.5 s InNOut saw. With the API or without it.
+
+**Decision.**
+1. **A set's page that a navigation opened says `arrived: true` as it starts, with or without the
+   Navigation API.** `arrived` is set outside the guard's block, from the plan alone (files, and
+   no ticket's address). Without the API it is the page's only word, and P098 already takes it on
+   either side of the load. No click fallback for the leaving notice: P098 takes the arriving
+   page's word without one, and a click handler would cover links only, not `location`. So
+   `arrived` alone covers it, and the tests show it does. `navigate-guard` (P079's control) also
+   takes `arrived` out, so it still takes out every notice of a set's pages.
+2. **A navigation within a page's document says the page stayed**: `porthole/navigating
+   { url, same: true, set }` on each `popstate` and `hashchange` (window listeners the shell adds
+   before content runs), in a set's page (files and their version), with or without the API. It is
+   never a page change. `pagesOfSet` takes it for the load it came after, or for the next one within
+   `LATE_NOTICE_MS` only (not P084's ten seconds: it is no page to come). It never shortens a
+   page's notice already given, and is taken however often the same address comes again. Like
+   `arrived`, it must name the mounted version: another version's, or none, ends a wait at once,
+   started again. The shell adapter forgets nothing for it (the page's watches and subscriptions go
+   on). A display whose pages never come with files is as before: every load after the first starts
+   it again at once.
+
+**What stays the accepted limit** (P079, P099, unchanged). Without the Navigation API the guard
+gets no events. A served frame can navigate itself to another content origin (`frame-src` lets it
+in), and a page on a tab can navigate itself away, or to a `blob:` document of its own. Every
+other navigation without the API is as before. Another path of its origin, a file that isn't a
+page, an outside site (`frame-src` stops it): the display starts again (or, on Firefox, an outside
+site leaves the document as it was). A single-document served artifact (no files, so no version in
+its notices), and every display that isn't an artifact with files, still starts again at a load
+after the first. On WebKit that includes the first link within the page. A frame can't tell the host
+a load is no new document without a version to name, and none of those waits for a notice
+(P031).
+
+**Threat (PRINCIPLE 1): nothing loosened.** No CSP, sandbox, guard rule, gate or origin changed;
+the guard stops what it stopped, where it has events. The host takes a notice as before: only for
+a display whose pages may come with files, from the frame's window and origin, naming the mounted
+version, within its window. Both notices are the content's word. Content could always send
+`porthole/navigating` itself (P084: it only spares a restart, which P031 says is no wall).
+`arrived` without the API, or `same` from a listener, gives it nothing it lacked. A `same`
+notice's grant is shorter than the one content could already ask for. The wall against a
+navigated document running is the embedding page's `frame-src`, as P031 has it.
+
+**Tested.** `leak/served/files.spec.ts`:
+- with the API: a link down the entry page and down a page a link opened. The page scrolls, the
+  document stays, the display goes on, the frame announces no page change (only `same`), and the
+  host blocks nothing.
+- without the API: a link to another page and back (one outcome, nothing blocked), and the link
+  down the page as above.
+- the negative controls: a file that isn't a page and another path of the origin still start the
+  display again at its entry, and an outside site hears nothing.
+
+All pass on Chromium, WebKit 26.6 and Firefox 155, and on WebKit 18.2 itself. Before the fix, the
+page link failed on Chromium without the API and on WebKit 18.2, and the link down the page failed
+on WebKit 18.2 and 26.6 (started again). `test/pages-of-set.test.ts`: `same` before or after its
+load; again at the same address; no grant past `LATE_NOTICE_MS`; a page's grant kept; another
+version, or none, ends the wait; nothing for displays without files. `test/runtime-review.test.ts`:
+a `same` notice ends no watch (it failed before). Controls: `same-document-notice` (the listeners
+out) fails both link-down cases on all three engines (the frame says nothing; on WebKit the display
+starts again too). `navigate-guard` now also fails the page link without the API and both link-down
+cases, whose second page is opened by a link.
+
+**Revisit when** an engine stops firing a frame's load for a navigation within its document
+(the `same` notice then has no load to explain), single-document served artifacts need it (give
+their notices the version), or hosts need Safari before 26 on a tab (P099's limit stands).
