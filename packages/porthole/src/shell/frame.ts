@@ -1,5 +1,5 @@
 import { PAGE_SANDBOX_TOKENS } from "../compile/policy.ts";
-import { hostOriginProblem, onNestedLabel } from "../isolation/served.ts";
+import { framedByProblem, hostOriginProblem, onNestedLabel } from "../isolation/served.ts";
 
 /**
  * Porthole's shell for a nested page (P111): the whole document at the address the host frames,
@@ -81,7 +81,9 @@ export const FRAME_SHELL_RUNTIME = String.raw`(() => {
   const web = plan.origins.filter((origin) => origin.indexOf("https://") === 0 || origin.indexOf("http://") === 0);
   // To the host: each web host origin (only the parent's is delivered); a desktop app's own scheme
   // is no target a browser takes, so where one is listed and the parent isn't a known web origin,
-  // "*" (frame-ancestors holds the parent to the host origins; nothing said here is secret).
+  // "*" (frame-ancestors holds the parent to the host origins; nothing said here is secret). Where
+  // it names an outer page above them too (the host's framedBy, P141: plan.strictParent), the parent
+  // may be the outer page: "*" then goes only to a parent the engine names as a host origin.
   const toHost = (message) => {
     if (!framed) {
       return;
@@ -92,7 +94,11 @@ export const FRAME_SHELL_RUNTIME = String.raw`(() => {
       } catch (_) {}
     }
     const parent = location.ancestorOrigins && location.ancestorOrigins.length > 0 ? location.ancestorOrigins[0] : null;
-    if (web.length < plan.origins.length && (parent === null || web.indexOf(parent) === -1)) {
+    if (
+      web.length < plan.origins.length &&
+      (parent === null || web.indexOf(parent) === -1) &&
+      (plan.strictParent !== true || (parent !== null && plan.origins.indexOf(parent) !== -1))
+    ) {
       try {
         window.parent.postMessage(message, "*");
       } catch (_) {}
@@ -264,6 +270,12 @@ export { SHELL_METHOD_PREFIX, SHELL_STATE_METHOD } from "../isolation/types.ts";
 export interface FrameShellOptions {
   /** The host origins: the shell takes messages from its parent only from these. */
   readonly origins: readonly string[];
+  /**
+   * Origins of an outer page that may be an ancestor above a host origin's page (P141): in the
+   * shell's `frame-ancestors` after `origins` (`nestedShellResponse`), never heard or told. Where
+   * there are any, the shell says `*` only to a parent the engine names as a host origin.
+   */
+  readonly framedBy?: readonly string[];
   /** The page's address: absolute, on the shell's own origin, under `/__porthole/f/`. */
   readonly page: string;
   /** The page frame's accessible name. */
@@ -287,6 +299,12 @@ export function frameShellScript(options: FrameShellOptions): string {
       throw new TypeError(`frameShellScript: ${problem}`);
     }
   }
+  for (const origin of options.framedBy ?? []) {
+    const problem = framedByProblem(origin);
+    if (problem !== null || options.origins.includes(origin)) {
+      throw new TypeError(`frameShellScript: framedBy: ${problem ?? `${origin} is a host origin`}`);
+    }
+  }
   let page: URL;
   try {
     page = new URL(options.page);
@@ -305,6 +323,7 @@ export function frameShellScript(options: FrameShellOptions): string {
   return FRAME_SHELL_RUNTIME.replace("__PLAN__", () =>
     scriptJson({
       origins: options.origins,
+      ...((options.framedBy ?? []).length === 0 ? {} : { strictParent: true }),
       page: page.href,
       sandbox: PAGE_SANDBOX_TOKENS.join(" "),
       ...(options.title === undefined ? {} : { title: options.title }),

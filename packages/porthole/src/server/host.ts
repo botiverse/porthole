@@ -12,7 +12,7 @@ import {
 } from "./domain.ts";
 import { reservedLabels, type Naming } from "./naming.ts";
 import { peerAddress } from "./peer.ts";
-import { appStatusPage, tabOnlyPage } from "./pages.ts";
+import { ancestorsOf, appStatusPage, tabOnlyPage } from "./pages.ts";
 import { createServer } from "./server.ts";
 import type {
   Access,
@@ -105,8 +105,21 @@ type Awaitable<T> = T | Promise<T>;
 export interface ContentHostOptions<V> {
   /** `content.example.com`, `content.localhost:8790`; empty: content off. Or parsed settings. */
   readonly domain: string | null | undefined | ContentDomainInfo;
-  /** The app's own origins: they frame content (`frame-ancestors`) and are checked for clashes. */
+  /**
+   * The app's own origins: they frame content (`frame-ancestors`), are the only origins its frames
+   * hear and tell, and are checked for clashes.
+   */
   readonly appOrigins: readonly string[];
+  /**
+   * Origins of an outer page that frame the app itself (P141): each may be an ancestor of every frame
+   * the app shows, above an app origin's page, so it is in every `frame-ancestors` Porthole sends
+   * (content, nested pages, doors, status and entry pages, the authorize route's pages) after
+   * `appOrigins`, and nowhere else. Never an origin a frame hears or tells, never an app origin for
+   * redirect entry or the handoff; the app's own page must still be the frame's parent. Exact https
+   * origins (`http://` on loopback), none an app origin, none the content domain's site. The app's
+   * own `frame-ancestors` (its page's, which Porthole doesn't send) is the app's to set.
+   */
+  readonly framedBy?: readonly string[];
   /** At least 32 random bytes (or a string of at least 32 bytes). */
   readonly secret: Uint8Array | string;
   readonly tickets?: TicketStore;
@@ -636,6 +649,8 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
   let server: PortholeServer | null = null;
   let view: ContentHealthView = { state: "off" };
   let configs: Readonly<Record<string, PortholeConfig>> = {};
+  // Who may frame the authorize route's pages: the app origins, and the outer pages' once checked.
+  let appAncestors = options.appOrigins.join(" ");
 
   try {
     domain =
@@ -676,6 +691,7 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
         }),
         secret,
         hostOrigins: options.appOrigins,
+        ...(options.framedBy === undefined ? {} : { framedBy: options.framedBy }),
         configs,
         ...(options.source === undefined ? {} : { artifacts: { get: options.source } }),
         ...(options.assets === undefined
@@ -714,6 +730,8 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
               },
             }),
       });
+      // createServer checked them (P141): only then in a header of the app's.
+      appAncestors = ancestorsOf(options.appOrigins, options.framedBy);
       view = gate === undefined ? { state: "healthy" } : { state: "checking" };
     }
   } catch (error) {
@@ -1308,7 +1326,7 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
           status,
           title,
           detail,
-          options.appOrigins.join(" "),
+          appAncestors,
           reason,
           options.appOrigins,
           link,
@@ -1337,7 +1355,7 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
         // sign-in or refusal there, and says nothing to the page that frames it.
         const dest = request.headers.get("sec-fetch-dest");
         if (dest === "iframe" || dest === "frame") {
-          return tabOnlyPage(options.appOrigins.join(" "), method);
+          return tabOnlyPage(appAncestors, method);
         }
         const clean = `${domain.originOf(state.label)}${state.path}`;
         if (state.expired) {

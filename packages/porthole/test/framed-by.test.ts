@@ -1,0 +1,519 @@
+import { runInNewContext } from "node:vm";
+import { describe, expect, it } from "vitest";
+import { presets } from "../src/index.ts";
+import type { InstanceRef } from "../src/isolation/types.ts";
+import { frameShellScript } from "../src/shell/frame.ts";
+import {
+  createContentHost,
+  createServer,
+  doorResponse,
+  doorStatusResponse,
+  nestedLabelOf,
+  nestedShellCsp,
+  nestedShellResponse,
+  statusPage,
+  type ServerOptions,
+} from "../src/server/index.ts";
+import { pageScript, STATUS_SCRIPT_PATH } from "../src/server/pages.ts";
+import { compile } from "../src/compile/compile.ts";
+import { FRAME_STATUS_METHOD } from "../src/isolation/types.ts";
+
+/**
+ * `framedBy` (P141): an outer page's origins that may be an ancestor of every frame a host shows,
+ * above the host's own page. They are in every `frame-ancestors` Porthole sends and nowhere else:
+ * never a host origin a frame hears or tells, never in a page's `data-porthole-hosts` or a shell's
+ * plan. Where they are set, a page or a nested page's shell says `*` (a desktop scheme among the
+ * host origins) only to a parent the engine names as a host origin, never to an outer page.
+ */
+
+const secret = new Uint8Array(32).fill(7);
+const HOST = "https://app.example.com";
+const DESKTOP = "ferry://app";
+const DECK = "https://deck.example.net";
+const DOMAIN = "example-usercontent.com";
+const CONTENT = `https://*.${DOMAIN}`;
+
+const encode = (text: string) => new TextEncoder().encode(text);
+const files: Record<string, string> = {
+  "index.html": `<!doctype html><html><head><script src="./app.js"></script></head><body>files</body></html>`,
+  "app.js": "window.ran = true;",
+  "notes.txt": "hi",
+};
+const fileSet = {
+  files: Object.fromEntries(
+    Object.entries(files).map(([name, body]) => [
+      name,
+      { size: encode(body).byteLength, sha256: "", type: "text/plain" },
+    ]),
+  ),
+  read: (name: string) =>
+    Promise.resolve(files[name] === undefined ? null : encode(files[name] ?? "")),
+};
+
+const configs = {
+  inlineWidget: presets.inlineWidget({ isolation: "domain", contentOrigins: [CONTENT] }),
+  artifact: presets.artifact({ isolation: "domain", contentOrigins: [CONTENT] }),
+  mcpApp: presets.mcpApp({ isolation: "domain", contentOrigins: [CONTENT] }),
+  url: presets.url({ contentOrigins: [CONTENT] }),
+  artifactFrames: presets.artifact({
+    isolation: "domain",
+    contentOrigins: [CONTENT],
+    nestedFrames: "own",
+  }),
+  artifactNested: presets.artifact({
+    isolation: "domain",
+    contentOrigins: [CONTENT],
+    nested: true,
+  }),
+};
+
+function server(extra: Partial<ServerOptions> = {}) {
+  return createServer({
+    content: { domain: DOMAIN, scheme: "https" },
+    secret,
+    hostOrigins: [HOST, DESKTOP],
+    framedBy: [DECK],
+    configs,
+    artifacts: {
+      get: (id) =>
+        Promise.resolve(
+          id === "set" ? fileSet : { html: "<!doctype html><html><body><p>one</p></body></html>" },
+        ),
+    },
+    upstream: () => new Response("<!doctype html><p>app</p>", { headers: { "x-app": "1" } }),
+    ...extra,
+  });
+}
+
+const ask = (url: string, dest = "iframe", headers: Record<string, string> = {}) =>
+  new Request(url, {
+    headers: { "sec-fetch-dest": dest, "sec-fetch-site": "cross-site", ...headers },
+  });
+
+const cookieOf = (response: Response): string =>
+  (response.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+
+/** The `frame-ancestors` sources of every policy a response carries (null: none names it). */
+function ancestorsOf(response: Response): string[] | null {
+  const policies = (response.headers.get("content-security-policy") ?? "")
+    .split(/[;,]/u)
+    .map((each) => each.trim())
+    .filter((each) => each.startsWith("frame-ancestors "));
+  return policies.length === 0 ? null : policies.flatMap((each) => each.split(/\s+/u).slice(1));
+}
+
+/**
+ * Every kind of answer `/server` frames, under one `framedBy`: a shell, an artifact page, a page of
+ * a file set and its files, a page's own frames, a nested page's shell, page and files, an MCP
+ * Apps proxy, a door and a used door, a url-mode app's entry page and its answers, the 401, 404
+ * and renew answers.
+ */
+async function everyAnswer(porthole: ReturnType<typeof server>) {
+  const answers: { readonly name: string; readonly response: Response }[] = [];
+  const keep = async (name: string, response: Response | null) => {
+    expect(response, name).not.toBeNull();
+    answers.push({ name, response: response! });
+    return response!;
+  };
+  const shellAt: InstanceRef = { scope: "s1", document: { kind: "shell", preset: "inlineWidget" } };
+  const shell = await porthole.issue(shellAt, { viewer: "v" });
+  const shown = await keep("shell", await porthole.handle(ask(shell.url)));
+  expect(shown.status).toBe(200);
+  await keep("shell's ticket used", await porthole.handle(ask(shell.url)));
+  await keep("not found", await porthole.handle(ask(`${shell.origin}/nothing/here`)));
+  if (shell.door !== undefined) {
+    await keep("door", await porthole.handle(ask(shell.door.url)));
+    await keep("door used", await porthole.handle(ask(shell.door.url)));
+  }
+  const page = await porthole.issue(
+    { scope: "s2", document: { kind: "artifact", id: "page", version: "1" } },
+    { viewer: "v" },
+  );
+  await keep("artifact page", await porthole.handle(ask(page.url)));
+  const proxy = await porthole.issue(
+    { scope: "s3", document: { kind: "mcp-proxy" } },
+    { viewer: "v" },
+  );
+  await keep("mcp app proxy", await porthole.handle(ask(proxy.url)));
+  for (const [scope, config] of [
+    ["set-1", "artifact"],
+    ["set-2", "artifactFrames"],
+  ] as const) {
+    const set = await porthole.issue(
+      { scope, document: { kind: "artifact", id: "set", version: "1", preset: config } },
+      { viewer: "v" },
+    );
+    const entry = await keep(`${config}: a file set's ticket`, await porthole.handle(ask(set.url)));
+    const html = await entry.clone().text();
+    const base = /"base":"([^"]+)"/u.exec(html)?.[1];
+    expect(base, `${config}: the set's sealed base`).toBeDefined();
+    const at = new URL(base!, set.origin).href;
+    await keep(`${config}: its page at its base`, await porthole.handle(ask(at)));
+    await keep(`${config}: its script`, await porthole.handle(ask(`${at}app.js`, "script")));
+    await keep(`${config}: a text file`, await porthole.handle(ask(`${at}notes.txt`, "empty")));
+    await keep(
+      `${config}: a renewal from elsewhere`,
+      await porthole.handle(ask(`${at}__porthole/renew`, "empty")),
+    );
+  }
+  const nested = await porthole.issue(
+    {
+      scope: "n1",
+      document: { kind: "artifact", id: "set", version: "1", preset: "artifactNested" },
+    },
+    { viewer: "v" },
+  );
+  const nestedShell = await keep("nested shell", await porthole.handle(ask(nested.url)));
+  const nestedPage = /"page":"([^"]+)"/u.exec(await nestedShell.clone().text())?.[1] ?? "";
+  expect(nestedPage).toContain("/__porthole/f/");
+  await keep("nested page", await porthole.handle(ask(nestedPage)));
+  await keep(
+    "nested script",
+    await porthole.handle(ask(new URL("app.js", nestedPage).href, "script")),
+  );
+  await keep(
+    "nested page, its access ended",
+    await porthole.handle(ask(nestedPage.replace(/\/f\/[^/]+\//u, "/f/AAAA/"))),
+  );
+  const app = await porthole.issue(
+    { scope: "u1", document: { kind: "external", url: "https://app.test/landing" } },
+    { viewer: "v" },
+  );
+  const entered = await keep("url mode: the entry page", await porthole.handle(ask(app.url)));
+  const cookie = cookieOf(entered);
+  if (cookie !== "") {
+    await keep(
+      "url mode: the app's answer",
+      await porthole.handle(ask(`${app.origin}/landing`, "iframe", { cookie })),
+    );
+  }
+  return answers;
+}
+
+describe("framedBy is checked like a host origin (P141)", () => {
+  const base = {
+    content: { domain: DOMAIN, scheme: "https" as const },
+    secret,
+    hostOrigins: [HOST],
+    configs: {},
+  };
+
+  it("takes exact https origins, and http on loopback", () => {
+    expect(() => createServer({ ...base, framedBy: [DECK] })).not.toThrow();
+    expect(() =>
+      createServer({ ...base, framedBy: ["http://localhost:5173", "http://127.0.0.1:8080"] }),
+    ).not.toThrow();
+  });
+
+  it("refuses a wildcard, a path, a keyword, a list, null, a desktop scheme and plain http", () => {
+    for (const bad of [
+      "https://*.example.net",
+      "https://deck.example.net/",
+      "https://deck.example.net/app",
+      "https://Deck.example.net",
+      "*",
+      "'self'",
+      "https://deck.example.net https://evil.example",
+      "https://deck.example.net; script-src *",
+      "null",
+      "ferry://app",
+      "http://deck.example.net",
+      "",
+    ]) {
+      expect(() => createServer({ ...base, framedBy: [bad] }), bad).toThrow(/framedBy/u);
+    }
+  });
+
+  it("refuses a host origin (it frames and talks already) and the content domain's site", () => {
+    expect(() => createServer({ ...base, framedBy: [HOST] })).toThrow(/host origin already/u);
+    expect(() => createServer({ ...base, framedBy: [`https://deck.${DOMAIN}`] })).toThrow(
+      /same site/u,
+    );
+    expect(() => createServer({ ...base, framedBy: [`https://${DOMAIN}`] })).toThrow(/same site/u);
+  });
+
+  it("the helpers a content Worker of its own answers with check them too", () => {
+    expect(() =>
+      doorResponse({ hostOrigins: [HOST], framedBy: ["https://*.deck.example"] }),
+    ).toThrow(/framedBy/u);
+    expect(() =>
+      statusPage({ status: 401, title: "t", detail: "d", hostOrigins: [HOST], framedBy: [HOST] }),
+    ).toThrow(/host origin/u);
+    expect(() => nestedShellCsp("1;", "https://porthole-x.example", [HOST], ["*"])).toThrow(
+      /framedBy/u,
+    );
+  });
+});
+
+describe("framedBy is in every frame-ancestors, and nowhere else (P141)", () => {
+  it("every answer that names frame-ancestors names the outer page after the host origins; none says it elsewhere", async () => {
+    const answers = await everyAnswer(server());
+    expect(answers.map(({ name }) => name)).toHaveLength(23);
+    for (const { name, response } of answers) {
+      const ancestors = ancestorsOf(response);
+      if (ancestors !== null) {
+        expect(ancestors, `${name}: frame-ancestors`).toContain(DECK);
+        expect(ancestors.indexOf(HOST), `${name}: host origin before it`).toBeLessThan(
+          ancestors.indexOf(DECK),
+        );
+      }
+      for (const [header, value] of response.headers) {
+        if (header !== "content-security-policy") {
+          expect(value, `${name}: ${header}`).not.toContain("deck.example.net");
+        }
+      }
+      // Not in a page's body: not in data-porthole-hosts, a shell's plan, or anything it says.
+      const body = await response.text();
+      expect(body, `${name}: body`).not.toContain("deck.example.net");
+    }
+    // Every framed document says who may frame it.
+    const framed = answers.filter(({ response }) =>
+      (response.headers.get("content-type") ?? "").startsWith("text/html"),
+    );
+    for (const { name, response } of framed) {
+      expect(ancestorsOf(response), `${name}: has frame-ancestors`).not.toBeNull();
+    }
+  });
+
+  it("without framedBy, nothing changes: frame-ancestors is the host origins, no page is strict", async () => {
+    const answers = await everyAnswer(server({ framedBy: [] }));
+    for (const { name, response } of answers) {
+      const ancestors = ancestorsOf(response);
+      if (ancestors !== null) {
+        expect(ancestors, name).not.toContain(DECK);
+      }
+      const body = await response.text();
+      expect(body, name).not.toContain("data-porthole-strict-parent");
+      expect(body, name).not.toContain('"strictParent"');
+    }
+  });
+
+  it("with framedBy, the pages that may say * are strict about their parent, and the shells' plans too", async () => {
+    const answers = await everyAnswer(server());
+    const strict = answers.filter(({ name }) =>
+      [
+        "shell's ticket used",
+        "not found",
+        "door",
+        "door used",
+        "url mode: the entry page",
+      ].includes(name),
+    );
+    expect(strict.length).toBeGreaterThan(3);
+    for (const { name, response } of strict) {
+      expect(await response.text(), name).toContain("data-porthole-strict-parent");
+    }
+    const nested = answers.find(({ name }) => name === "nested shell");
+    expect(await nested?.response.text()).toContain('"strictParent":true');
+  });
+
+  it("the helpers for a content Worker of its own: framedBy in frame-ancestors, the hosts alone told", async () => {
+    for (const response of [
+      doorResponse({ hostOrigins: [HOST], framedBy: [DECK] }),
+      doorStatusResponse({ status: 401, reason: "session", hostOrigins: [HOST], framedBy: [DECK] }),
+      statusPage({ status: 429, title: "t", detail: "d", hostOrigins: [HOST], framedBy: [DECK] }),
+    ]) {
+      expect(ancestorsOf(response)).toEqual([HOST, DECK]);
+      const body = await response.text();
+      expect(body).toContain(`data-porthole-hosts="[&#34;${HOST}&#34;]"`);
+      expect(body).not.toContain("deck.example.net");
+    }
+    // The defaults are as before: the host origins alone.
+    expect(ancestorsOf(doorResponse({ hostOrigins: [HOST] }))).toEqual([HOST]);
+    const origin = `https://${nestedLabelOf("abc")}.${DOMAIN}`;
+    const shell = nestedShellResponse(compile(configs.artifactNested), {
+      origin,
+      origins: [HOST],
+      framedBy: [DECK],
+      page: `${origin}/__porthole/f/x/`,
+    });
+    expect(ancestorsOf(shell)).toEqual([HOST, DECK]);
+    const html = await shell.text();
+    expect(html).toContain(`"origins":["${HOST}"]`);
+    expect(html).not.toContain("deck.example.net");
+  });
+});
+
+describe("an outer page as the parent is never told, nor heard (P141, negative control)", () => {
+  /** Runs a page's status script in a frame whose parent the engine names as `parent`. */
+  async function statusSaid(strict: boolean, parent: string | undefined) {
+    const posted: string[] = [];
+    runInNewContext((await pageScript(STATUS_SCRIPT_PATH)?.text()) ?? "", {
+      window: {
+        parent: {
+          postMessage: (_message: unknown, origin: string) => {
+            if (origin !== "*" && !/^https?:\/\/[^/]+$/u.test(origin)) {
+              throw new SyntaxError(`Invalid target origin '${origin}'`);
+            }
+            posted.push(origin);
+          },
+        },
+      },
+      document: {
+        querySelector: () => ({
+          dataset: {
+            portholeHosts: JSON.stringify([HOST, DESKTOP]),
+            portholeReason: "session",
+            portholeStatus: "401",
+            ...(strict ? { portholeStrictParent: "" } : {}),
+          },
+        }),
+      },
+      location: parent === undefined ? {} : { ancestorOrigins: [parent] },
+    });
+    return posted;
+  }
+
+  it("a strict page says * only to a parent named as a host origin: never to the outer page, never unnamed", async () => {
+    expect(await statusSaid(true, DESKTOP)).toEqual([HOST, "*"]);
+    expect(await statusSaid(true, HOST)).toEqual([HOST]);
+    expect(await statusSaid(true, DECK)).toEqual([HOST]);
+    expect(await statusSaid(true, "null")).toEqual([HOST]);
+    expect(await statusSaid(true, undefined)).toEqual([HOST]);
+    // The control: without strictness (frame-ancestors the host origins alone), an outer page as
+    // the parent would have heard * (were it framable), as an unnamed parent still does.
+    expect(await statusSaid(false, DECK)).toEqual([HOST, "*"]);
+    expect(await statusSaid(false, undefined)).toEqual([HOST, "*"]);
+  });
+
+  /** The nested page's shell's word to its host, with the engine naming `parent`. */
+  function shellSaid(framedBy: readonly string[], parent: string | undefined, from: string) {
+    const origin = `https://${nestedLabelOf("abc")}.${DOMAIN}`;
+    const script = frameShellScript({
+      origins: [HOST, DESKTOP],
+      framedBy,
+      page: `${origin}/__porthole/f/x/`,
+    });
+    const posted: string[] = [];
+    const delivered: unknown[] = [];
+    const listeners: ((event: unknown) => void)[] = [];
+    const parentWindow = {
+      postMessage: (_message: unknown, target: string) => {
+        if (target !== "*" && !/^https?:\/\/[^/]+$/u.test(target)) {
+          throw new SyntaxError(`Invalid target origin '${target}'`);
+        }
+        posted.push(target);
+      },
+    };
+    const child = { postMessage: (message: unknown) => delivered.push(message), focus: () => {} };
+    const element = () => ({
+      setAttribute: () => {},
+      style: {},
+      contentWindow: child,
+      addEventListener: () => {},
+      focus: () => {},
+    });
+    const self: Record<string, unknown> = {};
+    Object.assign(self, {
+      parent: parentWindow,
+      addEventListener: (type: string, listener: (event: unknown) => void) => {
+        if (type === "message") {
+          listeners.push(listener);
+        }
+      },
+    });
+    runInNewContext(script, {
+      window: self,
+      location: {
+        origin,
+        hostname: new URL(origin).hostname,
+        ...(parent === undefined ? {} : { ancestorOrigins: [parent] }),
+      },
+      document: {
+        documentElement: { style: {} },
+        body: { style: {}, append: () => {} },
+        createElement: element,
+        hasFocus: () => false,
+        addEventListener: () => {},
+      },
+      navigator: {},
+      performance: { now: () => 0 },
+      requestAnimationFrame: () => 0,
+      setTimeout: () => 0,
+      setInterval: () => 0,
+      clearTimeout: () => {},
+      addEventListener: self.addEventListener,
+      fetch: () => new Promise(() => {}),
+      URL,
+    });
+    // The page says something (its child window is the source), then the parent says something.
+    for (const listener of listeners) {
+      listener({
+        source: child,
+        origin: "null",
+        data: { jsonrpc: "2.0", method: "ui/ping", id: 1 },
+      });
+      listener({
+        source: parentWindow,
+        origin: from,
+        data: { jsonrpc: "2.0", method: "ui/notifications/host-context-changed", params: {} },
+      });
+    }
+    return { posted, delivered };
+  }
+
+  it("a nested page's shell: the outer page as its parent hears no * and its words never reach the page", () => {
+    const strict = shellSaid([DECK], DECK, DECK);
+    expect(strict.posted).not.toContain("*");
+    expect(strict.posted.length).toBeGreaterThan(0);
+    expect(strict.delivered, "the outer page's word reached the page").toEqual([]);
+    // The host's own word goes on, and a desktop parent named so still hears *.
+    const desktop = shellSaid([DECK], DESKTOP, HOST);
+    expect(desktop.posted).toContain("*");
+    expect(desktop.delivered).toHaveLength(1);
+    // The control: without framedBy the shell says * to a parent it can't place (the old rule).
+    expect(shellSaid([], DECK, HOST).posted).toContain("*");
+  });
+
+  it("a content Worker's door and status pages tell the hosts alone", async () => {
+    const said = (
+      await doorResponse({ hostOrigins: [HOST, DESKTOP], framedBy: [DECK] }).text()
+    ).match(/data-porthole-[a-z-]+/gu);
+    expect(said).toContain("data-porthole-strict-parent");
+    expect(FRAME_STATUS_METHOD).toBe("porthole/notifications/frame-status");
+  });
+});
+
+describe("the host kit passes framedBy on (P141)", () => {
+  const kit = (framedBy?: readonly string[]) =>
+    createContentHost<{ id: string }>({
+      domain: DOMAIN,
+      appOrigins: [HOST],
+      ...(framedBy === undefined ? {} : { framedBy }),
+      secret,
+      configs: { artifact: configs.artifact },
+      instance: () => null,
+      access: () => null,
+      entry: {
+        at: () => null,
+        handoff: { id: (viewer: { id: string }) => viewer.id, viewer: () => null },
+      },
+      name: { label: (scope: string) => `a-${scope}`, scopeOf: (label: string) => label.slice(2) },
+    } as unknown as Parameters<typeof createContentHost<{ id: string }>>[0]);
+
+  it("its content and its authorize route's pages may be framed below the outer page; the handoff stays the app's", async () => {
+    const host = kit([DECK]);
+    const page = await host.authorize(() => null)(
+      new Request(`${HOST}/porthole/authorize?state=nope`, {
+        headers: { "sec-fetch-dest": "iframe" },
+      }),
+    );
+    expect(ancestorsOf(page)).toEqual([HOST, DECK]);
+    expect(await page.text()).not.toContain("deck.example.net");
+    const handoff = await host.handoff(() => ({ id: "ada" }))(
+      new Request(`${HOST}/porthole/handoff`, { method: "POST", headers: { origin: DECK } }),
+    );
+    expect(handoff.status, "the outer page hands no viewer over").toBe(403);
+    const own = await host.handoff(() => ({ id: "ada" }))(
+      new Request(`${HOST}/porthole/handoff`, { method: "POST", headers: { origin: HOST } }),
+    );
+    expect(own.status, "the app's own page still does").toBe(204);
+    const content = await host.fetch(ask(`https://a-x.${DOMAIN}/nothing`));
+    expect(ancestorsOf(content!)).toEqual([HOST, DECK]);
+  });
+
+  it("refuses a bad one as it refuses a bad app origin", () => {
+    expect(() => kit(["https://*.deck.example"])).toThrow(/framedBy/u);
+    expect(() => kit([HOST])).toThrow(/host origin already/u);
+  });
+});

@@ -78,6 +78,27 @@ export function hostOriginProblem(origin: unknown): string | null {
   return `${JSON.stringify(origin)} is not an exact origin (scheme://host[:port], lowercase, no path)`;
 }
 
+const LOOPBACK_HOST = (host: string): boolean =>
+  host === "localhost" || host.endsWith(".localhost") || host === "127.0.0.1" || host === "[::1]";
+
+/**
+ * Why `origin` can't be one of a host's `framedBy` (P141): an outer page that may be an
+ * ancestor of every frame the host shows, above the host's own page, and never a host origin. An
+ * exact web origin, `https://host[:port]` (lowercase, no path, no wildcard), or `http://` on
+ * loopback alone (`localhost`, `*.localhost`, `127.0.0.1`, `[::1]`) for development: never a
+ * desktop scheme, `"null"`, a CSP keyword or a list. Null if it can be.
+ */
+export function framedByProblem(origin: unknown): string | null {
+  const parsed = typeof origin === "string" && isHostOrigin(origin) ? parseOrigin(origin) : null;
+  if (
+    parsed === null ||
+    !(parsed.scheme === "https" || (parsed.scheme === "http" && LOOPBACK_HOST(parsed.host)))
+  ) {
+    return `${JSON.stringify(origin)} is not an exact https origin (https://host[:port], lowercase, no path; http only on loopback)`;
+  }
+  return null;
+}
+
 /**
  * Whether two hosts may be the same site. Without the public-suffix list this errs one way only:
  * it says "same site" whenever the hosts are equal or share their last two labels, so a pair it

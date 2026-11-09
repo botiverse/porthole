@@ -745,6 +745,15 @@ nodeServer({ content, app: async (request) => (await routes(request)) ?? app(req
 - **`Response.redirect` needs an absolute URL** outside a browser (Node throws on `/login`).
 - **`reserved`** is only for labels your app itself serves on the content domain (previews of a
   dev server, `p-*`). Labels nothing serves need nothing: they are a 404 there.
+- **`framedBy`** (P141): where another app frames yours (a dashboard that embeds your app in an
+  iframe), its origins: `framedBy: ["https://dashboard.example.com"]`. `frame-ancestors` names every
+  ancestor, so without it each of your frames is blank inside that app. Each may then be an
+  ancestor of every frame Porthole serves, after `appOrigins`, and is never a host: no frame hears
+  or tells it, it isn't in `data-porthole-hosts`, and redirect entry and the handoff stay
+  `appOrigins`' alone. Exact https origins (`http://` on loopback), none an app origin. Your own
+  page between them is still the frame's parent, and its `frame-ancestors` is yours to set. A
+  content Worker of your own passes the same list to `statusPage`, `doorResponse`,
+  `doorStatusResponse` and `nestedShellResponse` (`framedBy`).
 - **No content domain** (self-hosted without one): still make the host, with `domain: null` (or
   `""`). That is the supported setup: no secret is needed, `GET /porthole/meta` answers
   `{ served: false }`, and pages show every kind opaque (a url kind, its fallback) instead of
@@ -919,7 +928,7 @@ no frame), `nestedShellResponse` throws for another origin, and the shell runs n
 
 | Request | Answer |
 | --- | --- |
-| `<origin>/__porthole/d/<key>`, the framed address (a ticket's, a cookie's reload; an entered clean address on the scope's label answers a `303` here with a one-time ticket), a navigation | 200, `text/html`: Porthole's shell, `nestedShellResponse(compiled, { origin, origins: hostOrigins, page: "<origin>/__porthole/f/<token>/<entry>", renew: { url: "<origin>/__porthole/f/<token>/__porthole/renew", expires } })`. Headers: `Content-Security-Policy: default-src 'none'; script-src 'sha256-<its script>'; frame-src <origin>/__porthole/f/; connect-src <origin>/__porthole/f/; base-uri 'none'; form-action 'none'; frame-ancestors <host origins>`; `Cache-Control: no-store`; `Referrer-Policy: no-referrer`; `X-Content-Type-Options: nosniff`; the served `Permissions-Policy`. No content in it. Any other request there: 404. |
+| `<origin>/__porthole/d/<key>`, the framed address (a ticket's, a cookie's reload; an entered clean address on the scope's label answers a `303` here with a one-time ticket), a navigation | 200, `text/html`: Porthole's shell, `nestedShellResponse(compiled, { origin, origins: hostOrigins, framedBy, page: "<origin>/__porthole/f/<token>/<entry>", renew: { url: "<origin>/__porthole/f/<token>/__porthole/renew", expires } })`. Headers: `Content-Security-Policy: default-src 'none'; script-src 'sha256-<its script>'; frame-src <origin>/__porthole/f/; connect-src <origin>/__porthole/f/; base-uri 'none'; form-action 'none'; frame-ancestors <host origins> <framedBy>`; `Cache-Control: no-store`; `Referrer-Policy: no-referrer`; `X-Content-Type-Options: nosniff`; the served `Permissions-Policy`. No content in it. Any other request there: 404. |
 | `<origin>/__porthole/f/<token>/<page>` (the shell's child, or a tab) | The page as served before (the shell's runtime and the page), its plan's `origins` the content origin alone (`[<origin>]`) and its storage `memory`. `Content-Security-Policy`: `nestedFileCsp("page", fileSetCspDirectives(compiled.cspDirectives, "<origin>/__porthole/f/"))` then `; frame-ancestors ` and `nestedAncestors("<origin>", "<host origins>")`: the page's directives, its files' prefix opened, and `sandbox allow-scripts` (never `allow-same-origin`). Access from `<token>` alone: no cookie is sent (the page's origin is opaque), and never decide by `Origin` (it is `null`) or `Sec-Fetch-Site` (`cross-site`). |
 | `<origin>/__porthole/f/<token>/<file>` (the page's loads) | As served files are, plus `Cross-Origin-Resource-Policy: cross-origin` and `Access-Control-Allow-Origin: *` (`NESTED_FILE_HEADERS`): the opaque page's images, scripts, modules, fonts and fetches are cross-origin. Every one carries a CSP sandbox, never `allow-same-origin` (`nestedFileCsp(fileTypeOf(path).role, directives)`, then the `frame-ancestors` above): a non-page file `default-src 'none'; sandbox`, a script its directives plus `sandbox`, so none opened on a tab of its own (an SVG, an XML file) runs on the shell's origin. |
 | `<origin>/__porthole/f/<token>/__porthole/renew` | Only the shell's own fetch (`Sec-Fetch-Site: same-origin`, not a navigation): `{ "base": "<origin>/__porthole/f/<new token>/", "expires": <epoch ms> }`, `no-store`; anything else 403. The shell renews 5 minutes before `expires` and moves the page to the new base. |
@@ -1145,8 +1154,8 @@ A **content Worker of your own** (one that answers the content origins itself, i
 `/server`) serves the door too: `issue` mints the door ticket and returns `door: { url }`, and the
 Worker routes `DOOR_PATH + <key>` (`/__porthole/door/<key>`) on every label — take the door ticket
 (`TicketRecord.door === true`, bound to the label and key), run the same access, document and entry
-checks the content route runs for that grant, then answer `doorResponse({ hostOrigins })` (open) or
-`doorStatusResponse({ status, reason, code?, hostOrigins })` (401 `session` / 403 `denied` / 404
+checks the content route runs for that grant, then answer `doorResponse({ hostOrigins, framedBy })` (open) or
+`doorStatusResponse({ status, reason, code?, hostOrigins, framedBy })` (401 `session` / 403 `denied` / 404
 `not-found` / 500 `error`). Refuse a door ticket at `/__porthole/d/`, and serve no door on a nested
 page's shell label. `DOOR_PATH`, `doorResponse` and `doorStatusResponse` are exported from
 `@botiverse/porthole/server`.
