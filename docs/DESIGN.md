@@ -1047,7 +1047,7 @@ chooses), and the annotation runtime is in the shell only then.
 
 | Direction | Message | Params |
 |-----------|---------|--------|
-| host → frame | `porthole/annotate.start` | `{ elements, text }`: picking elements (the one under the pointer or finger outlined with its name; a click or tap picks it, never reaching the content; Escape cancels; one pick), selecting text (each settled selection), or both (a click picks, a drag selects) |
+| host → frame | `porthole/annotate.start` | `{ elements, text, keepSelection? }`: picking elements (the one under the pointer or finger outlined with its name; a click or tap picks it, never reaching the content; Escape cancels; one pick), selecting text (each settled selection), or both (a click picks, a drag selects); `keepSelection: true` (absent otherwise): the host follows what is selected, so the frame keeps it, and a pick's outline, for a follow asked after `selected` (P140) |
 | host → frame | `porthole/annotate.stop` | — |
 | host → frame | `porthole/annotate.show` | `{ marks: [{ id, anchor, count?, kind? }], active? }`: drawn over the content in the shell's own layer (a closed shadow root), found again whenever the content changes; a mark with a `count` (0 to 999; the host clamps a larger one, P116) also gets a marker (P104); `kind: "draft"` (absent: posted) is drawn apart, with a marker and never a count (P107) |
 | host → frame | `porthole/annotate.focus` | `{ id }`: scrolled into view inside the frame, made the active mark, flashed |
@@ -1060,7 +1060,7 @@ chooses), and the annotation runtime is in the shell only then.
 | frame → host | `porthole/annotate.anchored` | `{ results: [{ id, state: "attached" \| "orphaned", rect?, documentRect?, lastLineDocumentRect?, order? }], scroll? }` (a newer shell's `documentRect` and `scroll`: P132, below; `lastLineDocumentRect`: P133, never without `scroll`, P137): every mark after `show`, the one after `focus`, every mark when the content changed a state, and, while any mark has a marker (a `count` or a draft, P107), once a scroll, a resize or a run of content changes has settled (150 ms quiet), only the marks that moved more than 0.5 px since the host was last told, at most one a second together with the selection's (P104, P105) |
 | host → frame | `porthole/annotate.track` | `{ id }` or `{ id: null }`: follow one shown mark, or none (P112); `{ id: null, selection: true }`: follow the selection last reported as `selected` instead, and highlight it while followed (P138; an older shell reads it as none) |
 | frame → host | `porthole/annotate.tracked` | `{ id, rect, documentRect?, lastLineDocumentRect?, scroll? }`: the followed mark's box at an animation frame where it moved, at most one every 16 ms; the host takes 60 a second, for that mark only (P112); a newer shell adds its place in the document and the document's scroll (P132), and its last line's (P133, never without the scroll, P137) |
-| frame → host | `porthole/annotate.selectionTracked` | `{ state: "attached", rect, documentRect, lastLineDocumentRect?, scroll, inView }` or `{ state: "orphaned" }`: the followed selection's boxes, as `tracked`'s, at an animation frame where it moved or the viewport changed size, at most one every 16 ms, the first at the frame after the host asks; `orphaned` once while it isn't in the page (or the frame has no selection), found again by its anchor at most twice a second; the host takes it only while it follows the selection, 60 a second with `tracked`, its `rect` clamped, `inView` false unless its box as read reaches the viewport (P138) |
+| frame → host | `porthole/annotate.selectionTracked` | `{ state: "attached", rect, documentRect, lastLineDocumentRect?, scroll, inView }` or `{ state: "orphaned" }`: the followed selection's boxes, as `tracked`'s, at an animation frame where it moved or the viewport changed size, at most one every 16 ms, the first at the frame after the host asks; `orphaned` once while it isn't in the page (or the frame has no selection), found again by its anchor at most twice a second; the host takes it only while it follows the selection (otherwise dropped unread, no refusal, P140), 60 a second with `tracked`, its `rect` clamped, `inView` false unless its box as read reaches the viewport (P138) |
 | frame → host | `porthole/annotate.activated` | `{ id, rect }`: the person clicked a mark's marker, or pressed Enter or Space on it (P133); `rect` is the marker's (P104); taken only while the host's page has transient activation (P105) |
 
 - **Anchors** are W3C Web Annotation selectors, at most one of each:
@@ -1098,7 +1098,8 @@ chooses), and the annotation runtime is in the shell only then.
   of the words' client rects, the box a text marker's place starts from; an element,
   which has no lines of its own, gives its whole box. Its place in the frame's viewport
   is it less `scroll`. Absent from an older shell, and where nothing of it is drawn.
-- **The selection followed** (P138). The shell keeps what each `selected` reported: the
+- **The selection followed** (P138, P140). For a host that follows the selection, or said at
+  `start` that it will (`keepSelection`), the shell keeps what each `selected` reported: the
   element picked (a click, or a block held), or a copy of the selection's range (the
   DOM's own `cloneRange`, taken before content runs), which the page's changes keep up to
   date and which stays when the page's own selection goes (the host's `clearSelection`
@@ -1110,13 +1111,17 @@ chooses), and the annotation runtime is in the shell only then.
   the viewport). Taken out of the page, it is `orphaned` once, and found again by its
   anchor as a mark is. It reads boxes only: no focus moves, no selection changes, no
   listener is added, and nothing about the words goes with it (they went with
-  `selected`). A newer `selected` replaces it, followed from the next frame. Before the host
-  follows it, the element just picked keeps an outline drawn the same way, so nothing changes on
-  screen when the follow takes over; without a follow it ends as a selection does (the next pick or
-  selection, `clearSelection`, `start`, `stop`, `clear`, Escape, the element leaving the page), on
-  no timer (Tenny's review). While followed, a scroll re-sends no `selected` (P105's follow-up):
+  `selected`). A newer `selected` replaces it, followed from the next frame. For any other host
+  nothing is kept and a pick's outline goes with the pick, as before P138; the end of a following
+  lets the kept selection go unless `keepSelection` holds (P140). Under `keepSelection`, before the
+  host follows it, the element just picked keeps an outline drawn the same way, so nothing changes
+  on screen when the follow takes over; until a follow it ends as a selection does (the next pick
+  or selection, `clearSelection`, `start`, `stop`, `clear`, Escape, the element leaving the page),
+  on no timer (Tenny's review). While followed, a scroll re-sends no `selected` (P105's follow-up):
   once the following ends, it does again. The React binding sends the following before a mode
-  change made in the same render.
+  change made in the same render, and starts the mode with `keepSelection` while
+  `trackedSelection` is given (P140). The host drops a `selectionTracked` unread, before parsing
+  it, while it follows no selection (P140).
 - **Markers** (P104). A mark with a `count` gets a bubble glyph and its number ("99+"
   above 99; 0 the bubble alone), a real button (P133, below), on an element's top right
   corner, inside the frame's width, and at the end of a text anchor's paragraph (P133):
@@ -1610,7 +1615,7 @@ control the tables above name to the registry):
 | `comments-in-frame` | `served/runtime.spec.ts` | `comments.open while the person types in the host's composer reaches no handler, by the page's own call or the shell's; from a press in the frame it does` | — | — |
 | `cancel-any-mode` | `annotate.spec.ts` | `Escape while selecting text is cancelled, and stays the page's key; with no mode on, a page's own cancel isn't heard (P112)`, `a hostile page fakes reports: the host takes none it didn't ask for, nothing malformed, and not a flood` | — | — |
 | `track-checks` | `annotate.spec.ts` | `a followed mark's box comes as it moves, for that mark only, at most 60 a second, clamped to the frame, until the host stops (P112)` | — | — |
-| `track-selection-checks` | `annotate.spec.ts` | `a followed selection's place comes as it moves, highlighted, out of view and back, gone and found again, only while the host follows it, at most 60 a second (P138)` | — | — |
+| `track-selection-checks` | `annotate.spec.ts` | `a followed selection's place comes as it moves, highlighted, out of view and back, gone and found again, only while the host follows it, at most 60 a second (P138)`, `without keepSelection or a follow, a pick's outline goes with the pick and nothing is kept: a follow asked after it has nothing, one asked before it follows it; a page's malformed word is no refusal (P140)` | — | — |
 | `order-check` | `annotate.spec.ts` | `every found mark's place in the document comes with its box, offscreen ones too; a place that isn't one is no report (P112)` | — | — |
 | `hold-click` | `annotate.spec.ts` | `holding a block 500 ms selects it and its release's click never reaches the page; a tap, a moving finger and a mouse are the page's (P112)` | — | — |
 | `clear-selection` | `annotate.spec.ts` | `clearSelection takes the page's selection away and tells nothing back; marks and drafts stay, the next selection is told (P115)` | — | — |

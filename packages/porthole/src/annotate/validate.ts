@@ -339,10 +339,19 @@ export function parseReport(value: unknown): AnnotationReport | null {
   }
 }
 
-/** What the host may start with: elements, text, or both (default both). */
-export function annotateMode(mode: AnnotateMode | undefined): Required<AnnotateMode> {
+/** A mode as the frame gets it: `keepSelection` only where it is true (P140). */
+export type StartedMode = Required<Omit<AnnotateMode, "keepSelection">> & {
+  readonly keepSelection?: true;
+};
+
+/**
+ * What the host may start with: elements, text, or both (default both); and whether it follows
+ * what is selected (`keepSelection`, P140).
+ */
+export function annotateMode(mode: AnnotateMode | undefined): StartedMode {
   const elements = mode?.elements ?? true;
   const words = mode?.text ?? true;
+  const keep = mode?.keepSelection ?? false;
   if (
     (typeof elements !== "boolean" && elements !== "hold") ||
     typeof words !== "boolean" ||
@@ -350,7 +359,10 @@ export function annotateMode(mode: AnnotateMode | undefined): Required<AnnotateM
   ) {
     throw new TypeError("annotations.start: elements, text, or both");
   }
-  return { elements, text: words };
+  if (typeof keep !== "boolean") {
+    throw new TypeError("annotations.start: keepSelection is true or false");
+  }
+  return { elements, text: words, ...(keep ? { keepSelection: true } : {}) };
 }
 
 /**

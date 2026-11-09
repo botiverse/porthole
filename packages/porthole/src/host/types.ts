@@ -300,7 +300,11 @@ export interface FindControls {
  * given to every frame the display runs (a reload, a navigation recovered from).
  */
 export interface AnnotationControls {
-  /** Lets the person point at elements, select text, or both (default both). */
+  /**
+   * Lets the person point at elements, select text, or both (default both). With
+   * `keepSelection: true` (P140) the frame keeps what is selected for `track({ selection: true })`;
+   * without it, nothing is kept and a pick's outline goes with the pick.
+   */
   start(mode?: AnnotateMode): void;
   stop(): void;
   /** Marks these anchors (replacing the marks before); the frame reports where they are. */
@@ -320,14 +324,17 @@ export interface AnnotationControls {
    * highlights it while it is followed (an element in the outline it had while it was picked) and
    * reports `{ type: "selectionTracked", ... }` with the same boxes as `tracked` and `inView`, or
    * `state: "orphaned"` while it isn't in the page; at most 60 a second together with `tracked`.
-   * A `show` leaves it, and `stop` (or a pick ending) too: it ends with `track(null)`, `track(id)`
+   * The frame keeps a selection to follow only for a host that said so at `start`
+   * (`keepSelection`, P140), or one that already follows the selection as it is made: without
+   * either, a follow asked after `selected` has nothing to follow and answers `orphaned`. A `show`
+   * leaves it, and `stop` (or a pick ending) too: it ends with `track(null)`, `track(id)`
    * or `clear` (comment posted, composer dismissed, Escape in it), and the highlight with it. A
    * newer shell answers at its next animation frame; an older one sends nothing (it reads the
    * message as `track(null)`), so until a `selectionTracked` comes, place by `selected`'s boxes.
-   * Kept for a frame that runs later, which has no selection: it answers `orphaned`. The element
-   * just picked stays outlined until then, so call it before a `start` or `stop` sent with it (a
-   * stop ends that outline); while followed, `selected` isn't re-sent after a scroll (Tenny's
-   * review).
+   * Kept for a frame that runs later, which has no selection: it answers `orphaned`. Under
+   * `keepSelection` the element just picked stays outlined until then, so call it before a `start`
+   * or `stop` sent with it (a stop ends that outline); while followed, `selected` isn't re-sent
+   * after a scroll (Tenny's review).
    */
   track(target: AnnotationTrackTarget): void;
   /** Removes every mark. */

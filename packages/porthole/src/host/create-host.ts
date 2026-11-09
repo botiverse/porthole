@@ -1,9 +1,4 @@
-import {
-  ANNOTATE_METHODS,
-  type AnnotateMode,
-  type AnnotationMark,
-  type AnnotationReport,
-} from "../annotate/types.ts";
+import { ANNOTATE_METHODS, type AnnotationMark, type AnnotationReport } from "../annotate/types.ts";
 import {
   annotateMode,
   checkMarks,
@@ -12,6 +7,7 @@ import {
   hasMarker,
   inViewport,
   parseReport,
+  type StartedMode,
 } from "../annotate/validate.ts";
 import { FIND_LIMITS, FIND_METHODS, type FindReport, type FindResult } from "../find/types.ts";
 import { blankQuery, checkFindQuery, parseFindReport, parseFindResult } from "../find/validate.ts";
@@ -234,7 +230,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       const replay = new Map<string, unknown[]>();
       // Annotations: the host's state, given to each frame once it finished its handshake.
       const annotates = config.capabilities.annotate !== undefined;
-      let annotating: Required<AnnotateMode> | null = null;
+      let annotating: StartedMode | null = null;
       let marks: AnnotationMark[] = [];
       let activeMark: string | null = null;
       // The mark the host follows (P112), or whether it follows the selection instead (P138), and
@@ -452,6 +448,12 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         if (type === undefined) {
           return;
         }
+        // The followed selection (P138) only while the host follows it, and dropped unread
+        // otherwise (P140): a host that doesn't follow it takes it as 0.14.14 took a method it
+        // didn't know, so a malformed one is no refusal either.
+        if (type === "selectionTracked" && !trackingSelection) {
+          return;
+        }
         let report = parseReport({ ...(isRecord(raw.params) ? raw.params : {}), type });
         if (report === null) {
           void through.call("annotate", null);
@@ -476,12 +478,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           emit("annotation", withinFrame(report));
           return;
         }
-        // The followed selection (P138): only while the host follows it, on the same 60 a second
-        // (one followed thing at a time), past the bridge's rate as the followed mark's.
+        // The followed selection (P138): only while the host follows it (above), on the same 60 a
+        // second (one followed thing at a time), past the bridge's rate as the followed mark's.
         if (report.type === "selectionTracked") {
-          if (!trackingSelection) {
-            return;
-          }
           const at = Date.now();
           while (trackedTimes.length > 0 && at - (trackedTimes[0] as number) >= 1_000) {
             trackedTimes.shift();
@@ -504,7 +503,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             }
             // A pick ends with it; holding a block (P112) lasts until the host stops it.
             if (kind === "element" && annotating.elements === true) {
-              annotating = annotating.text ? { elements: false, text: true } : null;
+              annotating = annotating.text ? { ...annotating, elements: false } : null;
             }
             break;
           }
@@ -520,7 +519,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
               return;
             }
             if (annotating.elements === true) {
-              annotating = annotating.text ? { elements: false, text: true } : null;
+              annotating = annotating.text ? { ...annotating, elements: false } : null;
             }
             break;
           case "anchored": {

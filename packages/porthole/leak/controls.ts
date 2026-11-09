@@ -680,11 +680,13 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "a followed mark's box comes as it moves, for that mark only, at most 60 a second, clamped to the frame, until the host stops (P112)",
     ),
   },
-  // A followed selection's place only while the host follows it, at most 60 a second (P138).
+  // A followed selection's place only while the host follows it, at most 60 a second (P138), and
+  // unread while it doesn't (P140).
   "track-selection-checks": {
     specs: [ANNOTATE],
     fails: all(
       "a followed selection's place comes as it moves, highlighted, out of view and back, gone and found again, only while the host follows it, at most 60 a second (P138)",
+      "without keepSelection or a follow, a pick's outline goes with the pick and nothing is kept: a follow asked after it has nothing, one asked before it follows it; a page's malformed word is no refusal (P140)",
     ),
   },
   // A mark's place is a whole number below the most marks (P112).

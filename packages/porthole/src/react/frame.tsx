@@ -680,7 +680,7 @@ export interface PortholeFrameProps {
   /**
    * Annotations, where the config declares `annotate` (P053): what the person may point at now
    * (elements, text, or both), or null to stop. A picked element ends element picking: set it
-   * again to pick again.
+   * again to pick again. `keepSelection` is set for you while `trackedSelection` is given (P140).
    */
   readonly annotating?: AnnotateMode | null;
   /**
@@ -716,6 +716,11 @@ export interface PortholeFrameProps {
    * thing at a time); false, or leaving it out, ends it and its highlight (the comment posted, the
    * composer dismissed, Escape in it), and `trackedAnnotation`'s mark is followed again. Until a
    * `selectionTracked` comes, place by `selected`'s boxes: an older shell sends none.
+   *
+   * Give it from the first render, `false` until the composer opens (P140): while it is given,
+   * `annotating` starts with `keepSelection`, so the frame keeps what is picked or selected (and
+   * the picked element outlined) for the follow. Left out, the frame keeps nothing, and a follow
+   * asked after the pick has nothing to follow (`orphaned`).
    */
   readonly trackedSelection?: boolean;
   /** The display's imperative calls (`PortholeFrameHandle`, P118): React 19's `ref` prop. */
@@ -1292,10 +1297,12 @@ function Mount({
         : JSON.stringify([focusedAnnotation]);
   // By value: the same marks given again don't mark them again.
   const annotations = useByValue(frame.annotations);
+  // Whether the selection is kept for a follow (P140): while `trackedSelection` is given.
+  const keep = annotating?.keepSelection === true || frame.trackedSelection !== undefined;
   const mode =
     annotating === undefined || annotating === null
       ? ""
-      : JSON.stringify([annotating.elements ?? true, annotating.text ?? true]);
+      : JSON.stringify([annotating.elements ?? true, annotating.text ?? true, keep]);
   useEffect(() => {
     const display = handle.current;
     if (annotates && display !== null) {
@@ -1337,12 +1344,16 @@ function Mount({
     if (!annotates || display === null) {
       return;
     }
-    const wanted = mode === "" ? null : (JSON.parse(mode) as [boolean, boolean]);
+    const wanted = mode === "" ? null : (JSON.parse(mode) as [boolean | "hold", boolean, boolean]);
     attempt(
       () =>
         wanted === null
           ? display.annotations.stop()
-          : display.annotations.start({ elements: wanted[0], text: wanted[1] }),
+          : display.annotations.start({
+              elements: wanted[0],
+              text: wanted[1],
+              ...(wanted[2] ? { keepSelection: true } : {}),
+            }),
       latest(),
     );
   }, [annotates, mode]);
@@ -1442,7 +1453,11 @@ function applyAnnotations(display: DisplayHandle, frame: PortholeFrameProps): vo
       display.annotations.focus(focused);
     }
     if (frame.annotating !== undefined && frame.annotating !== null) {
-      display.annotations.start(frame.annotating);
+      display.annotations.start(
+        frame.trackedSelection === undefined
+          ? frame.annotating
+          : { ...frame.annotating, keepSelection: true },
+      );
     }
   }, frame);
 }

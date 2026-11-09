@@ -660,14 +660,19 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "          if (false) {",
     },
   ],
-  // A followed selection's place (P138) taken whether the host follows the selection or not, at
-  // any rate.
+  // A followed selection's place (P138) taken whether the host follows the selection or not (read,
+  // so a malformed one is a refusal, P140), at any rate.
   "track-selection-checks": [
     {
       file: "src/host/create-host.ts",
-      find: "          if (!trackingSelection) {\n            return;\n          }\n          const at = Date.now();\n          while (trackedTimes.length > 0 && at - (trackedTimes[0] as number) >= 1_000) {\n            trackedTimes.shift();\n          }\n          if (trackedTimes.length >= TRACKED_PER_SECOND) {",
+      find: '        if (type === "selectionTracked" && !trackingSelection) {\n          return;\n        }\n',
+      replace: "",
+    },
+    {
+      file: "src/host/create-host.ts",
+      find: '        if (report.type === "selectionTracked") {\n          const at = Date.now();\n          while (trackedTimes.length > 0 && at - (trackedTimes[0] as number) >= 1_000) {\n            trackedTimes.shift();\n          }\n          if (trackedTimes.length >= TRACKED_PER_SECOND) {',
       replace:
-        "          const at = Date.now();\n          while (trackedTimes.length > 0 && at - (trackedTimes[0] as number) >= 1_000) {\n            trackedTimes.shift();\n          }\n          if (false) {",
+        '        if (report.type === "selectionTracked") {\n          const at = Date.now();\n          while (trackedTimes.length > 0 && at - (trackedTimes[0] as number) >= 1_000) {\n            trackedTimes.shift();\n          }\n          if (false) {',
     },
   ],
   // A mark's place in the document (P112) taken as the page gives it: any number at all.

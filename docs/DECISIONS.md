@@ -8288,7 +8288,7 @@ of the host's, like the rest of the exception. No code changes.
 seen moving on inside 100 ms; a platform gives frames a clock that is shared and monotonic; or the
 parked word's own age should count.
 
-## P138 · 2026-11-08 · The selection followed: a composer stays beside what it is for, and what was picked stays lit · Accepted
+## P138 · 2026-11-08 · The selection followed: a composer stays beside what it is for, and what was picked stays lit · Accepted; amended by P140
 
 Amends P112 (`track` follows the selection too) and P118 (`trackedSelection`). From a Raft user's
 report, Kirby's design.
@@ -8530,3 +8530,96 @@ control: it is no defense.
 **Revisit when** a tab gets a host of its own (an opener that answers, a web view's native bridge),
 which would need it asked; or a tool needs to know more of the shell's state than its handshake
 (the page drawn, its scripts run), for which this attribute is no model.
+
+
+## P140 · 2026-11-09 · A pick stays lit, and a selection kept, only for a host that follows it (`keepSelection`) · Accepted
+
+Amends P138 (its decision 2 and Tenny's "no gap at pick time"). From Ferryman's audit of 0.14.15.
+
+**Context.** P138 changed what every host's people see, not only a host that follows the selection.
+After a pick the shell kept the element outlined until the next pick or selection,
+`clearSelection`, `start`, `stop`, `clear`, Escape or the element leaving the page, and kept every
+`selected` (the element, or a copy of the range) in memory until the next. A host that never calls
+`track({ selection: true })` got that too: on Chromium and Firefox the outline was still there 2 s
+after the pick, where 0.14.14 took it away with the pick. The outline is in the layer's closed
+shadow root and takes no pointer, so the page could neither read it nor be clicked through it; but
+it is a change to the default path that a host didn't ask for, which CHANGELOG, ADOPTING and P138
+named and THREAT_MODEL §7 didn't. Two smaller findings with it: a host that follows no selection
+parsed a page's `selectionTracked` before dropping it, so a malformed one became an
+`annotate:invalid` refusal where 0.14.14 ignored the method unread; and ADOPTING said in one
+place that a pick's outline goes with it and later that it stays.
+
+The outline and the kept selection exist for one thing: a follow that comes after `selected`
+(the host opens its composer on the report, then asks). The shell can't tell at pick time whether
+that follow will come, and the host can: it knows whether it follows selections at all.
+
+**Decision.**
+
+1. **`start` says whether the host follows what is selected:** `annotations.start({ ...,
+   keepSelection: true })`, on the wire `porthole/annotate.start` with `keepSelection: true` (absent
+   when false; `annotateMode` throws for a value that isn't a boolean). It holds until the next
+   `start`, and is kept with the mode for a frame that runs later and past a pick that leaves text
+   selection on. A `stop` leaves it, so a stop sent as a composer opens doesn't take the selection
+   away before the follow arrives.
+2. **The shell keeps a selection only while the host follows the selection, or said at its last
+   `start` that it will.** Otherwise a `selected` keeps nothing (P138's `held` stays null), a pick's
+   outline goes with the pick (`picked` is set only under `keepSelection`), and the end of a
+   following lets the kept selection go. That is 0.14.14's behaviour, exactly: the same draw at the
+   pick, nothing in memory after it. Under `keepSelection` everything is as P138 has it: the
+   outline until the follow takes it over or the pick ends as a selection does, the selection kept
+   for a follow asked after `selected`.
+3. **A follow asked before the pick needs no option.** While the host follows the selection, each
+   `selected` is kept and followed from the next frame, as P138 has it; the highlight is drawn at
+   the pick, in the same draw, so there is no gap either.
+4. **React** starts the mode with `keepSelection` while `trackedSelection` is given (true or false),
+   from the first render: `trackedSelection={composerOpen}` is the shape it documents. A host that
+   gives `annotating` a `keepSelection` of its own keeps it too.
+5. **`createHost` drops `selectionTracked` unread while it follows no selection**, before parsing
+   it: no report, no refusal, as 0.14.14 dropped a method it didn't know. While it follows, a
+   malformed one is refused as before.
+
+**Versions.** A newer host with a 0.14.15 shell: the shell ignores `keepSelection` and keeps every
+pick lit, as it does now. A newer host with an older shell: nothing changes (no follow there). A
+0.14.15 host that follows the selection after `selected`, with a newer shell: it never says
+`keepSelection`, so the shell has nothing to follow and answers `orphaned`. The composer stays
+where `selected` put it, as with an older shell, until the host upgrades (or asks for the follow
+before the pick). 0.14.15 is a day old; the CHANGELOG says to upgrade the host with the content
+server.
+
+**Not a loosening.** It narrows P138: less is drawn and less is kept for a host that doesn't follow,
+and a page's word is read by fewer hosts. No CSP, sandbox, egress or gate change. The page reads
+`keepSelection` (it shares the shell's realm, P053), so it learns that the host follows selections,
+which is a property of the host's UI, not of anything the person did, and which it learns from the
+first `track` anyway. Negative control `track-selection-checks` now also takes out the unread drop,
+with the rate.
+
+**Rejected.**
+- *Tying it to the following alone* (keep and outline only while `track({ selection: true })` is
+  on, and no option): the host's documented order, P138's sample and React's `trackedSelection`
+  ask for the follow after `selected`, which would then always find nothing. Every following host
+  would have to follow from before the pick, and get `orphaned` reports while nothing is picked:
+  a change to how 0.14.15's hosts call it, where `keepSelection` is one field at `start`. Point 3
+  keeps that order working for a host that prefers it.
+- *A timer* (keep the pick for a second): P138 chose no timer, and the auditor's 2 s measure would
+  still see it.
+- *The anchor sent back with `track`, found again by the shell*: no state in the frame, but the
+  gap at pick time returns, and a found anchor can be another element than the one picked.
+- *`keepPick`* (the auditor's name): what is kept is the words selected too.
+
+**Tested.** `test/annotate.test.ts`: `annotateMode` with `keepSelection` (only where true, a
+non-boolean throws); through `createHost`, `start` sends it only where asked and keeps it for a
+later frame past a pick; "not following the selection, a selectionTracked is dropped unread…": five
+malformed reports and a good one, no refusal and no report, again after a following ended, and a
+refusal for the same malformed one while followed; in the shell's runtime, kept only while
+followed or kept (`keeps()`), `start` setting it and letting go, `holdSelected` keeping nothing
+otherwise, the outline set only under it, a following's end letting go, `stop` leaving it.
+`leak/annotate.spec.ts` "without keepSelection or a follow, a pick's outline goes with the pick and
+nothing is kept…" (Chromium and Firefox here): no outline at the pick and 2 s on; a page's
+malformed `selectionTracked` no refusal; a follow asked after the pick `orphaned`, nothing drawn; a
+follow asked before the pick attached and lit, and let go with its end; words selected without it
+`orphaned` too. P138's browser tests now start with `keepSelection` where they follow after
+`selected` (the outline, the follow, the scroll, the focus), and React's `trackedSelection` test
+gives it false from the first render.
+
+**Revisit when** a host needs the pick kept without following it (a host that draws its own
+highlight from `selected`), or a host is seen confused by `orphaned` after an upgrade.

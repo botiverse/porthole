@@ -900,9 +900,11 @@ test("trackedSelection follows the picked element through onAnnotation's `select
       trackedAnnotation: "c1",
       ...more,
     });
+  // Given from the first render, false until the composer opens (P140): so the frame keeps the pick
+  // for the follow (React starts the mode with keepSelection), which it otherwise wouldn't.
   await open(page, {
     provider: "default",
-    frames: [notes({ annotating: { elements: true, text: false } })],
+    frames: [notes({ annotating: { elements: true, text: false }, trackedSelection: false })],
   });
   const inside = frameOf(page, "notes");
   await expect(inside.locator("#near")).toBeVisible();
@@ -937,7 +939,10 @@ test("trackedSelection follows the picked element through onAnnotation's `select
   expect((await of("tracked")).length, "the mark isn't followed meanwhile").toBe(marks);
 
   // It closes: no more of the selection, and the mark is followed again.
-  await open(page, { provider: "default", frames: [notes({ annotating: null })] });
+  await open(page, {
+    provider: "default",
+    frames: [notes({ annotating: null, trackedSelection: false })],
+  });
   await page.waitForTimeout(300);
   const closed = (await of("selectionTracked")).length;
   await scroll(-20);

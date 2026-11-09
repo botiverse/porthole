@@ -17,6 +17,22 @@ P-numbers below.
   page's word, never a gate. Upgrade the content server for it.
 - **Security (P139):** no CSP, sandbox, egress, gate or message changes. On a tab the shell sent
   nothing before either (its parent is itself).
+- **Annotations: a pick stays lit only for a host that follows it (P140, Ferryman's audit of
+  0.14.15).** 0.14.15 kept every pick outlined after `selected`, and every selection in the frame's
+  memory, for every host, including one that never follows the selection. Now that happens only for
+  a host that says it follows what is selected: `annotations.start({ ..., keepSelection: true })`
+  (React does it for you while `trackedSelection` is given). Any other host gets 0.14.14's
+  behaviour: the outline goes with the pick, and the frame keeps nothing. A follow asked before the
+  pick follows it without the option. **If you follow the selection after `selected`** (0.14.15's
+  sample, and React with `trackedSelection`), start with `keepSelection: true`, or give
+  `trackedSelection` from the first render (`false` until the composer opens): without it a newer
+  content server has nothing to follow and answers `orphaned`, so upgrade the host with the content
+  server.
+- **Annotations: an unasked `selectionTracked` is no refusal (P140).** A host that follows no
+  selection drops it unread, as 0.14.14 did, instead of counting a malformed one as `invalid`.
+- **Security (P140):** a narrowing: less drawn and less kept for a host that doesn't follow, and a
+  page's word read by fewer hosts. No CSP, sandbox, egress or gate changes; control
+  `track-selection-checks` covers the unread drop too.
 
 ## 0.14.15
 
