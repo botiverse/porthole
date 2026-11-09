@@ -454,6 +454,35 @@ describe("8: a new page on the transport follows nothing the last one did", () =
     t.display.destroy();
   });
 
+  test("a navigation within the page's document (P142) is no new page: its watches go on", async () => {
+    const t = show(
+      presets.inlineWidget({ runtime: "1", capabilities: { db: {} } }),
+      declared({ db: {} }),
+      viewer("interact"),
+    );
+    const events = () =>
+      t.heard.filter((each) => "method" in each && each.method === "porthole/event").length;
+    await t.ask("ui/initialize", {});
+    await t.ask("porthole/call", {
+      capability: "db",
+      method: "watch",
+      args: { path: "n/a" },
+      watch: "w1",
+    });
+    const before = events();
+    t.say({
+      method: "porthole/navigating",
+      params: { url: "https://x/page.html#end", same: true },
+    });
+    await t.ask("porthole/call", {
+      capability: "db",
+      method: "set",
+      args: { path: "n/a", data: { v: 1 } },
+    });
+    expect(events()).toBe(before + 1);
+    t.display.destroy();
+  });
+
   test("the shell's watch ids are random", () => {
     const plan = shellPlan(presets.inlineWidget({ runtime: "1", capabilities: { db: {} } }));
     const runtimeText = composedRuntime(plan!);

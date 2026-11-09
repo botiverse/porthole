@@ -67,6 +67,7 @@ const notice = (url: string, more: Record<string, unknown> = {}) => ({
 });
 const leaving = (url: string) => notice(url, { set: SET });
 const arriving = (url: string, set: unknown = SET) => notice(url, { arrived: true, set });
+const stayed = (url: string, set: unknown = SET) => notice(url, { same: true, set });
 const call = { jsonrpc: "2.0", id: 7, method: "ui/open-link", params: { url: "https://x.test/" } };
 const hello = { jsonrpc: "2.0", id: "porthole-shell-1", method: "ui/initialize", params: {} };
 
@@ -238,6 +239,88 @@ describe("pages of a set (P098)", () => {
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     const each = display(null);
     each.raw.say(arriving("./about"));
+    each.raw.load();
+    expect(each.restarts()).toBe(1);
+  });
+});
+
+/**
+ * A navigation within a page's document (P142): WebKit fires the frame's load for the first one
+ * (a link to `#bottom`; measured on 18.2 and 26.6: no request, the document and its globals kept),
+ * after the frame's word on 26.6 and before it on 18.2. The page says it stayed (`same`).
+ */
+describe("a page that stayed (P142)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("takes a load as the page that stayed when its word comes before it or after it", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const before = display();
+    before.raw.say(stayed("./#bottom"));
+    before.raw.load();
+    vi.advanceTimersByTime(LATE_NOTICE_MS * 2);
+    expect(before.restarts()).toBe(0);
+    const after = display();
+    after.raw.load();
+    after.raw.say(call);
+    vi.advanceTimersByTime(LATE_NOTICE_MS - 1);
+    after.raw.say(stayed("./#bottom"));
+    expect(after.heard).toEqual([call, stayed("./#bottom")]);
+    vi.advanceTimersByTime(LATE_NOTICE_MS * 2);
+    expect(after.restarts()).toBe(0);
+  });
+
+  it("says so at every navigation within the page, the same address again too: each may come with a load", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const each = display();
+    for (let at = 0; at < 3; at += 1) {
+      each.raw.say(stayed("./#bottom"));
+      each.raw.load();
+      vi.advanceTimersByTime(LATE_NOTICE_MS * 2);
+    }
+    expect(each.restarts()).toBe(0);
+  });
+
+  it("is no word for a page to come: a load past LATE_NOTICE_MS waits, and starts the display again", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const each = display();
+    each.raw.say(stayed("./#bottom"));
+    vi.advanceTimersByTime(LATE_NOTICE_MS);
+    each.raw.load();
+    vi.advanceTimersByTime(LATE_NOTICE_MS);
+    expect(each.restarts()).toBe(1);
+  });
+
+  it("never shortens a page's word already given", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const each = display();
+    each.raw.say(leaving("./about"));
+    each.raw.say(stayed("./#bottom"));
+    vi.advanceTimersByTime(LATE_NOTICE_MS * 2);
+    each.raw.load();
+    vi.advanceTimersByTime(LATE_NOTICE_MS * 2);
+    expect(each.restarts()).toBe(0);
+  });
+
+  it("ends the wait at once, started again, for another version's page or one that won't say which", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    for (const word of [
+      stayed("./#bottom", { id: "site", version: "2" }),
+      stayed("./#bottom", null),
+      notice("./#bottom", { same: true }),
+    ]) {
+      const each = display();
+      each.raw.load();
+      each.raw.say(word);
+      expect(each.restarts(), JSON.stringify(word)).toBe(1);
+    }
+  });
+
+  it("in a display whose pages never come with files, a load after the first starts it again at once, as before", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const each = display(null);
+    each.raw.say(stayed("./#bottom"));
     each.raw.load();
     expect(each.restarts()).toBe(1);
   });

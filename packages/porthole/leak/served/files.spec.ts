@@ -451,6 +451,216 @@ s.onerror = () => { document.documentElement.dataset.script = "refused"; }; docu
   });
 });
 
+/** Two long pages: a link down each, links between them, and a mark only each document has. */
+const LONG = {
+  "index.html": `<!doctype html><title>Long</title><h1 id="title">Long</h1>
+<a id="down" href="#bottom">down</a> <a id="next" href="about">About</a>
+<div style="height: 3000px"></div><p id="bottom">the bottom</p>
+<script>window.kept = "this document";</script>`,
+  "about.html": `<!doctype html><title>About</title><main id="about">the about page</main>
+<a id="down" href="#end">down</a> <a id="back" href="./">back</a>
+<div style="height: 3000px"></div><p id="end">the end</p>
+<script>window.kept = "about";</script>`,
+};
+
+const kept = (frame: Frame) =>
+  frame.evaluate(() => (window as unknown as { kept?: string }).kept ?? "");
+
+/**
+ * A link down the page, on the entry (a ticket's answer) and on a page a link opened: the page
+ * scrolls, its document stays, and so does the display. WebKit (18.2 and 26.6, measured) fires the
+ * frame's load for the first navigation within a document, which the host took for content that
+ * left, and started the display again once its wait for a late notice was over (P142).
+ */
+async function linkDownThePage(page: Page, id: string, before?: (frame: Frame) => Promise<void>) {
+  await publish(id, "1", LONG);
+  const { frame, shown } = await showFiles(page, id, "1");
+  await before?.(frame);
+  const base = frame.url();
+  // What the frame says of its pages, heard on the host page before the host hears it.
+  await page.evaluate(() => {
+    const said: unknown[] = [];
+    (window as unknown as { said: unknown[] }).said = said;
+    window.addEventListener(
+      "message",
+      (event) => {
+        const data = event.data as { method?: unknown; params?: unknown } | null;
+        if (data?.method === "porthole/navigating") {
+          said.push(data.params);
+        }
+      },
+      true,
+    );
+  });
+  const said = () => page.evaluate(() => [...(window as unknown as { said: unknown[] }).said]);
+  const forget = () =>
+    page.evaluate(() => void (window as unknown as { said: unknown[] }).said.splice(0));
+  const down = async (to: string, what: string) => {
+    await forget();
+    await clickIn(frame, "#down", `the link down ${what} was there to follow`);
+    await expect
+      .poll(() => frame.evaluate(() => window.scrollY), { message: "probe: the page scrolled" })
+      .toBeGreaterThan(1000);
+    expect(frame.url(), `probe: the frame is at ${what}'s end`).toBe(to);
+    // No page change is announced: only that the page stayed (popstate, hashchange), there.
+    await expect
+      .poll(async () => (await said()).length, { message: "probe: the frame said its page stayed" })
+      .toBeGreaterThan(0);
+    await page.waitForTimeout(300);
+    expect(await said(), "probe: the frame said only that its page stayed").toEqual(
+      (await said()).map(() =>
+        expect.objectContaining({ url: expect.stringMatching(/#/u), same: true }),
+      ),
+    );
+  };
+  await down(`${base}#bottom`, "the first page");
+  // Past the wait the host gives a late notice (P098): a load nobody explained restarts only then.
+  await page.waitForTimeout(LATE_NOTICE_MS + 500);
+  expect(await kept(frame).catch(String), "probe: the first page's document stayed").toBe(
+    "this document",
+  );
+  expect((await shown.read()).outcomes, "probe: the display went on, loaded once").toEqual([
+    { state: "loaded" },
+  ]);
+  await clickIn(frame, "#next", "the link to the about page was there to follow");
+  await expect(
+    frame.locator("#about"),
+    "probe: the link opened the about page in the frame",
+  ).toHaveText("the about page");
+  // The about page's own load settled first (taken for that page, or the display started again),
+  // so what follows is the link down it alone.
+  await page.waitForTimeout(LATE_NOTICE_MS + 500);
+  await down(`${base}about#end`, "the about page");
+  await page.waitForTimeout(LATE_NOTICE_MS + 500);
+  expect(await kept(frame).catch(String), "probe: the about page's document stayed").toBe("about");
+  const record = await shown.read();
+  expect(record.outcomes, "probe: the display went on, loaded once").toEqual([{ state: "loaded" }]);
+  expect(record.navigationsBlocked, "probe: the host blocked no navigation").toEqual([]);
+}
+
+test.describe("in a frame, within a page (P142)", () => {
+  test("a link down the page scrolls it; the document stays, and so does the display", async ({
+    page,
+  }) => {
+    await linkDownThePage(page, unique("down"));
+  });
+});
+
+test.describe("in a frame, in an engine without the Navigation API (P142)", () => {
+  // Safari before 26 has no `window.navigation` (nor Firefox before 147): the shell's guard gets
+  // no events there and says nothing from it. Each frame here loses the API before the shell runs,
+  // as such an engine has it: the global and every interface the shell asks for.
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      const scope = window as unknown as Record<string, unknown>;
+      for (const name of Object.getOwnPropertyNames(window)) {
+        if (name === "navigation" || name.startsWith("Navigat")) {
+          delete scope[name];
+        }
+      }
+    });
+  });
+
+  /** Whether the frame has the Navigation API (the cases' precondition: it hasn't). */
+  const hasApi = (frame: Frame) =>
+    frame.evaluate(() => "navigation" in window || typeof NavigateEvent !== "undefined");
+  const withoutApi = async (frame: Frame) => {
+    expect(await hasApi(frame), "the frame has no Navigation API").toBe(false);
+  };
+
+  test("without the Navigation API, a link to another page of the set opens it in the frame; the display goes on", async ({
+    page,
+  }) => {
+    const id = unique("no-api-pages");
+    await publish(id, "1", LONG);
+    const { frame, shown } = await showFiles(page, id, "1");
+    await withoutApi(frame);
+    const base = frame.url();
+    await clickIn(frame, "#next", "the link to the about page was there to follow");
+    await expect(
+      frame.locator("#about"),
+      "probe: the link opened the about page in the frame",
+    ).toHaveText("the about page");
+    expect(frame.url(), "probe: the frame is on the about page").toBe(`${base}about`);
+    await withoutApi(frame);
+    await clickIn(frame, "#back", "the about page was still the frame's, its link back there");
+    await expect(
+      frame.locator("#title"),
+      "probe: the link back opened the first page in the frame",
+    ).toHaveText("Long");
+    await page.waitForTimeout(LATE_NOTICE_MS + 500);
+    const record = await shown.read();
+    expect(record.outcomes, "probe: the display went on, loaded once").toEqual([
+      { state: "loaded" },
+    ]);
+    expect(record.navigationsBlocked, "probe: the host blocked no navigation").toEqual([]);
+  });
+
+  test("without the Navigation API, a link down the page scrolls it; the document stays, and so does the display", async ({
+    page,
+  }) => {
+    await linkDownThePage(page, unique("no-api-down"), withoutApi);
+  });
+
+  // Anything else is as it was without the API (P079, P031): the guard can't stop it, and a
+  // document that isn't a page of the set says nothing, so the display starts again at its entry.
+  const OUT = (away: string) => ({
+    "index.html": `<!doctype html><title>Out</title><main id="here">here</main>
+<button id="file" type="button">file</button><button id="root" type="button">root</button>
+<button id="away" type="button">away</button>
+<script>
+const go = (id, to) => document.getElementById(id).addEventListener("click", () => { location.href = to; });
+go("file", "notes.txt"); go("root", "/"); go("away", ${JSON.stringify(away)});
+</script>`,
+    "notes.txt": "notes",
+  });
+  for (const [target, what] of [
+    ["#file", "a file of the set that isn't a page"],
+    ["#root", "another path of its origin"],
+  ] as const) {
+    test(`without the Navigation API, anything else starts the display again, as before: ${what}`, async ({
+      page,
+    }) => {
+      const id = unique("no-api-out");
+      await publish(id, "1", OUT("about:blank"));
+      const { frame, shown } = await showFiles(page, id, "1");
+      await withoutApi(frame);
+      await frame.locator(target).click();
+      await expect
+        .poll(async () => (await shown.read()).outcomes.length, {
+          message: "probe: the display started again",
+          timeout: LATE_NOTICE_MS + 10_000,
+        })
+        .toBe(2);
+      await expect(
+        (await shown.frame()).locator("#here"),
+        "probe: started again at its entry",
+      ).toHaveText("here");
+    });
+  }
+
+  // An outside site: the embedding page's frame-src is the wall, as P079 has it without the API.
+  // The document is replaced by an error page and the display starts again (Chromium, WebKit), or
+  // kept (Firefox): either way the site hears nothing.
+  test("without the Navigation API, an outside site hears nothing: frame-src stops it, as before", async ({
+    page,
+  }) => {
+    const served = await harness();
+    const id = unique("no-api-away");
+    await publish(id, "1", OUT(`${served.foreignOrigin}/canary/${id}`));
+    const { frame, shown } = await showFiles(page, id, "1");
+    await withoutApi(frame);
+    await frame.locator("#away").click();
+    await page.waitForTimeout(LATE_NOTICE_MS + 1_500);
+    expect(served.hits.get(id) ?? 0, "probe: the outside site heard the frame").toBe(0);
+    await expect(
+      (await shown.frame()).locator("#here"),
+      "probe: the display shows its entry, kept or started again",
+    ).toHaveText("here");
+    expect((await shown.read()).outcomes.length, "probe: one run, or one more").toBeLessThan(3);
+  });
+});
+
 test.describe("a page's own frames (P128)", () => {
   /** A page that frames a file of its own, a srcdoc and a file it adds by script. */
   const OWN = {

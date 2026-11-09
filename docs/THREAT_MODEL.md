@@ -47,7 +47,10 @@ host that follows none drops `selectionTracked` unread (§7). 0.14.17: P141 lets
 origins of an outer page that frames its app (`framedBy`): each may be an ancestor of every frame,
 above the host's own page, so it is in every `frame-ancestors`, and nowhere else; it is never a
 host a frame hears or tells, and a page's `*` fallback is held to a parent named as a host origin
-(§6 "What every host must do", S3).
+(§6 "What every host must do", S3). Unreleased: P142 keeps a set's pages and links within a page from
+starting the display again where there is no Navigation API, and where WebKit fires a frame's load
+for a link within its document: the arriving page's notice is sent without the API, and a page
+says it stayed; no wall moves, and the limit without the API is P079's, unchanged.
 
 ## 1. Two layers
 

@@ -4,6 +4,16 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **A set's pages without the Navigation API, and links within a page (P142).** In Safari before 26
+  (no Navigation API), every link to another page of a served artifact's set started the display
+  again at its entry: the page that opened now says so as it starts, with or without the API. On
+  WebKit (18.2 and 26.6), the first link within a page (`#bottom`) started the display again about
+  2.5 s later: WebKit fires the frame's `load` for it, which the host took for content that left. A
+  set's page now says it stayed (`porthole/navigating { same: true }`), which the host takes for
+  that load only; its watches and subscriptions go on. Hosts change nothing; nothing is loosened.
+
 ## 0.14.17
 
 - **An app framed by another (P141): `framedBy`.** `createContentHost({ framedBy })` and
