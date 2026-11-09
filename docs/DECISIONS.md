@@ -8572,7 +8572,8 @@ that follow will come, and the host can: it knows whether it follows selections 
    `selected` is kept and followed from the next frame, as P138 has it; the highlight is drawn at
    the pick, in the same draw, so there is no gap either.
 4. **React** starts the mode with `keepSelection` while `trackedSelection` is given (true or false),
-   from the first render: `trackedSelection={composerOpen}` is the shape it documents. A host that
+   from the first render: `trackedSelection={composerOpen}` is the shape it documents. Read at each
+   start, never a reason for one (after Ferryman's review, below). A host that
    gives `annotating` a `keepSelection` of its own keeps it too.
 5. **`createHost` drops `selectionTracked` unread while it follows no selection**, before parsing
    it: no report, no refusal, as 0.14.14 dropped a method it didn't know. While it follows, a
@@ -8588,9 +8589,11 @@ server.
 
 **Not a loosening.** It narrows P138: less is drawn and less is kept for a host that doesn't follow,
 and a page's word is read by fewer hosts. No CSP, sandbox, egress or gate change. The page reads
-`keepSelection` (it shares the shell's realm, P053), so it learns that the host follows selections,
-which is a property of the host's UI, not of anything the person did, and which it learns from the
-first `track` anyway. Negative control `track-selection-checks` now also takes out the unread drop,
+`keepSelection` (it shares the shell's realm, P053), so it learns at every `start` that the host
+will follow the selection: before any pick, and earlier than the first `track` would tell it. That
+is a property of the host's UI, not of anything the person did or wrote. What the shell keeps (a
+reference to the picked element, a copy of the range) is in the shell's script's memory, not in
+its layer: only the outline is in the closed shadow root. Negative control `track-selection-checks` now also takes out the unread drop,
 with the rate.
 
 **Rejected.**
@@ -8620,6 +8623,33 @@ follow asked before the pick attached and lit, and let go with its end; words se
 `orphaned` too. P138's browser tests now start with `keepSelection` where they follow after
 `selected` (the outline, the follow, the scroll, the focus), and React's `trackedSelection` test
 gives it false from the first render.
+
+*After Ferryman's review of porthole#119, one change and one correction:*
+
+- **React restarts no mode for `trackedSelection`.** Decision 4 first put "`trackedSelection` is
+  given" into the mode's key, so the prop appearing or going restarted the mode: a host that keeps
+  `annotating` on and gives `trackedSelection` as its composer opens (0.14.15's prop docs allow it)
+  sent `start` again, element picking came back on after the pick had ended it, and the person's
+  next click in the frame picked again and sent another `selected`. Now the key is the mode alone
+  (`elements`, `text`, and the host's own `keepSelection`), and whether `trackedSelection` is given
+  is read at each start: it rides with the next one, and is never a reason for one. So it counts
+  from the mode's start: given (false is enough) when the mode started, the pick is kept and a
+  follow after it is `attached`; given only after the pick, nothing was kept and the follow is
+  `orphaned`, which is decision 2 for a host that hadn't said it follows (0.14.15 was `attached`
+  there because it kept every host's pick). No shell change, and no message between starts: the
+  shell needs the word before the pick, and a start is where React has it, given from the first
+  render as documented.
+- **Where things are.** Only the outline is in the layer's closed shadow root; the kept selection
+  (a reference to the element, a copy of the range) is in the shell's script's memory, and it is
+  the page's own DOM. `keepSelection` tells the page at every `start` that the host will follow the
+  selection, before any pick and earlier than the first `track`. THREAT_MODEL §7 now says both.
+
+*Tested.* `leak/react.spec.ts` "trackedSelection given or left out while annotating stays on
+restarts no mode…" (Chromium and Firefox here): with the mode left on, `trackedSelection` given after
+the pick restarts nothing (the next click is no second `selected`) and the follow is `orphaned`, and
+taking it away restarts nothing either; given as false from the first render, the follow after the
+pick is `attached` and the next click again no second `selected`. With "is given" back in the key,
+it fails at the second pick.
 
 **Revisit when** a host needs the pick kept without following it (a host that draws its own
 highlight from `selected`), or a host is seen confused by `orphaned` after an upgrade.

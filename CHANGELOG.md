@@ -21,7 +21,8 @@ P-numbers below.
   0.14.15).** 0.14.15 kept every pick outlined after `selected`, and every selection in the frame's
   memory, for every host, including one that never follows the selection. Now that happens only for
   a host that says it follows what is selected: `annotations.start({ ..., keepSelection: true })`
-  (React does it for you while `trackedSelection` is given). Any other host gets 0.14.14's
+  (React does it for you on a start made while `trackedSelection` is given; giving it or leaving it
+  out later restarts no mode). Any other host gets 0.14.14's
   behaviour: the outline goes with the pick, and the frame keeps nothing. A follow asked before the
   pick follows it without the option. **If you follow the selection after `selected`** (0.14.15's
   sample, and React with `trackedSelection`), start with `keepSelection: true`, or give

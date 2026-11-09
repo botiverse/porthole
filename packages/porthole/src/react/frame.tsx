@@ -680,7 +680,8 @@ export interface PortholeFrameProps {
   /**
    * Annotations, where the config declares `annotate` (P053): what the person may point at now
    * (elements, text, or both), or null to stop. A picked element ends element picking: set it
-   * again to pick again. `keepSelection` is set for you while `trackedSelection` is given (P140).
+   * again to pick again. `keepSelection` is set for you on a start made while `trackedSelection` is
+   * given (P140).
    */
   readonly annotating?: AnnotateMode | null;
   /**
@@ -717,10 +718,12 @@ export interface PortholeFrameProps {
    * composer dismissed, Escape in it), and `trackedAnnotation`'s mark is followed again. Until a
    * `selectionTracked` comes, place by `selected`'s boxes: an older shell sends none.
    *
-   * Give it from the first render, `false` until the composer opens (P140): while it is given,
-   * `annotating` starts with `keepSelection`, so the frame keeps what is picked or selected (and
-   * the picked element outlined) for the follow. Left out, the frame keeps nothing, and a follow
-   * asked after the pick has nothing to follow (`orphaned`).
+   * Give it from the first render, `false` until the composer opens (P140): each start of
+   * `annotating` made while it is given carries `keepSelection`, so the frame keeps what is picked
+   * or selected (and the picked element outlined) for the follow. It is read as a mode starts:
+   * giving it, or leaving it out, later restarts nothing, and counts from the next start. Left out
+   * when the mode started, the frame keeps nothing, and a follow asked after the pick has nothing
+   * to follow (`orphaned`).
    */
   readonly trackedSelection?: boolean;
   /** The display's imperative calls (`PortholeFrameHandle`, P118): React 19's `ref` prop. */
@@ -1297,12 +1300,18 @@ function Mount({
         : JSON.stringify([focusedAnnotation]);
   // By value: the same marks given again don't mark them again.
   const annotations = useByValue(frame.annotations);
-  // Whether the selection is kept for a follow (P140): while `trackedSelection` is given.
-  const keep = annotating?.keepSelection === true || frame.trackedSelection !== undefined;
+  // The mode, by value: what the person may point at, and the host's own `keepSelection`. Not
+  // whether `trackedSelection` is given (P140, Ferryman's review): that is read at each start, so
+  // a composer's prop that appears or goes restarts no mode (which would turn a pick that ended
+  // back on, for the person's next click to pick again).
   const mode =
     annotating === undefined || annotating === null
       ? ""
-      : JSON.stringify([annotating.elements ?? true, annotating.text ?? true, keep]);
+      : JSON.stringify([
+          annotating.elements ?? true,
+          annotating.text ?? true,
+          annotating.keepSelection === true,
+        ]);
   useEffect(() => {
     const display = handle.current;
     if (annotates && display !== null) {
@@ -1352,7 +1361,7 @@ function Mount({
           : display.annotations.start({
               elements: wanted[0],
               text: wanted[1],
-              ...(wanted[2] ? { keepSelection: true } : {}),
+              ...(wanted[2] || keepsSelection(latest()) ? { keepSelection: true } : {}),
             }),
       latest(),
     );
@@ -1454,9 +1463,7 @@ function applyAnnotations(display: DisplayHandle, frame: PortholeFrameProps): vo
     }
     if (frame.annotating !== undefined && frame.annotating !== null) {
       display.annotations.start(
-        frame.trackedSelection === undefined
-          ? frame.annotating
-          : { ...frame.annotating, keepSelection: true },
+        keepsSelection(frame) ? { ...frame.annotating, keepSelection: true } : frame.annotating,
       );
     }
   }, frame);
@@ -1470,6 +1477,15 @@ function applyAnnotations(display: DisplayHandle, frame: PortholeFrameProps): vo
 function useByValue<T>(value: T): T {
   const key = value === undefined ? "" : JSON.stringify(value);
   return useMemo(() => (key === "" ? undefined : JSON.parse(key)) as T, [key]);
+}
+
+/**
+ * Whether a start keeps what is selected for a follow (P140): while `trackedSelection` is given
+ * (true or false), or the host's own `keepSelection` says so. Read at each start, never a reason
+ * for one.
+ */
+function keepsSelection(frame: PortholeFrameProps): boolean {
+  return frame.annotating?.keepSelection === true || frame.trackedSelection !== undefined;
 }
 
 /** What a display follows (P118, P138): a mark's id, the selection (this one object), or nothing. */

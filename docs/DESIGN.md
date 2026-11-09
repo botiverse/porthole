@@ -1120,7 +1120,7 @@ chooses), and the annotation runtime is in the shell only then.
   on no timer (Tenny's review). While followed, a scroll re-sends no `selected` (P105's follow-up):
   once the following ends, it does again. The React binding sends the following before a mode
   change made in the same render, and starts the mode with `keepSelection` while
-  `trackedSelection` is given (P140). The host drops a `selectionTracked` unread, before parsing
+  `trackedSelection` is given (P140), read at each start and never a reason for one. The host drops a `selectionTracked` unread, before parsing
   it, while it follows no selection (P140).
 - **Markers** (P104). A mark with a `count` gets a bubble glyph and its number ("99+"
   above 99; 0 the bubble alone), a real button (P133, below), on an element's top right

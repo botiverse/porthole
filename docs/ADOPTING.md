@@ -291,7 +291,7 @@ composer.onClose(() => display.annotations.clearSelection());
   `annotations`, `focusedAnnotation` and `trackedAnnotation` (the mark to follow, by value; `null`
   stops), `trackedSelection` (true while your composer is open: the selection is followed in the
   mark's place, P138; give it from the first render, `false` until then, so the mode starts with
-  `keepSelection`, P140), every report through `onAnnotation` (`tracked` and `selectionTracked` too). The selection is cleared through a
+  `keepSelection`, P140: it is read as the mode starts, and giving it later restarts nothing), every report through `onAnnotation` (`tracked` and `selectionTracked` too). The selection is cleared through a
   ref, which holds `clearSelection()` only (a `PortholeFrameHandle`; never the display, whose life
   is the binding's); with no display running it does nothing. Errors the core's calls throw (an id
   no shown mark has, a config without `annotate`) reach `onHostError`, kind `"annotations"`.

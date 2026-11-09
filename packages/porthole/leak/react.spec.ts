@@ -953,6 +953,70 @@ test("trackedSelection follows the picked element through onAnnotation's `select
   expect(await events(page, "notes", "host-error")).toEqual([]);
 });
 
+test("trackedSelection given or left out while annotating stays on restarts no mode: the next click picks nothing, and a pick is kept for the follow when the mode started with it (P140, Ferryman's review)", async ({
+  page,
+}) => {
+  const notes = (displayId: string, more: Partial<FrameSpec>) =>
+    frame({
+      displayId,
+      title: "Notes",
+      config: "notes",
+      content: LONG,
+      fill: true,
+      annotating: { elements: true, text: false },
+      ...more,
+    });
+  const of = async (display: string, type: string) =>
+    (await events(page, display, "annotation"))
+      .map((entry) => entry.detail as { type: string; state?: string })
+      .filter((detail) => detail.type === type);
+  const pick = async (display: string) => {
+    const inside = frameOf(page, display);
+    await expect(inside.locator("#near")).toBeVisible();
+    await expect
+      .poll(async () => {
+        await inside.locator("#near").click();
+        return (await of(display, "selected")).length;
+      })
+      .toBeGreaterThan(0);
+    return (await of(display, "selected")).length;
+  };
+  const clickAgain = async (display: string) => {
+    await frameOf(page, display).locator("#near").click();
+    await page.waitForTimeout(500);
+    return (await of(display, "selected")).length;
+  };
+  const lastFollowed = async (display: string) =>
+    (await of(display, "selectionTracked")).at(-1)?.state;
+
+  // The composer's prop comes only once the person picked, the mode left on: no mode restarts, so
+  // the next click is the page's. Nothing was kept, since the mode started without it (P140).
+  await open(page, { provider: "default", frames: [notes("late", {})] });
+  const picked = await pick("late");
+  expect(picked).toBe(1);
+  await open(page, { provider: "default", frames: [notes("late", { trackedSelection: true })] });
+  await expect
+    .poll(() => lastFollowed("late"), { message: "nothing kept for a mode started without it" })
+    .toBe("orphaned");
+  expect(await clickAgain("late"), "probe: no second pick once trackedSelection is given").toBe(
+    picked,
+  );
+  // And taken away again: still no restart.
+  await open(page, { provider: "default", frames: [notes("late", {})] });
+  expect(await clickAgain("late"), "probe: no second pick once it is left out").toBe(picked);
+
+  // Given from the first render, false until the composer opens: the pick is kept and followed,
+  // and the next click is still the page's.
+  await open(page, { provider: "default", frames: [notes("early", { trackedSelection: false })] });
+  const first = await pick("early");
+  expect(first).toBe(1);
+  await open(page, { provider: "default", frames: [notes("early", { trackedSelection: true })] });
+  await expect.poll(() => lastFollowed("early"), { message: "the pick followed" }).toBe("attached");
+  expect(await clickAgain("early"), "no second pick").toBe(first);
+  expect(await events(page, "early", "host-error")).toEqual([]);
+  expect(await events(page, "late", "host-error")).toEqual([]);
+});
+
 const PARAGRAPHS = `<!doctype html><html><head><title>Notes</title></head><body>
 <h2 id="title">Quarterly notes</h2><p id="p1">Costs fell by 3%.</p></body></html>`;
 
