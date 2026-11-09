@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.14.17
 
 - **An app framed by another (P141): `framedBy`.** `createContentHost({ framedBy })` and
   `createServer({ framedBy })` name the origins of an outer page that frames your app (Raft's Deck).
