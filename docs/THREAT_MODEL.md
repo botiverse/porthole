@@ -5,7 +5,7 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes Porthole 0.14.16 (2026-11-09). A review on 2026-10-19 found gaps, and every decision it led to
+**Status.** This describes Porthole 0.14.17 (2026-11-09). A review on 2026-10-19 found gaps, and every decision it led to
 has merged ([§8](#8-fixes-in-flight) lists them). P096 changed the negative-control runner and CI,
 and the shipped conformance probes' messages and timing, not what they check. P104 (0.9.0's
 annotation markers) had a review of its own, and P105, in 0.10.0, is what it led to. 0.11.0 was
@@ -43,7 +43,7 @@ word 100 ms old or more; no wall moves. 0.14.15: P138 lets the host follow the c
 (`selectionTracked`, the same boxes as `tracked`, on its budget, only while asked) and keeps what was
 picked lit; no wall moves. 0.14.16: P139 has a shell on a tab of its own ask no host; P140 narrows P138: a pick stays lit, and a
 selection is kept in the frame, only for a host that follows the selection (`keepSelection`), and a
-host that follows none drops `selectionTracked` unread (§7). Unreleased: P141 lets a host name the
+host that follows none drops `selectionTracked` unread (§7). 0.14.17: P141 lets a host name the
 origins of an outer page that frames its app (`framedBy`): each may be an ancestor of every frame,
 above the host's own page, so it is in every `frame-ancestors`, and nowhere else; it is never a
 host a frame hears or tells, and a page's `*` fallback is held to a parent named as a host origin
