@@ -761,13 +761,20 @@ nodeServer({ content, app: async (request) => (await routes(request)) ?? app(req
 - **`embeds`** (P143): to let any site embed a public artifact page, set `embeds: true` and, from
   one route of your own that decides the page is public (never your reader's issue endpoint),
   issue it with `{ anonymous: true, embed: true }` (no `level`, no `user`; an artifact's page that
-  isn't nested). That session's answers say `frame-ancestors *`, and nothing else's do. It has no
+  isn't nested): `host.server.issue(instance, { anonymous: true, embed: true })`. Never answer
+  `embed` from `access`: it answers your readers, and the kit refuses it there (409 from the issue
+  endpoint and a clean address's resolve, its 409 page at a clean address's tab; P145). That
+  session's answers say `frame-ancestors *`, and nothing else's do. It has no
   host: frame it from an outer page of your own that listens to nothing (its `frame-src` the one
   label), which any site may frame; the shell asks no host and says nothing to any parent, links out
   of the page go nowhere (give the outer page your own "Open" link), and there is no door.
   `authorize.check` gets `embed: true` for it, so your check can hold an embed subject to embed
   sessions. A content Worker of your own answers its refusals before a session exists with
-  `statusPage({ embed: true, … })` or `doorStatusResponse({ embed: true, … })`.
+  `statusPage({ embed: true, … })` or `doorStatusResponse({ embed: true, … })`. The page learns
+  where it is embedded: its request's `Referer` and `document.referrer` name your outer page, and
+  `location.ancestorOrigins` names every ancestor, the embedding site included (Chromium, Firefox
+  and WebKit), so a page with any egress can report where it is shown
+  ([THREAT_MODEL.md S4](THREAT_MODEL.md#s4-public-links-and-pages-that-are-apps)).
 - **No content domain** (self-hosted without one): still make the host, with `domain: null` (or
   `""`). That is the supported setup: no secret is needed, `GET /porthole/meta` answers
   `{ served: false }`, and pages show every kind opaque (a url kind, its fallback) instead of

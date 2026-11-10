@@ -121,10 +121,14 @@ export interface ContentHostOptions<V> {
    */
   readonly framedBy?: readonly string[];
   /**
-   * Whether `access` may answer an embed grant (P143, `Grant.embed`): a public artifact page that
+   * Whether `server.issue` takes an embed grant (P143, `Grant.embed`): a public artifact page that
    * any site may frame, with no host (`ServerOptions.embeds`). Default false: an embed grant is
-   * refused at issue. Only an embed session's answers say `frame-ancestors *`; every other answer
-   * is as without it.
+   * refused at issue. Mint one from a route of your own that decides the page is public
+   * (`host.server.issue(instance, { anonymous: true, embed: true })`), never from `access`: `access`
+   * answers your readers (the issue endpoint, a clean address), and the kit refuses an `access`
+   * answer with `embed` (409 at the issue endpoint and a clean address's resolve; a clean address's
+   * tab gets its 409 page, as `enterBy` refuses it) (P145). Only an embed session's answers say
+   * `frame-ancestors *`; every other answer is as without it.
    */
   readonly embeds?: boolean;
   /** At least 32 random bytes (or a string of at least 32 bytes). */
@@ -167,7 +171,11 @@ export interface ContentHostOptions<V> {
     viewer: V | null,
     request: Request,
   ) => Awaitable<InstanceRef | null>;
-  /** Policy 2, access at issue: may this viewer see it, and with what grant (null: 401/403). */
+  /**
+   * Policy 2, access at issue: may this viewer see it, and with what grant (null: 401/403). It
+   * answers readers, so never with `embed` (refused, P145): an embed grant is minted from a route
+   * of your own through `host.server.issue`.
+   */
   readonly access: (
     instance: InstanceRef,
     viewer: V | null,
@@ -1129,6 +1137,15 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
         request: Request,
         more: { readonly page?: string; readonly resolved?: boolean } = {},
       ): Promise<Response> {
+        // `access` answers readers, here and at a clean address: an embed grant (P143) is never
+        // theirs, whatever `embeds` says (P145). A host mints it from a route of its own.
+        if ((grant as { readonly embed?: unknown }).embed !== undefined) {
+          return refusal(
+            409,
+            "refused",
+            "access never answers an embed grant: mint it from a route of your own with host.server.issue (P145)",
+          );
+        }
         let location: FrameLocation;
         try {
           location = await server!.issue(

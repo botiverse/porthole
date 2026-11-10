@@ -4,6 +4,40 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## 0.15.1
+
+After Ferryman's audit of 0.15.0 (P145, amends P143 and P144): no P0, no escape, no new egress,
+and no way found for an embed session's `frame-ancestors *` to reach another session. Four fixes:
+
+- **"Byte for byte", said as it holds.** 0.15.0 said the default path (no `framedBy`, no embed) was
+  0.14.16's again, byte for byte. Every header was (every CSP, `frame-ancestors` and `script-src`
+  hash, every cookie and cache header), and so were the status, entry and door pages' scripts and
+  the nested page's shell. The shell runtime that a served shell, an artifact page, a file set's
+  pages and the MCP Apps proxy inline was not: it carries P142's changes (0.14.18) and P143's
+  `hostless` branches, inert wherever a plan names a host. Nothing a browser does changed, and no
+  hash covers that runtime; the claim did. DECISIONS, THREAT_MODEL and 0.15.0's lines above now say
+  what holds, and a test pins the runtime's bytes, so a change to them is said in this file.
+- **The host kit never mints an embed session from `access`.** 0.15.0's `embeds` doc said "whether
+  `access` may answer an embed grant", but `access` answers your readers (the issue endpoint, a
+  clean address), which must never mint one. Now an `access` answer with `embed` is refused: 409
+  `refused` from the issue endpoint and a clean address's resolve, and the kit's 409 page at a clean
+  address's tab, with `embeds` or without. **If you answered `embed` from `access`**, mint it from a
+  route of your own instead: `host.server.issue(instance, { anonymous: true, embed: true })`.
+- **What an embed page learns of where it is, documented** (THREAT_MODEL S4, ADOPTING `embeds`):
+  its request's `Referer` and `document.referrer` name your outer page, and
+  `location.ancestorOrigins` names every ancestor, the embedding site included (measured in
+  Chromium, Firefox and WebKit), so a page with any egress can report where it is shown.
+- **Ports and hosts as a browser serializes them.** A host origin's or `framedBy`'s port is 1 to
+  65535, without a leading zero, and an `http`/`https` host is as the URL parser gives it: `:0`,
+  `:99999`, `:0443` and `https://0x7f.0.0.1` now throw in `createServer`, the host kit and every
+  helper that takes them (each matched nothing before). A default port (`:443`) is still taken.
+- **Tests:** the `embed-origins` control could fail `[embed.unheard]` before its verdict on a loaded
+  box (a weakened shell drew the hostile document before its own); the probe now waits for either
+  and judges at its verdict, and its document arrives in two parts so the early words are covered
+  on every run.
+- **Security (P145):** a narrowing: the kit refuses what it used to pass on, and malformed origins
+  throw. No CSP, sandbox, egress or gate changes.
+
 ## 0.15.0
 
 - **Embedded documents (P143): `Grant.embed`.** A public artifact page any site may frame, with no
@@ -20,8 +54,10 @@ P-numbers below.
   an embed ticket, cookie or address opens nothing.
 - **Security (P143):** a loosening, bounded: `*` for an embed session's answers alone, a session
   the host minted on purpose, with no viewer, no level, no host function and no channel to any
-  parent. Every other session's answers are as before, byte for byte, on the same server while an
-  embed session of the same artifact exists; cookies stay host-only (`__Host-`, never `Domain=`).
+  parent. Every other session's answers are, byte for byte, what the same server without `embeds`
+  answers, while an embed session of the same artifact exists (not 0.14.18's: the shell runtime
+  they inline carries P143's inert `hostless` branches; said so in 0.15.1, P145); cookies stay
+  host-only (`__Host-`, never `Domain=`).
   Negative controls `embed-ancestors`, `embed-handshake`, `embed-origins`.
 - **`framedBy` after Ferryman's audit of 0.14.17 and 0.14.18 (P144, amends P141).** No P0 and no
   new egress; four fixes:
@@ -45,9 +81,10 @@ P-numbers below.
     named twice so is named once.
   - *ADOPTING's nested-page rows* (the page, its files, an ended token) name `<framedBy>` in
     `frame-ancestors`: a content Worker copied from them showed a blank frame below the outer page.
-- **Security (P144):** nothing is loosened. The default path is 0.14.16's again; with `framedBy`,
-  the scripts and rules are 0.14.17's, and a host origin is now refused as `framedBy` under a
-  second spelling.
+- **Security (P144):** nothing is loosened. On the default path every header and the four scripts
+  are 0.14.16's again (the shell runtime that served documents inline is not: P142's and P143's
+  changes, inert there; said so in 0.15.1, P145); with `framedBy`, the scripts and rules are
+  0.14.17's, and a host origin is now refused as `framedBy` under a second spelling.
 
 ## 0.14.18
 

@@ -143,6 +143,9 @@ async function weakenedAnswer(answer: Response): Promise<Response> {
   return new Response(body, { status: answer.status, headers });
 }
 
+/** Content labels (`host`) whose documents arrive in two parts (`[embed.unheard]`). */
+const slow = new Set<string>();
+
 let started: Promise<Served> | null = null;
 const served = (): Promise<Served> => (started ??= start());
 
@@ -173,7 +176,21 @@ async function start(): Promise<Served> {
         headers["set-cookie"] = cookies;
       }
       response.writeHead(answer?.status ?? 404, headers);
-      response.end(answer === null ? "" : Buffer.from(await answer.arrayBuffer()));
+      const bytes = answer === null ? Buffer.alloc(0) : Buffer.from(await answer.arrayBuffer());
+      // A label marked slow: its documents come in two parts, the shell's script first and the
+      // rest 1.5 s later, so a word reaches the shell before its document has loaded (before it
+      // draws its own page), as on a loaded box (P145).
+      const cut = bytes.lastIndexOf("</script>");
+      if (
+        slow.has(host) &&
+        cut > 0 &&
+        (answer?.headers.get("content-type") ?? "").startsWith("text/html")
+      ) {
+        response.write(bytes.subarray(0, cut + "</script>".length));
+        setTimeout(() => response.end(bytes.subarray(cut + "</script>".length)), 1_500);
+        return;
+      }
+      response.end(bytes);
     });
   });
   const port = await listen(main);
@@ -250,19 +267,27 @@ async function frameOn(page: Page, origin: string): Promise<Frame | null> {
   return null;
 }
 
-/** Whether the frame shows the embedded page (a refused frame shows the engine's error page). */
-const shows = (frame: Frame | null): Promise<boolean> =>
+/**
+ * Whether the frame shows the embedded page (a refused frame shows the engine's error page): an
+ * element of one of `ids` is in its document (the page's own `#content` by default).
+ */
+const shows = (frame: Frame | null, ids: readonly string[] = ["content"]): Promise<boolean> =>
   frame === null
     ? Promise.resolve(false)
     : Promise.race([
-        frame.evaluate(() => document.getElementById("content") !== null).catch(() => false),
+        frame
+          .evaluate((names) => names.some((id) => document.getElementById(id) !== null), ids)
+          .catch(() => false),
         new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3_000)),
       ]);
 
 /** Polls until the frame shows the page (or 5 s pass). */
-async function showsSoon(frame: Frame | null): Promise<boolean> {
+async function showsSoon(
+  frame: Frame | null,
+  ids: readonly string[] = ["content"],
+): Promise<boolean> {
   for (let tries = 0; tries < 25; tries += 1) {
-    if (await shows(frame)) {
+    if (await shows(frame, ids)) {
       return true;
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
@@ -308,9 +333,16 @@ test.describe("embed grants (P143): a public page below any site, with no host",
   }) => {
     const { outer, top } = await served();
     const issued = await issue(EMBED);
+    // The words reach the shell before its document has loaded, and go on after.
+    slow.add(new URL(issued.url).host);
     await page.goto(framing(top, framing(outer, issued.url, true), true));
     const content = await frameOn(page, issued.origin);
-    expect(await showsSoon(content), "the embedded page shows").toBe(true);
+    // The page loaded: its own `#content`, or the document a host's word drew in its place
+    // (`#taken`). Which one is the verdict's to judge, below: a shell that takes a word before its
+    // document loads (the `embed-origins` control) draws that word instead of its page, and must
+    // fail there, by the probe, not here (P145, Ferryman's audit of 0.15.0: on a loaded box it
+    // failed here, unmarked).
+    expect(await showsSoon(content, ["content", "taken"]), "the embedded page loaded").toBe(true);
     const outerFrame = outerOf(page, outer);
     expect(outerFrame, "the outer page").not.toBeNull();
     // The outer page (the content's parent) and the top have said their words many times over.
