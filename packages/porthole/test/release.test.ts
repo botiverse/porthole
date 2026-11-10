@@ -343,7 +343,8 @@ describe("V03: a release waits for ci.yml on the same commit", () => {
     // A newer push replaces an older push's run on its ref; a run started by hand is alone in
     // its group (its run id), so neither a merge to main nor a second full run stops it.
     expect(ci.concurrency).toEqual({
-      group: "ci-${{ github.event_name }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'push' }}",
+      group:
+        "ci-${{ github.event_name }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'push' }}",
       "cancel-in-progress": true,
     });
   });
