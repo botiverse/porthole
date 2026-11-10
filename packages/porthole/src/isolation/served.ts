@@ -78,6 +78,31 @@ export function hostOriginProblem(origin: unknown): string | null {
   return `${JSON.stringify(origin)} is not an exact origin (scheme://host[:port], lowercase, no path)`;
 }
 
+/**
+ * An origin as a browser serializes it, for comparing two (P144):
+ * scheme and host lowercase, and for `http`/`https` a default port dropped, so
+ * `https://app.example:443` is `https://app.example`. Any other scheme's origin (a desktop app's) is
+ * only lowercased.
+ */
+export function normalOrigin(origin: string): string {
+  const lower = origin.toLowerCase();
+  if (lower.startsWith("https://") || lower.startsWith("http://")) {
+    try {
+      const serialized = new URL(lower).origin;
+      if (serialized !== "null") {
+        return serialized;
+      }
+    } catch {
+      // Not a URL: compared as it is, lowercase.
+    }
+  }
+  return lower;
+}
+
+/** Whether `origin` is one of `origins`, compared as browsers serialize them (`normalOrigin`). */
+export const includesOrigin = (origins: readonly string[], origin: string): boolean =>
+  origins.some((each) => normalOrigin(each) === normalOrigin(origin));
+
 const LOOPBACK_HOST = (host: string): boolean =>
   host === "localhost" || host.endsWith(".localhost") || host === "127.0.0.1" || host === "[::1]";
 

@@ -8656,7 +8656,7 @@ it fails at the second pick.
 highlight from `selected`), or a host is seen confused by `orphaned` after an upgrade.
 
 
-## P141 · 2026-11-09 · An app framed by another: its outer page may be an ancestor of its frames, never their host (`framedBy`) · Accepted
+## P141 · 2026-11-09 · An app framed by another: its outer page may be an ancestor of its frames, never their host (`framedBy`) · Accepted; amended by P144
 
 From Raft (task #botiverse-raft-deployment:#245, Tenny): Deck (`https://deck.raft.build`, and
 `https://deck-aws-dev.raft.build` on staging) frames the Raft app (`app.raft.build`) in an iframe.
@@ -8974,3 +8974,77 @@ plan) fails `[embed.unheard]`; each exactly that probe on Chromium.
 **Revisit when** an embed needs a host function (then the outer page becomes a narrow host, with
 its own entry), auto-height needs a word to the embedding site, or browsers give a policy for the
 parent alone.
+
+## P144 · 2026-11-10 · After the audit of 0.14.17 and 0.14.18: `framedBy`'s default path byte for byte, the nesting it is for, origins compared as browsers serialize them · Accepted
+
+Amends P141 (its decision 1's "byte for byte", its decision 3 and its "What it re-opens"). From
+Ferryman's audit of 0.14.17 (P141) and 0.14.18 (P142): no P0 and no new egress; four findings, all
+fixed here.
+
+**Context.**
+1. *(P1) The default path's scripts.* Without `framedBy`, every `frame-ancestors` and every
+   behaviour was 0.14.16's, but the status, entry and door pages' scripts and the nested page's
+   shell carried P141's `strict` branch on every path, unused there, so their bytes and their
+   `script-src` hashes changed. P141's decision 1 and 0.14.17's changelog said every response was
+   as before, byte for byte.
+2. *(P2) The nesting P141 is for.* P141's "What it re-opens" and THREAT_MODEL described an outer
+   page that frames content directly. In the nesting it was made for (the outer page, then the app's
+   page, then content), content is a descendant of the outer page: it can `postMessage` the outer
+   page and every frame in its tree, and learn the outer page's origin (measured in Chromium and
+   Firefox). No header stops that, as none stops a frame posting the other frames of its page (S7).
+3. *(P3) The host-origin check compared strings.* `https://app.example.com:443` as `framedBy`
+   beside `https://app.example.com` as a host origin passed (and the reverse): one origin named as
+   both a host and an outer page, which decision 3 refuses. Only narrower in effect (the host's own
+   pages turned strict), but not what was said.
+4. *(P3) ADOPTING's nested-page rows.* The page's, its files' and an ended token's
+   `frame-ancestors` lacked `<framedBy>`: a content Worker copied from them shows a blank frame below
+   the outer page.
+
+**Decision.**
+1. **Without `framedBy` (and without an embed, P143), 0.14.16's scripts, byte for byte.** Each of
+   the four scripts comes in two: 0.14.16's, and a strict one (0.14.17's, unchanged) for a page
+   whose `frame-ancestors` names anyone beyond its host origins (`framedBy`, or an embed's `*`). The
+   status and entry pages load 0.14.16's from `/__porthole/status.js` and `/__porthole/enter.js` as
+   before, and a strict page loads `/__porthole/status-strict.js` or `/__porthole/enter-strict.js`
+   (all four served on every content origin); a door, a door that doesn't open and a relay's status
+   page carry 0.14.16's inline (under its hash as before) or the strict one under its own; a nested
+   page's shell runs 0.14.16's runtime unless it is given `framedBy`. So without `framedBy` every
+   response is 0.14.16's again, byte for byte, as P141 said; with it, 0.14.17's, but for the two
+   strict pages' script address.
+2. **The nesting, said.** THREAT_MODEL §6 "What every host must do" and S7, P141's entry in it, and
+   ADOPTING's `framedBy`: the outer page's authors must check `event.source` and `event.origin` in
+   every message listener, on the outer page and in each of its frames, taking a message only from
+   the window and origin they expect; and S7's rule (a page's egress is the union of its frames')
+   now covers the outer page's frames: what content was given can be handed to any frame the outer
+   page shows, and that frame's network becomes content's way out. Porthole can hold neither: both
+   are the outer page's.
+3. **Origins compared as browsers serialize them.** `normalOrigin` (scheme and host lowercase, an
+   `http`/`https` default port dropped) before every comparison of `framedBy` with the host origins
+   (`createServer`, so the host kit; `statusPage`, `doorResponse`, `doorStatusResponse`,
+   `nestedShellCsp` and `nestedShellResponse`; `frameShellScript`), and for an outer page named
+   twice (kept once, as first named). Inputs are still held to P141's exact, lowercase forms: this
+   only catches two spellings of one origin.
+4. **ADOPTING's three nested-page rows name `<framedBy>`.**
+
+**Rejected.**
+- *One script per page that reads its strictness from the page (0.14.17's)*: its bytes, and so
+  its hash, change for every host so that one that names an outer page has the check.
+- *A strict page's status and entry scripts inline, under their hash*: those pages' policy is
+  `script-src 'self'`; changing it for the strict path is wider than two addresses.
+
+**Tested.** `test/framed-by.test.ts`: the four scripts pinned to 0.14.16's sha256 (from
+`git show v0.14.16:…`): `/__porthole/status.js`, `/__porthole/enter.js`, the door's and the inline
+status script's `script-src`, the nested shell's runtime and its script for a fixed plan, from the
+helpers and from a server without `framedBy` (its 404 and used ticket load `status.js`, its entry
+page `enter.js`, its door and nested shell carry 0.14.16's); with `framedBy` the strict pages load
+the strict addresses, which carry the check, and the old addresses still serve 0.14.16's. P141's
+negative control now runs the strict script for a strict page and 0.14.16's for its control.
+Origins: `normalOrigin` and `includesOrigin` (default ports, case, IPv6, another port, a desktop
+scheme); `createServer` and the host kit refusing a host origin as `framedBy` with or without
+`:443`, either way round (and `http://localhost` beside `:80`), taking another port; the helpers
+and `frameShellScript` refusing it; an outer page named with and without `:443` named once.
+`leak/served/framed-by.spec.ts` and the served suites over the status, entry and door pages and
+the nested shell pass unchanged on Chromium.
+
+**Revisit when** a host needs a strict page's script at the old address, or browsers give a policy
+for the parent alone.
