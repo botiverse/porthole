@@ -7,10 +7,12 @@ name: release
 #   GitHub release from that version's CHANGELOG.md section. A tag created with GITHUB_TOKEN starts
 #   no workflow, so this path publishes once.
 # - a pushed v* tag, as before: publishes that commit, nothing else.
-# Either way `gate` lets a release through only for a commit on main whose ci.yml run on main (a
-# push's, or one started by hand) passed, with every job in REQUIRED_CI_JOBS among those that
-# passed (the checks, both browser suites and the negative controls on three engines, prod-shape,
-# the examples). A pending run is waited for; anything but a pass stops the release.
+# Either way `gate` lets a release through only for a commit on main whose full ci.yml run on main
+# passed: one started by hand (`stamp workflow run ci.yml --repo botiverse/porthole`, P146; a push's
+# run skips the full set), with every job in REQUIRED_CI_JOBS among those that passed (the checks,
+# both browser suites and the negative controls on three engines, prod-shape, the examples). So a
+# release is two commands, the full run on main's head and then this workflow; a pending run is
+# waited for, and anything but a pass stops the release.
 #
 # The gate is in the file it guards: a release.yml dispatched from another branch, or a tag pushed
 # on a branch's commit, runs that commit's own copy. Until the admin settings in P097 are on (a
@@ -58,11 +60,12 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          # How long a pending run is waited for: longer than ci.yml's slowest job, after its queue
+          # How long a pending full run is waited for: longer than ci.yml's slowest job, after its queue
           # (GitHub's runners run fewer jobs at once; test/release.test.ts checks it against ci.yml's timeouts).
           CI_WAIT_MINUTES: "240"
-          # ci.yml's jobs as GitHub names them, the one list of them: test/release.test.ts holds it
-          # to ci.yml's jobs, so a job added, renamed or dropped there fails a test.
+          # ci.yml's jobs as GitHub names them, the quick set and the full set, the one list of
+          # them: test/release.test.ts holds it to ci.yml's jobs, so a job added, renamed or
+          # dropped there fails a test.
           REQUIRED_CI_JOBS: |
             check
             loopback (chromium)
@@ -108,16 +111,17 @@ jobs:
             echo "$GITHUB_SHA is not on main (main is $main; the commit is $position)"; exit 1
           fi
           for attempt in $(seq 1 "$CI_WAIT_MINUTES"); do
-            # The newest ci.yml run on main for this very commit, started by a push or by hand
-            # (`stamp workflow run ci.yml --repo botiverse/porthole`, for a run that flaked or a
-            # commit without one); never a pull request's. A re-run of failed jobs updates its run.
+            # The newest full ci.yml run on main for this very commit: one started by hand (`stamp
+            # workflow run ci.yml --repo botiverse/porthole`), the only kind that runs every job
+            # (P146); never a push's, whose full-set jobs were skipped, nor a pull request's. A
+            # re-run of failed jobs updates its run.
             runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&branch=main&per_page=100" \
-              --jq '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")] | sort_by(.created_at) | last // empty | "\(.id) \(.status) \(.conclusion)"')
+              --jq '[.workflow_runs[] | select(.event == "workflow_dispatch")] | sort_by(.created_at) | last // empty | "\(.id) \(.status) \(.conclusion)"')
             if [ -z "$runs" ]; then
               if [ "$attempt" -ge 10 ]; then
-                echo "no ci.yml run on main for $GITHUB_SHA: stamp workflow run ci.yml --repo botiverse/porthole, then release again"; exit 1
+                echo "no full ci.yml run on main for $GITHUB_SHA (one started by hand): stamp workflow run ci.yml --repo botiverse/porthole, then release again"; exit 1
               fi
-              echo "no ci.yml run on main for $GITHUB_SHA yet"
+              echo "no full ci.yml run on main for $GITHUB_SHA yet"
             else
               read -r id status conclusion <<< "$runs"
               echo "ci.yml run $id on $GITHUB_SHA: $status $conclusion"
@@ -125,8 +129,9 @@ jobs:
                 if [ "$conclusion" != success ]; then
                   echo "ci.yml did not pass on $GITHUB_SHA: re-run it (stamp workflow run ci.yml --repo botiverse/porthole), then release again"; exit 1
                 fi
-                # Each job's latest attempt: a job made conditional, skipped or dropped from
-                # ci.yml leaves a run that passed without it.
+                # Each job's latest attempt: a job skipped (as the full set is in any run not
+                # started by hand), made conditional otherwise or dropped from ci.yml leaves a run
+                # that passed without it.
                 jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?filter=all&per_page=100" \
                   --jq '[.jobs[] | {name, conclusion, run_attempt}] | group_by(.name) | map(max_by(.run_attempt)) | .[] | "\(.name)\t\(.conclusion)"')
                 failed=0

@@ -7,7 +7,8 @@ import { parse } from "yaml";
  * The release path (V03 of the 2026-10-19 audit, P097): npm gets only a commit of main that passed
  * the whole of ci.yml (the three engines' loopback and negative controls, prod-shape, the
  * examples), every Action is a reviewed commit, and only the job that publishes can mint the
- * id-token, running none of the package's or its dependencies' code.
+ * id-token, running none of the package's or its dependencies' code. Since P146 the whole of
+ * ci.yml is a run started by hand: a push runs the quick set, and the gate takes no push's run.
  */
 
 const repo = path.resolve(import.meta.dirname, "../../..");
@@ -15,6 +16,7 @@ const workflows = path.join(repo, ".github/workflows");
 
 interface Step {
   readonly name?: string;
+  readonly if?: string;
   readonly uses?: string;
   readonly run?: string;
   readonly with?: Readonly<Record<string, unknown>>;
@@ -26,11 +28,15 @@ interface Job {
   readonly if?: string;
   readonly "timeout-minutes"?: number;
   readonly permissions?: Readonly<Record<string, string>>;
-  readonly strategy?: { readonly matrix?: Readonly<Record<string, unknown>> };
+  readonly strategy?: {
+    readonly matrix?: Readonly<Record<string, unknown>>;
+    readonly "fail-fast"?: boolean;
+  };
   readonly steps?: readonly Step[];
 }
 interface Workflow {
   readonly on: unknown;
+  readonly concurrency?: unknown;
   readonly permissions?: Readonly<Record<string, string>>;
   readonly jobs: Readonly<Record<string, Job>>;
 }
@@ -84,29 +90,42 @@ function combinations(matrix: Readonly<Record<string, unknown>>): Combination[] 
 }
 
 /**
- * ci.yml's jobs as GitHub names them: a job's `name` or id; a matrix job once per combination,
- * its name with `${{ matrix.<key> }}` filled in, or else followed by the combination's values.
+ * A job of ci.yml as GitHub names it: its `name` or id; a matrix job once per combination, its
+ * name with `${{ matrix.<key> }}` filled in, or else followed by the combination's values.
  */
-function ciJobNames(): string[] {
-  return Object.entries(ci.jobs).flatMap(([id, job]) => {
-    const name = job.name ?? id;
-    const matrix = job.strategy?.matrix;
-    if (matrix === undefined) {
-      expect(name, `${id}: a name without expressions`).not.toContain("${{");
-      return [name];
+function jobNames(id: string, job: Job): string[] {
+  const name = job.name ?? id;
+  const matrix = job.strategy?.matrix;
+  if (matrix === undefined) {
+    expect(name, `${id}: a name without expressions`).not.toContain("${{");
+    return [name];
+  }
+  return combinations(matrix).map((each) => {
+    if (!name.includes("${{")) {
+      return `${name} (${Object.values(each).map(String).join(", ")})`;
     }
-    return combinations(matrix).map((each) => {
-      if (!name.includes("${{")) {
-        return `${name} (${Object.values(each).map(String).join(", ")})`;
-      }
-      const named = name.replace(/\$\{\{\s*matrix\.([\w-]+)\s*\}\}/gu, (_, key: string) =>
-        String(each[key]),
-      );
-      expect(named, `${id}: a name made of matrix values only`).not.toContain("${{");
-      return named;
-    });
+    const named = name.replace(/\$\{\{\s*matrix\.([\w-]+)\s*\}\}/gu, (_, key: string) =>
+      String(each[key]),
+    );
+    expect(named, `${id}: a name made of matrix values only`).not.toContain("${{");
+    return named;
   });
 }
+
+/** ci.yml's jobs as GitHub names them. */
+function ciJobNames(): string[] {
+  return Object.entries(ci.jobs).flatMap(([id, job]) => jobNames(id, job));
+}
+
+/** The one condition a job of ci.yml may carry (P146): the full set runs when started by hand. */
+const BY_HAND = "github.event_name == 'workflow_dispatch'";
+/** ci.yml's quick set (every push) and full set (by hand only), as GitHub names their jobs. */
+const quickSet = Object.entries(ci.jobs)
+  .filter(([, job]) => job.if === undefined)
+  .flatMap(([id, job]) => jobNames(id, job));
+const fullSet = Object.entries(ci.jobs)
+  .filter(([, job]) => job.if !== undefined)
+  .flatMap(([id, job]) => jobNames(id, job));
 
 const gate = release.jobs["gate"];
 const gateEnv = (gate?.steps ?? []).find((step) => step.env !== undefined)?.env ?? {};
@@ -174,10 +193,12 @@ describe("V03: a release waits for ci.yml on the same commit", () => {
         gated.add(id);
       }
     }
-    // ci.yml's runs on main for this very commit, a push's or one started by hand, never a pull
-    // request's (test/release-scripts.test.ts runs the script against each).
+    // ci.yml's runs on main for this very commit, started by hand: the only runs with the full
+    // set (P146). Never a push's or a pull request's (test/release-scripts.test.ts runs the
+    // script against each).
     expect(gateScript).toContain("actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&branch=main");
-    expect(gateScript).toContain('select(.event == "push" or .event == "workflow_dispatch")');
+    expect(gateScript).toContain('select(.event == "workflow_dispatch")');
+    expect(gateScript).not.toMatch(/\.event == "(?:push|pull_request|schedule)"/u);
     expect(gateScript).toContain('"$GITHUB_REF" != refs/heads/main');
     // The commit on main itself, against main by its full ref (no tag can stand in for it).
     expect(gateScript).toContain("git/ref/heads/main");
@@ -249,18 +270,82 @@ describe("V03: a release waits for ci.yml on the same commit", () => {
     expect(gate?.["timeout-minutes"] ?? 0).toBeGreaterThanOrEqual(wait + 5);
   });
 
-  it("ci.yml runs on pushes to main, pull requests and by hand, and none of its jobs is skipped or allowed to fail", () => {
+  it("ci.yml runs on pushes to main, pull requests and by hand, and none of its jobs is allowed to fail", () => {
     const on = ci.on as Record<string, unknown>;
     // main, never tags: a tag's run names the tag as its branch (a tag named main). A pull
     // request's commits run as the pull request's, once (P096).
     expect(on["push"]).toEqual({ branches: ["main"] });
     expect(Object.hasOwn(on, "pull_request")).toBe(true);
-    // `stamp workflow run ci.yml` for a run that flaked, or a commit without one.
+    // `stamp workflow run ci.yml`: the full run a release waits for (P146), or a branch's.
     expect(Object.hasOwn(on, "workflow_dispatch")).toBe(true);
+    expect(Object.keys(on).sort()).toEqual(["pull_request", "push", "workflow_dispatch"]);
     for (const [id, job] of Object.entries(ci.jobs)) {
-      expect(job.if, id).toBeUndefined();
       expect((job as { "continue-on-error"?: unknown })["continue-on-error"], id).toBeUndefined();
+      for (const step of job.steps ?? []) {
+        expect(
+          (step as { "continue-on-error"?: unknown })["continue-on-error"],
+          id,
+        ).toBeUndefined();
+        // No step that runs the project's code is conditional: only the reports' uploads are.
+        if (step.if !== undefined) {
+          expect(step.uses, `${id}: ${step.if}`).toMatch(/^actions\/upload-artifact@/u);
+          expect(["failure()", "always()"], id).toContain(step.if);
+        }
+      }
     }
+  });
+
+  it("a push runs the quick set; the full set, every security suite in it, runs by hand only (P146)", () => {
+    // The one condition a job may carry, whole: nothing else skips a job, and a run started by
+    // hand skips none.
+    for (const [id, job] of Object.entries(ci.jobs)) {
+      if (job.if !== undefined) {
+        expect(job.if, id).toBe(BY_HAND);
+      }
+    }
+    expect([...quickSet].sort()).toEqual(
+      ["check", "examples", "loopback (chromium)", "loopback (chromium-oopif)"].sort(),
+    );
+    const full = [
+      "loopback (webkit)",
+      "loopback (firefox)",
+      ...["chromium", "webkit", "firefox"].flatMap((engine) =>
+        [1, 2, 3, 4].map((shard) => `controls (${engine}, ${shard}/4)`),
+      ),
+      "controls",
+      "prod-shape",
+    ];
+    expect([...fullSet].sort()).toEqual(full.sort());
+    // The two sets are the gate's list, each job once: a run started by hand runs them all.
+    expect([...quickSet, ...fullSet].sort()).toEqual([...requiredCiJobs].sort());
+    // A job that waits for one of the full set is of the full set (a skipped `needs` skips it).
+    for (const [id, job] of Object.entries(ci.jobs)) {
+      if (needs(job).some((each) => ci.jobs[each]?.if !== undefined)) {
+        expect(job.if, id).toBe(BY_HAND);
+      }
+    }
+  });
+
+  it("runs the same browser suite on the full set's engines as on the quick set's", () => {
+    const quick = ci.jobs["loopback"];
+    const more = ci.jobs["loopback-engines"];
+    expect(quick?.steps?.length ?? 0).toBeGreaterThan(0);
+    expect(more?.steps).toEqual(quick?.steps);
+    expect(more?.["timeout-minutes"]).toBe(quick?.["timeout-minutes"]);
+    expect(quick?.strategy?.matrix).toEqual({ engine: ["chromium", "chromium-oopif"] });
+    expect(more?.strategy?.matrix).toEqual({ engine: ["webkit", "firefox"] });
+    // One engine's failure leaves the other's run going.
+    expect(quick?.strategy?.["fail-fast"]).toBe(false);
+    expect(more?.strategy?.["fail-fast"]).toBe(false);
+  });
+
+  it("never cancels a run started by hand for a push: the full run a release waits for", () => {
+    // A newer push replaces an older push's run on its ref; a run started by hand shares no
+    // group with a push's, so a merge to main leaves the release's run going.
+    expect(ci.concurrency).toEqual({
+      group: "ci-${{ github.event_name }}-${{ github.ref }}",
+      "cancel-in-progress": true,
+    });
   });
 
   it("calls the API only as an assignment or a command of its own, never inside a test", () => {
