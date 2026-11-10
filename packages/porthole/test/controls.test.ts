@@ -486,8 +486,8 @@ describe("V02: one registry of the negative controls", () => {
     expect(job).toContain(
       `run: pnpm --filter @botiverse/porthole exec node scripts/controls.ts --shard \${{ matrix.shard }}/${shards.length}\n`,
     );
-    // A shard runs about 42 minutes; a slow browser install fails on its own (ci.yml).
-    expect(job).toContain("runs-on: blacksmith-4vcpu-ubuntu-2404\n    timeout-minutes: 90\n");
+    // A shard runs about 42 minutes on Blacksmith, longer on GitHub's runners; a slow browser install fails on its own (ci.yml).
+    expect(job).toContain("runs-on: ubuntu-24.04\n    timeout-minutes: 150\n");
     expect(job).toContain("--with-deps ${{ matrix.engine }}\n        timeout-minutes: 25\n");
     const summary = ci.slice(ci.indexOf("\n  controls:"), ci.indexOf("\n  examples:"));
     expect(summary).toContain("needs: controls-shard");
