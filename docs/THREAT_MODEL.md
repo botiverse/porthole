@@ -623,7 +623,8 @@ the attacker (c), and its readers are strangers.
   cached or not). The embedding site sees the page load and hears what the page itself posts to its
   parent or top. The page learns where it is embedded (P145, measured in Chromium, Firefox and
   WebKit): its document's request carries your outer page's address as `Referer` (its origin, under
-  the default referrer policy; no `Origin` on that navigation), `document.referrer` says the same,
+  the default referrer policy; Firefox also sends it as `Origin`, Chromium and WebKit don't),
+  `document.referrer` says the same,
   and `location.ancestorOrigins` names every ancestor, the embedding site's origin included. A page
   with any egress (a `connect-src`, an image source) can send that out; one with none can't. Treat
   where an embed is shown as known to its author.

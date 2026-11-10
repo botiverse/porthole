@@ -9106,7 +9106,8 @@ is at least P1; P3 on its own) and three P3s, all fixed here.
    embed: true })`, which needs `embeds: true`. `ContentHostOptions.embeds` and `access` say so.
 3. **What an embed page learns, said** (THREAT_MODEL S4, ADOPTING `embeds`). Measured in Chromium,
    Firefox (155) and WebKit: the content document's request carries the outer page's address as
-   `Referer` (its origin, under the default referrer policy; no `Origin` on that navigation),
+   `Referer` (its origin, under the default referrer policy; Firefox 155 also sends it as `Origin`, Chromium
+   and WebKit send no `Origin`; Ferryman's recheck of #129),
    `document.referrer` is the same, and `location.ancestorOrigins` lists the outer page and the
    embedding site. A page with any egress can send that out. Porthole's served documents send no
    `Referer` of their own (`no-referrer`), which doesn't hide what the page reads.
