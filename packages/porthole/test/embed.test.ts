@@ -12,7 +12,7 @@ import {
   type PortholeServer,
   type ServerOptions,
 } from "../src/server/index.ts";
-import { pageScript, STATUS_SCRIPT_PATH } from "../src/server/pages.ts";
+import { pageScript, STRICT_STATUS_SCRIPT_PATH } from "../src/server/pages.ts";
 
 /**
  * Embed grants (P143): a public artifact page that any site may frame, with no host. Only where
@@ -589,7 +589,7 @@ describe("statusPage and doorStatusResponse for an embed (P143)", () => {
 
   it("their script tells no parent anything", async () => {
     const posted: string[] = [];
-    runInNewContext((await pageScript(STATUS_SCRIPT_PATH)?.text()) ?? "", {
+    runInNewContext((await pageScript(STRICT_STATUS_SCRIPT_PATH)?.text()) ?? "", {
       window: {
         parent: { postMessage: (_message: unknown, origin: string) => posted.push(origin) },
       },

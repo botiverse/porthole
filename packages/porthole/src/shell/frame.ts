@@ -1,5 +1,10 @@
 import { PAGE_SANDBOX_TOKENS } from "../compile/policy.ts";
-import { framedByProblem, hostOriginProblem, onNestedLabel } from "../isolation/served.ts";
+import {
+  framedByProblem,
+  hostOriginProblem,
+  includesOrigin,
+  onNestedLabel,
+} from "../isolation/served.ts";
 
 /**
  * Porthole's shell for a nested page (P111): the whole document at the address the host frames,
@@ -33,9 +38,12 @@ import { framedByProblem, hostOriginProblem, onNestedLabel } from "../isolation/
  *   the host's the window hears no focus event at all (Firefox). A later task's `frame.focus()`
  *   goes through on all of them, the frame blurred first as the failed one left it active.
  *
- * Plain ES2020, no imports and no build step, like the runtime. `__PLAN__` is its plan.
+ * Plain ES2020, no imports and no build step, like the runtime. `__PLAN__` is its plan. A shell
+ * whose parent may be an outer page (a host's `framedBy`, P141) runs the strict runtime, which
+ * checks that parent before it says `*`; every other shell runs 0.14.16's, byte for byte, so its
+ * hash is too (P144).
  */
-export const FRAME_SHELL_RUNTIME = String.raw`(() => {
+const frameShellRuntime = (strict: boolean): string => String.raw`(() => {
   "use strict";
   const plan = __PLAN__;
   const PREFIX = "porthole/shell/";
@@ -81,9 +89,7 @@ export const FRAME_SHELL_RUNTIME = String.raw`(() => {
   const web = plan.origins.filter((origin) => origin.indexOf("https://") === 0 || origin.indexOf("http://") === 0);
   // To the host: each web host origin (only the parent's is delivered); a desktop app's own scheme
   // is no target a browser takes, so where one is listed and the parent isn't a known web origin,
-  // "*" (frame-ancestors holds the parent to the host origins; nothing said here is secret). Where
-  // it names an outer page above them too (the host's framedBy, P141: plan.strictParent), the parent
-  // may be the outer page: "*" then goes only to a parent the engine names as a host origin.
+  // "*" (frame-ancestors holds the parent to the host origins; nothing said here is secret).${strict ? STRICT_NOTE : ""}
   const toHost = (message) => {
     if (!framed) {
       return;
@@ -94,11 +100,7 @@ export const FRAME_SHELL_RUNTIME = String.raw`(() => {
       } catch (_) {}
     }
     const parent = location.ancestorOrigins && location.ancestorOrigins.length > 0 ? location.ancestorOrigins[0] : null;
-    if (
-      web.length < plan.origins.length &&
-      (parent === null || web.indexOf(parent) === -1) &&
-      (plan.strictParent !== true || (parent !== null && plan.origins.indexOf(parent) !== -1))
-    ) {
+    if (${strict ? STRICT_CONDITION : "web.length < plan.origins.length && (parent === null || web.indexOf(parent) === -1)"}) {
       try {
         window.parent.postMessage(message, "*");
       } catch (_) {}
@@ -265,6 +267,22 @@ export const FRAME_SHELL_RUNTIME = String.raw`(() => {
   }
 })();`;
 
+/** What a strict shell says of its `*` (P141), after the default's note. */
+const STRICT_NOTE = ` Where
+  // it names an outer page above them too (the host's framedBy, P141: plan.strictParent), the parent
+  // may be the outer page: "*" then goes only to a parent the engine names as a host origin.`;
+/** When a strict shell says `*` (P141): as 0.14.16's, and only to a parent named as a host origin. */
+const STRICT_CONDITION = `
+      web.length < plan.origins.length &&
+      (parent === null || web.indexOf(parent) === -1) &&
+      (plan.strictParent !== true || (parent !== null && plan.origins.indexOf(parent) !== -1))
+    `;
+
+/** The nested page's shell's runtime: 0.14.16's, byte for byte. */
+export const FRAME_SHELL_RUNTIME = frameShellRuntime(false);
+/** A strict shell's runtime (P141): its parent may be an outer page. */
+export const STRICT_FRAME_SHELL_RUNTIME = frameShellRuntime(true);
+
 export { SHELL_METHOD_PREFIX, SHELL_STATE_METHOD } from "../isolation/types.ts";
 
 export interface FrameShellOptions {
@@ -301,7 +319,7 @@ export function frameShellScript(options: FrameShellOptions): string {
   }
   for (const origin of options.framedBy ?? []) {
     const problem = framedByProblem(origin);
-    if (problem !== null || options.origins.includes(origin)) {
+    if (problem !== null || includesOrigin(options.origins, origin)) {
       throw new TypeError(`frameShellScript: framedBy: ${problem ?? `${origin} is a host origin`}`);
     }
   }
@@ -320,10 +338,11 @@ export function frameShellScript(options: FrameShellOptions): string {
       "frameShellScript: page is on a nested page's own label (porthole-<24 base32>, nestedLabelOf)",
     );
   }
-  return FRAME_SHELL_RUNTIME.replace("__PLAN__", () =>
+  const strict = (options.framedBy ?? []).length > 0;
+  return (strict ? STRICT_FRAME_SHELL_RUNTIME : FRAME_SHELL_RUNTIME).replace("__PLAN__", () =>
     scriptJson({
       origins: options.origins,
-      ...((options.framedBy ?? []).length === 0 ? {} : { strictParent: true }),
+      ...(strict ? { strictParent: true } : {}),
       page: page.href,
       sandbox: PAGE_SANDBOX_TOKENS.join(" "),
       ...(options.title === undefined ? {} : { title: options.title }),

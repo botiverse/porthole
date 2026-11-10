@@ -5,7 +5,7 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes Porthole 0.14.18 (2026-11-09). A review on 2026-10-19 found gaps, and every decision it led to
+**Status.** This describes Porthole 0.15.0 (2026-11-10). A review on 2026-10-19 found gaps, and every decision it led to
 has merged ([§8](#8-fixes-in-flight) lists them). P096 changed the negative-control runner and CI,
 and the shipped conformance probes' messages and timing, not what they check. P104 (0.9.0's
 annotation markers) had a review of its own, and P105, in 0.10.0, is what it led to. 0.11.0 was
@@ -50,10 +50,17 @@ host a frame hears or tells, and a page's `*` fallback is held to a parent named
 (§6 "What every host must do", S3). 0.14.18: P142 keeps a set's pages and links within a page from
 starting the display again where there is no Navigation API, and where WebKit fires a frame's load
 for a link within its document: the arriving page's notice is sent without the API, and a page
-says it stayed; no wall moves, and the limit without the API is P079's, unchanged. Unreleased
-(0.15.0): P143 lets a host that opts in (`embeds`) mint an embed grant: a public artifact page's
-answers say `frame-ancestors *` for that session alone, and the page has no host: it hears no one,
-tells no parent anything, and no capability, runtime host function or door is there (S4, §8).
+says it stayed; no wall moves, and the limit without the API is P079's, unchanged. 0.15.0: P143
+lets a host that opts in (`embeds`) mint an embed grant: a public artifact page's answers say
+`frame-ancestors *` for that session alone, and the page has no host: it hears no one, tells no
+parent anything, and no capability, runtime host function or door is there (S4, §8). P144, after
+Ferryman's audit of 0.14.17 and 0.14.18 (no P0, no new egress), amends P141: without `framedBy`
+the status, entry and door pages' scripts and the nested page's shell are 0.14.16's again, byte for
+byte (0.14.17 had changed their hashes, not what they do); in the nesting P141 is for (the outer
+page, then the app's page, then content), content can message the outer page and every frame in
+its tree and learn its origin, so the outer page must check every message it takes, and S7's
+egress rule covers its frames (§6 "What every host must do", S7); and `framedBy` is compared with
+the host origins as browsers serialize origins (`https://a.example:443` is `https://a.example`).
 
 ## 1. Two layers
 
@@ -286,6 +293,14 @@ Whatever the use:
   can hear is the content's own word to its parent (`*`), which it must treat as untrusted. Your
   app page's own `frame-ancestors` is yours to set; Porthole never sends it. Name exact origins of
   that one product, and drop them when it stops framing you.
+- In the nesting `framedBy` is for (the outer page, then your app's page, then content), content
+  is a descendant of the outer page (P144): it can `postMessage` the outer page (`top`) and every
+  frame in its tree, and learn the outer page's origin (measured in Chromium and Firefox). No
+  header stops that. Tell the outer page's authors: every message listener on the outer page and in
+  each of its frames must check `event.source` and `event.origin`, taking a message only from the
+  window and origin it expects (your app's page), and treat any other as content's untrusted word.
+  S7's rule now covers the outer page's frames: what content was given can be handed to any frame
+  the outer page shows, so the widest network among them is content's way out.
 - Under the app runtime, run `defineRuntimeConformance` with `api` in CI (§7).
 
 ### S1. Inline widgets in a conversation
@@ -737,6 +752,10 @@ can be handed to the display with the widest network.
 
 - Porthole doesn't enforce this: `defineDisplays` takes any kinds together, and
   `frameSources` is the union of all of theirs. Group displays by page yourself.
+- Where another app frames yours (`framedBy`, P141, P144), the page is the outer page's, and its
+  frames are in the union too: content can post to the outer page and to every frame in its tree.
+  The outer page's own frames, and their network, are its authors' to group, and its listeners must
+  check `event.source` and `event.origin` (§6 "What every host must do").
 - An opaque frame also inherits the page's own CSP, so a strict page narrows its opaque frames
   further (P058). A served frame has only its own policy.
 
@@ -1295,7 +1314,7 @@ found P124 held only for a nested display or one alone in its scope; in 0.14.6: 
 | P101 | Merged | Under https Porthole read unprefixed `porthole-*` cookies a sibling label can plant; the entered mark carried no label; url mode checked neither `Origin` nor `Sec-Fetch-Site`. Now only `__Host-` names are read, the mark names its label, and a url-mode app answers its own origin and navigations. | S3, S6 |
 | P102 | Merged | This document. | |
 | P103 | Merged | A live widget's capabilities could add origins; bearer-mode assets skipped the code re-check; `callTool` had no rate. Now the preset refuses them and its config is frozen, every load asks the current config (its ETag says which answer), and `callTool` has 30 a minute. | S2, S5, §7 |
-| P143 | Unreleased (0.15.0) | Embeds: a public grant's documents framed by any page (`frame-ancestors *`) only for a session the host minted with `embed`, never a reader's. Such a frame has no host: it hears no one, Porthole tells no parent anything, no capability or runtime host function runs, no door. Accepted: the embedding site sees the page load and hears what the page itself posts to its parent or top. The host must keep its embed entry from widening grants, and blank takedowns within its stated bound. | S4 |
+| P143 | Merged (0.15.0) | Embeds: a public grant's documents framed by any page (`frame-ancestors *`) only for a session the host minted with `embed`, never a reader's. Such a frame has no host: it hears no one, Porthole tells no parent anything, no capability or runtime host function runs, no door. Accepted: the embedding site sees the page load and hears what the page itself posts to its parent or top. The host must keep its embed entry from widening grants, and blank takedowns within its stated bound. | S4 |
 
 Open with no decision yet; until then they are the host's to cover:
 

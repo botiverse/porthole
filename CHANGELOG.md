@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## 0.15.0 (unreleased)
+## 0.15.0 (2026-11-10)
 
 - **Embedded documents (P143): `Grant.embed`.** A public artifact page any site may frame, with no
   host: the host's own outer page (no host itself) frames it, and any site frames that page.
@@ -23,6 +23,31 @@ P-numbers below.
   parent. Every other session's answers are as before, byte for byte, on the same server while an
   embed session of the same artifact exists; cookies stay host-only (`__Host-`, never `Domain=`).
   Negative controls `embed-ancestors`, `embed-handshake`, `embed-origins`.
+- **`framedBy` after Ferryman's audit of 0.14.17 and 0.14.18 (P144, amends P141).** No P0 and no
+  new egress; four fixes:
+  - *Without `framedBy`, 0.14.16's scripts again, byte for byte.* 0.14.17 kept every
+    `frame-ancestors` and behaviour without `framedBy`, but the status, entry and door pages'
+    scripts and the nested page's shell carried its strict check on every path, so their bytes and
+    `script-src` hashes changed, against 0.14.17's "every response is as before". Now without
+    `framedBy` (and without an embed) they are 0.14.16's, and a test pins their hashes to 0.14.16's.
+    A page whose parent may be an outer page loads `/__porthole/status-strict.js` or
+    `/__porthole/enter-strict.js` (0.14.17's scripts); a door and a nested shell carry the strict
+    script inline as before.
+  - *The nesting `framedBy` is for, documented.* With the outer page above your app's page above
+    content, content can `postMessage` the outer page and every frame in its tree and learn the
+    outer page's origin (Chromium, Firefox). **If an outer page frames your app**, its authors must
+    check `event.source` and `event.origin` in every message listener, on the outer page and in
+    its frames; THREAT_MODEL's S7 egress rule (a page's egress is the union of its frames') now
+    covers the outer page's frames too.
+  - *Origins compared as browsers serialize them.* A host origin given again as `framedBy` with
+    or without its default port (`https://app.example.com:443`) now throws ("a host origin
+    already"), in `createServer`, the host kit and every helper that takes `framedBy`; an outer page
+    named twice so is named once.
+  - *ADOPTING's nested-page rows* (the page, its files, an ended token) name `<framedBy>` in
+    `frame-ancestors`: a content Worker copied from them showed a blank frame below the outer page.
+- **Security (P144):** nothing is loosened. The default path is 0.14.16's again; with `framedBy`,
+  the scripts and rules are 0.14.17's, and a host origin is now refused as `framedBy` under a
+  second spelling.
 
 ## 0.14.18
 

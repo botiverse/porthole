@@ -1,8 +1,14 @@
+import { createHash } from "node:crypto";
 import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { presets } from "../src/index.ts";
 import type { InstanceRef } from "../src/isolation/types.ts";
-import { frameShellScript } from "../src/shell/frame.ts";
+import {
+  FRAME_SHELL_RUNTIME,
+  frameShellScript,
+  STRICT_FRAME_SHELL_RUNTIME,
+} from "../src/shell/frame.ts";
+import { includesOrigin, normalOrigin } from "../src/isolation/served.ts";
 import {
   createContentHost,
   createServer,
@@ -14,7 +20,13 @@ import {
   statusPage,
   type ServerOptions,
 } from "../src/server/index.ts";
-import { pageScript, STATUS_SCRIPT_PATH } from "../src/server/pages.ts";
+import {
+  ENTER_SCRIPT_PATH,
+  pageScript,
+  STATUS_SCRIPT_PATH,
+  STRICT_ENTER_SCRIPT_PATH,
+  STRICT_STATUS_SCRIPT_PATH,
+} from "../src/server/pages.ts";
 import { compile } from "../src/compile/compile.ts";
 import { FRAME_STATUS_METHOD } from "../src/isolation/types.ts";
 
@@ -338,7 +350,8 @@ describe("an outer page as the parent is never told, nor heard (P141, negative c
   /** Runs a page's status script in a frame whose parent the engine names as `parent`. */
   async function statusSaid(strict: boolean, parent: string | undefined) {
     const posted: string[] = [];
-    runInNewContext((await pageScript(STATUS_SCRIPT_PATH)?.text()) ?? "", {
+    const path = strict ? STRICT_STATUS_SCRIPT_PATH : STATUS_SCRIPT_PATH;
+    runInNewContext((await pageScript(path)?.text()) ?? "", {
       window: {
         parent: {
           postMessage: (_message: unknown, origin: string) => {
@@ -515,5 +528,219 @@ describe("the host kit passes framedBy on (P141)", () => {
   it("refuses a bad one as it refuses a bad app origin", () => {
     expect(() => kit(["https://*.deck.example"])).toThrow(/framedBy/u);
     expect(() => kit([HOST])).toThrow(/host origin already/u);
+    expect(() => kit([`${HOST}:443`])).toThrow(/host origin already/u);
+  });
+});
+
+/**
+ * 0.14.16's scripts, by their sha256 as a policy names them: the status, entry and door pages'
+ * (`git show v0.14.16:packages/porthole/src/server/pages.ts`) and the nested page's shell's
+ * (`.../src/shell/frame.ts`, its runtime, and its script for `PINNED_SHELL` below). 0.14.17 changed
+ * all four on every path, with a branch only `framedBy` takes (P144, after Ferryman's audit of 0.14.18): without
+ * `framedBy` (and without embed, P143), every response carries these again, byte for byte.
+ */
+const V0_14_16 = {
+  status: "'sha256-XB1Co2NQ5DJ8+kmWSugeVUXsldJaHiI7gXXoH+yitRw='",
+  enter: "'sha256-Lzrcu1/YmcGN5E7MYSqe2IBdqoDfIZXsCiQn3fJclJY='",
+  door: "'sha256-v9Jwr3GLqqhJUL7YFH0fgjsdZgRs8zIYdIvmchvGd3A='",
+  shellRuntime: "'sha256-0nIZ304ltfsUzuaJh0kqjvbMpA4cPJT1suOXSIRIPMA='",
+  shell: "'sha256-pzr8GzzEGqwx1Kqp7zaknNd3kSfdsrZXQrdtRrDrBm8='",
+};
+const PINNED_HOSTS = ["https://host.example", "ferry://app"];
+const PINNED_ORIGIN = "https://porthole-abcdefghijklmnopqrstuvwx.content.example";
+const PINNED_SHELL = {
+  origins: PINNED_HOSTS,
+  page: `${PINNED_ORIGIN}/__porthole/f/x/`,
+  title: "T",
+};
+
+const hashOf = (script: string): string =>
+  `'sha256-${createHash("sha256").update(script).digest("base64")}'`;
+const scriptSrcOf = (response: Response): string =>
+  /script-src ([^;]+)/u.exec(response.headers.get("content-security-policy") ?? "")?.[1] ?? "";
+const inlineScriptOf = (html: string): string =>
+  /<script>([\s\S]*)<\/script>/u.exec(html)?.[1] ?? "";
+
+describe("without framedBy, the pages' and the nested shell's scripts are 0.14.16's, byte for byte (P144)", () => {
+  it("the status and entry pages' scripts", async () => {
+    expect(hashOf((await pageScript(STATUS_SCRIPT_PATH)?.text()) ?? "")).toBe(V0_14_16.status);
+    expect(hashOf((await pageScript(ENTER_SCRIPT_PATH)?.text()) ?? "")).toBe(V0_14_16.enter);
+  });
+
+  it("the door's, and the status script inline (a door that doesn't open, a relay's status page)", async () => {
+    const door = doorResponse({ hostOrigins: PINNED_HOSTS });
+    expect(scriptSrcOf(door)).toBe(V0_14_16.door);
+    expect(hashOf(inlineScriptOf(await door.text()))).toBe(V0_14_16.door);
+    for (const response of [
+      doorStatusResponse({ hostOrigins: PINNED_HOSTS, status: 401, reason: "session" }),
+      statusPage({ status: 404, title: "t", detail: "d", hostOrigins: PINNED_HOSTS }),
+    ]) {
+      expect(scriptSrcOf(response)).toBe(V0_14_16.status);
+      expect(hashOf(inlineScriptOf(await response.text()))).toBe(V0_14_16.status);
+    }
+  });
+
+  it("the nested page's shell", async () => {
+    expect(hashOf(FRAME_SHELL_RUNTIME)).toBe(V0_14_16.shellRuntime);
+    expect(hashOf(frameShellScript(PINNED_SHELL))).toBe(V0_14_16.shell);
+    const shell = nestedShellResponse(compile(configs.artifactNested), {
+      ...PINNED_SHELL,
+      origin: PINNED_ORIGIN,
+    });
+    expect(scriptSrcOf(shell)).toBe(V0_14_16.shell);
+    expect(await shell.text()).not.toContain("strictParent");
+  });
+
+  it("a server without framedBy answers with them: its pages load 0.14.16's scripts, its door and nested shell carry them", async () => {
+    const porthole = server({ framedBy: [] });
+    const answers = await everyAnswer(porthole);
+    const named = (name: string) => answers.find((each) => each.name === name)?.response;
+    for (const name of ["shell's ticket used", "not found"]) {
+      expect(await named(name)?.text(), name).toContain(`<script src="${STATUS_SCRIPT_PATH}">`);
+    }
+    expect(await named("url mode: the entry page")?.text()).toContain(
+      `<script src="${ENTER_SCRIPT_PATH}">`,
+    );
+    const { origin } = await porthole.issue(
+      { scope: "s9", document: { kind: "shell", preset: "inlineWidget" } },
+      { viewer: "v" },
+    );
+    for (const [path, hash] of [
+      [STATUS_SCRIPT_PATH, V0_14_16.status],
+      [ENTER_SCRIPT_PATH, V0_14_16.enter],
+    ] as const) {
+      const served = await porthole.handle(ask(`${origin}${path}`, "script"));
+      expect(hashOf((await served?.text()) ?? ""), path).toBe(hash);
+    }
+    for (const name of ["door", "door used"]) {
+      const response = named(name);
+      expect(response, name).toBeDefined();
+      expect([V0_14_16.door, V0_14_16.status], name).toContain(scriptSrcOf(response!));
+    }
+    // The nested shell: 0.14.16's runtime, its own plan spliced in.
+    const nested = named("nested shell")!;
+    const script = inlineScriptOf(await nested.clone().text());
+    expect(scriptSrcOf(nested)).toBe(hashOf(script));
+    const [before = "", after = ""] = FRAME_SHELL_RUNTIME.split("__PLAN__");
+    expect(script.startsWith(before) && script.endsWith(after)).toBe(true);
+  });
+
+  it("with framedBy, the strict pages load scripts of their own, and the default paths still serve 0.14.16's", async () => {
+    const porthole = server();
+    const answers = await everyAnswer(porthole);
+    const named = (name: string) => answers.find((each) => each.name === name)?.response;
+    expect(await named("not found")?.text()).toContain(
+      `<script src="${STRICT_STATUS_SCRIPT_PATH}">`,
+    );
+    expect(await named("url mode: the entry page")?.text()).toContain(
+      `<script src="${STRICT_ENTER_SCRIPT_PATH}">`,
+    );
+    const { origin } = await porthole.issue(
+      { scope: "s9", document: { kind: "shell", preset: "inlineWidget" } },
+      { viewer: "v" },
+    );
+    for (const path of [STRICT_STATUS_SCRIPT_PATH, STRICT_ENTER_SCRIPT_PATH]) {
+      const served = await porthole.handle(ask(`${origin}${path}`, "script"));
+      expect(await served?.text(), path).toContain("portholeStrictParent");
+    }
+    const served = await porthole.handle(ask(`${origin}${STATUS_SCRIPT_PATH}`, "script"));
+    expect(hashOf((await served?.text()) ?? "")).toBe(V0_14_16.status);
+    const door = doorResponse({ hostOrigins: PINNED_HOSTS, framedBy: [DECK] });
+    expect(scriptSrcOf(door)).not.toBe(V0_14_16.door);
+    expect(hashOf(inlineScriptOf(await door.text()))).toBe(scriptSrcOf(door));
+    expect(STRICT_FRAME_SHELL_RUNTIME).not.toBe(FRAME_SHELL_RUNTIME);
+    expect(frameShellScript({ ...PINNED_SHELL, framedBy: [DECK] })).toContain(
+      '"strictParent":true',
+    );
+  });
+});
+
+describe("framedBy is compared with the host origins as browsers serialize origins (P144)", () => {
+  const base = {
+    content: { domain: DOMAIN, scheme: "https" as const },
+    secret,
+    configs: {},
+  };
+
+  it("normalOrigin lowercases and drops a default port", () => {
+    expect(normalOrigin("https://app.example.com:443")).toBe("https://app.example.com");
+    expect(normalOrigin("HTTPS://App.Example.COM")).toBe("https://app.example.com");
+    expect(normalOrigin("http://localhost:80")).toBe("http://localhost");
+    expect(normalOrigin("http://[::1]:80")).toBe("http://[::1]");
+    expect(normalOrigin("https://app.example.com:8443")).toBe("https://app.example.com:8443");
+    expect(normalOrigin("http://localhost:443")).toBe("http://localhost:443");
+    expect(normalOrigin("Ferry://App")).toBe("ferry://app");
+    expect(includesOrigin([HOST], `${HOST}:443`)).toBe(true);
+    expect(includesOrigin([`${HOST}:443`], HOST)).toBe(true);
+    expect(includesOrigin([HOST], `${HOST}:8443`)).toBe(false);
+  });
+
+  it("a host origin with or without its default port is a host origin already", () => {
+    expect(() => createServer({ ...base, hostOrigins: [HOST], framedBy: [`${HOST}:443`] })).toThrow(
+      /host origin already/u,
+    );
+    expect(() => createServer({ ...base, hostOrigins: [`${HOST}:443`], framedBy: [HOST] })).toThrow(
+      /host origin already/u,
+    );
+    expect(() =>
+      createServer({ ...base, hostOrigins: [HOST], framedBy: [`${HOST}:8443`] }),
+    ).not.toThrow();
+    expect(() =>
+      createServer({
+        ...base,
+        hostOrigins: ["http://localhost:5173"],
+        framedBy: ["http://localhost"],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      createServer({
+        ...base,
+        hostOrigins: ["http://localhost"],
+        framedBy: ["http://localhost:80"],
+      }),
+    ).toThrow(/host origin already/u);
+  });
+
+  it("the helpers a content Worker of its own answers with compare them so too", () => {
+    expect(() => doorResponse({ hostOrigins: [HOST], framedBy: [`${HOST}:443`] })).toThrow(
+      /host origin/u,
+    );
+    expect(() =>
+      statusPage({
+        status: 401,
+        title: "t",
+        detail: "d",
+        hostOrigins: [`${HOST}:443`],
+        framedBy: [HOST],
+      }),
+    ).toThrow(/host origin/u);
+    expect(() =>
+      nestedShellCsp("1;", "https://porthole-x.example", [HOST], [`${HOST}:443`]),
+    ).toThrow(/host origin/u);
+    const origin = `https://${nestedLabelOf("abc")}.${DOMAIN}`;
+    expect(() =>
+      frameShellScript({
+        origins: [HOST],
+        framedBy: [`${HOST}:443`],
+        page: `${origin}/__porthole/f/x/`,
+      }),
+    ).toThrow(/host origin/u);
+  });
+
+  it("an outer page named twice, with and without its default port, is named once", () => {
+    expect(
+      ancestorsOf(doorResponse({ hostOrigins: [HOST], framedBy: [DECK, `${DECK}:443`] })),
+    ).toEqual([HOST, DECK]);
+    expect(
+      ancestorsOf(
+        statusPage({
+          status: 404,
+          title: "t",
+          detail: "d",
+          hostOrigins: [HOST],
+          framedBy: [DECK, `${DECK}:443`],
+        }),
+      ),
+    ).toEqual([HOST, DECK]);
   });
 });

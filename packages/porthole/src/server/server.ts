@@ -2,6 +2,7 @@ import { compile, type CompiledConfig } from "../compile/compile.ts";
 import type { DisplayMode, EgressConfig } from "../config/schema.ts";
 import {
   framedByProblem,
+  includesOrigin,
   hostOriginProblem,
   maybeSameSite,
   originMatchesSource,
@@ -453,7 +454,7 @@ export function createServer(options: ServerOptions): PortholeServer {
     if (problem !== null) {
       throw new TypeError(`framedBy: ${problem}`);
     }
-    if (options.hostOrigins.includes(origin)) {
+    if (includesOrigin(options.hostOrigins, origin)) {
       throw new TypeError(
         `framedBy: ${origin} is a host origin already: framedBy names an ancestor that never talks to a frame`,
       );
@@ -469,7 +470,7 @@ export function createServer(options: ServerOptions): PortholeServer {
         `framedBy: ${origin} may be the same site as the content domain ${domain}: serve content from a registrable domain the host uses for nothing else`,
       );
     }
-    if (!framedBy.includes(origin)) {
+    if (!includesOrigin(framedBy, origin)) {
       framedBy.push(origin);
     }
   }
