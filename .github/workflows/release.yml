@@ -49,7 +49,7 @@ jobs:
   gate:
     runs-on: ubuntu-24.04
     # Longer than the wait below (CI_WAIT_MINUTES).
-    timeout-minutes: 160
+    timeout-minutes: 245
     permissions:
       contents: read # whether the tag exists
       actions: read # ci.yml's runs and jobs for the released commit
@@ -59,8 +59,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           # How long a pending run is waited for: longer than ci.yml's slowest job, after its queue
-          # (test/release.test.ts checks it against ci.yml's timeouts).
-          CI_WAIT_MINUTES: "150"
+          # (GitHub's runners run fewer jobs at once; test/release.test.ts checks it against ci.yml's timeouts).
+          CI_WAIT_MINUTES: "240"
           # ci.yml's jobs as GitHub names them, the one list of them: test/release.test.ts holds it
           # to ci.yml's jobs, so a job added, renamed or dropped there fails a test.
           REQUIRED_CI_JOBS: |
