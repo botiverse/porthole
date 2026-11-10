@@ -339,11 +339,11 @@ describe("V03: a release waits for ci.yml on the same commit", () => {
     expect(more?.strategy?.["fail-fast"]).toBe(false);
   });
 
-  it("never cancels a run started by hand for a push: the full run a release waits for", () => {
-    // A newer push replaces an older push's run on its ref; a run started by hand shares no
-    // group with a push's, so a merge to main leaves the release's run going.
+  it("never cancels a run started by hand, for a push or for another run started by hand: the full run a release waits for", () => {
+    // A newer push replaces an older push's run on its ref; a run started by hand is alone in
+    // its group (its run id), so neither a merge to main nor a second full run stops it.
     expect(ci.concurrency).toEqual({
-      group: "ci-${{ github.event_name }}-${{ github.ref }}",
+      group: "ci-${{ github.event_name }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'push' }}",
       "cancel-in-progress": true,
     });
   });

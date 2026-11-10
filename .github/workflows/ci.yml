@@ -33,10 +33,11 @@ on:
 permissions:
   contents: read
 
-# A newer push replaces an older one's run on the same ref; a run started by hand is in a group of
-# its own, so a merge to main never cancels the full run a release is waiting for.
+# A newer push replaces an older one's run on the same ref. A run started by hand is in a group of
+# its own (its run id), so nothing cancels the full run a release is waiting for: not a merge to
+# main, and not a second full run started for a newer commit.
 concurrency:
-  group: ci-${{ github.event_name }}-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'push' }}
   cancel-in-progress: true
 
 jobs:

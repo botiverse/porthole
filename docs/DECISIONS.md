@@ -9202,11 +9202,12 @@ rounded up to a minute):
    gate waits for a full run that is still going (`CI_WAIT_MINUTES`) and, after ten minutes with
    none, says to start one. The gate's permissions stay `contents: read`, `actions: read`: it
    starts nothing itself.
-3. **A push never cancels a run started by hand.** ci.yml's concurrency group is
-   `ci-<event>-<ref>` (was `ci-<ref>`): a newer push still replaces an older push's run on its
-   ref, and a newer run by hand an older one, but a merge to main no longer cancels the full run
-   a release is waiting for (before, it cancelled main's run, and the release of the earlier
-   commit with it).
+3. **Nothing cancels a run started by hand.** ci.yml's concurrency group is
+   `ci-<event>-<ref>-push` for a push (was `ci-<ref>`) and `ci-<event>-<ref>-<run id>` for a run
+   started by hand: a newer push still replaces an older push's run on its ref, but neither a
+   merge to main nor a second full run started for a newer commit cancels the full run a release
+   is waiting for (before, a merge cancelled main's run, and the release of the earlier commit
+   with it; Tenny's review of #131 for the second case).
 4. **A change to a wall asks for the full set before it merges** (AGENTS.md): a pull request that
    touches isolation, egress, the shell, the focus guard, a probe or a control starts the full
    run on its branch (`--ref <branch>`), since its own CI shows Chromium and no control.
