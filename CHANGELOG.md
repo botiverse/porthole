@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## 0.15.0 (2026-11-10)
+## 0.15.0
 
 - **Embedded documents (P143): `Grant.embed`.** A public artifact page any site may frame, with no
   host: the host's own outer page (no host itself) frames it, and any site frames that page.
