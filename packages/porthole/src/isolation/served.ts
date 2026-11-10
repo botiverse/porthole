@@ -67,10 +67,37 @@ export function isHostOrigin(origin: unknown): origin is string {
   return typeof origin === "string" && origin.length <= 300 && HOST_ORIGIN.test(origin);
 }
 
+/**
+ * Whether an origin that matched `HOST_ORIGIN` is one a browser can serialize as it is written
+ * (P145): a port, where it names one, is 1 to 65535 in plain decimal (never `:0`, `:99999` or
+ * `:0443`), and an `http`/`https` host is as the URL parser gives it back (never `0x7f.0.0.1` for
+ * `127.0.0.1`). A default port (`:443`) is still taken: browsers drop it, and `normalOrigin`
+ * compares it so (P144). Such an origin matches no frame and no message, so refusing it only says
+ * so early.
+ */
+function serializable(origin: string): boolean {
+  const port = /:(\d+)$/u.exec(origin)?.[1];
+  if (port !== undefined && !(/^[1-9]\d{0,4}$/u.test(port) && Number(port) <= 65_535)) {
+    return false;
+  }
+  const scheme = origin.slice(0, origin.indexOf(":"));
+  if (scheme !== "http" && scheme !== "https") {
+    return true;
+  }
+  try {
+    const url = new URL(origin);
+    return url.hostname === origin.slice(scheme.length + 3).replace(/:\d+$/u, "");
+  } catch {
+    return false;
+  }
+}
+
 /** Why `origin` can't be a host origin, in words a host's developer can act on; null if it can. */
 export function hostOriginProblem(origin: unknown): string | null {
   if (isHostOrigin(origin)) {
-    return null;
+    return serializable(origin)
+      ? null
+      : `${JSON.stringify(origin)} is not an origin a browser serializes so (a port is 1 to 65535, no leading zero; a host as the URL parser gives it)`;
   }
   if (origin === "null") {
     return 'the host page\'s origin is opaque ("null"): serve it from a real origin (an Electron custom protocol must be registered as standard, and file: pages have none)';
@@ -111,7 +138,8 @@ const LOOPBACK_HOST = (host: string): boolean =>
  * ancestor of every frame the host shows, above the host's own page, and never a host origin. An
  * exact web origin, `https://host[:port]` (lowercase, no path, no wildcard), or `http://` on
  * loopback alone (`localhost`, `*.localhost`, `127.0.0.1`, `[::1]`) for development: never a
- * desktop scheme, `"null"`, a CSP keyword or a list. Null if it can be.
+ * desktop scheme, `"null"`, a CSP keyword or a list. Its port, where it names one, is 1 to 65535
+ * in plain decimal, and its host is as the URL parser gives it back (P145). Null if it can be.
  */
 export function framedByProblem(origin: unknown): string | null {
   const parsed = typeof origin === "string" && isHostOrigin(origin) ? parseOrigin(origin) : null;
@@ -120,6 +148,9 @@ export function framedByProblem(origin: unknown): string | null {
     !(parsed.scheme === "https" || (parsed.scheme === "http" && LOOPBACK_HOST(parsed.host)))
   ) {
     return `${JSON.stringify(origin)} is not an exact https origin (https://host[:port], lowercase, no path; http only on loopback)`;
+  }
+  if (!serializable(origin as string)) {
+    return `${JSON.stringify(origin)} is not an origin a browser serializes so (a port is 1 to 65535, no leading zero; a host as the URL parser gives it)`;
   }
   return null;
 }

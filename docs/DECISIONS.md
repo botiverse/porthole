@@ -8863,7 +8863,7 @@ cases, whose second page is opened by a link.
 (the `same` notice then has no load to explain), single-document served artifacts need it (give
 their notices the version), or hosts need Safari before 26 on a tab (P099's limit stands).
 
-## P143 · 2026-11-10 · An embedded document: a public grant with no host, framed by any page (`embed`) · Accepted
+## P143 · 2026-11-10 · An embedded document: a public grant with no host, framed by any page (`embed`) · Accepted; amended by P145
 
 From Raft (Tenny): public artifacts embedded on any site, as a video is. The host's own outer page
 (its code, no author code, and no host: it hears and tells nothing) frames the content frame, and
@@ -8975,7 +8975,7 @@ plan) fails `[embed.unheard]`; each exactly that probe on Chromium.
 its own entry), auto-height needs a word to the embedding site, or browsers give a policy for the
 parent alone.
 
-## P144 · 2026-11-10 · After the audit of 0.14.17 and 0.14.18: `framedBy`'s default path byte for byte, the nesting it is for, origins compared as browsers serialize them · Accepted
+## P144 · 2026-11-10 · After the audit of 0.14.17 and 0.14.18: `framedBy`'s default path byte for byte, the nesting it is for, origins compared as browsers serialize them · Accepted; amended by P145
 
 Amends P141 (its decision 1's "byte for byte", its decision 3 and its "What it re-opens"). From
 Ferryman's audit of 0.14.17 (P141) and 0.14.18 (P142): no P0 and no new egress; four findings, all
@@ -9048,3 +9048,112 @@ the nested shell pass unchanged on Chromium.
 
 **Revisit when** a host needs a strict page's script at the old address, or browsers give a policy
 for the parent alone.
+
+## P145 · 2026-11-10 · After the audit of 0.15.0: "byte for byte" said as it holds, embeds never from `access`, what an embed page learns, origins' ports · Accepted
+
+Amends P143 (its decision 3's "as before, byte for byte", and its host duties) and P144 (its
+decision 1's "every response is 0.14.16's again", and its decision 3's "P141's exact forms"). From
+Ferryman's audit of 0.15.0 (P143, P144): no P0, no escape, no new egress, and no way found for an
+embed session's `*` to reach another session; one P1 (by the rule that any default-path byte change
+is at least P1; P3 on its own) and three P3s, all fixed here.
+
+**Context.**
+1. *(P1 by rule, P3 on its own) "Byte for byte".* P144 #1 ended "without `framedBy` every response
+   is 0.14.16's again, byte for byte"; 0.15.0's CHANGELOG said "the default path is 0.14.16's
+   again", and P143 #3 and its CHANGELOG line "every other session's answers are as before, byte
+   for byte". Every header held (every CSP, `frame-ancestors`, `script-src` hash, cookie and cache
+   header) and so did the four scripts P144 pinned. The bodies of the documents that inline the
+   shell runtime did not: a served shell, an artifact page, a file set's pages, the MCP Apps proxy
+   and the nested page carry P142's changes (0.14.18) and P143's `hostless` branches (0.15.0). Those
+   branches are inert where a plan names a host (`createServer` refuses empty `hostOrigins`), and no
+   hash covers the runtime (`'unsafe-inline'`), so nothing a browser does changed; the claim did.
+   P143's bound test compares with a 0.15.0 server without `embeds`, which carries the same runtime,
+   so it could not see this.
+2. *(P3) The kit's `embeds` said "whether `access` may answer an embed grant".* `access` answers
+   the kit's reader issue endpoint and a clean address's resolve, which ADOPTING and THREAT_MODEL
+   say must never mint `embed`, and the kit's test minted it there. A host that followed the kit's
+   doc made signed-out readers' frames hostless and frameable by any site (nothing signed-in rode
+   along: `checkGrant` refuses a viewer, level or user with `embed`).
+3. *(P3) An embed page learns where it is embedded*, which P143 didn't say beside "the embedding
+   site sees the page load".
+4. *(P3) Ports.* `framedByProblem` (and `hostOriginProblem`) took `:0`, `:99999` and `:0443`, and a
+   host the URL parser rewrites (`https://0x7f.0.0.1` is `https://127.0.0.1`). Each failed closed (a
+   source that matches nothing, or a stricter page), but P144 said inputs are held to exact forms.
+5. *(P3) A control's probe failed at an unmarked step.* Under `embed-origins`, `[embed.unheard]`
+   once failed at "the embedded page shows" instead of its verdict (Chromium, a loaded box), so the
+   runner counted it as not failing by its probe. The cause: the shell draws one document
+   (`render` runs once), and the hostile outer page says a document every 100 ms. A weakened shell
+   that hears that word before its own document has loaded draws the word instead of the page
+   (`#taken`, no `#content`), and the step before the verdict waited 5 s for `#content`. Reproduced
+   on Chromium and Firefox by delivering the document in two parts: both failed "unmarked: Error:
+   the embedded page shows".
+
+**Decision.**
+1. **Said as it holds.** Without `framedBy` and an embed, every header and the status, entry and
+   door pages' scripts and the nested page's shell are 0.14.16's, byte for byte; the shell runtime
+   that served documents inline is 0.15.0's: P142's changes and P143's `hostless` branches, inert
+   where a plan names a host. Every other session's answers are, byte for byte, what the same server
+   without `embeds` answers. THREAT_MODEL's status line, S4 and 0.15.0's CHANGELOG lines say so.
+   The runtime is not moved again: splicing `hostless` into embed documents alone (as P144 did for
+   `strict`) would make the claim true against 0.14.18 only, not 0.14.16, for a third runtime
+   variant. Instead **its bytes are pinned** (`SHELL_RUNTIME`, `ANNOTATE_RUNTIME`, `FIND_RUNTIME`,
+   `USE_RUNTIME`, `LEGACY_GLOBALS_RUNTIME` by sha256): a change to them fails a test, so the next
+   release says it rather than asserting it away.
+2. **Embeds never from `access`.** The host kit refuses an `access` answer that carries `embed`,
+   whatever `embeds` says: 409 `refused` from its issue endpoint and a clean address's resolve, and
+   a clean address's tab gets the kit's 409 page (`enterBy` refuses it, as before). A host mints an
+   embed session from a route of its own with `host.server.issue(instance, { anonymous: true,
+   embed: true })`, which needs `embeds: true`. `ContentHostOptions.embeds` and `access` say so.
+3. **What an embed page learns, said** (THREAT_MODEL S4, ADOPTING `embeds`). Measured in Chromium,
+   Firefox (155) and WebKit: the content document's request carries the outer page's address as
+   `Referer` (its origin, under the default referrer policy; Firefox 155 also sends it as `Origin`, Chromium
+   and WebKit send no `Origin`; Ferryman's recheck of #129),
+   `document.referrer` is the same, and `location.ancestorOrigins` lists the outer page and the
+   embedding site. A page with any egress can send that out. Porthole's served documents send no
+   `Referer` of their own (`no-referrer`), which doesn't hide what the page reads.
+4. **A port is 1 to 65535, in plain decimal; an `http`/`https` host is as the URL parser gives
+   it.** `hostOriginProblem` and `framedByProblem` refuse `:0`, `:00`, `:65536`, `:99999`, `:0443`,
+   and a host like `0x7f.0.0.1`, `0177.0.0.1` or `127.1`; so `createServer`, the host kit and every
+   helper that takes host origins or `framedBy` throw on them. A default port (`:443`) is still
+   taken: browsers drop it and P144 compares it so; refusing it in a patch release would break a
+   working config.
+5. **The probe judges, not the step before it.** `[embed.unheard]` waits for the page to have
+   loaded, its own `#content` or a word's `#taken`, and leaves which one to its verdict. Its
+   documents now arrive in two parts (the shell's script, then the rest 1.5 s later), so the words
+   reach the shell before its document loads every time, not only on a loaded box: the probe covers
+   the early words too, and `embed-origins` fails it with the page taken over (`taken: true`,
+   `content: false`), on every engine.
+
+**Rejected.**
+- *Requiring `new URL(origin).origin === origin`* (the audit's suggestion): it refuses `:443` too,
+  which 0.15.0 takes for host origins and `framedBy` alike (P144's tests); a patch should not break
+  a working config. The rule above refuses everything else it would.
+- *The kit dropping `embed` from an `access` answer and issuing a public session*: a host that
+  meant an embed would get a reader's frame without a word; a refusal says it.
+- *Running `embed.spec` on Firefox and WebKit through a workflow change*: CI's `loopback` job runs
+  every spec (`testMatch: **/*.spec.ts`) on `chromium`, `chromium-oopif`, `webkit` and `firefox`,
+  and `controls-shard` runs every control on `chromium`, `webkit` and `firefox`; 0.15.0's CI ran
+  `embed.spec` on all three. Only P143's local run was Chromium alone.
+
+**Tested.** `test/framed-by.test.ts`: the served shell runtime's five parts pinned to 0.15.0's
+sha256, three of them shown not 0.14.16's (and `use`, `legacy` the same), and on a server without
+`framedBy` or `embeds` an artifact page carries the `hostless` line with a plan naming its host
+origins; Ferryman's edges probe: thirteen origins (`:0`, `:00`, `:65536`, `:99999`, `:0443`,
+`:08443`, a host origin with `:0443`, `http://localhost:0`, `http://127.0.0.1:65536`,
+`0x7f.0.0.1`, `0177.0.0.1`, `127.1`, `203.0.113.07`) refused by `createServer`, the host kit,
+`statusPage`, `doorResponse`, `doorStatusResponse`, `nestedShellCsp` and `frameShellScript`; the
+audit's refused forms (a host origin with or without `:443`, a trailing dot, userinfo, Unicode, case,
+a path, `http:` off loopback, `ferry://App`) still refused; ports 1, 8443, 65535, a default port, an
+IPv4 address and loopback http taken; a host origin's port held the same; `embeds: "true"` throws.
+`test/origins.test.ts`: `hostOriginProblem` on the same ports and hosts, custom schemes included.
+`test/embed.test.ts`: the kit refuses `access` answering `embed` at its issue endpoint, a clean
+address's resolve (409 `refused`) and its tab (409, no redirect), with `embeds` absent, false and
+true, and issues a public grant from the same routes; `host.server.issue` mints the embed only with
+`embeds: true`. Taking the kit's check out fails the refusal test. `leak/served/embed.spec.ts`
+passes on Chromium, Firefox and WebKit, and `embed-ancestors`, `embed-handshake` and `embed-origins`
+each fail exactly their probe on all three. The old spec with its document in two parts failed
+`embed-origins` unmarked on Chromium and Firefox; this one fails it by the probe.
+
+**Revisit when** the runtime pin changes (say what changed), a host needs `embed` from a reader's
+route (then it needs its own entry, never `access`), or a browser stops exposing
+`ancestorOrigins` to a framed page.

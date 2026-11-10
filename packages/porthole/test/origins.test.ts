@@ -40,6 +40,29 @@ describe("host origins", () => {
     expect(hostOriginProblem(origin)).toMatch(message);
   });
 
+  test.each([
+    "https://app.example.com:0",
+    "https://app.example.com:65536",
+    "https://app.example.com:99999",
+    "https://app.example.com:0443",
+    "https://0x7f.0.0.1",
+    "http://127.1:8797",
+    "ferry://app:0",
+    "my-app+x.y://host.name:08443",
+  ])(
+    "refuses %j: a port 1 to 65535 without a leading zero, a host as the URL parser gives it (P145)",
+    (origin) => {
+      expect(hostOriginProblem(origin)).toMatch(/serializes/u);
+    },
+  );
+
+  test.each(["https://app.example.com:443", "https://app.example.com:65535", "ferry://app:1"])(
+    "still accepts %s",
+    (origin) => {
+      expect(hostOriginProblem(origin)).toBeNull();
+    },
+  );
+
   test("the shell takes messages from a custom-scheme host, and from it only, exactly", () => {
     const html = compile(presets.inlineWidget()).shellDocument({ origins: ["ferry://app"] });
     const plan = JSON.parse(/const plan = (\{.*?\});\n/su.exec(html)?.[1] ?? "{}") as {

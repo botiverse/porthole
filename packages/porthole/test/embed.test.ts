@@ -6,6 +6,7 @@ import {
   createContentHost,
   createServer,
   doorStatusResponse,
+  prefixedName,
   statusPage,
   type AuthorizeRequest,
   type Grant,
@@ -19,8 +20,9 @@ import { pageScript, STRICT_STATUS_SCRIPT_PATH } from "../src/server/pages.ts";
  * the server opted in (`embeds`), only anonymous with no level or user, only an artifact's page that
  * isn't nested. The flag is signed into the session and the sealed address; every answer of such a
  * session says `frame-ancestors *`, its documents' plans name no host, and no door is minted.
- * Every other session's answers are as before, byte for byte, on the same server, while an embed
- * session of the same artifact exists.
+ * Every other session's answers are, byte for byte, what the same server without `embeds` answers,
+ * while an embed session of the same artifact exists (not a release before 0.15.0's: the shell
+ * runtime they inline carries P143's inert `hostless` branches, pinned in framed-by.test.ts, P145).
  */
 
 const secret = new Uint8Array(32).fill(9);
@@ -317,7 +319,7 @@ describe("an embed grant is taken only as narrow as P143 says", () => {
     await expect(porthole.enterBy(state!, page("a"), EMBED)).rejects.toThrow(/clean address/u);
   });
 
-  it("goes through the host kit only where it opted in", async () => {
+  it("goes through the host kit's server only where it opted in, never through access (P145)", async () => {
     const kit = (embeds?: boolean) =>
       createContentHost<null>({
         domain: DOMAIN,
@@ -327,20 +329,74 @@ describe("an embed grant is taken only as narrow as P143 says", () => {
         configs: { artifact: configs.artifact },
         source: () => Promise.resolve({ html: "<p>one</p>" }),
         instance: (proposal) => proposal,
-        access: () => EMBED,
+        access: () => ({ anonymous: true }),
       });
-    const body = JSON.stringify({ instance: page("a") });
-    const issue = (embeds?: boolean) =>
-      kit(embeds).issue(() => null)(
-        new Request(`${HOST}/porthole/frames`, { method: "POST", body }),
-      );
-    const refused = await issue();
-    expect(refused.status).toBe(409);
-    const issued = await issue(true);
-    expect(issued.status).toBe(201);
-    const location = (await issued.json()) as { url: string; door?: unknown; reports: boolean };
+    // The host's own embed route: `host.server.issue`, only where it opted in.
+    await expect(kit().server!.issue(page("a"), EMBED)).rejects.toThrow(/embeds: true/u);
+    await expect(kit(false).server!.issue(page("a"), EMBED)).rejects.toThrow(/embeds: true/u);
+    const location = await kit(true).server!.issue(page("a"), EMBED);
     expect(location.door).toBeUndefined();
     expect(location.reports).toBe(false);
+  });
+
+  it("the host kit refuses an embed grant from access, at the issue endpoint, a clean address's resolve and its tab, with or without embeds (P145)", async () => {
+    const AUTHORIZE = `${HOST}/porthole/authorize`;
+    const kit = (embeds: boolean | undefined, grant: Grant) =>
+      createContentHost<null>({
+        domain: DOMAIN,
+        appOrigins: [HOST],
+        secret,
+        ...(embeds === undefined ? {} : { embeds }),
+        configs: { artifact: configs.artifact },
+        source: () => Promise.resolve({ html: "<p>one</p>" }),
+        instance: (proposal) => proposal,
+        access: () => grant,
+        name: prefixedName("a-"),
+        entry: {
+          authorizeUrl: AUTHORIZE,
+          at: (scope, path) => (path === "/" ? page(scope) : null),
+          signIn: () => new Response(null, { status: 303, headers: { location: `${HOST}/in` } }),
+        },
+      });
+    const post = (host: ReturnType<typeof kit>, body: unknown) =>
+      host.issue(() => null)(
+        new Request(`${HOST}/porthole/frames`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+    for (const embeds of [undefined, false, true]) {
+      const host = kit(embeds, EMBED);
+      const clean = host.urlOf("a", "/")!;
+      for (const [name, body] of [
+        ["the issue endpoint", { instance: page("a") }],
+        ["a clean address's resolve", { address: clean }],
+      ] as const) {
+        const answer = await post(host, body);
+        expect(answer.status, `${name}, embeds ${String(embeds)}`).toBe(409);
+        expect(
+          ((await answer.json()) as { error: { code: string } }).error.code,
+          `${name}, embeds ${String(embeds)}`,
+        ).toBe("refused");
+      }
+      // The tab: redirect entry to the app's authorize route, which opens nothing.
+      const begun = await host.fetch(
+        new Request(clean, {
+          headers: { "sec-fetch-dest": "document", "sec-fetch-mode": "navigate" },
+        }),
+      );
+      expect(begun?.status).toBe(302);
+      const authorized = await host.authorize(() => null)(
+        new Request(begun!.headers.get("location")!),
+      );
+      expect(authorized.status, `the tab, embeds ${String(embeds)}`).toBe(409);
+      expect(authorized.headers.get("location")).toBeNull();
+    }
+    // The control: the same routes issue a public grant.
+    const host = kit(true, { anonymous: true });
+    expect((await post(host, { instance: page("a") })).status).toBe(201);
+    expect((await post(host, { address: host.urlOf("a", "/") })).status).toBe(201);
   });
 });
 

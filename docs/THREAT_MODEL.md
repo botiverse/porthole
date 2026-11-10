@@ -5,7 +5,7 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes Porthole 0.15.0 (2026-11-10). A review on 2026-10-19 found gaps, and every decision it led to
+**Status.** This describes Porthole 0.15.1 (2026-11-10). A review on 2026-10-19 found gaps, and every decision it led to
 has merged ([§8](#8-fixes-in-flight) lists them). P096 changed the negative-control runner and CI,
 and the shipped conformance probes' messages and timing, not what they check. P104 (0.9.0's
 annotation markers) had a review of its own, and P105, in 0.10.0, is what it led to. 0.11.0 was
@@ -55,12 +55,20 @@ lets a host that opts in (`embeds`) mint an embed grant: a public artifact page'
 `frame-ancestors *` for that session alone, and the page has no host: it hears no one, tells no
 parent anything, and no capability, runtime host function or door is there (S4, §8). P144, after
 Ferryman's audit of 0.14.17 and 0.14.18 (no P0, no new egress), amends P141: without `framedBy`
-the status, entry and door pages' scripts and the nested page's shell are 0.14.16's again, byte for
-byte (0.14.17 had changed their hashes, not what they do); in the nesting P141 is for (the outer
-page, then the app's page, then content), content can message the outer page and every frame in
-its tree and learn its origin, so the outer page must check every message it takes, and S7's
-egress rule covers its frames (§6 "What every host must do", S7); and `framedBy` is compared with
-the host origins as browsers serialize origins (`https://a.example:443` is `https://a.example`).
+every header (every `frame-ancestors` and `script-src` hash) and the status, entry and door pages'
+scripts and the nested page's shell are 0.14.16's again, byte for byte (0.14.17 had changed their
+hashes, not what they do); the shell runtime every served document inlines is not (P142's
+changes, and P143's `hostless` branches, inert where a plan names a host; no hash covers it: P145);
+in the nesting P141 is for (the outer page, then the app's page, then content), content can message
+the outer page and every frame in its tree and learn its origin, so the outer page must check every
+message it takes, and S7's egress rule covers its frames (§6 "What every host must do", S7); and
+`framedBy` is compared with the host origins as browsers serialize origins (`https://a.example:443`
+is `https://a.example`).
+0.15.1: P145, after Ferryman's audit of 0.15.0 (no P0, no escape, no new egress), amends P143 and
+P144: their "byte for byte" is said as it holds (above); the host kit refuses an `access` answer
+with `embed`, so a reader's issue endpoint never mints an embed session (S4); an embed page learns
+where it is embedded (S4); and a host origin's or `framedBy`'s port is 1 to 65535, without a
+leading zero, and its host as the URL parser gives it. No wall moves.
 
 ## 1. Two layers
 
@@ -572,8 +580,10 @@ the attacker (c), and its readers are strangers.
   `frame-ancestors *` for that session alone, never a reader's; it is anonymous, with no level or
   user, an artifact's page that isn't nested; its plan names no host, so it hears no one, Porthole
   tells no parent anything, no capability or runtime host function runs, and no door is minted. The
-  flag is signed into the session and the sealed address. Every other session is unchanged, byte
-  for byte, while an embed session of the same artifact exists; cookies stay host-only.
+  flag is signed into the session and the sealed address. Every other session's answers are, byte
+  for byte, what the same server without `embeds` answers, while an embed session of the same
+  artifact exists; cookies stay host-only. The host kit never mints one from `access` (its reader's
+  issue endpoint and clean addresses refuse an `embed` answer, P145).
 - A page opened in a tab of its own has its frame's powers and no more (P099): its CSP header
   carries the frame's sandbox (scripts on its own origin; no popups, forms, downloads, browser
   dialogs, or navigation of another window, its opener's included), and its `Permissions-Policy`
@@ -607,10 +617,17 @@ the attacker (c), and its readers are strangers.
 - Check pages for secrets before publishing them: `lintContent` has no rule for credentials.
 - Pass Porthole's `Content-Security-Policy` and `Permissions-Policy` headers on as they are,
   through any edge or proxy: on a tab they are the page's sandbox.
-- For embeds (P143): mint `embed` from one route of yours alone (never a reader's ticket or door),
-  keep that route from widening grants, and blank a takedown within a bound you state (your
-  `authorize` answers, cached or not). The embedding site sees the page load and hears what the
-  page itself posts to its parent or top.
+- For embeds (P143): mint `embed` from one route of yours alone (never a reader's ticket or door;
+  with the host kit, `host.server.issue`, never `access`, which it refuses, P145), keep that route
+  from widening grants, and blank a takedown within a bound you state (your `authorize` answers,
+  cached or not). The embedding site sees the page load and hears what the page itself posts to its
+  parent or top. The page learns where it is embedded (P145, measured in Chromium, Firefox and
+  WebKit): its document's request carries your outer page's address as `Referer` (its origin, under
+  the default referrer policy; Firefox also sends it as `Origin`, Chromium and WebKit don't),
+  `document.referrer` says the same,
+  and `location.ancestorOrigins` names every ancestor, the embedding site's origin included. A page
+  with any egress (a `connect-src`, an image source) can send that out; one with none can't. Treat
+  where an embed is shown as known to its author.
 - Treat a public link's clean address as a tab's (P125): to show what one names in a frame, resolve
   it through your issue endpoint (`client.resolve`, `<PortholeView address>`). Its refusals (signed
   out, denied, not found) are your backend's word, drawn as the fallback with no frame built: keep

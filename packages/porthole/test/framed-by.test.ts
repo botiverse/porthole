@@ -28,6 +28,11 @@ import {
   STRICT_STATUS_SCRIPT_PATH,
 } from "../src/server/pages.ts";
 import { compile } from "../src/compile/compile.ts";
+import { ANNOTATE_RUNTIME } from "../src/shell/annotate.ts";
+import { FIND_RUNTIME } from "../src/shell/find.ts";
+import { LEGACY_GLOBALS_RUNTIME } from "../src/shell/legacy.ts";
+import { SHELL_RUNTIME } from "../src/shell/runtime.ts";
+import { USE_RUNTIME } from "../src/shell/use.ts";
 import { FRAME_STATUS_METHOD } from "../src/isolation/types.ts";
 
 /**
@@ -253,6 +258,119 @@ describe("framedBy is checked like a host origin (P141)", () => {
     ).toThrow(/host origin/u);
     expect(() => nestedShellCsp("1;", "https://porthole-x.example", [HOST], ["*"])).toThrow(
       /framedBy/u,
+    );
+  });
+});
+
+describe("framedBy's port and host are as a browser serializes them (P145, Ferryman's edges probe of 0.15.0)", () => {
+  const hostOrigins = [HOST, "ferry://app"];
+  const base = {
+    content: { domain: DOMAIN, scheme: "https" as const },
+    secret,
+    hostOrigins,
+    configs: {},
+  };
+  const kitWith = (framedBy: readonly string[]) =>
+    createContentHost<null>({
+      domain: DOMAIN,
+      appOrigins: hostOrigins,
+      framedBy,
+      secret,
+      configs: {},
+      instance: () => null,
+      access: () => null,
+    });
+  /** Every place that takes `framedBy`, each throwing or not for `origin`. */
+  const takers: readonly (readonly [string, (origin: string) => unknown])[] = [
+    ["createServer", (origin) => createServer({ ...base, framedBy: [origin] })],
+    ["the host kit", (origin) => kitWith([origin])],
+    [
+      "statusPage",
+      (origin) =>
+        statusPage({ status: 404, title: "t", detail: "d", hostOrigins, framedBy: [origin] }),
+    ],
+    ["doorResponse", (origin) => doorResponse({ hostOrigins, framedBy: [origin] })],
+    [
+      "doorStatusResponse",
+      (origin) =>
+        doorStatusResponse({ hostOrigins, framedBy: [origin], status: 401, reason: "session" }),
+    ],
+    [
+      "nestedShellCsp",
+      (origin) => nestedShellCsp("1;", "https://porthole-x.example", hostOrigins, [origin]),
+    ],
+    [
+      "frameShellScript",
+      (origin) => frameShellScript({ ...PINNED_SHELL, origins: hostOrigins, framedBy: [origin] }),
+    ],
+  ];
+
+  it.each([
+    "https://deck.example.net:0",
+    "https://deck.example.net:00",
+    "https://deck.example.net:65536",
+    "https://deck.example.net:99999",
+    "https://deck.example.net:0443",
+    "https://deck.example.net:08443",
+    `${HOST}:0443`,
+    "http://localhost:0",
+    "http://127.0.0.1:65536",
+    "https://0x7f.0.0.1",
+    "https://0177.0.0.1",
+    "https://127.1",
+    "https://203.0.113.07",
+  ])("refuses %s everywhere it is taken", (origin) => {
+    for (const [name, take] of takers) {
+      expect(() => take(origin), name).toThrow(/framedBy/u);
+    }
+  });
+
+  it.each([
+    // Refused before (P141, P144), and still.
+    HOST,
+    `${HOST}:443`,
+    "https://deck.example.net.",
+    "https://deck.example.net.:8443",
+    "https://user@deck.example.net",
+    "https://déck.example.net",
+    "https://DECK.example.net",
+    "https://deck.example.net/x",
+    "http://deck.example.net",
+    "ferry://App",
+  ])("still refuses %s", (origin) => {
+    for (const [name, take] of takers) {
+      expect(() => take(origin), name).toThrow(/framedBy/u);
+    }
+  });
+
+  it.each([
+    "https://deck.example.net:1",
+    "https://deck.example.net:8443",
+    "https://deck.example.net:65535",
+    // A default port: a browser drops it, and it is compared so (P144).
+    "https://deck.example.net:443",
+    "https://203.0.113.7",
+    "http://localhost:5173",
+    "http://127.0.0.1:8080",
+    "http://[::1]:3000",
+  ])("takes %s everywhere it is taken", (origin) => {
+    for (const [name, take] of takers) {
+      expect(() => take(origin), name).not.toThrow();
+    }
+  });
+
+  it("a host origin's port is held the same way", () => {
+    for (const origin of [`${HOST}:0`, `${HOST}:99999`, `${HOST}:0443`, "ferry://app:0"]) {
+      expect(() => createServer({ ...base, hostOrigins: [origin] }), origin).toThrow(
+        /hostOrigins/u,
+      );
+    }
+    expect(() => createServer({ ...base, hostOrigins: [`${HOST}:8443`] })).not.toThrow();
+  });
+
+  it("embeds that isn't a boolean throws", () => {
+    expect(() => createServer({ ...base, embeds: "true" as unknown as boolean })).toThrow(
+      /embeds/u,
     );
   });
 });
@@ -537,7 +655,8 @@ describe("the host kit passes framedBy on (P141)", () => {
  * (`git show v0.14.16:packages/porthole/src/server/pages.ts`) and the nested page's shell's
  * (`.../src/shell/frame.ts`, its runtime, and its script for `PINNED_SHELL` below). 0.14.17 changed
  * all four on every path, with a branch only `framedBy` takes (P144, after Ferryman's audit of 0.14.18): without
- * `framedBy` (and without embed, P143), every response carries these again, byte for byte.
+ * `framedBy` (and without embed, P143), every response that carries one of these carries 0.14.16's
+ * again, byte for byte (the shell runtime served documents inline is another matter, below: P145).
  */
 const V0_14_16 = {
   status: "'sha256-XB1Co2NQ5DJ8+kmWSugeVUXsldJaHiI7gXXoH+yitRw='",
@@ -652,6 +771,69 @@ describe("without framedBy, the pages' and the nested shell's scripts are 0.14.1
     expect(frameShellScript({ ...PINNED_SHELL, framedBy: [DECK] })).toContain(
       '"strictParent":true',
     );
+  });
+});
+
+/**
+ * The shell runtime every served document inlines (a served shell, an artifact page, a file set's
+ * pages, the MCP Apps proxy, a nested page): not 0.14.16's. It carries P142's changes (0.14.18) and
+ * P143's `hostless` branches (0.15.0), inert wherever the plan names a host. 0.15.0 said "the
+ * default path is 0.14.16's again, byte for byte", which held for the four scripts above and every
+ * header, not for this (Ferryman's audit of 0.15.0, P145). No hash covers it (`script-src` is
+ * `'unsafe-inline'` for these documents), so it is pinned here: a change to its bytes fails this
+ * test, and is said in the CHANGELOG, not assumed away. From `git show v0.15.0:…/src/shell/*.ts`
+ * and `git show v0.14.16:…` (`SHELL_RUNTIME`, `ANNOTATE_RUNTIME`, `FIND_RUNTIME`, `USE_RUNTIME`,
+ * `LEGACY_GLOBALS_RUNTIME`).
+ */
+const RUNTIME_V0_15_0 = {
+  shell: "'sha256-kafLnuVV2E6YUJtxXEooMNi8MNwbMJRdYi+0PTOe1RA='",
+  annotate: "'sha256-3PZMe4arifdWHJU1jS0laR49wiWc/uBWIFddGJPyf/w='",
+  find: "'sha256-invvWJWqsN6Zv0kMLG2eeofMX6XmKNSqsvYydiElDGc='",
+  use: "'sha256-TJx7YF/WvrHHkz8iTPfUfH6GNUEgES6O+0+igLRmyPQ='",
+  legacy: "'sha256-ZEVJsezqV7n+Ho0m7Y92NYxAZqf8ynKq/rDdXrJUKp0='",
+};
+const RUNTIME_V0_14_16 = {
+  shell: "'sha256-8svnEfnvxleYrCo6NIinDLSpcd5tu6++3CxlDUvma3Q='",
+  annotate: "'sha256-jf7Z8UE3pAtdnMpM7kIfdpnLSs1sPrK8/4fE+jxbUqs='",
+  find: "'sha256-Fim3NMYzFyomgFsW6tuOFuydk0Hwcy1az2ICGXj3fn4='",
+  use: "'sha256-TJx7YF/WvrHHkz8iTPfUfH6GNUEgES6O+0+igLRmyPQ='",
+  legacy: "'sha256-ZEVJsezqV7n+Ho0m7Y92NYxAZqf8ynKq/rDdXrJUKp0='",
+};
+
+describe("the served shell runtime is 0.15.0's, not 0.14.16's: pinned, so what the CHANGELOG says of it is checked (P145)", () => {
+  const now = {
+    shell: hashOf(SHELL_RUNTIME),
+    annotate: hashOf(ANNOTATE_RUNTIME),
+    find: hashOf(FIND_RUNTIME),
+    use: hashOf(USE_RUNTIME),
+    legacy: hashOf(LEGACY_GLOBALS_RUNTIME),
+  };
+
+  it("its bytes are 0.15.0's (a change here is a change every served document carries: say it)", () => {
+    expect(now).toEqual(RUNTIME_V0_15_0);
+  });
+
+  it("which are not 0.14.16's: the shell's, annotations' and find's differ (P142, P143)", () => {
+    expect(now.shell).not.toBe(RUNTIME_V0_14_16.shell);
+    expect(now.annotate).not.toBe(RUNTIME_V0_14_16.annotate);
+    expect(now.find).not.toBe(RUNTIME_V0_14_16.find);
+    expect({ use: now.use, legacy: now.legacy }).toEqual({
+      use: RUNTIME_V0_14_16.use,
+      legacy: RUNTIME_V0_14_16.legacy,
+    });
+  });
+
+  it("on the default path its P143 branches are there and inert: the plan names its hosts", async () => {
+    const porthole = server({ framedBy: [] });
+    const page = await porthole.issue(
+      { scope: "s-rt", document: { kind: "artifact", id: "page", version: "1" } },
+      { viewer: "v" },
+    );
+    const html = (await (await porthole.handle(ask(page.url)))?.text()) ?? "";
+    expect(html).toContain(
+      "const hostless = Array.isArray(plan.origins) && plan.origins.length === 0;",
+    );
+    expect(html).toContain(`"origins":${JSON.stringify([HOST, DESKTOP])}`);
   });
 });
 
