@@ -78,8 +78,25 @@ pnpm exec oxfmt <file>                          # format (never prettier)
 ```
 
 CI runs on pushes to main, on pull requests, and by hand (P096): pushes to `agent/*`
-branches (any branch but main) no longer run CI until a pull request exists. To get CI
-before opening one: `stamp workflow run ci.yml --repo botiverse/porthole --ref <branch>`.
+branches (any branch but main) no longer run CI until a pull request exists.
+
+A push runs CI's quick set only (P146): `check`, `examples`, and the browser suites on
+Chromium (`loopback (chromium)`, `loopback (chromium-oopif)`), about 18 runner minutes.
+The full set (the browser suites on WebKit and Firefox, every negative control on three
+engines, prod-shape; about 420 runner minutes) runs only when started by hand:
+
+```bash
+stamp workflow run ci.yml --repo botiverse/porthole --ref <branch>   # a branch, before it merges
+stamp workflow run ci.yml --repo botiverse/porthole                  # main's head, before a release
+```
+
+- **Start it on your branch** when the change touches a wall, a probe, a control, the
+  shell or the focus guard (step 2 of "Verify your change" below), and wait for it before
+  the pull request merges: nothing else runs those suites until the next release.
+- **A release is two commands**: the full run on main's head, then
+  `stamp workflow run release.yml --repo botiverse/porthole -f version=X.Y.Z`. The
+  release's gate takes only a run started by hand on main for the released commit, with
+  every job passed; it waits for one that is still going, and a push's run never counts.
 
 WebKit and Firefox need system libraries a shared Linux box may lack (no sudo
 there): run them on a machine that has them (`playwright install --with-deps webkit
@@ -131,6 +148,10 @@ ops/prod-shape/          docker compose: Caddy, CoreDNS, the kit app, the browse
    entry in `leak/controls.ts` with the probes it fails per engine, and that row
    in DESIGN.md's table: `node packages/porthole/scripts/controls.ts --table`),
    and `pnpm --filter @botiverse/porthole test:controls <name>` passes (P032, P096).
+   A pull request's CI runs Chromium alone and no control (P146): where you can't run
+   the other engines or the controls yourself, start CI's full set on your branch
+   (`stamp workflow run ci.yml --repo botiverse/porthole --ref <branch>`) and say in
+   the pull request that it passed.
 3. If you changed the config schema, regenerate and re-read the example CSP,
    shell and guide, and confirm all three still agree (`test/agreement.test.ts`
    must pass, and must still cover what you added).

@@ -475,7 +475,7 @@ describe("V02: one registry of the negative controls", () => {
     expect([...named].filter((name) => CONTROLS[name] === undefined)).toEqual([]);
   });
 
-  test("CI runs every control, on every engine, in shards whose summary checks them all", () => {
+  test("CI's full run (by hand, before a release: P146) runs every control, on every engine, in shards whose summary checks them all", () => {
     const pkg = JSON.parse(read("package.json")) as { scripts: Record<string, string> };
     expect(pkg.scripts["test:controls"]).toBe("node scripts/controls.ts");
     const ci = read("../../.github/workflows/ci.yml");
@@ -489,8 +489,13 @@ describe("V02: one registry of the negative controls", () => {
     // A shard runs about 42 minutes on Blacksmith, longer on GitHub's runners; a slow browser install fails on its own (ci.yml).
     expect(job).toContain("runs-on: ubuntu-24.04\n    timeout-minutes: 150\n");
     expect(job).toContain("--with-deps ${{ matrix.engine }}\n        timeout-minutes: 25\n");
-    const summary = ci.slice(ci.indexOf("\n  controls:"), ci.indexOf("\n  examples:"));
+    const summary = ci.slice(ci.indexOf("\n  controls:"), ci.indexOf("\n  prod-shape:"));
     expect(summary).toContain("needs: controls-shard");
+    // Both in the full set, the summary no less than its shards: a run started by hand runs them
+    // (test/release.test.ts: the release gate takes such a run alone, and requires each by name).
+    const byHand = "\n    if: github.event_name == 'workflow_dispatch'\n";
+    expect(job.split(byHand)).toHaveLength(2);
+    expect(summary.split(byHand)).toHaveLength(2);
     expect(summary).toContain(
       "run: node packages/porthole/scripts/controls.ts --summary .dev/shards",
     );

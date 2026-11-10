@@ -574,8 +574,9 @@ the system store for WebKit; Playwright's Firefox reads neither, so its project 
 certificate errors). The suite (`packages/porthole/prod-shape`) runs the whole runner over https,
 then the sibling cases: Porthole's cookies host-only and `__Host-`; a sibling label (an app's
 preview) can't plant a cookie that opens content, or frame it; another site can't frame it; the
-clash. CI (`.github/workflows/ci.yml`) runs on every push: the checks, the loopback suites on
-each engine, and the prod-shape profile.
+clash. CI (`.github/workflows/ci.yml`) runs the checks, the examples and the loopback suites on
+Chromium on every push, and the loopback suites on each engine, the negative controls and the
+prod-shape profile when started by hand, which a release requires on its commit (P146).
 
 **Compatibility.** Every 0.1.x export stays as it was; the kit wraps `createServer`. The npm
 package carries these docs (`docs/`), and `/server` exports the types an app's callbacks take

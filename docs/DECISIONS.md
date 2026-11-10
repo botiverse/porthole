@@ -3149,7 +3149,7 @@ a page's updates heard by the next page, code a viewer uploaded made runnable by
 keeps partitioned cookies there (then `/_blob/<id>` loads everywhere and `assets.url` is a
 convenience); or a host needs per-collection levels beyond a batch's.
 
-## P097 · 2026-10-19 · A release is a commit of main that passed all of CI; the open-source materials · Accepted
+## P097 · 2026-10-19 · A release is a commit of main that passed all of CI; the open-source materials · Accepted; amended by P146
 
 The 2026-10-19 audit's V03 and its licenses-and-materials findings (baseline 264b12fa). Before,
 a pushed `v*` tag published from one job that ran `check`, the build and the Chromium bundle test,
@@ -4757,7 +4757,7 @@ the content can't steal, likely the host's own overlay), a bubble must follow du
 coarser report, or the host drawing markers itself from `anchored`), or MCP Apps defines
 annotations.
 
-## P096 · 2026-10-19 · The negative controls: one registry, every control run, and a run that proves nothing fails · Accepted
+## P096 · 2026-10-19 · The negative controls: one registry, every control run, and a run that proves nothing fails · Accepted; amended by P146
 
 Amends P032 (what DESIGN.md records per control), P091's harness item (`scripts/controls.ts`) and
 P097's CI triggers. From the audit of 2026-10-19 (V01, V02).
@@ -9157,3 +9157,129 @@ each fail exactly their probe on all three. The old spec with its document in tw
 **Revisit when** the runtime pin changes (say what changed), a host needs `embed` from a reader's
 route (then it needs its own entry, never `access`), or a browser stops exposing
 `ancestorOrigins` to a framed page.
+
+## P146 · 2026-11-10 · CI's full set runs before a release, not on every push · Accepted
+
+Amends P096 (its decision 4: what a push runs; its decision 6: the shards run by hand) and P097
+(its decision 1: which run the gate takes). From the owner's direction (xxchan, 2026-11-10:
+Porthole's tests cut to what is needed or made cheaper; Raft's Artifacts are the real-world check;
+the security tests are worth keeping; the heavy suites only at a release is fine) and the CI cost
+review that moved CI to GitHub's runners (#130).
+
+**Context**, measured on 2026-11-03T16:00Z to 11-10T16:00Z (Blacksmith's 4-vCPU runners, each job
+rounded up to a minute):
+- 94 ci.yml runs (57 pull requests', 35 pushes to main, 2 by hand) and 14 releases: 36,789 runner
+  minutes. The controls were 31,760 of them (86%), the loopback suites 3,756, prod-shape 830, the
+  examples 324, the checks 119.
+- One whole run is about 420 minutes: the controls 370 (12 shards of 25 to 35), loopback 36 (the
+  headless shell 11, full Chromium 2, WebKit 12, Firefox 12), prod-shape 8, the examples 3, the
+  checks 1 (types, lint, format and the unit tests together are 15 seconds of it).
+- The registry has 105 controls. Each is one Playwright run of its specs with one wall out, on one
+  engine: 7 seconds (`url-permissions`) to 14 minutes (`nonce`), about two hours an engine (116,
+  121 and 124 minutes). 46 of them run the whole of `annotate.spec.ts` or `leak.spec.ts` (226 of
+  the 361 minutes), `nonce` 43.
+- Every pull request's push and every merge paid all of it; a release needs it once, on the commit
+  it publishes.
+
+**Decision.**
+1. **ci.yml has two sets of jobs.** The quick set runs on every pull request's push, every push to
+   main and by hand: `check`, `examples`, `loopback (chromium)` and `loopback (chromium-oopif)`
+   (every spec on Chromium, and the nested page's cases on full Chromium, frames out of process:
+   P111). The full set runs only in a run started by hand (`workflow_dispatch`): `loopback
+   (webkit)`, `loopback (firefox)`, the twelve `controls (<engine>, k/4)` shards, `controls` and
+   `prod-shape`. Each job of the full set carries `if: github.event_name == 'workflow_dispatch'`,
+   the one condition a job of ci.yml may carry (P097 had none), and no step that runs the
+   project's code is conditional. The two loopback jobs (`loopback`, and `loopback-engines` under
+   the same names) have the same steps; a test holds them equal. A run started by hand skips
+   nothing, so it is the whole of ci.yml, as every run was before.
+2. **A release needs the full run on its commit, as before, and now asks for it.** release.yml's
+   gate takes the newest ci.yml run on `main` for the released commit that was started by hand,
+   and no other: a push's run (its full set skipped) is no run to it, as a pull request's never
+   was. `REQUIRED_CI_JOBS` is unchanged, all twenty jobs by name, and each must have passed in its
+   latest attempt, so a run whose full set was skipped fails on each skipped job even if it were
+   taken. A release is two commands: `stamp workflow run ci.yml --repo botiverse/porthole` (main's
+   head), then `stamp workflow run release.yml --repo botiverse/porthole -f version=X.Y.Z`. The
+   gate waits for a full run that is still going (`CI_WAIT_MINUTES`) and, after ten minutes with
+   none, says to start one. The gate's permissions stay `contents: read`, `actions: read`: it
+   starts nothing itself.
+3. **Nothing cancels a run started by hand.** ci.yml's concurrency group is
+   `ci-<event>-<ref>-push` for a push (was `ci-<ref>`) and `ci-<event>-<ref>-<run id>` for a run
+   started by hand: a newer push still replaces an older push's run on its ref, but neither a
+   merge to main nor a second full run started for a newer commit cancels the full run a release
+   is waiting for (before, a merge cancelled main's run, and the release of the earlier commit
+   with it; Tenny's review of #131 for the second case).
+4. **A change to a wall asks for the full set before it merges** (AGENTS.md): a pull request that
+   touches isolation, egress, the shell, the focus guard, a probe or a control starts the full
+   run on its branch (`--ref <branch>`), since its own CI shows Chromium and no control.
+5. **No test was removed.** Looked at for this: the unit tests are seconds for all 60 files, and
+   the whole loopback suite is 10 to 12 minutes an engine (652 tests), now run on Chromium per
+   push and on the others per release, so removing behaviour tests would save a minute or two of
+   a run that is no longer the cost. The behaviour cases share their specs with the probes
+   (`annotate.spec.ts`: a hostile page's faked reports beside the markers' placing), and every
+   control judges the other tests of its specs too (P096), so a case cut from one changes what 23
+   controls check; none was clearly redundant enough to cut without running the suites. The
+   candidates, measured on Chromium, are for a change that can run them: `check.spec.ts`'s ten
+   presets over every manual example (124 of the suite's 1,240 test-seconds), and the shipped
+   probes run again against the strict page, the kit's app, the example app and prod-shape (the
+   same walls in each deployment's shape: security, kept).
+
+**Expected**, for the same week's activity: the quick set's four jobs were 1,739 of the minutes
+above; 14 full runs are about 5,900; about 7,600 in all, a fifth of 36,789. Full runs on branches
+(decision 4) add 420 each. On GitHub's runners the minutes cost nothing; what they save there is
+the queue (a full run is 19 jobs at once, a quick one 4).
+
+**Why.** The controls test the tests (PRINCIPLE 6: a wall never seen to fail proves nothing): they
+change when a wall, a probe or the registry changes, and what must never happen is a release
+whose walls were not seen to fail. That is a property of the released commit, and the gate holds
+it there, with the same twenty jobs, by name. Running it 94 times a week to publish 14 commits
+bought an earlier answer for the pull requests that touch a wall, at five times the price; those can
+ask for it (decision 4). The quick set keeps what a pull request most often breaks in front of its
+author: types, lint, the unit tests, the built package, the example app through the adopter's
+suite, and every browser spec on one engine in both its builds: about 18 runner minutes, and 12
+of waiting.
+
+**Accepted limits.**
+- A regression only WebKit or Firefox shows, or only a control sees (a probe gone blind), or only
+  prod-shape, is found at the release's full run, or at a branch's, not at every pull request. The
+  cost is a fix and another full run; nothing unverified is published.
+- The pull request's checks list the full set's jobs as skipped (a matrix job once, under its
+  name's template). Skipped is not passed: the gate reads each job's conclusion.
+- As P097: the gate is in the file it guards, and stops mistakes, not someone who can push.
+
+**Rejected.**
+- *The full set on pushes to main, the quick set on pull requests*: 35 merges a week at 420
+  minutes is still 14,700, for commits most of which are never published, and the release's
+  answer then arrives after the merge either way.
+- *The controls on one engine per push*: a third of 86% is still most of the cost, and the
+  controls' per-engine entries (`fails` per engine, `holds`, `measured`) are what the other two
+  engines check.
+- *A second workflow file for the full set*: two lists of required jobs (or the quick jobs written
+  twice), and a gate that reads two workflows' runs; one file with one condition keeps
+  `REQUIRED_CI_JOBS` the one list.
+- *release.yml running the suites itself* (a called workflow before `build`): the release's run
+  would execute the project's browser suites for an hour, a flake would fail the release rather
+  than a run one can start again, and the suites could no longer be run without releasing.
+- *The gate starting the full run* (`actions: write`): more than the gate needs to read a verdict.
+- *A weekly scheduled full run*: with two releases a day it adds nothing; see Revisit.
+- *Each control run with its named probes alone* (`--grep`): the controls' cost would fall
+  several times over, but P096's "and nothing else" (a control that fails more is a probe that
+  depends on something else) would go unchecked. A design question of its own, not a trim.
+- *Removing behaviour tests now* (decision 5).
+
+**Tested.** `test/release.test.ts`: the quick set is exactly `check`, `examples`, `loopback
+(chromium)`, `loopback (chromium-oopif)`, and the full set the other sixteen; a job's only
+condition is the one above, whole; a job that needs one of the full set is of it; the two sets
+together are `REQUIRED_CI_JOBS`, each once; the two loopback jobs' steps are equal; no step that
+runs code is conditional, none may fail; the concurrency group; the gate's script selects
+`workflow_dispatch` and names no other event. `test/release-scripts.test.ts`, against the
+simulated API: a run by hand that passed is let through, whatever the commit's push run said; a
+push's run alone is "no full ci.yml run", and the jobs are never read; a run whose full set was
+skipped names each of the sixteen and stops; the newest run by hand decides; a pull request's is
+ignored; a pending one is waited for. `test/controls.test.ts`: the shards and their summary are of
+the full set. With the gate taking pushes again, a job's condition removed, or the old concurrency
+group, five of these fail.
+
+**Revisit when** releases come less than weekly (add a scheduled full run on main, and let the
+gate take it); a release's full run fails on what the quick set could have shown more than now and
+then (move that suite or engine into the quick set); GitHub's runners queue a full run for long
+(the shard count, `MEASURED`); or the controls are redesigned to run less (the rejected `--grep`).

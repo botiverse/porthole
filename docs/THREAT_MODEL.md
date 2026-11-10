@@ -147,8 +147,9 @@ viewer and any declaration.
 The leak suite attempts each channel in DESIGN.md's table from inside the content, on Chromium,
 WebKit and Firefox, and most defenses have a negative control that takes the defense out to show
 its probes then fail (DESIGN.md § "Egress hardening, each with its test"). CI runs every negative
-control on all three engines, and a control passes only when its marked probes failed by their own
-assertion (P096).
+control on all three engines on the commit of every release (P146: the release's gate requires
+that run; a pull request's CI runs the suite on Chromium, with no control), and a control passes
+only when its marked probes failed by their own assertion (P096).
 
 ## 5. Out of scope
 

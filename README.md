@@ -85,8 +85,8 @@ the latest release is supported: fixes ship as new releases, and known issues ar
 GitHub issues.
 
 The leak suite, with a negative control for every defense (P032, P096), runs on Chromium (also
-with frames out of process, 0.14), WebKit and Firefox for every change; the prod-shape profile
-(0.2) runs its suite on all three behind a TLS edge, wildcard DNS and sibling apps. An app proves its own integration with the conformance
+with frames out of process, 0.14), WebKit and Firefox for every release, and on Chromium for every
+change (P146); the prod-shape profile (0.2) runs its suite on all three behind a TLS edge, wildcard DNS and sibling apps. An app proves its own integration with the conformance
 kits: `defineHostConformance` against its real page (0.2, P066) and `defineRuntimeConformance`
 against its runtime services (0.7). A release publishes only a commit of main whose CI passed
 (0.8, P097).

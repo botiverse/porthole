@@ -165,41 +165,96 @@ const DISPATCH = {
   GITHUB_REF: "refs/heads/main",
   TAG: "v0.7.1",
 };
+// The full run (P146): one started by hand on main, the only kind that runs every job.
 const passed = {
-  "runs.json": runs(run("push", "success", "2026-10-19T10:00:00Z")),
+  "runs.json": runs(run("workflow_dispatch", "success", "2026-10-19T10:00:00Z")),
   "jobs.json": jobs(),
 };
+// A push's run of the same commit: its quick set passed, its full set was skipped.
+const SKIPPED_IN_A_PUSH = Object.fromEntries(
+  REQUIRED.filter((name) =>
+    /^(?:controls|prod-shape|loopback \((?:webkit|firefox)\))/u.test(name),
+  ).map((name) => [name, "skipped"]),
+);
 
 describe.skipIf(!runnable)("V03: the gate, against a simulated API", () => {
-  it("lets through a commit whose push run on main passed every required job", () => {
+  it("lets through a commit whose run on main started by hand passed every required job", () => {
     const result = simulate("gate", passed, DISPATCH);
     expect(result.out).toContain("ci.yml passed on c0ffee");
     expect(result.status).toBe(0);
     expect(result.calls.some((call) => call.includes("branch=main"))).toBe(true);
   });
 
-  it("accepts a run on main started by workflow_dispatch (a re-run through Stamp)", () => {
-    const result = simulate(
+  it("takes the run started by hand over the commit's push run, whatever that one said", () => {
+    for (const push of ["failure", "success", "cancelled"]) {
+      const result = simulate(
+        "gate",
+        {
+          "runs.json": runs(
+            run("push", push, "2026-10-19T11:00:00Z", 7),
+            run("workflow_dispatch", "success", "2026-10-19T10:00:00Z", 8),
+          ),
+          "jobs.json": jobs(),
+        },
+        PUSH,
+      );
+      expect(result.out, push).toContain("ci.yml run 8 on c0ffee: completed success");
+      expect(result.status, push).toBe(0);
+    }
+  });
+
+  it("never takes a push's run for the full run (P146): alone, it is no run", () => {
+    // A push's run that passed: its quick set did, its full set was skipped. No run by hand yet.
+    const alone = simulate(
+      "gate",
+      {
+        "runs.json": runs(run("push", "success", "2026-10-19T10:00:00Z")),
+        "jobs.json": jobs(SKIPPED_IN_A_PUSH),
+      },
+      DISPATCH,
+    );
+    expect(alone.out).toContain("no full ci.yml run on main for c0ffee (one started by hand)");
+    expect(alone.out).toContain("stamp workflow run ci.yml --repo botiverse/porthole");
+    expect(alone.out).not.toContain("ci.yml passed");
+    expect(alone.status).toBe(1);
+    expect(alone.calls.some((call) => call.includes("/jobs"))).toBe(false);
+    // Newer than a failed run by hand, it doesn't stand in for it either.
+    const over = simulate(
       "gate",
       {
         "runs.json": runs(
-          run("workflow_dispatch", "success", "2026-10-19T11:00:00Z", 8),
-          run("push", "failure", "2026-10-19T10:00:00Z", 7),
+          run("push", "success", "2026-10-19T11:00:00Z", 9),
+          run("workflow_dispatch", "failure", "2026-10-19T10:00:00Z", 7),
         ),
         "jobs.json": jobs(),
       },
       PUSH,
     );
-    expect(result.out).toContain("ci.yml run 8 on c0ffee: completed success");
-    expect(result.status).toBe(0);
+    expect(over.out).toContain("ci.yml run 7 on c0ffee: completed failure");
+    expect(over.status).toBe(1);
   });
 
-  it("takes the newest of those runs: a later failed dispatch run stops a passed push run", () => {
+  it("stops a run whose full set was skipped, were one ever taken: each skipped job is named", () => {
+    // What a push's run looks like by its jobs: the gate's second hold, behind the event.
+    const result = simulate(
+      "gate",
+      { "runs.json": passed["runs.json"], "jobs.json": jobs(SKIPPED_IN_A_PUSH) },
+      PUSH,
+    );
+    for (const name of Object.keys(SKIPPED_IN_A_PUSH)) {
+      expect(result.out).toContain(`ci.yml job '${name}' did not pass in run 7`);
+    }
+    expect(Object.keys(SKIPPED_IN_A_PUSH)).toHaveLength(16);
+    expect(result.out).not.toContain("ci.yml passed");
+    expect(result.status).toBe(1);
+  });
+
+  it("takes the newest of the runs started by hand: a later failed one stops an earlier pass", () => {
     const result = simulate(
       "gate",
       {
         "runs.json": runs(
-          run("push", "success", "2026-10-19T10:00:00Z", 7),
+          run("workflow_dispatch", "success", "2026-10-19T10:00:00Z", 7),
           run("workflow_dispatch", "failure", "2026-10-19T11:00:00Z", 8),
         ),
         "jobs.json": jobs(),
@@ -208,6 +263,20 @@ describe.skipIf(!runnable)("V03: the gate, against a simulated API", () => {
     );
     expect(result.out).toContain("ci.yml did not pass");
     expect(result.status).toBe(1);
+    // And a later pass (a run that flaked, started again) lets an earlier failure through.
+    const again = simulate(
+      "gate",
+      {
+        "runs.json": runs(
+          run("workflow_dispatch", "failure", "2026-10-19T10:00:00Z", 7),
+          run("workflow_dispatch", "success", "2026-10-19T11:00:00Z", 8),
+        ),
+        "jobs.json": jobs(),
+      },
+      PUSH,
+    );
+    expect(again.out).toContain("ci.yml run 8 on c0ffee: completed success");
+    expect(again.status).toBe(0);
   });
 
   it("ignores a pull request's run, even a newer one that passed", () => {
@@ -216,7 +285,7 @@ describe.skipIf(!runnable)("V03: the gate, against a simulated API", () => {
       {
         "runs.json": runs(
           run("pull_request", "success", "2026-10-19T11:00:00Z", 9),
-          run("push", "failure", "2026-10-19T10:00:00Z", 7),
+          run("workflow_dispatch", "failure", "2026-10-19T10:00:00Z", 7),
         ),
         "jobs.json": jobs(),
       },
@@ -229,7 +298,7 @@ describe.skipIf(!runnable)("V03: the gate, against a simulated API", () => {
       { "runs.json": runs(run("pull_request", "success", "2026-10-19T11:00:00Z", 9)) },
       PUSH,
     );
-    expect(alone.out).toContain("no ci.yml run on main for c0ffee");
+    expect(alone.out).toContain("no full ci.yml run on main for c0ffee");
     expect(alone.status).toBe(1);
   });
 
@@ -287,18 +356,18 @@ describe.skipIf(!runnable)("V03: the gate, against a simulated API", () => {
     const pending = simulate(
       "gate",
       {
-        "runs.1.json": runs(run("push", null, "2026-10-19T10:00:00Z")),
-        "runs.2.json": runs(run("push", null, "2026-10-19T10:00:00Z")),
+        "runs.1.json": runs(run("workflow_dispatch", null, "2026-10-19T10:00:00Z")),
+        "runs.2.json": runs(run("workflow_dispatch", null, "2026-10-19T10:00:00Z")),
         ...passed,
       },
       PUSH,
     );
     expect(pending.calls.filter((call) => call === "sleep 60")).toHaveLength(2);
     expect(pending.status).toBe(0);
-    // Three minutes, not the gate's 150, so the case runs in well under vitest's 5 s.
+    // Three minutes, not the gate's own wait, so the case runs in well under vitest's 5 s.
     const never = simulate(
       "gate",
-      { "runs.json": runs(run("push", null, "2026-10-19T10:00:00Z")) },
+      { "runs.json": runs(run("workflow_dispatch", null, "2026-10-19T10:00:00Z")) },
       { ...PUSH, CI_WAIT_MINUTES: "3" },
     );
     expect(never.calls.filter((call) => call === "sleep 60")).toHaveLength(3);
