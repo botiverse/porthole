@@ -132,6 +132,8 @@ const DEFAULT_SESSION_SECONDS = 3_600;
 const MAX_SESSION_SECONDS = 30 * 24 * 3_600;
 /** Browsers keep a cookie of up to 4 KB, name and attributes included. */
 const MAX_COOKIE_BYTES = 3_800;
+/** Who may frame an embed session's answers (P143): any page. That session's alone. */
+const EMBED_ANCESTORS = "*";
 
 /** A host (and port) as it compares: lowercase, no trailing dot, no default port. */
 function normalHost(value: string, protocol: string): string {
@@ -161,6 +163,11 @@ interface Session {
   readonly b?: string;
   /** Whether the base is the version's own address (the app said so): its files are immutable. */
   readonly k?: 1;
+  /**
+   * An embed session (P143): framed by any page, its documents hostless. Not `e`: a sealed
+   * address's `e` is its session's end, and a redirect entry's state is marked `e`.
+   */
+  readonly m?: 1;
 }
 
 /** Where a request falls under a file set's base: the base, and the path below it. */
@@ -469,6 +476,15 @@ export function createServer(options: ServerOptions): PortholeServer {
   // Who may be an ancestor of a frame served here: the host origins, then the outer pages' (P141).
   // Every frame's `frame-ancestors` is this; whom a frame hears and tells is `hostOrigins` alone.
   const frameAncestors = [...options.hostOrigins, ...framedBy].join(" ");
+  // Embed grants (P143): taken only where the host opted in. Off, a session or sealed address
+  // that says it is one opens nothing.
+  if (options.embeds !== undefined && typeof options.embeds !== "boolean") {
+    throw new TypeError("embeds is true or false");
+  }
+  const embeds = options.embeds === true;
+  /** Who may frame an access's answers: any page for an embed session (P143), else the list. */
+  const ancestorsFor = (access: Access): string =>
+    access.embed === true ? EMBED_ANCESTORS : frameAncestors;
   let authorizeUrl: URL | null = null;
   if (options.entry !== undefined) {
     try {
@@ -489,7 +505,10 @@ export function createServer(options: ServerOptions): PortholeServer {
   }
   const tickets: TicketStore = options.tickets ?? memoryTicketStore();
 
-  /** A page saying why there is nothing to show, told to the host too (its reason, P040). */
+  /**
+   * A page saying why there is nothing to show, told to the host too (its reason, P040). An embed
+   * session's (P143, `embed`): framed by any page, and told to no one (it names no host).
+   */
   const page = (
     status: number,
     title: string,
@@ -497,8 +516,20 @@ export function createServer(options: ServerOptions): PortholeServer {
     method?: string,
     reason: FrameBlock = status === 404 ? "not-found" : status === 502 ? "upstream" : "error",
     code?: string,
+    embed = false,
   ): Response =>
-    statusPage(status, title, detail, frameAncestors, method, reason, options.hostOrigins, code);
+    embed
+      ? statusPage(status, title, detail, EMBED_ANCESTORS, method, reason, [], code)
+      : statusPage(
+          status,
+          title,
+          detail,
+          frameAncestors,
+          method,
+          reason,
+          options.hostOrigins,
+          code,
+        );
 
   /**
    * The host's check on a request its cookie (or ticket) let in (P050): null to go on, or the
@@ -515,6 +546,7 @@ export function createServer(options: ServerOptions): PortholeServer {
           request.method.toUpperCase(),
           "denied",
           refused.code,
+          access.embed === true,
         );
   }
 
@@ -531,6 +563,8 @@ export function createServer(options: ServerOptions): PortholeServer {
       access.viewer,
       access.subject ?? null,
       access.expiresAt,
+      // An embed session's answer is its own (P143): never reused for another session.
+      ...(access.embed === true ? ["embed"] : []),
     ]);
     const at = Date.now();
     let answer = authorizeTtl > 0 ? answers.get(key) : undefined;
@@ -543,6 +577,7 @@ export function createServer(options: ServerOptions): PortholeServer {
           viewer: access.viewer,
           anonymous: access.anonymous === true,
           ...(access.subject === undefined ? {} : { subject: access.subject }),
+          ...(access.embed === true ? { embed: true as const } : {}),
           request,
         });
       } catch {
@@ -636,7 +671,11 @@ export function createServer(options: ServerOptions): PortholeServer {
     }
   }
 
-  async function documentOf(instance: InstanceRef): Promise<
+  async function documentOf(
+    instance: InstanceRef,
+    /** An embed session's (P143): its shell's plan names no host. */
+    embed = false,
+  ): Promise<
     | {
         readonly html: string;
         /** An artifact's own page, before the shell (a nested page's is made apart, P111). */
@@ -653,7 +692,7 @@ export function createServer(options: ServerOptions): PortholeServer {
     if (config === null) {
       return null;
     }
-    const origins = options.hostOrigins;
+    const origins = embed ? [] : options.hostOrigins;
     switch (document.kind) {
       case "shell":
         return {
@@ -704,6 +743,15 @@ export function createServer(options: ServerOptions): PortholeServer {
    */
   const ourCookie = (name: string): boolean =>
     name.startsWith(secure ? "__Host-porthole-" : "porthole-");
+  /**
+   * A session's cookie name, by its instance's key: an embed session's (P143) is a name of its own
+   * (`e-<key>`), so it never takes the place of another session of the same instance, which the
+   * same browser may hold where it partitions no cookies, and is never read as one.
+   */
+  const sessionName = (key: string, embed: boolean): string => cookieName(embed ? `e-${key}` : key);
+  /** Whether a verified session says it is an embed session (P143), checked: `m` is 1 or absent. */
+  const embedOf = (session: Record<string, unknown>): boolean | null =>
+    session.m === undefined ? false : session.m === 1 ? true : null;
 
   /**
    * The cookie a taken ticket buys: this origin only (`__Host-` over https), never readable by the
@@ -717,6 +765,7 @@ export function createServer(options: ServerOptions): PortholeServer {
     at: { readonly p?: string; readonly b?: string; readonly k?: 1 } = {},
   ): string {
     const sessionSeconds = record.sessionSeconds ?? DEFAULT_SESSION_SECONDS;
+    const embed = record.embed === true;
     const session: Session = {
       i: record.instance,
       w: record.viewer,
@@ -726,9 +775,10 @@ export function createServer(options: ServerOptions): PortholeServer {
       ...(at.p === undefined ? {} : { p: at.p }),
       ...(at.b === undefined ? {} : { b: at.b }),
       ...(at.k === undefined ? {} : { k: at.k }),
+      ...(embed ? { m: 1 as const } : {}),
     };
     return [
-      `${cookieName(keys.instanceKey(record.instance))}=${keys.sign(session)}`,
+      `${sessionName(keys.instanceKey(record.instance), embed)}=${keys.sign(session)}`,
       "Path=/",
       "HttpOnly",
       `Max-Age=${sessionSeconds}`,
@@ -783,7 +833,10 @@ export function createServer(options: ServerOptions): PortholeServer {
   function accessOf(request: Request, label: string, key: string | null): Access | null {
     let best: Access | null = null;
     for (const [name, value] of cookiesOf(request)) {
-      if (!(key === null ? ourCookie(name) : name === cookieName(key))) {
+      // An embed session (P143) only by its own name, for an instance's document, where embeds
+      // are on; every other session by the instance's name (or, for an app, any of ours).
+      const embedName = key !== null && embeds && name === sessionName(key, true);
+      if (!(embedName || (key === null ? ourCookie(name) : name === sessionName(key, false)))) {
         continue;
       }
       const session = keys.verify(value);
@@ -792,7 +845,8 @@ export function createServer(options: ServerOptions): PortholeServer {
         typeof session.w !== "string" ||
         typeof session.x !== "number" ||
         session.x <= Date.now() ||
-        (session.s !== undefined && typeof session.s !== "string")
+        (session.s !== undefined && typeof session.s !== "string") ||
+        embedOf(session) !== embedName
       ) {
         continue;
       }
@@ -814,7 +868,13 @@ export function createServer(options: ServerOptions): PortholeServer {
       ) {
         continue;
       }
-      if (best === null || session.x > best.expiresAt) {
+      // Any other session before an embed session (P143), then the latest to end: where a browser
+      // holds both (it partitions no cookies), the other session is never changed by it.
+      if (
+        best === null ||
+        (best.embed === true && !embedName) ||
+        ((best.embed === true) === embedName && session.x > best.expiresAt)
+      ) {
         best = {
           instance,
           viewer: session.w,
@@ -822,6 +882,7 @@ export function createServer(options: ServerOptions): PortholeServer {
           expiresAt: session.x,
           ...(session.a === 1 ? { anonymous: true } : {}),
           ...(typeof session.s === "string" ? { subject: session.s } : {}),
+          ...(embedName ? { embed: true as const } : {}),
         };
       }
     }
@@ -855,7 +916,9 @@ export function createServer(options: ServerOptions): PortholeServer {
       const base = typeof session.b === "string" && BASE.test(session.b) ? session.b : null;
       const under = base !== null && pathname.startsWith(base);
       const atBase = base !== null && `${pathname}/` === base;
+      // A clean address is never an embed session's (P143): only an entry code opens one.
       if (
+        embedOf(session) !== false ||
         (session.p !== pathname && !under && !atBase) ||
         typeof session.w !== "string" ||
         typeof session.x !== "number" ||
@@ -976,6 +1039,11 @@ export function createServer(options: ServerOptions): PortholeServer {
       return null;
     }
     const open = session.x > now || (session.e > now && ownLoad(request));
+    // An embed session's address (P143) opens only where embeds are on.
+    const embed = embedOf(session);
+    if (embed === null || (embed && !embeds)) {
+      return null;
+    }
     let instance: InstanceRef;
     try {
       instance = cleanInstance(session.i);
@@ -998,7 +1066,28 @@ export function createServer(options: ServerOptions): PortholeServer {
       expiresAt: session.e,
       ...(session.a === 1 ? { anonymous: true } : {}),
       ...(typeof session.s === "string" ? { subject: session.s } : {}),
+      ...(embed ? { embed: true as const } : {}),
     };
+  }
+
+  /**
+   * Whether a sealed address that no longer opens was an embed session's of this origin (P143):
+   * sealed by this server (so its `m` is this server's word), where embeds are on. Its ended
+   * access is then said where its frame is, below any page.
+   */
+  async function sealedEmbed(label: string, token: string): Promise<boolean> {
+    if (!embeds) {
+      return false;
+    }
+    const session = await keys.unseal(token);
+    if (!isRecord(session) || embedOf(session) !== true) {
+      return false;
+    }
+    try {
+      return labelFor(cleanInstance(session.i)) === label;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -1017,6 +1106,7 @@ export function createServer(options: ServerOptions): PortholeServer {
       e: access.expiresAt,
       ...(access.anonymous === true ? { a: 1 } : {}),
       ...(access.subject === undefined ? {} : { s: access.subject }),
+      ...(access.embed === true ? { m: 1 } : {}),
     });
     return { base: `${FILES_PREFIX}${token}/`, expires };
   }
@@ -1046,6 +1136,18 @@ export function createServer(options: ServerOptions): PortholeServer {
     }
     const access = await sealedAccess(request, label, token);
     if (access === null) {
+      // An embed session's ended access (P143): where its frame is, below any page, told no one.
+      if (await sealedEmbed(label, token)) {
+        return page(
+          401,
+          "This has ended",
+          "Content here opens for a while. Open it again from the page that showed it.",
+          method,
+          "session",
+          undefined,
+          true,
+        );
+      }
       // In a nested page's frame (P111) its shell frames it and hears it, on this origin; a
       // config without nesting never frames this address but at the host.
       return statusPage(
@@ -1063,18 +1165,33 @@ export function createServer(options: ServerOptions): PortholeServer {
     const blob = SEALED_ASSET.exec(rest)?.[1];
     if (blob !== undefined) {
       // A nested page loads no assets (its config refuses them): none on its shell's label (P114).
+      const none = () =>
+        page(
+          404,
+          "Not found",
+          "This address names no content.",
+          method,
+          undefined,
+          undefined,
+          access.embed === true,
+        );
       if (options.assets === undefined || isNestedLabel(label)) {
-        return page(404, "Not found", "This address names no content.", method);
+        return none();
       }
-      return (
-        (await assetFor(request, label, access, blob)) ??
-        page(404, "Not found", "This address names no content.", method)
-      );
+      return (await assetFor(request, label, access, blob)) ?? none();
     }
     if (rest === RENEW_PATH) {
       // Only the page itself renews its address, while its session lasts and the host lets it.
       if (method !== "GET" || !ownLoad(request)) {
-        return page(403, "Not allowed", "Only the page renews its own address.", method);
+        return page(
+          403,
+          "Not allowed",
+          "Only the page renews its own address.",
+          method,
+          undefined,
+          undefined,
+          access.embed === true,
+        );
       }
       const refusal = await denied(request, access);
       if (refusal !== null) {
@@ -1088,7 +1205,7 @@ export function createServer(options: ServerOptions): PortholeServer {
             "cache-control": "no-store",
             "x-content-type-options": "nosniff",
             "cross-origin-resource-policy": "same-origin",
-            "content-security-policy": `${INERT_FILE_CSP}; frame-ancestors ${frameAncestors}`,
+            "content-security-policy": `${INERT_FILE_CSP}; frame-ancestors ${ancestorsFor(access)}`,
             "referrer-policy": "no-referrer",
           },
         },
@@ -1122,10 +1239,12 @@ export function createServer(options: ServerOptions): PortholeServer {
     const record = method === "GET" ? await take(url.searchParams.get("ticket"), label) : null;
     // An entry code opens its clean address alone, through its own browser's nonce (P068, P114).
     // A door's ticket is the door's alone (P125): here it is no ticket.
+    // An embed grant's ticket (P143) opens only where embeds are on.
     if (
       record !== null &&
       record.entry === undefined &&
       record.door !== true &&
+      (record.embed !== true || embeds) &&
       record.instance.document.kind !== "external" &&
       keys.instanceKey(record.instance) === key
     ) {
@@ -1137,6 +1256,7 @@ export function createServer(options: ServerOptions): PortholeServer {
         expiresAt: Date.now() + (record.sessionSeconds ?? DEFAULT_SESSION_SECONDS) * 1_000,
         ...(record.anonymous === true ? { anonymous: true } : {}),
         ...(record.subject === undefined ? {} : { subject: record.subject }),
+        ...(record.embed === true ? { embed: true as const } : {}),
       };
     }
     access ??= accessOf(request, label, key);
@@ -1188,6 +1308,7 @@ export function createServer(options: ServerOptions): PortholeServer {
       if (
         record === null ||
         record.door !== true ||
+        record.embed === true ||
         record.entry !== undefined ||
         record.instance.document.kind === "external" ||
         keys.instanceKey(record.instance) !== key ||
@@ -1268,14 +1389,26 @@ export function createServer(options: ServerOptions): PortholeServer {
     if (refusal !== null) {
       return refusal;
     }
-    const served = await documentOf(access.instance);
+    // An embed session (P143): every answer below framed by any page, its documents hostless.
+    const embed = access.embed === true;
+    const missing = () =>
+      page(
+        404,
+        "Not found",
+        "This page, or this version of it, doesn't exist.",
+        method,
+        undefined,
+        undefined,
+        embed,
+      );
+    const served = await documentOf(access.instance, embed);
     if (served === null) {
-      return page(404, "Not found", "This page, or this version of it, doesn't exist.", method);
+      return missing();
     }
     // A frame's document opens at its file set's entry, which is a page (P125, P124-2): a set
     // stored before that was checked shows Porthole's word, never an inert file that says nothing.
     if ("files" in served && at === undefined && !entryIsPage(served.files)) {
-      return page(404, "Not found", "This page, or this version of it, doesn't exist.", method);
+      return missing();
     }
     // A page below a base (P125) names a file set's page: for one page alone, nothing; for a set,
     // the page the frame opens at (its entry, or the page it was issued for) must be one of its
@@ -1284,7 +1417,7 @@ export function createServer(options: ServerOptions): PortholeServer {
       at === undefined &&
       ("files" in served ? ticketPage(served.files, pageAt) === null : pageAt !== undefined)
     ) {
-      return page(404, "Not found", "This page, or this version of it, doesn't exist.", method);
+      return missing();
     }
     // A nested page (P111): the address the host frames (a ticket's, a cookie's, an entered
     // one's) answers Porthole's shell, which frames the page at its sealed files' address; only
@@ -1330,13 +1463,19 @@ export function createServer(options: ServerOptions): PortholeServer {
       }
       return shell;
     }
-    // Below the sealed prefix, a nested page and its files are framed by its shell too.
-    const ancestors = nested ? nestedAncestors(access.origin, frameAncestors) : frameAncestors;
+    // Below the sealed prefix, a nested page and its files are framed by its shell too. An embed
+    // session is never nested (`issue`): its answers are framed by any page (P143).
+    const ancestors = nested
+      ? nestedAncestors(access.origin, frameAncestors)
+      : ancestorsFor(access);
+    // Whom its pages hear and tell: the host origins, or no one for an embed session (P143).
+    const hostOrigins = embed ? [] : options.hostOrigins;
     if ("files" in served) {
       if (at !== undefined) {
         // A page's own frames (P128): its files below the base are framed by its own pages too,
-        // on this origin (`frame-ancestors` names every ancestor). Never another origin's.
-        const own = served.compiled.config.nestedFrames === "own";
+        // on this origin (`frame-ancestors` names every ancestor). Never another origin's. Any
+        // page already frames an embed session's (P143).
+        const own = served.compiled.config.nestedFrames === "own" && !embed;
         return serveFile({
           request,
           set: served.files,
@@ -1347,7 +1486,7 @@ export function createServer(options: ServerOptions): PortholeServer {
           pinned: at.pinned,
           source: at.source,
           compiled: served.compiled,
-          hostOrigins: options.hostOrigins,
+          hostOrigins,
           frameAncestors: own ? `${access.origin} ${ancestors}` : ancestors,
           ...versionOf(access.instance),
         });
@@ -1366,15 +1505,15 @@ export function createServer(options: ServerOptions): PortholeServer {
         pinned: true,
         source: `${access.origin}${FILES_PREFIX}`,
         compiled: served.compiled,
-        hostOrigins: options.hostOrigins,
-        frameAncestors,
+        hostOrigins,
+        frameAncestors: ancestors,
         ticket: { expires: sealed.expires, ...(pageAt === undefined ? {} : { page: pageAt }) },
         ...versionOf(access.instance),
       });
     }
     // One page at a file set's base (P081): its base is the page, nothing under it is.
     if (at !== undefined && at.rest !== "") {
-      return page(404, "Not found", "This page, or this version of it, doesn't exist.", method);
+      return missing();
     }
     // A page that may use its artifact's assets loads them from its own origin (P089); every
     // served page carries its frame's sandbox, a tab of its own included (P099).
@@ -1503,7 +1642,12 @@ export function createServer(options: ServerOptions): PortholeServer {
     if (refusal !== null) {
       return refusal;
     }
-    return serveAsset({ request, asset, frameAncestors, code: runsAsCode(asset, access) });
+    return serveAsset({
+      request,
+      asset,
+      frameAncestors: ancestorsFor(access),
+      code: runsAsCode(asset, access),
+    });
   }
 
   /**
@@ -1560,19 +1704,27 @@ export function createServer(options: ServerOptions): PortholeServer {
         continue;
       }
       const session = keys.verify(value);
+      // An embed session (P143) only where embeds are on, and only by its own name.
+      const embed = isRecord(session) ? embedOf(session) : null;
       if (
         !isRecord(session) ||
         typeof session.w !== "string" ||
         typeof session.x !== "number" ||
         session.x <= Date.now() ||
-        (session.s !== undefined && typeof session.s !== "string")
+        (session.s !== undefined && typeof session.s !== "string") ||
+        embed === null ||
+        (embed && !embeds)
       ) {
         continue;
       }
       let instance: InstanceRef;
       try {
         instance = cleanInstance(session.i);
-        if (instance.document.kind !== "artifact" || labelFor(instance) !== label) {
+        if (
+          instance.document.kind !== "artifact" ||
+          labelFor(instance) !== label ||
+          (embed && name !== sessionName(keys.instanceKey(instance), true))
+        ) {
           continue;
         }
       } catch {
@@ -1585,9 +1737,13 @@ export function createServer(options: ServerOptions): PortholeServer {
         expiresAt: session.x,
         ...(session.a === 1 ? { anonymous: true } : {}),
         ...(typeof session.s === "string" ? { subject: session.s } : {}),
+        ...(embed ? { embed: true as const } : {}),
       });
     }
-    return found.sort((a, b) => b.expiresAt - a.expiresAt);
+    // Any other session before an embed session (P143), then the latest first.
+    return found.sort(
+      (a, b) => Number(a.embed === true) - Number(b.embed === true) || b.expiresAt - a.expiresAt,
+    );
   }
 
   /**
@@ -1905,8 +2061,34 @@ export function createServer(options: ServerOptions): PortholeServer {
   function checkGrant(
     clean: InstanceRef,
     grant: Grant,
-  ): { readonly anonymous: boolean; readonly viewer: string } {
+  ): { readonly anonymous: boolean; readonly viewer: string; readonly embed: boolean } {
     const anonymous = grant.anonymous === true;
+    // An embedded document (P143): a public page with no host, which any page may frame. Only
+    // where the host opted in, and only as narrow as that: anonymous, no level, no user, an
+    // artifact's page that isn't nested.
+    // Read as given: a host's grant is checked here, not trusted to its type.
+    const asked: unknown = grant.embed;
+    const embed = asked !== undefined;
+    if (embed) {
+      if (asked !== true) {
+        throw new TypeError("A grant's embed is true or absent");
+      }
+      if (!embeds) {
+        throw new TypeError(
+          "An embed grant needs the server's opt-in (embeds: true): every page could frame it (P143)",
+        );
+      }
+      if (!anonymous || grant.level !== undefined || grant.user !== undefined) {
+        throw new TypeError(
+          "An embed grant is anonymous, with no viewer, level or user: it has no host to give them to (P143)",
+        );
+      }
+      if (clean.document.kind !== "artifact" || compiledFor(clean)?.config.nested === true) {
+        throw new TypeError(
+          "An embed grant opens an artifact's page that isn't nested: never a url-mode app, a served shell, the sandbox proxy or a nested display (P143)",
+        );
+      }
+    }
     if (anonymous) {
       if (grant.viewer !== undefined) {
         throw new TypeError("An anonymous grant names no viewer");
@@ -1927,7 +2109,7 @@ export function createServer(options: ServerOptions): PortholeServer {
     ) {
       throw new TypeError(`A grant's subject is a string of at most ${SUBJECT_MAX} characters`);
     }
-    return { anonymous, viewer: anonymous ? "" : (grant.viewer ?? "") };
+    return { anonymous, viewer: anonymous ? "" : (grant.viewer ?? ""), embed };
   }
 
   /** How long a grant's session lasts, checked (`sessionSeconds`). */
@@ -1950,7 +2132,12 @@ export function createServer(options: ServerOptions): PortholeServer {
   }> {
     const clean = cleanInstance(instance);
     check(clean);
-    const { anonymous, viewer } = checkGrant(clean, grant);
+    const { anonymous, viewer, embed } = checkGrant(clean, grant);
+    if (embed && entry !== undefined) {
+      throw new TypeError(
+        "An embed grant opens a frame, never a clean address (redirect entry is for a tab, P143)",
+      );
+    }
     const ttl = seconds(grant.ttlSeconds, DEFAULT_TICKET_SECONDS, MAX_TICKET_SECONDS, "ttlSeconds");
     const sessionSeconds = sessionOf(grant);
     const key = keys.instanceKey(clean);
@@ -1964,8 +2151,9 @@ export function createServer(options: ServerOptions): PortholeServer {
       ...(entry?.base === undefined
         ? {}
         : { b: entry.base, ...(entry.pinned === true ? { k: 1 } : {}) }),
+      ...(embed ? { m: 1 } : {}),
     });
-    if (cookieName(key).length + probe.length + 120 > MAX_COOKIE_BYTES) {
+    if (sessionName(key, embed).length + probe.length + 120 > MAX_COOKIE_BYTES) {
       throw new TypeError("This instance is too large to carry in a cookie (fewer origins?)");
     }
     const ticket = newTicket();
@@ -1978,11 +2166,13 @@ export function createServer(options: ServerOptions): PortholeServer {
       ...(grant.subject === undefined ? {} : { subject: grant.subject }),
       ...(entry === undefined ? {} : { entry }),
       ...(below === undefined ? {} : { page: below }),
+      ...(embed ? { embed: true as const } : {}),
     };
     await tickets.put(ticketId(ticket), record);
     // A frame on its scope's origin has a door (P125): its ticket, for the same grant and as long.
+    // An embed grant's has none (P143): a door tells a host how loading went, and there is none.
     let door: string | null = null;
-    if (entry === undefined && hasDoor(clean)) {
+    if (entry === undefined && !embed && hasDoor(clean)) {
       door = newTicket();
       await tickets.put(ticketId(door), { ...record, door: true });
     }
@@ -2070,7 +2260,8 @@ export function createServer(options: ServerOptions): PortholeServer {
       return {
         url: `${origin}${path}`,
         origin,
-        reports: true,
+        // An embed session's pages tell no one how loading went (P143): they name no host.
+        reports: grant.embed !== true,
         ...(viewer ? { viewer } : {}),
         // Its door (P125): the host frames it first, and takes its word alone.
         ...(door === null ? {} : { door: { url: `${origin}${DOOR_PATH}${key}?ticket=${door}` } }),
@@ -2092,7 +2283,12 @@ export function createServer(options: ServerOptions): PortholeServer {
           "A frame's page is a relative path below an artifact's files (no . or ..)",
         );
       }
-      const { anonymous, viewer } = checkGrant(clean, grant);
+      const { anonymous, viewer, embed } = checkGrant(clean, grant);
+      if (embed) {
+        throw new TypeError(
+          "An embed grant has no door (P143): a door tells a host how loading went, and there is none",
+        );
+      }
       const sessionSeconds = sessionOf(grant);
       const origin = originOfLabel(labelFor(clean));
       return answerDoor(

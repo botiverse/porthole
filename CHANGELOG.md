@@ -4,6 +4,26 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## 0.15.0 (unreleased)
+
+- **Embedded documents (P143): `Grant.embed`.** A public artifact page any site may frame, with no
+  host: the host's own outer page (no host itself) frames it, and any site frames that page.
+  `createServer({ embeds: true })` and `createContentHost({ embeds: true })` opt in (default off);
+  then `issue` takes `{ anonymous: true, embed: true }`, for an artifact's page that isn't nested,
+  with no `level` or `user` (anything else throws, as do `enterBy` and `doorAnswer` with it). The
+  flag is signed into the session (and the sealed files' address), its cookie has a name of its own
+  (`__Host-porthole-e-<key>`), and `authorize.check` is told `embed: true`. Every answer of such a
+  session says `frame-ancestors *`; its plan names no host, so the shell asks no host, ends its
+  handshake at once (`data-porthole-host="none"`), says nothing to any parent and hears no one; no
+  door is minted and `issue` says `reports: false`. `statusPage` and `doorStatusResponse` take
+  `embed: true` for a content Worker's own answers before such a session exists. With `embeds` off,
+  an embed ticket, cookie or address opens nothing.
+- **Security (P143):** a loosening, bounded: `*` for an embed session's answers alone, a session
+  the host minted on purpose, with no viewer, no level, no host function and no channel to any
+  parent. Every other session's answers are as before, byte for byte, on the same server while an
+  embed session of the same artifact exists; cookies stay host-only (`__Host-`, never `Domain=`).
+  Negative controls `embed-ancestors`, `embed-handshake`, `embed-origins`.
+
 ## 0.14.18
 
 - **A set's pages without the Navigation API, and links within a page (P142).** In Safari before 26

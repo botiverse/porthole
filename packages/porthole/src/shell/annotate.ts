@@ -161,8 +161,9 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const getAttribute = Element.prototype.getAttribute;
       const listenOn = EventTarget.prototype.addEventListener;
       const post = window.parent.postMessage.bind(window.parent);
-      // Read once: content can replace window.parent (it is [Replaceable]), never what was read.
-      const framed = window.parent !== window;
+      // Read once: content can replace window.parent (it is [Replaceable]), never what was read. A
+      // hostless plan (P143) tells no parent anything.
+      const framed = window.parent !== window && !hostless;
       const tell = (method, params) => {
         if (framed) {
           post({ jsonrpc: "2.0", method, params }, "*");

@@ -93,9 +93,10 @@ export const ONCE = String.raw`(passesAsIs, toText) => (value) => {
   }`;
 
 /**
- * The shell's handshake with its host (P085, P139), spliced into the runtime as
+ * The shell's handshake with its host (P085, P139, P143), spliced into the runtime as
  * `HANDSHAKE(topLevel, ask, answered, none, later)`. On a tab of its own (`topLevel`: the window is
- * its own top, so its parent is itself and no host can hear it) there is no host to ask: `none()`
+ * its own top, so its parent is itself and no host can hear it), and under a plan that names no
+ * host (P143: the runtime passes `topLevel` true for it too), there is no host to ask: `none()`
  * at once, and nothing is asked. In a frame it asks (`ask()`, a promise of the host's answer) up to
  * 40 times, 250 ms apart (`later(run, ms)`), since the host may start listening after the shell
  * runs; the first answer is taken (`answered(result)`), once. After the 40th try with no answer,
@@ -171,6 +172,10 @@ export const HANDSHAKE = String.raw`(topLevel, ask, answered, none, later) => {
 export const SHELL_RUNTIME = String.raw`(() => {
   "use strict";
   const plan = __PLAN__;
+  // A plan that names no host (P143: an embedded document, framed below a page that is no host):
+  // the shell asks no host and ends its handshake at once, as on a tab (P139), and says nothing to
+  // any parent, not even its own notices to "*" (P053). No origin is a host's, so it hears no one.
+  const hostless = Array.isArray(plan.origins) && plan.origins.length === 0;
   // Every built-in a guard calls is called through callOf, which is Reflect.apply itself, kept
   // now, before any content runs: a direct call of it never reads Function.prototype's call,
   // apply or bind, so nothing content later puts there sees what the shell calls or with what.
@@ -1604,9 +1609,9 @@ export const SHELL_RUNTIME = String.raw`(() => {
     send({ method: "notifications/message", params: { level: "error", logger: "porthole", data: ownAddresses(message).slice(0, 2000) } });
   };
   // Nothing secret is ever said from here, so any parent may hear it; what it hears is the
-  // content's word, which the host gates before it acts on it.
+  // content's word, which the host gates before it acts on it. A hostless plan says nothing (P143).
   const post = (message) => {
-    if (window.parent !== window) {
+    if (window.parent !== window && !hostless) {
       window.parent.postMessage(Object.assign({ jsonrpc: "2.0" }, message), "*");
     }
   };
@@ -2284,7 +2289,8 @@ export const SHELL_RUNTIME = String.raw`(() => {
 
   // The handshake (HANDSHAKE, P085): asked until answered, since the host may start listening
   // after this runs; on a tab of its own, not asked at all (P139): its parent is itself, so no host
-  // hears it, and the runtime has nothing to offer from the start. How it ended goes on the
+  // hears it, and the runtime has nothing to offer from the start. Nor under a plan that names no
+  // host (P143): no parent is one. How it ended goes on the
   // document's root element (data-porthole-host: "answered", or "none" where no host answered), for
   // a test, a person or a tool that shoots the page to see (P139): not on the shell's own script,
   // which a whole document's render takes out with the body it replaces, while the root stays (the
@@ -2298,7 +2304,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
   };
   const handshake = ${HANDSHAKE};
   handshake(
-    window.top === window,
+    window.top === window || hostless,
     () =>
       request("ui/initialize", {
         protocolVersion: plan.protocolVersion,

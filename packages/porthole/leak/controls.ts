@@ -92,6 +92,7 @@ const OUTCOME = "leak/served/outcome.spec.ts";
 const SIBLINGS_STATUS = "leak/served/siblings-status.spec.ts";
 const ANNOTATE = "leak/annotate.spec.ts";
 const LATE_WORD = "leak/nested-late-word.spec.ts";
+const EMBED = "leak/served/embed.spec.ts";
 
 /** The keyboard's probes (P109). */
 const TAKE =
@@ -760,6 +761,21 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   "door-opaque": {
     specs: [SIBLINGS_STATUS],
     fails: all("[door-reach]"),
+  },
+  // Embeds (P143): every session's answers framed by any page, not an embed session's alone.
+  "embed-ancestors": {
+    specs: [EMBED],
+    fails: all("[embed.reader-unframeable]"),
+  },
+  // A hostless plan asking its parent ui/initialize, and saying its notices to "*".
+  "embed-handshake": {
+    specs: [EMBED],
+    fails: all("[embed.untold]"),
+  },
+  // A hostless plan taking its parent's words as a host's.
+  "embed-origins": {
+    specs: [EMBED],
+    fails: all("[embed.unheard]"),
   },
   // The ordering rule taken out for a nested page's shell: a page's word after its hello taken.
   "frame-status-order": {

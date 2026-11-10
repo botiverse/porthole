@@ -840,6 +840,32 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: '  const mayBePorthole = () => source.kind === "url" && (!speaks || nested);',
     },
   ],
+  // Embeds (P143): every session's answers framed by any page, an embed session's or not. The embed
+  // spec's server runs in its own process, unweakened, so the spec rewrites the header.
+  "embed-ancestors": "harness",
+  // A hostless plan (P143) asks its parent ui/initialize, as a frame with a host does, and says its
+  // notices and requests to "*".
+  "embed-handshake": [
+    {
+      file: RUNTIME,
+      find: "  handshake(\n    window.top === window || hostless,",
+      replace: "  handshake(\n    window.top === window,",
+    },
+    {
+      file: RUNTIME,
+      find: "    if (window.parent !== window && !hostless) {\n      window.parent.postMessage(",
+      replace: "    if (window.parent !== window) {\n      window.parent.postMessage(",
+    },
+  ],
+  // A hostless plan (P143) takes its parent's every message: the origins check skipped for it.
+  "embed-origins": [
+    {
+      file: RUNTIME,
+      find: '\n  window.addEventListener("message", (event) => {\n    if (event.source !== window.parent || plan.origins.indexOf(event.origin) === -1) {',
+      replace:
+        '\n  window.addEventListener("message", (event) => {\n    if (event.source !== window.parent || (!hostless && plan.origins.indexOf(event.origin) === -1)) {',
+    },
+  ],
   // The asset library's CSP (P089), taken out by the served harness: scripts from it run
   // whoever uploaded them; an asset opened on its own runs.
   "blob-script": "harness",
@@ -926,6 +952,9 @@ const SERVED = [
   // served shell.
   "marker-late",
   "marker-busy",
+  // A hostless plan's shell (P143): an embed session's documents, made in the embed spec's process.
+  "embed-handshake",
+  "embed-origins",
 ];
 
 /** Whether a control asked for edits the served documents' shell (`weakenServed`). */
