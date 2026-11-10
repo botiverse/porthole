@@ -264,8 +264,29 @@ test.describe("a nested page (P111)", () => {
     );
     // WebKit refuses a cross-origin frame's focus() with no gesture of its own (measured): there
     // the page never holds the keyboard. Elsewhere it does, from its load, before the person comes.
+    // This is the attack's precondition, not its verdict: the cases below prove nothing of a page
+    // that never held the keyboard, so it is still required here.
+    // Its one focus() as it loads can miss where the page's frame is out of process (full
+    // Chromium on a slower runner, once in two CI runs: the host's page stayed on <body> for the
+    // whole wait): the call ran before the frame could take the focus, and nothing in the page
+    // asks again, since no blur follows a focus that never came. So after a second without it the
+    // host's page asks the page to focus its field again (`test: "focus"`, a message through the
+    // shell: no gesture, no timer of the page's, and still before the person comes), until it holds.
+    // Where the first call takes, as in every run on the earlier runners, nothing is sent.
     if (browserName !== "webkit") {
-      await expect.poll(() => hostActive(page), { timeout: 5_000 }).toBe("IFRAME");
+      const shownAt = Date.now();
+      await expect
+        .poll(
+          async () => {
+            const active = await hostActive(page);
+            if (active !== "IFRAME" && Date.now() - shownAt > 1_000) {
+              await tell(page, { test: "focus" });
+            }
+            return active;
+          },
+          { message: "the page holds the keyboard before the person comes", timeout: 15_000 },
+        )
+        .toBe("IFRAME");
     }
     await page.waitForTimeout(1_000);
     await page.mouse.click(composer.x, composer.y);
