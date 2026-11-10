@@ -120,6 +120,13 @@ export interface ContentHostOptions<V> {
    * own `frame-ancestors` (its page's, which Porthole doesn't send) is the app's to set.
    */
   readonly framedBy?: readonly string[];
+  /**
+   * Whether `access` may answer an embed grant (P143, `Grant.embed`): a public artifact page that
+   * any site may frame, with no host (`ServerOptions.embeds`). Default false: an embed grant is
+   * refused at issue. Only an embed session's answers say `frame-ancestors *`; every other answer
+   * is as without it.
+   */
+  readonly embeds?: boolean;
   /** At least 32 random bytes (or a string of at least 32 bytes). */
   readonly secret: Uint8Array | string;
   readonly tickets?: TicketStore;
@@ -692,6 +699,7 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
         secret,
         hostOrigins: options.appOrigins,
         ...(options.framedBy === undefined ? {} : { framedBy: options.framedBy }),
+        ...(options.embeds === undefined ? {} : { embeds: options.embeds }),
         configs,
         ...(options.source === undefined ? {} : { artifacts: { get: options.source } }),
         ...(options.assets === undefined

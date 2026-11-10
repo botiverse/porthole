@@ -8862,3 +8862,115 @@ cases, whose second page is opened by a link.
 **Revisit when** an engine stops firing a frame's load for a navigation within its document
 (the `same` notice then has no load to explain), single-document served artifacts need it (give
 their notices the version), or hosts need Safari before 26 on a tab (P099's limit stands).
+
+## P143 · 2026-11-10 · An embedded document: a public grant with no host, framed by any page (`embed`) · Accepted
+
+From Raft (Tenny): public artifacts embedded on any site, as a video is. The host's own outer page
+(its code, no author code, and no host: it hears and tells nothing) frames the content frame, and
+any site frames that page.
+
+**Context.** `frame-ancestors` names every ancestor (P141), so a frame below an unknown site needs
+`*`: "the outer page only" can't be said. P141 rejected a wildcard for `framedBy` because an outer
+page there is one product's and sits above a host, whose frames carry a viewer, a level and host
+functions. Here no host exists, and the page is public: it has no viewer to take anything from.
+The risk is the other way: a bug that lets `*` reach a reader's session makes signed-in content
+frameable anywhere. So `*` hangs on a flag the host mints on purpose, signed, and every other
+session is held to be unchanged.
+
+**Decision.**
+
+1. **`Grant.embed: true`**, taken only where the server opted in (`createServer({ embeds: true })`,
+   `createContentHost({ embeds: true })`; default off, two switches), only with `anonymous: true`
+   and no `level` or `user`, and only for an **artifact's page that isn't nested**: never a url-mode
+   app, a served shell or the sandbox proxy (each needs a host to send it content or to relay; the
+   proxy speaks to its parent itself), never a nested display. Anything else throws at `issue`, as
+   does `embed` that isn't `true`; `enterBy` (a clean address is a tab's, P125) and `doorAnswer`
+   refuse it too. `embeds` that isn't a boolean throws at `createServer`.
+2. **Signed into the session.** The session carries `m: 1` (not `e`: a sealed address's `e` is its
+   session's end, and a redirect entry's state is marked `e`), and so does the frame's sealed files'
+   address (P083), so it is never added to a session or taken from one without breaking the MAC or
+   the seal. The ticket's record carries `embed`. An embed session's cookie has a name of its own,
+   `__Host-porthole-e-<key>`, read only with `m: 1` (and the instance's own name only without it):
+   where a browser partitions no cookies and holds both for one instance, the other session is the
+   one served, never replaced or changed by the embed's. With `embeds` off, an embed ticket, cookie
+   or sealed address opens nothing (it is refused, not read as another session): turning it off is
+   a kill switch.
+3. **Any ancestor, for that session only.** Every answer of an embed session says `frame-ancestors
+   *` instead of the server's list: its document (a ticket's, a cookie's reload), a file set's
+   pages and files (its own frames: `*` already covers its origin), assets, renewals, and its status
+   pages: the host's refusal, a version gone, a missing page, and its ended access (a sealed address
+   this server sealed with `m`, once it no longer opens). Without `embed`, every answer is as
+   before, byte for byte. Answers before any session exists (a used ticket, a request with no
+   cookie) can't know of one and are as before.
+4. **No host at all.** The plan's `origins` are `[]`; a status page's `data-porthole-hosts="[]"`
+   (and so `data-porthole-strict-parent`, P141). The shell reads its plan's hosts first
+   (`hostless`): it asks no host and ends its handshake at once, as on a tab (P139: `HANDSHAKE` is
+   given "no host"), `data-porthole-host="none"`, no `ui/initialize`, no timer, `porthole.use`
+   null; and it says nothing to any parent: its one `post` (requests, answers, its own `*`
+   notices of P053: sizes, errors, navigation, storage) and the annotation and find runtimes'
+   reports are held. No origin is in an empty list, so it hears no one. `issue` answers
+   `reports: false` and no viewer.
+5. **No door** is minted: a door tells a host how loading went, and there is none.
+6. **`authorize.check` is told `embed: true`** for an embed session (absent for every other), and
+   its cached answers are an embed session's own: a host holds its embed subject to embed sessions.
+7. **`statusPage` and `doorStatusResponse` take `embed: true`** (then no `hostOrigins`,
+   `framedBy` or `frameAncestors`): `*`, told to no one, for a content Worker's own answer before an
+   embed session exists (not public, rate-limited), shown where the embed is.
+
+**What it re-opens (PRINCIPLE 1).** Any site may frame an embed session's documents.
+- *Clickjacking*: with nothing to click. The session has no viewer and no level; there is no host,
+  so no capability, no runtime host function, no `comments`, `copyText` or `openLink`, and the
+  bridge never runs. A link out of the page goes nowhere (the guard stops it, P079; the frame's
+  sandbox has no popups and no top navigation): the host's outer page is the way out.
+- *An outer page framing content directly*: a site can if it has an address. The host's route that
+  mints embed sessions bounds that (the host's to say: same-site entry only, say); if one does, it
+  gets what the outer page gets, no channel. Author script can still `postMessage` to its parent or
+  `top`, as any framed page can: the author's own word, about a public page, which the embedding
+  site must treat as untrusted.
+- *Partitioned cookies*: keyed to the embedding site (CHIPS), shared with nothing; `HttpOnly`,
+  `__Host-` (host-only: never `Domain=`, so never the outer page's or a sibling label's, P101).
+- *Signed-in content made frameable*: the risk this entry is built against. `*` follows only the
+  signed flag, which only `issue` given `embed` mints, where the host opted in; every other session
+  is pinned unchanged by test, on the same server, while an embed session of the same artifact
+  exists. The host must keep its other routes from minting `embed`.
+
+**Rejected.**
+- *`framedBy: ["*"]`*: it widens every session, readers' included.
+- *The outer page as a host origin (`appOrigins`)*: a message channel to audit, and nothing to
+  offer that needs one now.
+- *Refusing a parent that isn't the outer page by `ancestorOrigins`*: Firefox masks it (P141).
+- *Every document kind*: a served shell waits for its host to send content and the proxy says
+  `ready` to its parent; neither has anything to show with no host.
+
+**Tested.** `test/embed.test.ts`: `embed` refused without `embeds` (or with `embeds: false`), with a
+viewer, a level or a user, unless `true`, for url mode, a nested display, a served shell and the
+proxy, at a clean address and at the door; issue mints no door and says `reports: false`; the host
+kit takes it only where it opted in. The flag can't be stripped from an embed session or added to a
+public one (401, the server's list), a good session under the other name opens nothing, a changed
+sealed address opens nothing, and with `embeds` off an embed session's cookie and address open
+nothing. **The bound**: 23 kinds of answer (a page's ticket and cookie reload; two file sets', one
+with its own frames: ticket, page at its base, script, file, missing file, renewal, renewal from
+elsewhere, asset, missing asset; the host's refusal; a version gone; ended access) under an embed
+session say `*` and name no host (`"origins":[]`, `data-porthole-hosts="[]"`), and the host's check
+is told `embed` every time; the same under a public session and a viewer's session never say `*`
+and are, evened out for sealed addresses and their ends, byte for byte what a server without
+`embeds` answers; a member's session answers the same before an embed session of the same artifact
+exists and after, interleaved; with both cookies sent the member's session is served. Cookies of
+both kinds are host-only (`__Host-`, never `Domain=`; none on loopback http either). `statusPage`
+and `doorStatusResponse` with `embed`: `*`, no host, a script that tells no parent. Taking `*` to
+every session fails three of these. `test/shell.test.ts`: a hostless plan in a frame asks nothing,
+sets no timer and ends with no host at once, and its one `post` and the annotation and find reports
+are held. `leak/served/embed.spec.ts` (a foreign site framing a page that is no host, framing the
+content; Chromium here, WebKit and Firefox in CI): `[embed.loads]`; `[embed.unheard]` (the outer
+page's and the site's host words: a document to draw, a theme, answers to the shell's requests, all
+dropped); `[embed.untold]` (neither hears a Porthole word, and the handshake ended `"none"` at once);
+`[embed.no-escape]` (no window, no top navigation, no link out, no self-navigation to another
+label); `[embed.reader-unframeable]` (a public and a viewer's session refused below the site, with or
+without the outer page; shown below the host). **The negative controls**: `embed-ancestors`
+(harness: every answer `*`) fails `[embed.reader-unframeable]`; `embed-handshake` (a hostless plan
+asks and posts) fails `[embed.untold]`; `embed-origins` (the origins check skipped for a hostless
+plan) fails `[embed.unheard]`; each exactly that probe on Chromium.
+
+**Revisit when** an embed needs a host function (then the outer page becomes a narrow host, with
+its own entry), auto-height needs a word to the embedding site, or browsers give a policy for the
+parent alone.

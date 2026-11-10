@@ -230,16 +230,8 @@ export function appStatusPage(
   });
 }
 
-/**
- * A page saying why a frame shows nothing, for a relay of the app's own (P072): told to the page
- * that frames it, at each web host origin and (a desktop scheme among them) to its parent (P070),
- * its one script inline under its hash, so it works on any origin.
- */
-export function statusPageOf(options: {
-  readonly status: number;
-  readonly title: string;
-  readonly detail: string;
-  readonly reason?: FrameBlock;
+/** Who a page is framed by and tells: the host origins, and whom else may frame it. */
+export interface HostedPage {
   readonly hostOrigins: readonly string[];
   /**
    * Origins of an outer page that may be an ancestor above a host origin's page (P141): added to its
@@ -248,16 +240,56 @@ export function statusPageOf(options: {
   readonly framedBy?: readonly string[];
   /** Who may frame it (`frame-ancestors`): default, the host origins, then `framedBy`. */
   readonly frameAncestors?: string;
-  readonly link?: { readonly href: string; readonly text: string };
-  readonly method?: string;
-}): Response {
+  readonly embed?: false;
+}
+
+/**
+ * An embedded document's page (P143, `Grant.embed`): framed by any page (`frame-ancestors *`), and
+ * told to no one (it names no host, `data-porthole-hosts="[]"`). For a content Worker's answer
+ * before an embed session exists (not public, rate-limited), shown where the embed is.
+ */
+export interface EmbedPage {
+  readonly embed: true;
+  readonly hostOrigins?: never;
+  readonly framedBy?: never;
+  readonly frameAncestors?: never;
+}
+
+/** Whom a page tells, and who may frame it: the host origins' (P141), or an embed's (P143). */
+const framingOf = (
+  options: HostedPage | EmbedPage,
+): { readonly hosts: readonly string[]; readonly ancestors: string } =>
+  options.embed === true
+    ? { hosts: [], ancestors: "*" }
+    : {
+        hosts: options.hostOrigins,
+        ancestors: options.frameAncestors ?? ancestorsOf(options.hostOrigins, options.framedBy),
+      };
+
+/**
+ * A page saying why a frame shows nothing, for a relay of the app's own (P072): told to the page
+ * that frames it, at each web host origin and (a desktop scheme among them) to its parent (P070),
+ * its one script inline under its hash, so it works on any origin. With `embed` (P143), framed by
+ * any page and told to no one.
+ */
+export function statusPageOf(
+  options: {
+    readonly status: number;
+    readonly title: string;
+    readonly detail: string;
+    readonly reason?: FrameBlock;
+    readonly link?: { readonly href: string; readonly text: string };
+    readonly method?: string;
+  } & (HostedPage | EmbedPage),
+): Response {
+  const { hosts, ancestors } = framingOf(options);
   return appStatusPage(
     options.status,
     options.title,
     options.detail,
-    options.frameAncestors ?? ancestorsOf(options.hostOrigins, options.framedBy),
+    ancestors,
     options.reason ?? "error",
-    options.hostOrigins,
+    hosts,
     options.link,
     options.method,
   );
@@ -321,19 +353,24 @@ export function doorResponse(options: DoorOptions): Response {
  * A door that doesn't open (P125): why, said `blocked` to the page that frames it, as a content
  * origin's status page says it (`session` 401: no ticket, or one used, ended, or not a door's of
  * this instance on this origin; `denied` 403 with the host's code; `not-found` 404: no document, or
- * a file set whose entry isn't a page; `error` 500).
+ * a file set whose entry isn't a page; `error` 500). With `embed` (P143), for a content Worker's
+ * refusal before an embed session exists: framed by any page and told to no one.
  */
 export function doorStatusResponse(
-  options: DoorOptions & {
+  options: (
+    | (DoorOptions & { readonly embed?: false })
+    | (EmbedPage & { readonly method?: string })
+  ) & {
     readonly status: number;
     readonly reason: FrameBlock;
     readonly code?: string;
   },
 ): Response {
   const { status, reason, code } = options;
-  const hosts = escape(JSON.stringify(options.hostOrigins));
-  const ancestors = options.frameAncestors ?? ancestorsOf(options.hostOrigins, options.framedBy);
-  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Not shown</title></head><body><main data-porthole-status="${status}" data-porthole-reason="${escape(reason)}"${code === undefined ? "" : ` data-porthole-code="${escape(code)}"`} data-porthole-hosts="${hosts}"${strictParent(ancestors, options.hostOrigins)}></main><script>${STATUS_SCRIPT}</script></body></html>`;
+  const framing = framingOf(options);
+  const hosts = escape(JSON.stringify(framing.hosts));
+  const ancestors = framing.ancestors;
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Not shown</title></head><body><main data-porthole-status="${status}" data-porthole-reason="${escape(reason)}"${code === undefined ? "" : ` data-porthole-code="${escape(code)}"`} data-porthole-hosts="${hosts}"${strictParent(ancestors, framing.hosts)}></main><script>${STATUS_SCRIPT}</script></body></html>`;
   return new Response(options.method?.toUpperCase() === "HEAD" ? null : body, {
     status,
     headers: doorHeaders(hashOfStatus(), ancestors),

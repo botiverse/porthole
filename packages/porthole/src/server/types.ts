@@ -77,6 +77,17 @@ export type Grant = (
    * gives an id per artifact, so pages can't link a person across artifacts. Only with `level`.
    */
   readonly user?: { readonly id: string; readonly name?: string };
+  /**
+   * An embedded document (P143): a public page that any site may frame, with no host. Only where
+   * the server opted in (`ServerOptions.embeds`), only with `anonymous: true` and no `level` or
+   * `user`, and only for an artifact's page that isn't nested (never a url-mode app, a served shell,
+   * the sandbox proxy or a nested display); anything else throws at `issue`. Carried signed in the
+   * session (and in a frame's sealed files' address), so it is never added to a session or taken
+   * from one. Every answer of such a session says `frame-ancestors *` (no other session's changes),
+   * its shell's plan names no host (it asks no host, hears none and tells no parent anything; the
+   * bridge never runs), and `issue` mints no door.
+   */
+  readonly embed?: true;
 };
 
 export interface TicketRecord {
@@ -113,6 +124,8 @@ export interface TicketRecord {
    * content's address; the door takes no other.
    */
   readonly door?: true;
+  /** An embed grant's (P143): the session it buys is an embed session. */
+  readonly embed?: true;
 }
 
 /** Where tickets live between `issue` and their one use. Default: in memory (one process). */
@@ -224,6 +237,11 @@ export interface Access {
   readonly origin: string;
   /** When the cookie stops being good, epoch milliseconds. */
   readonly expiresAt: number;
+  /**
+   * An embed session's (P143, `Grant.embed`): its answers may be framed by any page, and its
+   * documents name no host. Absent for every other session.
+   */
+  readonly embed?: true;
 }
 
 /**
@@ -240,6 +258,11 @@ export interface AuthorizeRequest {
   readonly viewer: string;
   readonly anonymous: boolean;
   readonly subject?: string;
+  /**
+   * Whether the session is an embed session (P143, `Grant.embed`): absent for every other, so a
+   * host's check can hold an embed subject to embed sessions alone.
+   */
+  readonly embed?: true;
   /** The request itself (its path, method; never its Porthole cookie's value). */
   readonly request: Request;
 }
@@ -281,6 +304,13 @@ export interface ServerOptions {
    * (`http://` on loopback), none a host origin, none the content domain's site. Default none.
    */
   readonly framedBy?: readonly string[];
+  /**
+   * Whether `issue` takes an embed grant (P143, `Grant.embed`): a public artifact page that any
+   * site may frame, with no host. Default false: an embed grant throws, and a session or sealed
+   * address that says it is one opens nothing. Only an embed session's answers say
+   * `frame-ancestors *`; every other answer is as without it, byte for byte.
+   */
+  readonly embeds?: boolean;
   /**
    * The configs a served shell or page is served under, by the name a `ServedDocument` gives
    * (an artifact defaults to `artifact`, the MCP Apps sandbox proxy to `mcpApp`).

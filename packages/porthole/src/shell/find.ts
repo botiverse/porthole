@@ -261,7 +261,8 @@ export const FIND_RUNTIME = String.raw`if (declared("find")) {
       const time = () => callOf(clock, Date, []);
       // Read once: content can replace window.parent (it is [Replaceable]), never what was read.
       const parentWindow = window.parent;
-      const framed = parentWindow !== window;
+      // A hostless plan (P143) tells no parent anything.
+      const framed = parentWindow !== window && !hostless;
       const postIn = parentWindow.postMessage;
       const post = (message) => callOf(postIn, parentWindow, [message, "*"]);
       // Whose shortcut it is: Cmd on Apple's platforms, Ctrl elsewhere (read before content runs).

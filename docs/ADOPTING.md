@@ -754,6 +754,16 @@ nodeServer({ content, app: async (request) => (await routes(request)) ?? app(req
   page between them is still the frame's parent, and its `frame-ancestors` is yours to set. A
   content Worker of your own passes the same list to `statusPage`, `doorResponse`,
   `doorStatusResponse` and `nestedShellResponse` (`framedBy`).
+- **`embeds`** (P143): to let any site embed a public artifact page, set `embeds: true` and, from
+  one route of your own that decides the page is public (never your reader's issue endpoint),
+  issue it with `{ anonymous: true, embed: true }` (no `level`, no `user`; an artifact's page that
+  isn't nested). That session's answers say `frame-ancestors *`, and nothing else's do. It has no
+  host: frame it from an outer page of your own that listens to nothing (its `frame-src` the one
+  label), which any site may frame; the shell asks no host and says nothing to any parent, links out
+  of the page go nowhere (give the outer page your own "Open" link), and there is no door.
+  `authorize.check` gets `embed: true` for it, so your check can hold an embed subject to embed
+  sessions. A content Worker of your own answers its refusals before a session exists with
+  `statusPage({ embed: true, … })` or `doorStatusResponse({ embed: true, … })`.
 - **No content domain** (self-hosted without one): still make the host, with `domain: null` (or
   `""`). That is the supported setup: no secret is needed, `GET /porthole/meta` answers
   `{ served: false }`, and pages show every kind opaque (a url kind, its fallback) instead of

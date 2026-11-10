@@ -50,7 +50,10 @@ host a frame hears or tells, and a page's `*` fallback is held to a parent named
 (§6 "What every host must do", S3). 0.14.18: P142 keeps a set's pages and links within a page from
 starting the display again where there is no Navigation API, and where WebKit fires a frame's load
 for a link within its document: the arriving page's notice is sent without the API, and a page
-says it stayed; no wall moves, and the limit without the API is P079's, unchanged.
+says it stayed; no wall moves, and the limit without the API is P079's, unchanged. Unreleased
+(0.15.0): P143 lets a host that opts in (`embeds`) mint an embed grant: a public artifact page's
+answers say `frame-ancestors *` for that session alone, and the page has no host: it hears no one,
+tells no parent anything, and no capability, runtime host function or door is there (S4, §8).
 
 ## 1. Two layers
 
@@ -550,6 +553,12 @@ the attacker (c), and its readers are strangers.
   so it is never punycode for another name; pages say `noindex`; a file of a type Porthole
   doesn't know is served as a download.
 - `authorize` is the host's takedown switch.
+- An embedded document (P143, `Grant.embed`, only where the host set `embeds`): its answers say
+  `frame-ancestors *` for that session alone, never a reader's; it is anonymous, with no level or
+  user, an artifact's page that isn't nested; its plan names no host, so it hears no one, Porthole
+  tells no parent anything, no capability or runtime host function runs, and no door is minted. The
+  flag is signed into the session and the sealed address. Every other session is unchanged, byte
+  for byte, while an embed session of the same artifact exists; cookies stay host-only.
 - A page opened in a tab of its own has its frame's powers and no more (P099): its CSP header
   carries the frame's sandbox (scripts on its own origin; no popups, forms, downloads, browser
   dialogs, or navigation of another window, its opener's included), and its `Permissions-Policy`
@@ -583,6 +592,10 @@ the attacker (c), and its readers are strangers.
 - Check pages for secrets before publishing them: `lintContent` has no rule for credentials.
 - Pass Porthole's `Content-Security-Policy` and `Permissions-Policy` headers on as they are,
   through any edge or proxy: on a tab they are the page's sandbox.
+- For embeds (P143): mint `embed` from one route of yours alone (never a reader's ticket or door),
+  keep that route from widening grants, and blank a takedown within a bound you state (your
+  `authorize` answers, cached or not). The embedding site sees the page load and hears what the
+  page itself posts to its parent or top.
 - Treat a public link's clean address as a tab's (P125): to show what one names in a frame, resolve
   it through your issue endpoint (`client.resolve`, `<PortholeView address>`). Its refusals (signed
   out, denied, not found) are your backend's word, drawn as the fallback with no frame built: keep
@@ -1282,6 +1295,7 @@ found P124 held only for a nested display or one alone in its scope; in 0.14.6: 
 | P101 | Merged | Under https Porthole read unprefixed `porthole-*` cookies a sibling label can plant; the entered mark carried no label; url mode checked neither `Origin` nor `Sec-Fetch-Site`. Now only `__Host-` names are read, the mark names its label, and a url-mode app answers its own origin and navigations. | S3, S6 |
 | P102 | Merged | This document. | |
 | P103 | Merged | A live widget's capabilities could add origins; bearer-mode assets skipped the code re-check; `callTool` had no rate. Now the preset refuses them and its config is frozen, every load asks the current config (its ETag says which answer), and `callTool` has 30 a minute. | S2, S5, §7 |
+| P143 | Unreleased (0.15.0) | Embeds: a public grant's documents framed by any page (`frame-ancestors *`) only for a session the host minted with `embed`, never a reader's. Such a frame has no host: it hears no one, Porthole tells no parent anything, no capability or runtime host function runs, no door. Accepted: the embedding site sees the page load and hears what the page itself posts to its parent or top. The host must keep its embed entry from widening grants, and blank takedowns within its stated bound. | S4 |
 
 Open with no decision yet; until then they are the host's to cover:
 

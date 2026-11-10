@@ -99,7 +99,7 @@ function handshakeOf(topLevel: boolean) {
   return { said, asks, timers, tick };
 }
 
-describe("the shell's handshake with its host (P085, P139)", () => {
+describe("the shell's handshake with its host (P085, P139, P143)", () => {
   test("on a tab of its own, asks nothing and offers nothing at once: no retry, no timer", () => {
     const { said, asks, timers } = handshakeOf(true);
     expect(said).toEqual(["none"]);
@@ -148,7 +148,7 @@ describe("the shell's handshake with its host (P085, P139)", () => {
 
   test("is the runtime's own: told the top by the window itself, its end marked on the document's root", () => {
     expect(SHELL_RUNTIME).toContain(`const handshake = ${HANDSHAKE};`);
-    expect(SHELL_RUNTIME).toContain("handshake(\n    window.top === window,");
+    expect(SHELL_RUNTIME).toContain("handshake(\n    window.top === window || hostless,");
     expect(SHELL_RUNTIME.match(/request\("ui\/initialize"/gu)).toHaveLength(1);
     // On the root, which a whole document's render keeps (its body, and the shell's script in it,
     // are replaced), read when the shell starts.
@@ -164,6 +164,41 @@ describe("the shell's handshake with its host (P085, P139)", () => {
     expect(SHELL_RUNTIME).not.toMatch(/element\.removeAttribute\(attribute/u);
     expect(SHELL_RUNTIME).toContain('settled("none");\n      runtimeOffer(null);');
     expect(SHELL_RUNTIME).toContain('settled("answered");');
+  });
+
+  test("with no host in its plan (an embed, P143), in a frame: no ask, no timer, no host at once, and nothing posted", () => {
+    // The runtime reads the plan's hosts before anything else, and hands the handshake "no host"
+    // for a hostless plan as it does on a tab: none() at once, nothing asked, no timer.
+    const read = "  const hostless = Array.isArray(plan.origins) && plan.origins.length === 0;\n";
+    expect(SHELL_RUNTIME).toContain(
+      `  const plan = __PLAN__;\n${SHELL_RUNTIME.slice(SHELL_RUNTIME.indexOf("  // A plan that names no host"), SHELL_RUNTIME.indexOf(read))}${read}`,
+    );
+    expect(SHELL_RUNTIME.indexOf(read)).toBeLessThan(SHELL_RUNTIME.indexOf("const lock = "));
+    const { said, asks, timers } = handshakeOf(true);
+    expect(said).toEqual(["none"]);
+    expect(asks).toHaveLength(0);
+    expect(timers).toHaveLength(0);
+    // Its every word to a parent goes through post, which says nothing for a hostless plan: its
+    // requests (ui/initialize, porthole/call), its notices to "*" (sizes, errors, navigation,
+    // storage), and its answers. Annotation and find reports go out on their own, held the same.
+    expect(SHELL_RUNTIME).toContain(
+      "  const post = (message) => {\n    if (window.parent !== window && !hostless) {\n      window.parent.postMessage(",
+    );
+    expect(SHELL_RUNTIME.match(/postMessage\(/gu)).toHaveLength(1);
+    const document = compile(
+      presets.artifact({
+        isolation: "domain",
+        contentOrigins: ["https://*.example-usercontent.com"],
+        capabilities: { annotate: {}, find: {} },
+      }),
+    ).shellDocument({ origins: [], document: "<p>hi</p>" });
+    expect(planIn(document).origins).toEqual([]);
+    expect(document).toContain("const framed = window.parent !== window && !hostless;");
+    expect(document).toContain("const framed = parentWindow !== window && !hostless;");
+    // Every message is dropped: no origin is in an empty list.
+    expect(SHELL_RUNTIME).toContain(
+      "if (event.source !== window.parent || plan.origins.indexOf(event.origin) === -1) {",
+    );
   });
 });
 
