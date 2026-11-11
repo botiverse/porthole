@@ -931,9 +931,14 @@ export const SHELL_RUNTIME = String.raw`(() => {
   const noRewrite = function () {
     throw new Error("document.open and document.write aren't available here: build the page with DOM methods");
   };
+  const unfixedBeforeRewrite = unfixed.length;
   for (const name of ["open", "write", "writeln"]) {
     lock(Document.prototype, name, noRewrite);
   }
+  // Whether all three are fixed in place. The press port rests on it (P148): document.open() takes
+  // every listener off the window, the runtime's among them, and a document opened and closed
+  // again loads again, so content that could call it would hear a port before the runtime did.
+  const rewriteFixed = unfixed.length === unfixedBeforeRewrite;
 
   // Some engines act on a hint the moment its element is connected or changed (WebKit opens a
   // preconnect then, outside the CSP), before the observer's microtask. So every way to connect a
@@ -1397,6 +1402,254 @@ export const SHELL_RUNTIME = String.raw`(() => {
     ]);
   }
 
+  // A nested page's real presses, told to its shell (P148). The shell sees a press in the page only
+  // as its own activation turning on, and a press within 5 s of the last gesture turns nothing on
+  // (P111): to the host that reads as a button that does nothing. So the runtime, which runs before
+  // any content and hears the browser's own events first, tells the shell each one, over a
+  // MessagePort the shell sends at each load of the page's frame. What keeps that the runtime's
+  // word and never the content's:
+  // - the port: taken here, by the first listener there is (on window, capturing), from the first
+  //   message that is the browser's own (isTrusted), from the parent read now, that names the
+  //   method and carries exactly one port. The event goes no further. Every other event of that
+  //   name is stopped too, so content never hears one, and one that fails a check doesn't use up
+  //   the one port. The port is in this closure alone: no content holds it or can post on it. No
+  //   second port is taken: the shell's next one (it sends one at every load of the frame, and
+  //   WebKit fires a load for a navigation within the document) is answered on the first, that
+  //   this document is still here;
+  // - the press: only the browser's own events (isTrusted), read through the platform's getters
+  //   kept now. A mouse on its way down; a finger or a pen on its way up (one that scrolls ends in
+  //   pointercancel: HTML's own rule for what activates); Enter or Space, not held down, on a
+  //   native control that isn't editable (a link takes Enter alone), by its tag and type, never
+  //   its role, which is the content's word; a click on such a control (an assistive technology's
+  //   activation is a click alone), but not the click a form gives its submit button when Enter is
+  //   pressed in another of its fields, which is typing, nor any click while a key is down;
+  // - what is told: nothing but that there was one. No place, no target, no time.
+  // After a press is told, what the page's calls say to its host (send, below) waits for the
+  // shell's word that it has the press (it tells the host before it answers), so a call made in
+  // the press's own handler never arrives ahead of it; a shell that doesn't answer in 250 ms
+  // holds nothing back.
+  // None of it is installed unless all of it can be (a built-in missing, or document.open, write
+  // or writeln not fixed in place above): the page then tells no press, and the host has the
+  // shell's activation alone, as before.
+  let pressHeld = null;
+  const pressParent = window.parent;
+  if (plan.press === true && !hostless && pressParent !== window && rewriteFixed) {
+    const messageProto = typeof MessageEvent === "function" ? MessageEvent.prototype : null;
+    const messageSourceOf = getterOf(messageProto, "source");
+    const messageDataOf = getterOf(messageProto, "data");
+    const messagePortsOf = getterOf(messageProto, "ports");
+    const stopNow = Event.prototype.stopImmediatePropagation;
+    const portProto = typeof MessagePort === "function" ? MessagePort.prototype : null;
+    const portPost = portProto === null ? null : portProto.postMessage;
+    const portStart = portProto === null ? null : portProto.start;
+    const eventTargetOf = getterOf(Event.prototype, "target");
+    const pointerTypeOf = getterOf(typeof PointerEvent === "function" ? PointerEvent.prototype : null, "pointerType");
+    const keyProto = typeof KeyboardEvent === "function" ? KeyboardEvent.prototype : null;
+    const keyOf = getterOf(keyProto, "key");
+    const repeatOf = getterOf(keyProto, "repeat");
+    const editableOf = getterOf(HTMLElement.prototype, "isContentEditable");
+    const designModeOf = getterOf(Document.prototype, "designMode");
+    const activeOf = getterOf(Document.prototype, "activeElement");
+    const controlTypeOf = getterOf(HTMLInputElement.prototype, "type");
+    // Each control's form through its own getter: a field tied to a form by its form attribute is
+    // not inside that form's element.
+    const formGetters = bare(null);
+    formGetters.button = getterOf(HTMLButtonElement.prototype, "form");
+    formGetters.input = getterOf(HTMLInputElement.prototype, "form");
+    formGetters.select = getterOf(HTMLSelectElement.prototype, "form");
+    formGetters.textarea = getterOf(HTMLTextAreaElement.prototype, "form");
+    const pressLater = setTimeout;
+    const pressNoLater = clearTimeout;
+    const pressListen = EventTarget.prototype.addEventListener;
+    const all =
+      messageSourceOf !== null && messageDataOf !== null && messagePortsOf !== null &&
+      typeof stopNow === "function" && typeof portPost === "function" && typeof portStart === "function" &&
+      eventTargetOf !== null && pointerTypeOf !== null && keyOf !== null && repeatOf !== null &&
+      editableOf !== null && designModeOf !== null && activeOf !== null && controlTypeOf !== null &&
+      formGetters.button !== null && formGetters.input !== null && formGetters.select !== null && formGetters.textarea !== null &&
+      localNameOf !== null && namespaceOf !== null && nodeTypeOf !== null;
+    if (all) {
+      let port = null;
+      // How many presses the shell hasn't answered yet, and the timer that stops waiting for it.
+      let unanswered = 0;
+      let giveUp = 0;
+      const release = () => {
+        unanswered = 0;
+        callOf(pressNoLater, window, [giveUp]);
+        const held = pressHeld;
+        pressHeld = null;
+        if (held !== null) {
+          for (let i = 0; i < held.length; i += 1) {
+            post(held[i]);
+          }
+        }
+      };
+      const tellPress = () => {
+        if (port === null) {
+          return;
+        }
+        try {
+          callOf(portPost, port, [0]);
+        } catch (_) {
+          return;
+        }
+        unanswered += 1;
+        if (pressHeld === null) {
+          pressHeld = [];
+        }
+        callOf(pressNoLater, window, [giveUp]);
+        giveUp = callOf(pressLater, window, [release, 250]);
+      };
+      callOf(pressListen, window, [
+        "message",
+        (event) => {
+          let named = false;
+          try {
+            const data = callOf(messageDataOf, event, []);
+            named = data !== null && typeof data === "object" && data.method === "porthole/shell/press-port";
+          } catch (_) {}
+          if (!named) {
+            return;
+          }
+          callOf(stopNow, event, []);
+          if (event.isTrusted !== true) {
+            return;
+          }
+          try {
+            const ports = callOf(messagePortsOf, event, []);
+            if (callOf(messageSourceOf, event, []) !== pressParent || ports === null || ports.length !== 1) {
+              return;
+            }
+            // Only the first is ever taken. A later one is the shell's for a load that left this
+            // document where it was (WebKit's, for a navigation within it, P142): told, on the
+            // port held, that this document is still here, so the shell goes on hearing that one.
+            if (port !== null) {
+              callOf(portPost, port, [1]);
+              return;
+            }
+            const taken = ports[0];
+            // The shell's answer to a press: it has it, and has told the host.
+            callOf(pressListen, taken, [
+              "message",
+              () => {
+                unanswered -= 1;
+                if (unanswered <= 0) {
+                  release();
+                }
+              },
+            ]);
+            callOf(portStart, taken, []);
+            port = taken;
+          } catch (_) {}
+        },
+        true,
+      ]);
+      // A native control a key or a click presses: "both" (Enter and Space), "enter" (a link), or
+      // "" for anything else, an editable one included. By the kept getters: the tag and the type,
+      // never an attribute the content writes to say what it is.
+      const controlOf = (node) => {
+        if (typeOf(node) !== 1 || callOf(namespaceOf, node, []) !== XHTML) {
+          return "";
+        }
+        const name = callOf(localNameOf, node, []);
+        let kind = "";
+        if (name === "button" || name === "summary") {
+          kind = "both";
+        } else if (name === "input") {
+          const type = callOf(controlTypeOf, node, []);
+          kind = type === "button" || type === "submit" || type === "reset" ? "both" : "";
+        } else if (name === "a") {
+          kind = callOf(hasAttributeIn, node, ["href"]) === true ? "enter" : "";
+        }
+        return kind !== "" && callOf(editableOf, node, []) !== true ? kind : "";
+      };
+      const formOf = (node) => {
+        if (typeOf(node) !== 1 || callOf(namespaceOf, node, []) !== XHTML) {
+          return null;
+        }
+        const getter = formGetters[callOf(localNameOf, node, [])];
+        return typeof getter === "function" ? callOf(getter, node, []) : null;
+      };
+      // The browser's own event: nothing a page dispatches is a press.
+      const real = (event) => event.isTrusted === true;
+      // Whether a key is down: from the browser's own keydown to its keyup, or the next press of
+      // a pointer. No click in that time is a press. The key's own press was judged as it went
+      // down, where it went down: content that moves the focus to its button inside the keydown
+      // of an Enter typed in a text field gets that button a click of the browser's own, and a
+      // held key's repeats give a button one each. An assistive technology's click comes with no
+      // key down.
+      let keyDown = false;
+      const pointed = (down) => (event) => {
+        if (!real(event)) {
+          return;
+        }
+        keyDown = false;
+        try {
+          if ((callOf(pointerTypeOf, event, []) === "mouse") === down) {
+            tellPress();
+          }
+        } catch (_) {}
+      };
+      callOf(pressListen, window, ["pointerdown", pointed(true), true]);
+      callOf(pressListen, window, ["pointerup", pointed(false), true]);
+      callOf(pressListen, window, [
+        "keyup",
+        (event) => {
+          if (real(event)) {
+            keyDown = false;
+          }
+        },
+        true,
+      ]);
+      callOf(pressListen, window, [
+        "keydown",
+        (event) => {
+          if (!real(event)) {
+            return;
+          }
+          keyDown = true;
+          try {
+            // A key held down goes on being the key it was when it went down, wherever the focus
+            // has moved since: its repeats are no press.
+            const key = callOf(keyOf, event, []);
+            if ((key !== "Enter" && key !== " ") || callOf(repeatOf, event, []) === true || callOf(designModeOf, document, []) === "on") {
+              return;
+            }
+            const kind = controlOf(callOf(eventTargetOf, event, []));
+            if (kind === "both" || (kind === "enter" && key === "Enter")) {
+              tellPress();
+            }
+          } catch (_) {}
+        },
+        true,
+      ]);
+      callOf(pressListen, window, [
+        "click",
+        (event) => {
+          if (!real(event)) {
+            return;
+          }
+          try {
+            const target = callOf(eventTargetOf, event, []);
+            if (keyDown || controlOf(target) === "") {
+              return;
+            }
+            // A form's own click on its submit button, for Enter in another of its fields.
+            const active = callOf(activeOf, document, []);
+            if (active !== null && active !== target) {
+              const form = formOf(target);
+              if (form !== null && form === formOf(active)) {
+                return;
+              }
+            }
+            tellPress();
+          } catch (_) {}
+        },
+        true,
+      ]);
+    }
+  }
+
   // The clipboard is the host's to write (P051): content can neither write nor read it. A copy
   // the person makes (their keys, their menu) copies their selection as the browser makes it: no
   // copy or cut listener of the content's runs, so none can swap what goes on the clipboard.
@@ -1615,8 +1868,14 @@ export const SHELL_RUNTIME = String.raw`(() => {
       window.parent.postMessage(Object.assign({ jsonrpc: "2.0" }, message), "*");
     }
   };
+  // After a press was told to the shell (P148), what the shell's protocol says next (a call, an
+  // answer) waits for the shell to have the press: posted by the release above, through post.
   const send = (message) => {
     if (plan.protocol === "shell") {
+      if (pressHeld !== null) {
+        pressHeld[pressHeld.length] = message;
+        return;
+      }
       post(message);
     }
   };

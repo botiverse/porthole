@@ -652,18 +652,29 @@ describe("the host kit passes framedBy on (P141)", () => {
 
 /**
  * 0.14.16's scripts, by their sha256 as a policy names them: the status, entry and door pages'
- * (`git show v0.14.16:packages/porthole/src/server/pages.ts`) and the nested page's shell's
- * (`.../src/shell/frame.ts`, its runtime, and its script for `PINNED_SHELL` below). 0.14.17 changed
- * all four on every path, with a branch only `framedBy` takes (P144, after Ferryman's audit of 0.14.18): without
- * `framedBy` (and without embed, P143), every response that carries one of these carries 0.14.16's
- * again, byte for byte (the shell runtime served documents inline is another matter, below: P145).
+ * (`git show v0.14.16:packages/porthole/src/server/pages.ts`). 0.14.17 changed them and the nested
+ * page's shell on every path, with a branch only `framedBy` takes (P144, after Ferryman's audit of
+ * 0.14.18): without `framedBy` (and without embed, P143), every response that carries one of the
+ * pages' scripts carries 0.14.16's again, byte for byte (the nested page's shell was 0.14.16's too
+ * until 0.15.3, below: P148; the shell runtime served documents inline is another matter: P145).
  */
 const V0_14_16 = {
   status: "'sha256-XB1Co2NQ5DJ8+kmWSugeVUXsldJaHiI7gXXoH+yitRw='",
   enter: "'sha256-Lzrcu1/YmcGN5E7MYSqe2IBdqoDfIZXsCiQn3fJclJY='",
   door: "'sha256-v9Jwr3GLqqhJUL7YFH0fgjsdZgRs8zIYdIvmchvGd3A='",
-  shellRuntime: "'sha256-0nIZ304ltfsUzuaJh0kqjvbMpA4cPJT1suOXSIRIPMA='",
-  shell: "'sha256-pzr8GzzEGqwx1Kqp7zaknNd3kSfdsrZXQrdtRrDrBm8='",
+};
+/**
+ * The nested page's shell: 0.15.3's, no longer 0.14.16's. P148 changes it on every path (a port
+ * for its page at each load, the presses it hears in its state), so its `script-src` hash changes
+ * for every host, which the CHANGELOG says. 0.14.16's were
+ * 'sha256-0nIZ304ltfsUzuaJh0kqjvbMpA4cPJT1suOXSIRIPMA=' (its runtime) and
+ * 'sha256-pzr8GzzEGqwx1Kqp7zaknNd3kSfdsrZXQrdtRrDrBm8=' (its script for `PINNED_SHELL`). Pinned as
+ * the pages' are, so the next change to it is said too. The default path's still carries nothing
+ * of `framedBy`'s (P144).
+ */
+const SHELL_V0_15_3 = {
+  shellRuntime: "'sha256-QyOMnn/OtyVsbtPdzm3O4Ukmt4TexmpMMPZqt/dS+jY='",
+  shell: "'sha256-chcrn5hFVbPIkXKYTaZDKpCJnn+VkxJXickgRiImAGc='",
 };
 const PINNED_HOSTS = ["https://host.example", "ferry://app"];
 const PINNED_ORIGIN = "https://porthole-abcdefghijklmnopqrstuvwx.content.example";
@@ -680,7 +691,7 @@ const scriptSrcOf = (response: Response): string =>
 const inlineScriptOf = (html: string): string =>
   /<script>([\s\S]*)<\/script>/u.exec(html)?.[1] ?? "";
 
-describe("without framedBy, the pages' and the nested shell's scripts are 0.14.16's, byte for byte (P144)", () => {
+describe("without framedBy, the pages' scripts are 0.14.16's, byte for byte, and the nested shell's is 0.15.3's (P144, P148)", () => {
   it("the status and entry pages' scripts", async () => {
     expect(hashOf((await pageScript(STATUS_SCRIPT_PATH)?.text()) ?? "")).toBe(V0_14_16.status);
     expect(hashOf((await pageScript(ENTER_SCRIPT_PATH)?.text()) ?? "")).toBe(V0_14_16.enter);
@@ -699,14 +710,14 @@ describe("without framedBy, the pages' and the nested shell's scripts are 0.14.1
     }
   });
 
-  it("the nested page's shell", async () => {
-    expect(hashOf(FRAME_SHELL_RUNTIME)).toBe(V0_14_16.shellRuntime);
-    expect(hashOf(frameShellScript(PINNED_SHELL))).toBe(V0_14_16.shell);
+  it("the nested page's shell: 0.15.3's (P148)", async () => {
+    expect(hashOf(FRAME_SHELL_RUNTIME)).toBe(SHELL_V0_15_3.shellRuntime);
+    expect(hashOf(frameShellScript(PINNED_SHELL))).toBe(SHELL_V0_15_3.shell);
     const shell = nestedShellResponse(compile(configs.artifactNested), {
       ...PINNED_SHELL,
       origin: PINNED_ORIGIN,
     });
-    expect(scriptSrcOf(shell)).toBe(V0_14_16.shell);
+    expect(scriptSrcOf(shell)).toBe(SHELL_V0_15_3.shell);
     expect(await shell.text()).not.toContain("strictParent");
   });
 
@@ -736,7 +747,7 @@ describe("without framedBy, the pages' and the nested shell's scripts are 0.14.1
       expect(response, name).toBeDefined();
       expect([V0_14_16.door, V0_14_16.status], name).toContain(scriptSrcOf(response!));
     }
-    // The nested shell: 0.14.16's runtime, its own plan spliced in.
+    // The nested shell: the default runtime (0.15.3's), its own plan spliced in.
     const nested = named("nested shell")!;
     const script = inlineScriptOf(await nested.clone().text());
     expect(scriptSrcOf(nested)).toBe(hashOf(script));
@@ -781,14 +792,17 @@ describe("without framedBy, the pages' and the nested shell's scripts are 0.14.1
  * default path is 0.14.16's again, byte for byte", which held for the four scripts above and every
  * header, not for this (Ferryman's audit of 0.15.0, P145). No hash covers it (`script-src` is
  * `'unsafe-inline'` for these documents), so it is pinned here: a change to its bytes fails this
- * test, and is said in the CHANGELOG, not assumed away (0.15.2: annotations', P147). From `git show v0.15.0:…/src/shell/*.ts`
+ * test, and is said in the CHANGELOG, not assumed away (0.15.2: annotations', P147; 0.15.3: the
+ * shell's, P148). From `git show v0.15.0:…/src/shell/*.ts`
  * and `git show v0.14.16:…` (`SHELL_RUNTIME`, `ANNOTATE_RUNTIME`, `FIND_RUNTIME`, `USE_RUNTIME`,
  * `LEGACY_GLOBALS_RUNTIME`).
  */
-const RUNTIME_V0_15_2 = {
-  shell: "'sha256-kafLnuVV2E6YUJtxXEooMNi8MNwbMJRdYi+0PTOe1RA='",
+const RUNTIME_V0_15_3 = {
+  // 0.15.0's was 'sha256-kafLnuVV2E6YUJtxXEooMNi8MNwbMJRdYi+0PTOe1RA=': 0.15.3's tells a nested
+  // page's shell its real presses (P148), installed only under a nested page's plan.
+  shell: "'sha256-kWx9H3mLZTPs2MHT4fmpNuaZN9qIXLAVePeULjBsq/U='",
   // 0.15.0's was 'sha256-3PZMe4arifdWHJU1jS0laR49wiWc/uBWIFddGJPyf/w=': 0.15.2's marks ride the
-  // document's scroll (P147). The other four are 0.15.0's.
+  // document's scroll (P147). The other three are 0.15.0's.
   annotate: "'sha256-uQ77dZDXcY6pKRoTylHpGXY+ZhhCt4WZhB/qDTQJ6BE='",
   find: "'sha256-invvWJWqsN6Zv0kMLG2eeofMX6XmKNSqsvYydiElDGc='",
   use: "'sha256-TJx7YF/WvrHHkz8iTPfUfH6GNUEgES6O+0+igLRmyPQ='",
@@ -802,7 +816,7 @@ const RUNTIME_V0_14_16 = {
   legacy: "'sha256-ZEVJsezqV7n+Ho0m7Y92NYxAZqf8ynKq/rDdXrJUKp0='",
 };
 
-describe("the served shell runtime is 0.15.2's (0.15.0's, but for annotations: P147), not 0.14.16's: pinned, so what the CHANGELOG says of it is checked (P145)", () => {
+describe("the served shell runtime is 0.15.3's (0.15.0's, but for annotations, P147, and a nested page's presses, P148), not 0.14.16's: pinned, so what the CHANGELOG says of it is checked (P145)", () => {
   const now = {
     shell: hashOf(SHELL_RUNTIME),
     annotate: hashOf(ANNOTATE_RUNTIME),
@@ -811,8 +825,8 @@ describe("the served shell runtime is 0.15.2's (0.15.0's, but for annotations: P
     legacy: hashOf(LEGACY_GLOBALS_RUNTIME),
   };
 
-  it("its bytes are 0.15.2's (a change here is a change every served document carries: say it)", () => {
-    expect(now).toEqual(RUNTIME_V0_15_2);
+  it("its bytes are 0.15.3's (a change here is a change every served document carries: say it)", () => {
+    expect(now).toEqual(RUNTIME_V0_15_3);
   });
 
   it("which are not 0.14.16's: the shell's, annotations' and find's differ (P142, P143)", () => {

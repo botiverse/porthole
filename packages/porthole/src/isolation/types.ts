@@ -107,6 +107,13 @@ export const SHELL_LOOK_METHOD = "porthole/shell/look";
  */
 export const SHELL_FOCUS_METHOD = "porthole/shell/focus";
 
+/**
+ * A nested page's shell's word to its page's runtime (P148): one `MessagePort`, sent at each load
+ * of the page's frame, over which the runtime tells the shell each real press in the page. The
+ * runtime takes the first one alone, before any content runs, and no content ever holds it.
+ */
+export const SHELL_PRESS_PORT_METHOD = "porthole/shell/press-port";
+
 /** The shell's own namespace (P111): the shell drops a page's message that names a method in it. */
 export const SHELL_METHOD_PREFIX = "porthole/shell/";
 

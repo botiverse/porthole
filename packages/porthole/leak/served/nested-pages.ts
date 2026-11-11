@@ -70,6 +70,8 @@ interface Seen {
   storage: boolean[];
   activated: string[];
   anchored: string[];
+  /** How many real presses the page's shell last said it had heard (P148); -1 before it spoke. */
+  presses: number;
 }
 
 /** The host's own composer and button, above the display, and what the display tells it. */
@@ -86,7 +88,19 @@ export async function hostUi(page: Page): Promise<void> {
     const w = window as unknown as {
       seen: Seen;
     };
-    w.seen = { taken: [], errors: [], storage: [], activated: [], anchored: [] };
+    w.seen = { taken: [], errors: [], storage: [], activated: [], anchored: [], presses: -1 };
+    // The shell's own state as the host's page hears it (P148): how many presses it has heard.
+    window.addEventListener("message", (event) => {
+      const data = event.data as { method?: unknown; params?: { presses?: unknown } } | null;
+      if (
+        data !== null &&
+        typeof data === "object" &&
+        data.method === "porthole/shell/state" &&
+        typeof data.params?.presses === "number"
+      ) {
+        w.seen.presses = data.params.presses;
+      }
+    });
   });
 }
 

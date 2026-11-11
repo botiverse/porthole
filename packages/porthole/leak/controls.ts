@@ -83,6 +83,7 @@ const LEAK = "leak/leak.spec.ts";
 const RUNTIME = "leak/served/runtime.spec.ts";
 const NESTED = "leak/served/nested.spec.ts";
 const NESTED_SIBLINGS = "leak/served/nested-siblings.spec.ts";
+const NESTED_PRESS = "leak/served/nested-press.spec.ts";
 const STALL_RULE =
   "a shell's activation seen after a stall is no one's gesture until it goes off (P111, after its review)";
 const FILES = "leak/served/files.spec.ts";
@@ -190,6 +191,34 @@ export const LATE_WORD_PATCHED_FOCUS =
 /** The nested page's own case of it: the word through the shell, the same test in the page. */
 export const NESTED_LATE_WORD =
   "a focusMark a busy nested page takes late doesn't land once the host's page has moved on (P137)";
+/** A nested page's real presses (P148); `nested-press.spec.ts` takes these titles here. */
+export const PRESS_SECOND =
+  "a press in the page within 5 s of the last, after the person pressed the host's page, opens comments as the first did (P148)";
+export const PRESS_KEY_ORDER =
+  "Enter on the page's button, within 5 s of a press on the host's page: the call its click makes arrives after the press (P148)";
+export const PRESS_MADE_UP =
+  "a press the page makes up is none: a dispatched pointer, key or click tells the shell nothing (P148)";
+export const PRESS_ROLE =
+  "typing is no press, whatever the content calls the field: a role of button, a custom element's, an editable button (P148)";
+export const PRESS_REPEAT = "a key held down is one press, however long it repeats (P148)";
+export const PRESS_KEY_FOCUS =
+  "Enter typed in a text field is no press, though the page moves the focus to its button as the key goes down (P148)";
+export const PRESS_SUBMIT =
+  "Enter in a form's text field is no press, though the form clicks its submit button (P148)";
+export const PRESS_SCROLL = "a finger that scrolls the page is no press; a tap is (P148)";
+export const PRESS_PORT_UNHEARD =
+  "the shell's port is the runtime's alone: content's first listener hears no message that carries one (P148)";
+export const PRESS_FORGED_PORT =
+  "a port message content sends itself first is not taken, and takes no place: the person's press still reaches the shell (P148)";
+export const PRESS_OPEN_LOCKED =
+  "a page can't open its document again to hear the port the shell sends at the next load (P148)";
+export const PRESS_OPEN_EARLY =
+  "nor as soon as it runs, to hear the first port in the runtime's place (P148)";
+export const PRESS_SAME_DOCUMENT =
+  "a press after a link within the document is heard: the load WebKit fires for it leaves the first port the one (P148)";
+export const PRESS_STALL = "a press a shell tells after a stall is no one's (P148)";
+export const PRESS_WENT_BACK =
+  "a page's focus() just after a second press in it, the person gone back to the host's composer, is taken back (P148)";
 const HONEST_SCROLL =
   "an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second";
 /** A served page's own frames (P128): a frame of elsewhere stays out of the tree (files.spec.ts). */
@@ -832,11 +861,70 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       why: "no probe can see it on Chromium and WebKit: a page can't take focus back from its own blur there, so no fight has a frame take focus again (measured)",
     },
   },
-  // A stalled shell's activation is uncertain (P111, after its review).
+  // A stalled shell's activation is uncertain (P111, after its review), and a press it tells then
+  // is no one's (P148).
   "shell-stall": {
-    specs: [NESTED],
-    fails: all(STALL_RULE),
+    specs: [NESTED, NESTED_PRESS],
+    fails: all(STALL_RULE, PRESS_STALL),
   },
+  // A nested page's real presses (P148). A press is the browser's own event alone.
+  "press-untrusted": { specs: [NESTED_PRESS], fails: all(PRESS_MADE_UP) },
+  // A control is one by its tag and type, never the role its content gives it.
+  "press-role": { specs: [NESTED_PRESS], fails: all(PRESS_ROLE) },
+  // An editable control is a place to type.
+  "press-editable": { specs: [NESTED_PRESS], fails: all(PRESS_ROLE) },
+  // A held key's repeats are no press.
+  "press-repeat": { specs: [NESTED_PRESS], fails: all(PRESS_REPEAT) },
+  // No click while a key is down is a press.
+  "press-key-click": { specs: [NESTED_PRESS], fails: all(PRESS_KEY_FOCUS, PRESS_REPEAT) },
+  // The click a form gives its submit button for Enter in another of its fields is typing. A key
+  // is down for the whole of that Enter, and no click counts then: the wall in front of this one.
+  "press-submit": {
+    specs: [NESTED_PRESS],
+    fails: NOTHING,
+    holds: {
+      why: "a key is down while a form clicks its submit button for an Enter, and no click is a press then: that rule refuses the click first",
+      by: "press-key-click,press-submit",
+    },
+  },
+  "press-key-click,press-submit": {
+    specs: [NESTED_PRESS],
+    fails: all(PRESS_KEY_FOCUS, PRESS_REPEAT, PRESS_SUBMIT),
+  },
+  // A finger counts as it lifts, never as it lands: one that scrolls never lifts as a press.
+  "press-touch-down": {
+    specs: [NESTED_PRESS],
+    fails: { chromium: [PRESS_SCROLL], webkit: [], firefox: [] },
+    holds: {
+      why: "no probe can drive a finger's drag on WebKit and Firefox: a test has a tap there and no touch scroll",
+    },
+  },
+  // The runtime's listener stops the shell's port message: content's listener never hears it.
+  "press-port-heard": { specs: [NESTED_PRESS], fails: all(PRESS_PORT_UNHEARD) },
+  // The port is taken only from the browser's own message event.
+  "press-port-forged": {
+    specs: [NESTED_PRESS],
+    fails: { chromium: [PRESS_FORGED_PORT], webkit: [PRESS_FORGED_PORT], firefox: [] },
+    holds: {
+      why: "no probe can make the event on Firefox: its MessageEvent constructor takes no window of another origin as a source (measured), and the runtime takes a port from its parent's alone",
+    },
+  },
+  // document.open is fixed shut: no page clears the runtime's listener and loads again.
+  "press-open-lock": {
+    specs: [NESTED_PRESS],
+    fails: all(PRESS_OPEN_LOCKED, PRESS_OPEN_EARLY),
+  },
+  // A load that left the document where it was: the runtime says so on the port it holds.
+  "press-still-here": {
+    specs: [NESTED_PRESS],
+    fails: { chromium: [], webkit: [PRESS_SAME_DOCUMENT], firefox: [] },
+    holds: {
+      why: "no probe can see it on Chromium and Firefox: they fire no load for a navigation within the document (measured), so the shell sends no second port",
+    },
+  },
+  // A press told to the shell needs a quiet host as its activation does: the person's press in the
+  // page counts for a second, but not after they pressed or typed on the host's page.
+  "press-host-input": { specs: [NESTED_PRESS], fails: all(PRESS_WENT_BACK) },
   // A nested page's gesture needs a quiet host (P111): a page that takes the keyboard within a
   // second of the person's press in it keeps it though they went back to the host's composer.
   "shell-host-input": {

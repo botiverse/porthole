@@ -74,6 +74,14 @@ placed down the document and moved by a scroll-driven animation in the layer's c
 so they no longer trail the text for the frames before the scroll event is heard. No message and
 no reading is added (the scroll offset was read already, P132), and the layer still adds nothing to
 what a page can scroll. No wall moves.
+0.15.3: P148, a nested page's real presses: the page's runtime tells its shell each press the
+browser itself made (a mouse down, a finger up, Enter or Space on a native control, a click on
+one), over a `MessagePort` the shell sends at each load and the runtime takes before any content
+runs; the shell tells the host when it heard the last, and the host takes it as it takes the
+shell's activation turning on (§7 "The keyboard"). It gives back what P111 accepted as a loss: a
+press in the page within 5 s of the last gesture. It rests on the runtime's lock on
+`document.open` and on a nested page's frames being opaque, and is not installed where either
+fails. The nested shell's script and the served shell runtime change (their pins, P144 and P145).
 
 ## 1. Two layers
 
@@ -1177,11 +1185,24 @@ unposted words beside the frame and tell the page when.
   blur), and its `comments.open` on a key it got reaches no handler on Firefox and full Chromium
   (on Chromium with frames in process it can: below); what a page says in the shell's name, to its
   parent or to the host's window, moves nothing (negative controls `shell-namespace`,
-  `shell-host-input`, `pointer-rule`, `nested-fight`). *What doesn't*: a press in the page within
-  5 s of the last one turns no activation on, so a second move into it after the person went back
-  to the host's page is taken back until 5 s after their last press or key in the page, or they
-  Tab in; the page gets the keys typed while a move waits for the shell's word, or before focus is
-  back. No press of the person's comes within 250 ms of a key they typed on the host's page (a
+  `shell-host-input`, `pointer-rule`, `nested-fight`). A press in the page within 5 s of the last
+  gesture turns no activation on; the page's runtime tells the shell each real press instead
+  (P148), over a port no content holds, and the host takes a press told as it takes an activation
+  turning on: for a second, with no press or key on the host's page since, not in a fight, not
+  within 250 ms of the person's key, not within 500 ms of a stall of the shell. A press is the
+  browser's own event alone (a mouse down; a finger or pen up, so a scroll is none; Enter or Space,
+  not held, on a native control that isn't editable, by its tag and never its `role`; a click on
+  one, but none while a key is down, nor a form's own for Enter in a field); nothing a page
+  dispatches is one, and
+  nothing a page does gets it the port (`leak/served/nested-press.spec.ts`; negative controls
+  `press-untrusted`, `press-role`, `press-editable`, `press-repeat`, `press-key-click`,
+  `press-submit`,
+  `press-touch-down`, `press-port-heard`, `press-port-forged`, `press-open-lock`,
+  `press-still-here`, `press-host-input`). *What doesn't*: a key on a control that isn't native
+  (a `div` with `role="button"`) tells nothing, so a move into the page by it within 5 s of the
+  last gesture is still taken back, until they Tab in; so is any press where the runtime couldn't
+  install its part; the page gets the keys typed while a move waits for the shell's word, or
+  before focus is back. No press of the person's comes within 250 ms of a key they typed on the host's page (a
   hand goes from the keys to the pointer first): a move into the frame, or the shell's activation
   turning on, that soon is their next key landing in the page, and is taken back, on every engine
   (P122, after CI saw full Chromium let such a page keep the keyboard: its key outran the shell's
