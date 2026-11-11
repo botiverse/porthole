@@ -86,6 +86,15 @@ Also in 0.15.3, after the audit of 0.15.1: the four helpers a content Worker of 
 with host origins (`statusPage`, `doorResponse`, `doorStatusResponse`, `nestedShellCsp`) check
 each one and throw on a bad one, as P145 said they did; the origins are the host's own
 configuration, never content's.
+0.16.0: P149, a nested page's kept storage: where its config keeps `storage`, the page's
+`localStorage` is its scope's own origin's, read and written for it by a document of Porthole's
+own on that origin (the store), over a channel the shell hands out and reads nothing of. The
+store answers its own scope's shell alone (its parent, at that origin). **The store's word is that
+scope's content's word**: a served display of the same scope can already read and write the same
+storage, so only data crosses that channel, the runtime checks every word again, and neither the
+shell nor the host trusts it. Capped (1 MiB, 1,024 keys), `localStorage` only. A scope that is
+gone is forgotten by an address only the host's backend mints, the one answer that carries
+`Clear-Site-Data: "storage"`. The nested shell's script and the served shell runtime change again.
 
 ## 1. Two layers
 

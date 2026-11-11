@@ -934,6 +934,33 @@ a script of its own set is refused: its origin is opaque), which may `importScri
 scripts; Chromium refuses a Blob module worker there. Not yet with a nested page: the asset library (`assets`)
 and Porthole's libraries (`egress.libraries`); the config refuses them.
 
+**A nested page's storage (0.16.0, P149).** Without `storage` in its config a nested page's
+`localStorage` is a map in memory, gone with the load. With `storage: { scope: "…" }` it is its
+scope's own origin's `localStorage`, as a served page of that scope has it: the same data in the
+same browser, so a display you move from served to nested keeps what its readers saved. A small
+document of Porthole's own (the store) holds it on the scope's origin; the page's shell frames it
+and hands it and the page's runtime the two ends of one channel. What differs from a served page:
+- **`localStorage` only**, and writes never grow it past about 1 MB or 1,024 keys (`setItem`
+  throws `QuotaExceededError`). No IndexedDB, Cache API or cookie; `sessionStorage` lasts the load.
+- **The `storage` event says `kept`.** `{ used: true, kept: true }` when the page first uses its
+  storage and it is the kept one; `kept: false` when the store didn't answer in time (1.5 s after
+  the page loaded) or the browser gives a framed page no storage: this visit's changes are then
+  not saved, and you may say so. A hint, never grounds for anything.
+- **`display.storage.clear()`** empties it: for a "clear this page's saved data" of your own.
+- **`host.forgetStorage(scope)`** (`server.forgetStorage`) for a scope that is gone: call it from
+  your backend when the thing the scope stood for is deleted, and have your page load the address
+  it returns once, in a hidden frame; the browser then drops what that origin kept. It is good
+  once and for five minutes. Nothing else clears storage: no status page does.
+- `storage: { shared: "…" }` is refused with `nested`.
+
+A content Worker of your own answers two more addresses **on the scope's own label** (not the
+shell's): `/__porthole/store/<token>` with `storeResponse({ shell, hostOrigins })`, only for the
+token you sealed into that scope's shell (`frameShellScript`'s `store`, and `nestedShellCsp`'s
+last argument for its `frame-src`), where `shell` is `https://<nestedLabelOf(label)>.<content
+domain>`; and `/__porthole/forget/<ticket>` with `forgetResponse({ hostOrigins })`, only for a
+one-time ticket your backend minted for that scope. `Clear-Site-Data` goes on that answer alone.
+`/server` does all of this.
+
 What a content origin serves for a nested page (`/server` does all of it; a content Worker of your
 own answers the same, with the helpers `/server` exports: `nestedLabelOf`, `nestedShellResponse`,
 `nestedFileCsp`, `NESTED_FILE_HEADERS`, `nestedAncestors`). `<origin>` is the shell's own,

@@ -4,6 +4,25 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## 0.16.0
+
+- **A nested page may keep `localStorage`** (P149, amends P111 and P114). `nested: true` with
+  `storage: { scope }` now compiles (it threw): the page's `localStorage` is its scope's own
+  origin's, the same a served page of that scope has, so a display moved from served to nested
+  keeps what its readers saved. A document of Porthole's own (the store) keeps it on the scope's
+  origin; the nested shell frames it and hands it and the page's runtime the two ends of one
+  channel, reading nothing. `localStorage` only (no IndexedDB, Cache API or cookie), never grown
+  past 1,048,576 UTF-16 code units or 1,024 keys (`QuotaExceededError`); `storage.shared` is
+  refused with `nested`. Without `storage`, a nested page is as before.
+  **For a host:** the display's `storage` event gains `kept` (whether this load's storage is the
+  kept one); `display.storage.clear()` empties it; `host.forgetStorage(scope)`
+  (`server.forgetStorage`) returns an address your page loads once when a scope is gone, the one
+  answer that carries `Clear-Site-Data: "storage"`. `/server` answers `/__porthole/store/<token>`
+  and `/__porthole/forget/<ticket>` on scope labels; a content Worker of your own uses
+  `storeResponse` and `forgetResponse` (ADOPTING, "A nested page's storage"). The nested shell's
+  script and the shell runtime every served document inlines change again (their pins; the nested
+  shell's `script-src` hash with it). Both sides need 0.16.0.
+
 ## 0.15.3
 
 - **A nested page's real presses count, each of them** (P148, amends P111). A nested page's shell

@@ -5845,7 +5845,7 @@ that throws gives the "wasn't checked" warning; `admitFiles` with `\ffffff` in a
 **Revisit when** a page's own document is ever shown outside the shell (then quirks mode is real),
 or an engine starts counting fixed boxes in what the viewport scrolls.
 
-## P111 · 2026-10-28 · A nested page: Porthole's shell at the framed address, the page its opaque child, and the shell's own activation decides the keyboard and `comments.open` · Accepted; amended by P148
+## P111 · 2026-10-28 · A nested page: Porthole's shell at the framed address, the page its opaque child, and the shell's own activation decides the keyboard and `comments.open` · Accepted; amended by P148, P149
 
 **Context.** P109's focus guard and `comments.open`'s gate ask whether the person, not the page,
 moved the keyboard into a frame or clicked in it. In full Chromium a cross-site frame is out of
@@ -9524,3 +9524,123 @@ held: a second wall behind item 2, held by the unit test).
 condition: this and the activation rule could then both go); a host reports the residual for
 controls that aren't native (then a rule for `role` that typing can't satisfy); or the 500 ms
 after a stall drops presses people notice.
+
+## P149 · 2026-11-11 · A nested page's `localStorage`, kept by a store on its scope's own origin · Accepted
+
+Amends P111 (a nested page keeps no storage) and P114 (what is served on a scope's label). From
+Raft, by way of P148: its pages are served, and to give them P148 they must be nested; a nested
+page had no storage that outlived a load, and Raft's pages have `served.storage` today. Designed
+on one page first (four versions), read twice by the CTO and twice by Ferryman before any code.
+
+**Context.** A nested page is an opaque origin (P111): its `localStorage` is a map in memory. A
+host that moves a served display to a nested one would empty every reader's saved page state and
+keep none after. P111's "Revisit" named the way: a capability, never the content origin's storage
+handed to the page.
+
+**Decision.**
+1. **The storage is the scope's own origin's, where it is today.** A document of Porthole's own,
+   **the store**, is served on the scope's own origin (the origin a served page of that scope runs
+   on) at `/__porthole/store/<token>`. It reads and writes that origin's `localStorage` for one
+   peer and does nothing else. So the reach is today's by construction (one scope, one browser
+   profile, every version of the scope), the browser's own controls clear it as before, and what
+   a served page of the scope already kept is what its nested page reads: nothing to carry over.
+2. **Not in the shell's realm, and not on the shell's origin.** The shell speaks for the person's
+   presses (P148) and stays as small as it is. A second frame on the shell's own origin would
+   isolate nothing (two frames of one origin read each other; Ferryman). The store is another
+   origin than the shell's (`porthole-<24>`): a fault in the store can write that scope's storage
+   and nothing else. The shell frames the store, and at each load of its page's frame makes one
+   `MessageChannel` and hands an end to each: the store's in `porthole/shell/store-port` to the
+   store's window at its origin, the page's in `porthole/shell/storage-port`, a message of its
+   own with one port (P148's "exactly one port" stands). It reads nothing that crosses.
+3. **The store answers its own scope's shell alone.** It is on a content origin: to answer
+   anyone's port would hand over the whole storage. Its `frame-ancestors` is that shell's origin
+   and the pages above it (the header is matched against every ancestor, so the host's page is
+   named; nothing else is). And it takes a port only from the browser's own message whose
+   `source` is its parent and whose `origin` is exactly that shell's: a host's page that framed
+   the store directly passes the header and fails this, which is the gate. A new port from its
+   shell replaces the one before (the shell makes a channel at each load of the page's frame).
+   `/server` answers the address only for a token it sealed for that shell (the shell's label is
+   the scope's label's own, so a token minted for another scope names another shell), not ended,
+   and only to a GET.
+4. **The runtime has the keys before content runs.** It takes the storage port as it takes the
+   press port (the first listener, the browser's own message, from the parent read at start,
+   stopped there), asks the store for every key, and holds content back until they come. If they
+   haven't come 1.5 s after the document loaded (the design said 500 ms; the store's document is
+   a request of its own, and half a second was too tight for it), this load's `localStorage` is
+   memory alone, **nothing of it is ever written back** (a page that started empty must not
+   overwrite what is kept; no port is taken after), and the host is told: the display's `storage`
+   event says `{ used, kept: false }`.
+5. **Only `localStorage`, with a cap.** Writes never grow the origin's `localStorage` past
+   1,048,576 UTF-16 code units (every key's and value's length) or 1,024 keys. The runtime counts,
+   so `setItem` throws `QuotaExceededError` as the browser's does; the store counts again and
+   decides what is kept. What the origin already holds past that (a served page wrote it) stays
+   readable and can shrink. `sessionStorage` stays memory; there is no IndexedDB, Cache API or
+   cookie. Keys are the content's names (`__proto__` among them): both sides hold them in a `Map`
+   or as pairs, never as an object's properties.
+6. **Clearing.** The browser's site data, as before. And `display.storage.clear()`: the host's
+   word to the shell (`porthole/shell/storage-clear`, in the shell's namespace, which the shell
+   takes from its host alone), passed to the store, which empties the origin's `localStorage` and
+   tells the page's runtime.
+7. **A scope that is gone.** `server.forgetStorage(scope)` (the kit's `host.forgetStorage`; the
+   design called it `forget`, a name the authorize cache had) mints an address on the scope's own
+   origin, `/__porthole/forget/<ticket>`, good once and for five minutes, bound to that scope:
+   only the host's backend can mint one (no request to a content origin does, no page can ask),
+   and the host's page loads it in a hidden frame when it learns the scope is gone. Its answer
+   carries `Clear-Site-Data: "storage"`, and a document whose one script empties the same storage
+   itself, because WebKit acts on no `Clear-Site-Data` for a framed answer (measured). Both are on
+   that answer and no other: the origin is the whole scope's, so no status page may carry either
+   (a version gone, a ticket ended, a file's 404, which content can cause), and the header never
+   says `"cookies"` or `"*"`. It does not wait for the page's own address to be asked again, which
+   a deleted document's never is.
+8. **Opted into.** `nested: true` may now keep `storage.scope`; `storage.shared` it may not (a
+   scope several displays share is several pages' storage at once, which one peer and one cap
+   don't cover). Without `storage`, a nested page is as before: memory, no store framed.
+
+**What the store's word is.** The scope's content's word, and no more. A served display of the
+same scope runs content with `allow-same-origin` on the store's origin (P114 keeps the shell off
+it for that): it can read and write the same `localStorage` and watch every write by the
+`storage` event, and it can frame or script the store. With the store's port it could hand the
+nested page any keys, swallow its writes, or watch them: the same three things. So: only data
+crosses that port, the runtime checks every word again (strings, the caps, into its `Map`), and
+nothing on it ever changes what the runtime does (it must never become a control channel); and
+neither the host nor the shell trusts the store (the shell reads nothing; the host takes
+`storage { used, kept }` as a hint to show). A served page registers no service worker
+(conformance), so same-scope content can't replace the store's document with its own.
+
+**Threat.** A nested page gains what a served page has today, smaller: its own strings under its
+scope's origin, an identifier of a browser for that scope across loads, and of nothing across
+scopes. A second document of Porthole's own on a content origin (the store), a third (the forget
+address), two messages in the shell's namespace to the store, one to the page, one from the host.
+No message carries anything to the host but `kept`.
+
+**Residual.** A page that uses IndexedDB, the Cache API or a cookie has none when nested. Two
+tabs of one page each hold the keys as they were at their load; a write in one reaches the other
+(the store passes the origin's `storage` event on) without a `storage` event of the page's own.
+A load whose store answers late runs on memory and saves nothing. A browser that never opens the
+host again keeps what it has (at most what it had, never grown past 1 MiB by a nested page) until
+the browser evicts it.
+
+**Tested.** `test/nested-storage.test.ts`: the config and plan; the store's script against a
+stub origin (its one peer, a replaced port, strings alone, the caps by its own count and an origin
+already past them, the host's clear, another tab's change, a browser with no storage); the
+store's and the forget address's answers; the shell's CSP and script with a store; `/server`'s
+store and forget routes (another scope's label, a files token, another method, once, the header
+there alone, the ticket opening nothing else). `leak/served/nested-storage.spec.ts` on full
+Chromium, the headless shell, WebKit and Firefox: a value written is there at the next load and
+the host hears `kept: true`; another scope reads nothing and a second version reads it; **what a
+served display of the scope wrote is what its nested display reads** (the carry-over, on each
+engine); past the caps `setItem` throws, and nothing past them is kept; names an object would
+trip on; `display.storage.clear()`; a store held back 4 s leaves the load on memory, tells the
+host, and writes nothing back then or later; the host's page framing the store and handing it a
+port is told nothing; the forget address empties its scope's and no other's, once, and no status
+page carries the header; what a page says in the shell's name clears and writes nothing. Negative
+controls, each failing its probe on Chromium, WebKit and Firefox: `store-origin`, `storage-caps`,
+`store-caps` (behind `storage-caps`: it fails its probe with both out), `storage-late`,
+`storage-clear-source`. No browser control for the store's `frame-ancestors` (the port check is
+the gate; the header's exact value is the unit test's) nor for the forget ticket (the unit
+test's).
+
+**Revisit when** a host needs IndexedDB for a nested page (then another store, with its own
+caps); a host needs `storage.shared` nested; the 1.5 s wait proves long or short in use; or
+engines stop giving a framed origin the storage a served frame of the same top-level page has
+(the carry-over rests on it, and is tested, not assumed).

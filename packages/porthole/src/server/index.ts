@@ -81,6 +81,8 @@ export { doorResponse, doorStatusResponse, type DoorOptions } from "./pages.ts";
 // config with `nested`; a content Worker of its own answers the same (docs/ADOPTING.md, "Nested
 // pages").
 export {
+  FORGET_SCRIPT,
+  forgetResponse,
   isNestedLabel,
   NESTED_FILE_HEADERS,
   NESTED_FILES_PREFIX,
@@ -90,6 +92,8 @@ export {
   nestedShellCsp,
   nestedShellResponse,
   PORTHOLE_LABEL_PREFIX,
+  STORE_PREFIX,
+  storeResponse,
 } from "./nested.ts";
 export { isHostLabel, prefixedName, type Naming } from "./naming.ts";
 // The page an app serves in conformance test mode (P071).
