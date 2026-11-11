@@ -113,10 +113,7 @@ describe("checkFrameLocation", () => {
       origin,
       door,
     });
-    const check =
-      (door: unknown, nested = false) =>
-      () =>
-        checkFrameLocation(at(door) as never, sources, host, nested);
+    const check = (door: unknown) => () => checkFrameLocation(at(door) as never, sources, host);
 
     it("accepts a door on the display's own origin, at the door route", () => {
       expect(check({ url: `${origin}/__porthole/door/aaaaaaaaaaaaaaaa?ticket=d` })).not.toThrow();
@@ -142,25 +139,11 @@ describe("checkFrameLocation", () => {
       ).toThrow(/not on its location's origin/u);
     });
 
-    it("refuses a door elsewhere on the origin, one that isn't { url }, and any for a nested page", () => {
+    it("refuses a door elsewhere on the origin, and one that isn't { url }", () => {
       expect(check({ url: `${origin}/__porthole/d/aaaaaaaaaaaaaaaa?ticket=d` })).toThrow(
         /not at \/__porthole\/door\//u,
       );
       expect(check("https://x")).toThrow(/not \{ url \}/u);
-      // A nested page's shell, on its own label (P114): it is located with no door at all.
-      const shell = `https://porthole-${"a".repeat(24)}.example-usercontent.com`;
-      expect(() =>
-        checkFrameLocation(
-          {
-            url: `${shell}/__porthole/d/aaaaaaaaaaaaaaaa?ticket=t`,
-            origin: shell,
-            door: { url: `${shell}/__porthole/door/aaaaaaaaaaaaaaaa?ticket=d` },
-          },
-          sources,
-          host,
-          true,
-        ),
-      ).toThrow(/nested page is located with no door/u);
     });
 
     it("never quotes the door's ticket in a refusal", () => {

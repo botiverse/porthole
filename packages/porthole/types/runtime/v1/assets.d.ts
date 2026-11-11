@@ -34,7 +34,7 @@ interface PortholeAssets {
    * written in the page loads too, except in some browsers' frames (Safari's); this always does.
    */
   url(id: string): string;
-  /** Removes one, from a click; the app asks the person first. Level: admin. */
+  /** Removes one; the app asks the person first. Level: admin. */
   delete(id: string): Promise<boolean>;
 }
 

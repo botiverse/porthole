@@ -231,7 +231,7 @@ test("a served config is checked served: its own origin, cookie and storage as p
   expect(report.lint.find((each) => each.rule === "egress")?.line).toBe(7);
 });
 
-/** Calls on load: two that need a click (refused), one a person declines, one a handler answers. */
+/** Calls on load: one that needs a click (refused), three a person declines, one a handler answers. */
 const CALLS = `<p>Asks on load</p>
 <button onclick="sendPrompt('on click')">Ask</button>
 <script>
@@ -240,6 +240,7 @@ const ask = (id, method, params) => parent.postMessage({ jsonrpc: "2.0", id, met
 ask(901, "resources/read", { uri: "ui://data/x" });
 ask(902, "tools/call", { name: "x", arguments: {} });
 ask(903, "ui/download-file", { contents: [{ type: "resource", resource: { uri: "file:///a.txt", text: "a" } }] });
+ask(904, "porthole/copy-text", { text: "on load" });
 </script>`;
 
 for (const [mode, extra] of [
@@ -259,31 +260,27 @@ for (const [mode, extra] of [
       schemes: ["light"],
     });
     const run = report.runs[0];
-    // A call on load that needs a click is refused: sendPrompt by the shell itself where the
-    // frame knows it had no gesture (it rejects), else by the host; nobody clicks in a check, in
-    // any engine (P078).
-    const shellRefused = /^Unhandled rejection: sendPrompt needs a click/u;
-    expect(run?.errors.filter((each) => !shellRefused.test(each))).toEqual([]);
-    expect(
-      run?.errors.some((each) => shellRefused.test(each)) ||
-        run?.calls.some(
-          (each) => each.capability === "sendPrompt" && each.outcome === "no-user-activation",
-        ),
-      "sendPrompt on load refused",
-    ).toBe(true);
+    // The one call that needs a click (copyText: the clipboard is the person's) is refused on
+    // load: nobody clicks in a check, in any engine (P078). The others ask the person, and the
+    // check answers no (0.16.0, P149: no proof of a click is asked of them).
+    expect(run?.errors).toEqual([]);
     expect(run?.calls).toEqual(
       expect.arrayContaining([
+        { capability: "sendPrompt", outcome: "declined" },
         { capability: "readData", outcome: "answered" },
         { capability: "callTool", outcome: "declined" },
-        { capability: "downloadFile", outcome: "no-user-activation" },
+        { capability: "downloadFile", outcome: "declined" },
+        { capability: "copyText", outcome: "no-user-activation" },
       ]),
     );
     expect(report.ok).toBe(false);
     expect(report.text).toContain(
-      "It called downloadFile at load, with no click: hosts refuse that. Call downloadFile from a click",
+      "It called copyText at load, with no click: hosts refuse that. Call copyText from a click",
     );
     expect(report.text).toContain("Note: it called callTool at load; the check answered no");
     expect(report.text).toContain("Note: it called readData at load; the check answered no");
+    expect(report.text).toContain("Note: it called sendPrompt at load; the check answered no");
+    expect(report.text).toContain("Note: it called downloadFile at load; the check answered no");
     // Calls a person may decline are notes, not problems.
     const quiet = await checkPage({
       config,

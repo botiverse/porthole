@@ -17,8 +17,7 @@ const MCP_ADAPTER = "src/mcp/adapter.ts";
 const REQUESTS = "src/runtime/requests.ts";
 const OUTCOME = "src/host/outcome.ts";
 const WEB = "src/platform/web.ts";
-const MAY_BE_PORTHOLE =
-  '  const mayBePorthole = () => source.kind === "url" && (!speaks || (nested && !spoke));';
+const MAY_BE_PORTHOLE = '  const mayBePorthole = () => source.kind === "url" && !speaks;';
 /**
  * Each weakening: edits to the core's sources (served to the browser as they are stripped or
  * bundled), or a name the leak server (`embedder-csp`) or the served harness (`harness`) acts on.
@@ -285,29 +284,6 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "url-origin": "harness",
   // A served page without its CSP's sandbox (P099): on a tab of its own nothing else sandboxes it.
   "tab-sandbox": "harness",
-  // A nested page's files (P111, after its review) without their sandbox: one opened on its own
-  // tab has the shell's origin.
-  "file-sandbox": "harness",
-  // A nested page's shell on its scope's own label, as before P114 (porthole#56): its frame's
-  // address and its sealed files answered on the scope's origin, beside the scope's other displays.
-  "shell-label": "harness",
-  // The host's mount takes a nested page's location on any content origin (P121): a shell
-  // located on its scope's label, as a content Worker of a host's own might answer, is framed.
-  "nested-host-label": [
-    {
-      file: "src/isolation/served.ts",
-      find: "  if (nested && !onNestedLabel(location.origin)) {",
-      replace: "  if (false) {",
-    },
-  ],
-  // A nested page's shell runs on any origin (P121), its scope's included.
-  "nested-shell-origin": [
-    {
-      file: "src/shell/frame.ts",
-      find: '  if (!/^porthole-[a-z2-7]{24}\\./.test(location.hostname + ".")) {',
-      replace: "  if (false) {",
-    },
-  ],
   // A served page without its Permissions-Policy header (P099): on a tab nothing else denies it
   // devices, location or full screen, but the shell's locks (`device-locks`, the only wall on
   // WebKit and Firefox, which don't apply the header to them).
@@ -523,14 +499,6 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
         '        if (reported !== null) {\n          clearTimeout(selectionTimer);\n          selectionTimer = setTimeout(() => {\n            reported = "";\n            reportSelection(false);\n          }, 150);\n        }',
     },
   ],
-  // A marker's click only within a gesture (P105): the host takes one a page posts by itself.
-  "annotation-activated-gesture": [
-    {
-      file: "src/host/create-host.ts",
-      find: "            if (noGesture()) {\n              return;\n            }\n",
-      replace: "",
-    },
-  ],
   // The host's nonce, not given to an opaque frame's shell (P054): on a strict host page the
   // inherited policy stops the shell, so nothing the suite asks of it happens.
   nonce: [
@@ -592,67 +560,6 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       file: BRIDGE,
       find: "          return { ok: true, value: (value === true) as Result };",
       replace: "          return { ok: true, value: value as Result };",
-    },
-  ],
-  // The focus guard (P109): every move of the keyboard into a frame taken as the person's, so a
-  // page that calls focus() while the person types in the host's composer keeps their keys.
-  "focus-guard": [
-    {
-      file: "src/platform/focus-guard.ts",
-      find: "    const moved = personMoved({",
-      replace: "    const moved = true || personMoved({",
-    },
-  ],
-  // What the guard does after a take-back (P109, after GK-1): no watch that focus stays back, a
-  // look only while a text field has focus, and focus left on nothing after a press on a field not
-  // taken back, as before the review of the guard; so a page that takes focus back on its own
-  // blur, where Firefox lands the take-back on nothing, keeps it.
-  "focus-guard-watch": [
-    {
-      file: "src/platform/focus-guard.ts",
-      find: "    const watched = contest;\n",
-      replace: "    const watched = null as typeof contest;\n",
-    },
-    {
-      file: "src/platform/focus-guard.ts",
-      find: "    if (polling === 0 && (frames.size > 0 || contest !== null || waiting !== null)) {",
-      replace: "    if (polling === 0 && frames.size > 0 && takesText(known)) {",
-    },
-    {
-      file: "src/platform/focus-guard.ts",
-      find: "      press !== null &&\n",
-      replace: "      false &&\n      press !== null &&\n",
-    },
-  ],
-  // A nested page's frame that takes focus back in a fight over a text field (P120) keeps it, as a
-  // wait for its shell's word ended before the audit of P111's guard (NG-1): its activation then
-  // the person's own keys landing in the page. So a page that takes the keyboard back on its own
-  // blur keeps it on Firefox, where a page can.
-  "nested-fight": [
-    {
-      file: "src/platform/focus-guard.ts",
-      find: "      if (verdict === true) {\n        contest = null;\n        known = frame;",
-      replace:
-        "      if (verdict === true || (watched.fight && guarded.word !== null)) {\n        contest = null;\n        known = frame;",
-    },
-  ],
-  // The pointer rule (P120) out: a nested page's shell's activation may be a press wherever the
-  // pointer is, so a key the person meant for the host's composer, landing in the page, counts as
-  // one.
-  "pointer-rule": [
-    {
-      file: "src/platform/focus-guard.ts",
-      find: "  return !shown || at - typedAt > TYPING_MS || (over && overSince > typedAt);",
-      replace: "  return true;",
-    },
-  ],
-  // No time between a key on the host's page and a press (P122): an activation, or a move into a
-  // nested page's frame, right after the person's key may be a press of theirs.
-  "key-press": [
-    {
-      file: "src/platform/focus-guard.ts",
-      find: "export const KEY_PRESS_MS = 250;",
-      replace: "export const KEY_PRESS_MS = 0;",
     },
   ],
   // A cancel (P112) taken with no mode on: a page that says it is heard whenever it likes.
@@ -731,154 +638,6 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "            selectionTimer = 0;\n",
     },
   ],
-  // A nested page's shell (P111) passes on what its page says in the shell's own namespace: a page
-  // that says its shell's activation turned on is believed.
-  "shell-namespace": [
-    {
-      file: "src/shell/frame.ts",
-      find: 'typeof data.method === "string" && data.method.indexOf(PREFIX) === 0) {',
-      replace: "false) {",
-    },
-  ],
-  // The host's word (P136) moves the focus wherever it is: out of a host's button the host moved
-  // to in the same task, say.
-  "shell-focus-held": [
-    {
-      file: "src/shell/frame.ts",
-      find: "    if (holds && document.hasFocus()) {\n",
-      replace: "    if (true) {\n",
-    },
-    {
-      file: "src/shell/frame.ts",
-      find: "          if (holds) {\n            handOn();\n          } else {\n            wordUntil = performance.now() + 250;\n          }\n",
-      replace: "          handOn();\n",
-    },
-  ],
-  // A shell's stall (P111, after its review) not seen: an activation it saw late is fresh.
-  "shell-stall": [
-    {
-      file: "src/platform/focus-guard.ts",
-      find: "      const stalled = said.gap > SHELL_STALL_MS || at - guarded.heardAt > SHELL_STALL_MS;",
-      replace: "      const stalled = false;",
-    },
-  ],
-  // A nested page's real presses (P148): any event the page dispatches is one.
-  "press-untrusted": [
-    {
-      file: RUNTIME,
-      find: "      const real = (event) => event.isTrusted === true;",
-      replace: "      const real = (event) => true;",
-    },
-  ],
-  // What the content calls a button is one: its role is read.
-  "press-role": [
-    {
-      file: RUNTIME,
-      find: '        let kind = "";\n        if (name === "button" || name === "summary") {',
-      replace:
-        '        let kind = callOf(getAttributeIn, node, ["role"]) === "button" ? "both" : "";\n        if (kind !== "") {\n        } else if (name === "button" || name === "summary") {',
-    },
-  ],
-  // An editable control is pressed by the keys typed into it.
-  "press-editable": [
-    {
-      file: RUNTIME,
-      find: '        return kind !== "" && callOf(editableOf, node, []) !== true ? kind : "";',
-      replace: "        return kind;",
-    },
-  ],
-  // A held key's repeats are presses.
-  "press-repeat": [
-    {
-      file: RUNTIME,
-      find: " || callOf(repeatOf, event, []) === true || callOf(designModeOf",
-      replace: " || callOf(designModeOf",
-    },
-  ],
-  // A click while a key is down is a press: the one a button gets for an Enter typed elsewhere,
-  // once the page has moved the focus onto it.
-  "press-key-click": [
-    {
-      file: RUNTIME,
-      find: '            if (keyDown || controlOf(target) === "") {',
-      replace: '            if (controlOf(target) === "") {',
-    },
-  ],
-  // The click a form gives its submit button for Enter in one of its fields is a press.
-  "press-submit": [
-    {
-      file: RUNTIME,
-      find: "              if (form !== null && form === formOf(active)) {\n                return;\n              }\n",
-      replace: "",
-    },
-  ],
-  // A finger is a press as it lands: one that goes on to scroll was one.
-  "press-touch-down": [
-    {
-      file: RUNTIME,
-      find: '          if ((callOf(pointerTypeOf, event, []) === "mouse") === down) {',
-      replace: "          if (down) {",
-    },
-  ],
-  // The shell's port message goes on to content's listeners.
-  "press-port-heard": [
-    {
-      file: RUNTIME,
-      find: "          callOf(stopNow, event, []);\n          if (event.isTrusted !== true) {",
-      replace: "          if (event.isTrusted !== true) {",
-    },
-  ],
-  // A port message the page dispatches is taken as the shell's.
-  "press-port-forged": [
-    {
-      file: RUNTIME,
-      find: "          callOf(stopNow, event, []);\n          if (event.isTrusted !== true) {\n            return;\n          }\n",
-      replace: "          callOf(stopNow, event, []);\n",
-    },
-  ],
-  // document.open, write and writeln are the page's to call: it clears the window's listeners.
-  "press-open-lock": [
-    {
-      file: RUNTIME,
-      find: '  for (const name of ["open", "write", "writeln"]) {\n    lock(Document.prototype, name, noRewrite);\n  }\n',
-      replace: "",
-    },
-  ],
-  // A load that left the document where it was: its runtime says nothing, and the shell hears the
-  // new port alone, which no one took.
-  "press-still-here": [
-    {
-      file: RUNTIME,
-      find: "              callOf(portPost, port, [1]);\n",
-      replace: "",
-    },
-  ],
-  // A press told to the shell (P148) needs no quiet host.
-  "press-host-input": [
-    {
-      file: "src/platform/focus-guard.ts",
-      find: "    hostInputAt < pressedAt\n",
-      replace: "    true\n",
-    },
-  ],
-  // A nested page's gesture (P111) needs no quiet host: the person's press in the page counts for
-  // a second even after they pressed or typed on the host's page.
-  "shell-host-input": [
-    {
-      file: "src/platform/focus-guard.ts",
-      find: "    hostInputAt < word.activatedAt\n",
-      replace: "    true\n",
-    },
-  ],
-  // comments.open's gesture in the calling frame (P109): any gesture on the host's page will do,
-  // the person typing in the host's own composer included.
-  "comments-in-frame": [
-    {
-      file: BRIDGE,
-      find: "        if (inFrame(capability) && options.focused?.() === false) {",
-      replace: "        if (false) {",
-    },
-  ],
   // A comment's draft taken as the page gave it (P108): past the limit, unseen characters, not text.
   "comment-draft": [
     {
@@ -893,8 +652,7 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
     {
       file: OUTCOME,
       find: MAY_BE_PORTHOLE,
-      replace:
-        '  const mayBePorthole = () => source.kind === "url" && (!speaks || !nested || !spoke);',
+      replace: '  const mayBePorthole = () => source.kind === "url";',
     },
   ],
   // P124's first-word rule in place of the door: a status before the frame's hello is taken.
@@ -927,16 +685,8 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "door-silence": [
     {
       file: OUTCOME,
-      find: "        if (nested) {\n          neverRan();\n        } else {\n          silent();\n        }",
-      replace: "        neverRan();",
-    },
-  ],
-  // The ordering rule taken out for a nested page's shell: a status after its first word taken.
-  "frame-status-order": [
-    {
-      file: OUTCOME,
-      find: MAY_BE_PORTHOLE,
-      replace: '  const mayBePorthole = () => source.kind === "url" && (!speaks || nested);',
+      find: '      if (source.kind === "url") {\n        silent();\n      }',
+      replace: '      if (source.kind === "url") {\n        neverRan();\n      }',
     },
   ],
   // Embeds (P143): every session's answers framed by any page, an embed session's or not. The embed

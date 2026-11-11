@@ -143,15 +143,30 @@ describe("the bridge's order: declared → rate → valid → muted → gesture 
     expect(handled).toEqual([]);
   });
 
-  test("a gesture-gated call is refused when the host page says it has no user activation", async () => {
+  test("a gesture-gated call is refused when the host page says it has no user activation: copyText by default, and what a host gates so", async () => {
+    const copy = setup({ capabilities: { copyText: {} } }, { confirm: accept, activation: false });
+    expect(await copy.bridge.call("copyText", { text: "hi" })).toMatchObject({
+      refusal: "no-user-activation",
+    });
+    expect(copy.handled).toEqual([]);
     const { bridge, asked } = setup(
-      { capabilities: { openLink: {} } },
+      { capabilities: { openLink: { gates: ["user-activation", "confirm"] } } },
       { confirm: accept, activation: false },
     );
     expect(await bridge.call("openLink", { url: "https://example.com" })).toMatchObject({
       refusal: "no-user-activation",
     });
     expect(asked).toEqual([]);
+  });
+
+  test("nothing else asks for a gesture by default (0.16.0, P149): a link is the person's to confirm, whatever the page's activation", async () => {
+    const { bridge, asked, handled } = setup(
+      { capabilities: { openLink: {} } },
+      { confirm: accept, activation: false },
+    );
+    expect((await bridge.call("openLink", { url: "https://example.com/" })).ok).toBe(true);
+    expect(asked).toHaveLength(1);
+    expect(handled).toEqual([{ capability: "openLink", args: { url: "https://example.com/" } }]);
   });
 
   test("where the platform can't tell (undefined), the gesture is left to the shell", async () => {

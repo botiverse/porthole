@@ -24,12 +24,6 @@ export interface SurfaceSpec {
   readonly fill?: boolean;
   /** The height to start at (a remembered height, so a frame mounting again doesn't jump). */
   readonly initialHeightPx: number;
-  /**
-   * The frame holds a nested page's shell (P111): the host's config says so, never the frame. What
-   * the shell says of itself (`porthole/shell/state`) decides moves of focus into it and the
-   * gesture its page's calls need; nothing else in that namespace reaches the transport.
-   */
-  readonly nested?: boolean;
 }
 
 /** One isolated frame. */
@@ -42,7 +36,7 @@ export interface Surface {
   /**
    * Whether the embedding page has transient user activation now (a gesture in the frame
    * activates its ancestors), or undefined where the platform can't tell. The gesture gate reads
-   * it, and so does a marker's click (P105): false, or a throw, drops it.
+   * it (`copyText`'s by default, and any a host's config adds).
    */
   userActivation(): boolean | undefined;
   /**
@@ -53,22 +47,13 @@ export interface Surface {
    */
   viewport?(): { readonly width: number; readonly height: number } | undefined;
   /**
-   * Whether the embedding page's focus is in this frame now, once the platform's focus guard
-   * judged any move into it (P109); undefined, or absent, where the platform can't tell. A gesture
-   * gate that asks for the person in the calling frame (`comments`) reads it: false refuses. A
-   * nested page's frame (P111) is the person's too while its shell saw their gesture just now.
+   * Whether the embedding page's keyboard focus is in this frame now, as its document says;
+   * undefined, or absent, where the platform can't tell. The find shortcut reads it (P131: a
+   * frame that says the shortcut was pressed while the focus is elsewhere is not believed). No
+   * word on who put the focus there: a frame may take it by itself (P149).
    */
   focused?(): boolean | undefined;
-  /**
-   * Each time the content moved the keyboard into its frame from one of the embedding page's text
-   * fields without the person (no press on the frame, no Tab) and the platform gave focus back
-   * (P109): whether the person was typing then (a key within the last second), and whether focus
-   * failed to go back (the frame kept it or took it again). Absent where the platform has no guard.
-   */
-  onFocusTaken?(
-    listener: (take: { readonly typing: boolean; readonly failed: boolean }) => void,
-  ): () => void;
-  /** The host moves focus into the frame itself: the guard takes it as the person's (P109). */
+  /** The host moves focus into the frame itself. */
   focus?(): void;
   /**
    * The frame loaded a document other than the one it was given: the content navigated it. The

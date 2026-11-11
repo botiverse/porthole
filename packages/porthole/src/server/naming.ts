@@ -42,7 +42,7 @@ export function prefixedName(prefix: string): Naming & {
       "A name prefix is a lowercase letter, then letters or digits, then '-' (a-)",
     );
   }
-  // Porthole's own labels (a nested page's shell's, P114) are never a scope's.
+  // Porthole's own labels are never a scope's.
   if (prefix === "porthole-") {
     throw new TypeError("The name prefix porthole- is Porthole's own: choose another (a-)");
   }

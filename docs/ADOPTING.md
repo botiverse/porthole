@@ -319,8 +319,8 @@ composer.onClose(() => display.annotations.clearSelection());
   `"draft"` throws, as a bad anchor does (React: `onHostError`, kind `"annotations"`). The shell
   is your content server's: upgrade its Porthole first, or an older shell draws a draft as a
   posted mark without a marker. The view a draft's `activated` opens is guarded like any (below)
-  and puts no "Post", "Submit review" or "Discard" one click away: a page can fake that click on
-  the person's own press in the content (P107, P109).
+  and puts no "Post", "Submit review" or "Discard" one click away: a page can say that click
+  itself, at a moment it picks (P107; no gesture is asked of it since 0.16.0, P149).
 - **No drafts to a page that can pass them on**, or accept that it does: a page with the runtime's
   `db` writes and `user` can store who is drafting where (`user.get()` and the marks it is shown)
   for its author and other viewers to read before the draft is posted, and tie the posted comment
@@ -489,7 +489,7 @@ composer.onClose(() => display.annotations.clearSelection());
   stops, in reading order, named for what it is (`3 comments on "the words"`, from the `count` and
   the anchor's words, without an element's tag, P134; in English, whatever your UI's language). The
   `label` you store keeps its tag. Enter or Space on it is `activated`,
-  through the same path and the same gesture check as a click: nothing to handle apart. It is the
+  through the same path as a click: nothing to handle apart. It is the
   page's focus order, which a page can steal from or hide a marker from, and it is one more
   `activated` the content can time: keep your own list of marks as the way a keyboard can rely on,
   with `annotations.focus(id)` to bring one into view, and leave your view's guard as it is (it
@@ -513,9 +513,7 @@ composer.onClose(() => display.annotations.clearSelection());
   `display.annotations.focusMark(id)` (React: `focusMark(id)` on the `ref`) to put the keyboard back
   on the marker. It carries no content and reports nothing; an id with no marker, or a marker the
   page has moved away, does nothing and throws nothing; the page can take the focus straight back.
-  Close the view first: from one of your text fields that still has focus, the focus guard takes
-  the move for the page's, undoes it and counts it (`focusTaken`). Keep your own list of marks as
-  the way that holds.
+  Keep your own list of marks as the way that holds.
   On a calm page that lands at once, from your `<body>`. While the frame is finding its marks (a
   `show` just sent, which many hosts send as a card closes, or content that just changed) the word
   waits, up to a second, and is then dropped unless the focus is in the frame by then. A word the
@@ -541,17 +539,8 @@ composer.onClose(() => display.annotations.clearSelection());
 
   Keep the check: on a button of yours, the person has moved on, and `display.focus()` would take the
   keyboard from them. With React, whose `ref` has no `focus()`, call the frame's own `focus()` for
-  that step: it is only ever taken for the page's from a text field, and this one starts on `<body>`.
-  An id with no marker then leaves the focus in the frame, with the keys going to the page.
-
-  **Nested pages (P136).** `display.focus()` reaches a nested page on every engine, whether or not
-  it had the focus. Two ways don't:
-  - The frame's own `focus()`, which the React step above is: it stops at the page's shell (Chromium
-    and WebKit from anywhere, Firefox from a focused element of yours), so a `focusMark` that waits
-    is dropped even after it, and nothing tells you. On a calm page the second call doesn't wait and
-    lands. On a page that is changing, keep your own list of marks as the way back.
-  - `display.focus()` inside a key's own handler, on Firefox (measured on a nested page): it moves
-    nothing. Call it from a task, as the timer above does.
+  that step. An id with no marker then leaves the focus in the frame, with the keys going to the
+  page.
 
   Without the second call, nothing changes on a calm page. On a busy one, a word that the frame
   finishes with before your own move is lost where it used to land, so the person gets the frame and
@@ -645,54 +634,33 @@ display.on("navigated", () => bar.reset());
   const result = await frame.current?.find(query, { direction: "next" });
   ```
 
-### The keyboard: what a display can take, and what you get
+### The keyboard: a display can take it
 
 Any display can move the keyboard into its frame (`element.focus()` in the page, with no gesture
 on Chromium and WebKit), and what the person goes on typing in your composer or chat box then goes
-to the page. `createHost` (and so `PortholeView`) guards every display (P109): when focus leaves
-one of your page's text fields (a `<textarea>`, an `<input>` that takes text, a `contenteditable`
-region) for a display's frame without the person's press on the frame or a Tab into it, focus goes
-back to the field, and the display tells you; a display that keeps doing it is stopped.
+to the page, until they see it and click back. Porthole doesn't stop that. From 0.13 to 0.15 a
+guard took such a move back when it judged the move to be the page's; it could only guess whose
+move it was (your page sees no press inside a cross-site frame), and a wrong guess refused a
+person's own click. 0.16.0 removed it ([P149](DECISIONS.md)): no `focusTaken` event, no
+`onFocusTaken`, and a display is never stopped for taking the keyboard.
 
 ```js
-display.on("focusTaken", ({ typing }) => toast(typing ? "This page tried to take what you were typing." : "This page tried to take the keyboard."));
-display.on("contentError", ({ message }) => log(message)); // "The content kept taking the keyboard from the page; it was stopped."
-// Moving focus into a display yourself (a "focus the page" shortcut): use the display's own move.
-display.focus(); // not frame.focus(): from a text field, that one is taken for the page's and undone
-// Opening your composer focused: only in a comment mode the person started, for a composer that can
-// only save a draft (Enter adds it to the batch; submitting is only your own "Submit N"), and that
-// shows plainly it is a draft (THREAT_MODEL §6, P112); any other view a report opens takes no focus (P134's
-// exception, §6, is a container only, and its own conditions). Then
-// Porthole's move, not textarea.focus().
+// Moving focus into a display yourself (a "focus the page" shortcut):
+display.focus();
+// Moving it to a field of yours (opening your composer focused): Porthole's move, which lands on
+// every engine. Firefox ignores a plain focus() while a frame that takes focus back on its blur
+// holds it.
 import { focusField } from "@botiverse/porthole";
-focusField(composer.textarea); // Firefox ignores a plain focus() while a fighting frame holds focus
+focusField(composer.textarea);
 ```
 
-- **Free:** the guard, on by default, with no option. A page gets at most the keys typed before
-  focus is back (none or one in a sentence, measured on all three engines); three tries while the
-  person types (within 10 s), or five within 2 s, stop the display (`reload()` runs it again).
-- **Yours:** don't move focus from a text field into a display with the frame's own `focus()`
-  (use `display.focus()`), nor into your composer with the field's own `focus()` where a display
-  may hold focus (use `focusField`: on Firefox a page with the person's gesture that takes focus
-  back on its blur keeps a plain `focus()` from landing, and gets the keys); with a platform of your own (a native web view), implement `focused`,
-  `onFocusTaken` and `focus` on its surface, or a display can read what is typed beside it; know
-  the limits (THREAT_MODEL §7 "The keyboard": on Firefox, which shows your page no press
-  in a frame, a page keeps the keyboard if the pointer came over its frame after the person last
-  typed and after the field got focus; moves between two frames aren't judged).
-- **Served pages in full Chromium:** nest them ("Nested pages" below, P111). A served page's
-  frame there is out of process: your page sees no press in it, so a person's click into the
-  page's field is taken back. A nested page's shell sees it: a move into the frame is the
-  person's if the shell's activation turned on within the last second and you saw no press or key
-  of your own since. A second press in the page within 5 s of the last turns nothing on; from
-  0.15.3 the page's runtime tells its shell each real press (P148), so the person's next press in
-  the page counts as the first did, after they went back to your composer too. Nothing for you to
-  do but run 0.15.3 on both sides (your page, and whatever serves the content origins): an older
-  side ignores what the newer says, and the 5 s stay until both are new. A
-  nested page that takes the keyboard back as the guard returns it is fought as any page is, and
-  stopped (P120). A move into the page within 250 ms of the person's key on your page is taken
-  back on every engine (no hand presses that fast after typing, P122); on full Chromium a key the
-  person types into the page just as it takes the keyboard, slower than that, can still pass for a
-  press (THREAT_MODEL §7).
+- **Yours:** where a field must never lose a key to a page (a password, a payment field), don't
+  show a display you don't trust beside it. A view a display's report opens still takes no focus
+  and no press for its first 500 ms (THREAT_MODEL §6); that is your view's own guard, and it
+  doesn't depend on this.
+- **A platform of your own** (a native web view): `focus` on its surface is what `display.focus()`
+  calls; `focused`, if you give it, says whether the keyboard is in the display, which the find
+  shortcut reads (P131). `onFocusTaken` is no longer read.
 
 ## 4. Served pages: the host kit
 
@@ -755,16 +723,15 @@ nodeServer({ content, app: async (request) => (await routes(request)) ?? app(req
   or tells it, it isn't in `data-porthole-hosts`, and redirect entry and the handoff stay
   `appOrigins`' alone. Exact https origins (`http://` on loopback), none an app origin. Your own
   page between them is still the frame's parent, and its `frame-ancestors` is yours to set. A
-  content Worker of your own passes the same list to `statusPage`, `doorResponse`,
-  `doorStatusResponse` and `nestedShellResponse` (`framedBy`), and puts it in the nested page's
-  rows below (`<framedBy>`). The outer page is then an ancestor of content: a content page can
+  content Worker of your own passes the same list to `statusPage`, `doorResponse` and
+  `doorStatusResponse` (`framedBy`). The outer page is then an ancestor of content: a content page can
   `postMessage` it and every frame in its tree, and learn its origin, so the outer page's authors
   must check `event.source` and `event.origin` in every message listener
   ([THREAT_MODEL.md §6 "What every host must do"](THREAT_MODEL.md#what-every-host-must-do)).
 - **`embeds`** (P143): to let any site embed a public artifact page, set `embeds: true` and, from
   one route of your own that decides the page is public (never your reader's issue endpoint),
-  issue it with `{ anonymous: true, embed: true }` (no `level`, no `user`; an artifact's page that
-  isn't nested): `host.server.issue(instance, { anonymous: true, embed: true })`. Never answer
+  issue it with `{ anonymous: true, embed: true }` (no `level`, no `user`; an artifact's page):
+  `host.server.issue(instance, { anonymous: true, embed: true })`. Never answer
   `embed` from `access`: it answers your readers, and the kit refuses it there (409 from the issue
   endpoint and a clean address's resolve, its 409 page at a clean address's tab; P145). That
   session's answers say `frame-ancestors *`, and nothing else's do. It has no
@@ -893,70 +860,8 @@ artifact: { preset: "artifact", options: { layout: { kind: "fill" }, nestedFrame
 
 It is a weakening: a nested frame is a realm of its own where the shell's defenses never ran, so
 content there has WebRTC (a way out past `connect-src`) and can put text on the clipboard from a
-click, with no notice. The CSP still governs every frame's loads and navigations. Not for url mode,
-nested pages or live widgets (refused). Turn it on only where your product accepts that.
-
-### Nested pages: the page below Porthole's shell
-
-`nested: true` (P111) on an artifact kind served by the host kit puts the page in a frame of its
-own below Porthole's shell, with an opaque origin of its own. The shell, the page and its files are
-served on a label of the scope's own, `porthole-<24 base32>.<content domain>` (P114), not on the
-scope's label: the scope's other displays run content there with `allow-same-origin`, which would
-reach the shell (porthole#56). Do it where people
-type beside your displays: in full Chromium (a person's browser, not Playwright's headless shell) a
-served page's frame is out of process, and your page can't see a press in it, so without nesting a
-real click into the page's field is taken back and `comments.open` from a real click is refused
-within 5 s of any input on your page (porthole#53). The page's shell sees it, and tells your page.
-
-```ts
-const displays = defineDisplays({
-  page: {
-    preset: "artifact",
-    // No `served.storage`: a nested page keeps no storage of its own (localStorage lasts the load).
-    options: { runtime: "1", capabilities: { annotate: {}, comments: {} }, nested: true },
-  },
-});
-```
-
-Nothing else changes on your page: the same `createHost` (or `PortholeFrame`), the same handlers
-and events, the same `frame-src` (the content domain's wildcard covers the shell's label). Your
-frames route answers the shell's origin (`issue`'s location); a clean address stays on the scope's
-label and sends the browser on to the shell's with a one-time ticket.
-
-**Route the shell's label.** `porthole-<…>.<content domain>` must reach the content server as
-your other labels do. Wildcard DNS and a wildcard certificate (`*.<content domain>`) already cover
-it; a route, an edge rule or a firewall that matches labels by a pattern of yours (`a-*`) must let
-`porthole-*` through too. Every `porthole-` label is Porthole's: your naming may not make one
-(`content.name` giving one throws), and `reserved` may not hold one a shell would be on. The display has one more event, `storage` (`{ used }`, once per
-run: whether the page touched `localStorage` or `sessionStorage`, never what it kept), for you to
-count the pages that would need storage. A nested page's workers come from Blob URLs (a worker from
-a script of its own set is refused: its origin is opaque), which may `importScripts` the set's
-scripts; Chromium refuses a Blob module worker there. Not yet with a nested page: the asset library (`assets`)
-and Porthole's libraries (`egress.libraries`); the config refuses them.
-
-What a content origin serves for a nested page (`/server` does all of it; a content Worker of your
-own answers the same, with the helpers `/server` exports: `nestedLabelOf`, `nestedShellResponse`,
-`nestedFileCsp`, `NESTED_FILE_HEADERS`, `nestedAncestors`). `<origin>` is the shell's own,
-`https://<nestedLabelOf(label)>.<content domain>`, where `label` is the scope's label (the one its
-other displays are served on); `<token>` is the access in the path (Porthole's sealed session, or a
-signed token of your own: the shell only needs addresses under the prefix). Your frame location
-for a nested page is on `<origin>`.
-
-**The rule** (P114): `<origin>` answers the four rows below and Porthole's status pages, nothing
-else (no other display, no clean address, no asset, no app), and the scope's label never answers a
-nested page's shell, page or files. That is what keeps the shell's realm (its word to your page,
-the page's sealed address) out of every other display's reach. Porthole holds the shell to that
-label (P121): `createHost` refuses a nested page located anywhere else (a host error, `locate`, and
-no frame), `nestedShellResponse` throws for another origin, and the shell runs nowhere else. That
-`<origin>` answers nothing but these is yours to hold: Porthole can't see your Worker's routes.
-
-| Request | Answer |
-| --- | --- |
-| `<origin>/__porthole/d/<key>`, the framed address (a ticket's, a cookie's reload; an entered clean address on the scope's label answers a `303` here with a one-time ticket), a navigation | 200, `text/html`: Porthole's shell, `nestedShellResponse(compiled, { origin, origins: hostOrigins, framedBy, page: "<origin>/__porthole/f/<token>/<entry>", renew: { url: "<origin>/__porthole/f/<token>/__porthole/renew", expires } })`. Headers: `Content-Security-Policy: default-src 'none'; script-src 'sha256-<its script>'; frame-src <origin>/__porthole/f/; connect-src <origin>/__porthole/f/; base-uri 'none'; form-action 'none'; frame-ancestors <host origins> <framedBy>`; `Cache-Control: no-store`; `Referrer-Policy: no-referrer`; `X-Content-Type-Options: nosniff`; the served `Permissions-Policy`. No content in it. Any other request there: 404. |
-| `<origin>/__porthole/f/<token>/<page>` (the shell's child, or a tab) | The page as served before (the shell's runtime and the page), its plan's `origins` the content origin alone (`[<origin>]`) and its storage `memory`. `Content-Security-Policy`: `nestedFileCsp("page", fileSetCspDirectives(compiled.cspDirectives, "<origin>/__porthole/f/"))` then `; frame-ancestors ` and `nestedAncestors("<origin>", "<host origins> <framedBy>")`: the page's directives, its files' prefix opened, and `sandbox allow-scripts` (never `allow-same-origin`). Access from `<token>` alone: no cookie is sent (the page's origin is opaque), and never decide by `Origin` (it is `null`) or `Sec-Fetch-Site` (`cross-site`). |
-| `<origin>/__porthole/f/<token>/<file>` (the page's loads) | As served files are, plus `Cross-Origin-Resource-Policy: cross-origin` and `Access-Control-Allow-Origin: *` (`NESTED_FILE_HEADERS`): the opaque page's images, scripts, modules, fonts and fetches are cross-origin. Every one carries a CSP sandbox, never `allow-same-origin` (`nestedFileCsp(fileTypeOf(path).role, directives)`, then the `frame-ancestors` above, `<origin> <host origins> <framedBy>`): a non-page file `default-src 'none'; sandbox`, a script its directives plus `sandbox`, so none opened on a tab of its own (an SVG, an XML file) runs on the shell's origin. |
-| `<origin>/__porthole/f/<token>/__porthole/renew` | Only the shell's own fetch (`Sec-Fetch-Site: same-origin`, not a navigation): `{ "base": "<origin>/__porthole/f/<new token>/", "expires": <epoch ms> }`, `no-store`; anything else 403. The shell renews 5 minutes before `expires` and moves the page to the new base. |
-| A token that ended, under the prefix | Porthole's status page (`401`, reason `session`), `frame-ancestors <origin> <host origins> <framedBy>`: it tells the shell, which tells your page (`outcome` blocked). |
+click, with no notice. The CSP still governs every frame's loads and navigations. Not for url mode
+or live widgets (refused). Turn it on only where your product accepts that.
 
 ### The capability runtime: pages that are apps
 
@@ -1004,10 +909,11 @@ if (shown && !shown.ok) return <VersionError problems={shown.problems} />;   // 
 <PortholeView display="page" instance={instance} declaration={shown ? shown.declaration : null} />
 ```
 
-- **A page's draft in your composer** (P108, P109): `comments.open` reaches your handler only from
-  a gesture with the person in that frame (a press in it, a Tab into it; not their typing in your
-  UI), but the page still picks the moment (the second click of a double click, a field it asked
-  them to type into). So the composer it fills is the person's to act on:
+- **A page's draft in your composer** (P108): `comments.open` reaches your handler whenever the
+  page calls it, within its rate (30 a minute by default). No proof of a click is asked since
+  0.16.0 ([P149](DECISIONS.md)): the page picks the moment, and may call with no one pressing
+  anything. So the composer it fills is the person's to act on, and whether it opens at all is
+  yours to say (return false while the person is writing, or after they closed several unused):
 
   ```js
   // A composer the page filled: its words are the page's until the person acts in it.
@@ -1132,7 +1038,7 @@ hears those as a `hostError` of kind `"frame-status"` (log it, show nothing for 
 fallback from `outcome` only. A url-mode app is the exception: it can say any outcome (THREAT_MODEL
 S6).
 
-**The door (P125).** A served display that isn't nested (a served shell, a page, a view through the
+**The door (P125).** A served display (a served shell, a page, a view through the
 sandbox proxy) is framed on its scope's origin, where the scope's other displays run content: its
 own frame can't be trusted for how loading went (a same-scope sibling could speak for it). So
 `createHost` first frames a **door** — a page of Porthole's on the display's origin, in a hidden
@@ -1142,14 +1048,14 @@ for those kinds). The content frame's own frame status is then never taken, and 
 requirements:
 
 - **Deploy the server (or your content Worker) before the host.** The door is minted and served by
-  the server; a host given a served non-nested location with no door (from a server that doesn't
+  the server; a host given a served location with no door (from a server that doesn't
   yet mint one) builds no frame for it: `blocked: locate`, and a `hostError` of kind `"door"`
   naming the fix. Upgrade the server/Worker first, then the host. This is a hard requirement, not a
   preference.
 - **A custom locator must pass `door` through, and issue anew for every run.** If you rebuild
   `FrameLocation` yourself (a locator of your own rather than `httpLocator`), carry `door` from your
   issue endpoint unchanged; `httpLocator` and the host kit's client already do. Dropping it refuses
-  every served non-nested display, as above. And `locate` is called again on every run (a reload,
+  every served display, as above. And `locate` is called again on every run (a reload,
   a restart after the content navigated its frame away): answer each call with a fresh issue (a new
   ticket, a new door ticket). A location reused from an earlier run carries tickets already taken,
   so its door says `blocked: session` ("this link has been used"), and `createHost` tells you
@@ -1157,8 +1063,7 @@ requirements:
   display.)
 - **A platform of your own makes the web's doors.** A `PlatformHost` that wraps
   `webPlatform.createSurface` must also give `createDoor` (delegate to `webPlatform.createDoor`):
-  a platform without doors frames no served display that isn't nested (`blocked: locate`, a `door`
-  host error).
+  a platform without doors frames no served display (`blocked: locate`, a `door` host error).
 - **The door sits in the display's container while it decides**, a hidden 0×0 frame
   (`data-porthole-door`), removed once it says its word. Code that grabs
   `container.querySelector("iframe")` just after mounting may get the door: select
@@ -1180,8 +1085,7 @@ Worker routes `DOOR_PATH + <key>` (`/__porthole/door/<key>`) on every label — 
 (`TicketRecord.door === true`, bound to the label and key), run the same access, document and entry
 checks the content route runs for that grant, then answer `doorResponse({ hostOrigins, framedBy })` (open) or
 `doorStatusResponse({ status, reason, code?, hostOrigins, framedBy })` (401 `session` / 403 `denied` / 404
-`not-found` / 500 `error`). Refuse a door ticket at `/__porthole/d/`, and serve no door on a nested
-page's shell label. `DOOR_PATH`, `doorResponse` and `doorStatusResponse` are exported from
+`not-found` / 500 `error`). Refuse a door ticket at `/__porthole/d/`. `DOOR_PATH`, `doorResponse` and `doorStatusResponse` are exported from
 `@botiverse/porthole/server`.
 
 **A host that signs its own tickets** (P126) — its server mints its own ticket for a display and its
@@ -1197,7 +1101,7 @@ document and version, a file set's entry being a page (`not-found`), `doorRespon
 about the request but its method: **you must have authenticated the request and established the
 grant yourself**, as before `issue`. Pass the request so `authorize.check` sees it, and `{ page }`
 as the fourth argument for a frame that opens at a file set's page below its version. It throws for
-an instance with no door (a nested page, a url-mode app) and for an instance or grant `issue` would
+an instance with no door (a url-mode app) and for an instance or grant `issue` would
 refuse. The content route still takes its own ticket and checks again (P050).
 
 `porthole.config(kind)` is the served config while frames are served, the opaque one while they

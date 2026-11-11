@@ -50,7 +50,7 @@ const served = (reports: boolean): FrameSource => ({
   reports,
 });
 
-function watch(source: FrameSource, speaks: boolean, nested = false) {
+function watch(source: FrameSource, speaks: boolean) {
   const fake = fakeSurface();
   const seen: FrameOutcome[] = [];
   const refused: string[] = [];
@@ -58,7 +58,6 @@ function watch(source: FrameSource, speaks: boolean, nested = false) {
     surface: fake.surface,
     source,
     speaks,
-    nested,
     timeoutMs: 5_000,
     onOutcome: (each) => seen.push(each),
     refused: (message) => refused.push(message),
@@ -94,14 +93,6 @@ describe("a display's load outcome", () => {
   test("a page that loaded but never spoke, where it should have, never ran: framing", () => {
     vi.useFakeTimers();
     const { seen, load } = watch(served(true), false);
-    load();
-    vi.advanceTimersByTime(1_000);
-    expect(seen).toEqual([{ state: "blocked", reason: "framing" }]);
-  });
-
-  test("a nested page's shell that loaded without a word never ran either", () => {
-    vi.useFakeTimers();
-    const { seen, load } = watch(served(true), true, true);
     load();
     vi.advanceTimersByTime(1_000);
     expect(seen).toEqual([{ state: "blocked", reason: "framing" }]);
@@ -200,19 +191,9 @@ describe("who may say how loading went (P124)", () => {
     expect(refused).toEqual([UNTRUSTED_FRAME_STATUS]);
   });
 
-  test("a nested page's frame's first document that is a status page says how it went", () => {
-    vi.useFakeTimers();
-    const { seen, refused, say, load } = watch(served(true), true, true);
-    say(status({ state: "blocked", reason: "denied", status: 403, code: "revoked" }));
-    load();
-    vi.advanceTimersByTime(10_000);
-    expect(seen).toEqual([{ state: "blocked", reason: "denied", status: 403, code: "revoked" }]);
-    expect(refused).toEqual([]);
-  });
-
   test("a served shell's content, after the shell's hello, can't say it is blocked: before or after the handshake", () => {
     vi.useFakeTimers();
-    const { seen, refused, say, load, handle } = watch(served(true), true, true);
+    const { seen, refused, say, load, handle } = watch(served(true), true);
     say(hello);
     // Before the host answered: the content runs after the shell spoke, never before.
     say(status(SIGN_IN));
@@ -225,23 +206,9 @@ describe("who may say how loading went (P124)", () => {
     expect(refused).toEqual([UNTRUSTED_FRAME_STATUS]);
   });
 
-  test("a nested page's word, relayed by its shell after the page's hello, is the page's: not taken", () => {
-    vi.useFakeTimers();
-    // The shell's own words (porthole/shell/) never reach the watch (the platform takes them);
-    // the page's hello, relayed, is the first thing it hears.
-    const { seen, refused, say, load, handle } = watch(served(true), true, true);
-    load();
-    say(hello);
-    handle.initialized();
-    say(status(SIGN_IN));
-    vi.advanceTimersByTime(10_000);
-    expect(seen).toEqual([{ state: "loaded" }]);
-    expect(refused).toEqual([UNTRUSTED_FRAME_STATUS]);
-  });
-
   test("any other word counts as the frame speaking, a malformed one too", () => {
     vi.useFakeTimers();
-    const { seen, refused, say } = watch(served(true), true, true);
+    const { seen, refused, say } = watch(served(true), true);
     say({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: { height: 10 } });
     say(status(SIGN_IN));
     vi.advanceTimersByTime(5_000);
@@ -265,7 +232,7 @@ describe("who may say how loading went (P124)", () => {
   });
 });
 
-describe("a served display that isn't nested takes no frame status from its frame (P125)", () => {
+describe("a served display takes no frame status from its frame (P125)", () => {
   test("its frame's status is dropped, even as the first word, and the host is told once", () => {
     vi.useFakeTimers();
     const { seen, refused, say, load, handle } = watch(served(true), true);
@@ -540,7 +507,7 @@ describe("createHost: a served display's door decides, before the content frame 
     h.shown.destroy();
   });
 
-  test("a served non-nested location without a door (an old server, a clean address) is refused before any frame: blocked locate, and a door host error naming the fix", async () => {
+  test("a served location without a door (an old server, a clean address) is refused before any frame: blocked locate, and a door host error naming the fix", async () => {
     const h = harness(false);
     await vi.waitFor(() => expect(h.outcomes).toHaveLength(1));
     expect(h.outcomes).toEqual([{ state: "blocked", reason: "locate" }]);
@@ -552,7 +519,7 @@ describe("createHost: a served display's door decides, before the content frame 
     h.shown.destroy();
   });
 
-  test("a platform that makes no doors frames no served display that isn't nested", async () => {
+  test("a platform that makes no doors frames no served display", async () => {
     const h = harness(true);
     // The same harness, without createDoor: a platform of a host's own that predates P125.
     h.shown.destroy();

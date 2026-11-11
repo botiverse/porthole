@@ -61,11 +61,6 @@ export interface ShellPlan {
    * those iframes and removes every other frame-like element. Absent: it removes them all.
    */
   readonly nestedFrames?: "own";
-  /**
-   * A nested page's (P148): its runtime tells its shell each real press, over the port the shell
-   * sends it. Absent for every other plan: their runtime listens for no port and tells no press.
-   */
-  readonly press?: true;
 }
 
 export function shellPlan(config: PortholeConfig): ShellPlan | null {
@@ -107,15 +102,13 @@ export function shellPlan(config: PortholeConfig): ShellPlan | null {
     themeVariables: Object.keys(config.theme.variables),
     themeEvent: config.theme.event,
     themeDocuments: config.theme.documents ?? "declared",
-    // An opaque origin has no storage: an opaque frame's, and a nested page's (P111).
-    storage: config.isolation === "opaque" || config.nested === true ? "memory" : "native",
+    // An opaque origin has no storage.
+    storage: config.isolation === "opaque" ? "memory" : "native",
     maxErrorReports: config.limits.maxErrorReports,
     maxPromptChars: config.limits.maxPromptChars,
     maxCopyChars: MAX_COPY_CHARS,
     protocolVersion: MCP_APPS_PROTOCOL_VERSION,
     // Only where opted into (P128): every other plan is the same as before it.
     ...(config.nestedFrames === "own" ? { nestedFrames: "own" as const } : {}),
-    // A nested page's alone (P148): every other plan is the same as before it.
-    ...(config.nested === true ? { press: true as const } : {}),
   };
 }

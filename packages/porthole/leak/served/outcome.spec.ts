@@ -3,8 +3,6 @@ import { presets, type PortholeConfig } from "../../src/index.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
 import { keepsFramedCookies } from "../../src/conformance/cookies.ts";
 import { harness } from "./harness.ts";
-import { storedFiles } from "./files.ts";
-import { pageOf, unique } from "./nested-pages.ts";
 import { app, mount, outcomeOf, type DisplayRecord } from "./porthole-host.ts";
 
 /**
@@ -276,36 +274,6 @@ test("an opaque widget that says it is blocked is told nothing and shown nothing
     null,
     { scope: "outcome-forge-opaque", document: { kind: "shell", preset: "inlineWidget" } },
     { content: `<p>forger</p><script>${FORGE}</script>` },
-  );
-  untold(await forgedHeard(read));
-});
-
-test("a nested page that says it is blocked, through its shell or past it, is told nothing and shown nothing (P124)", async ({
-  page,
-}) => {
-  const served = await harness();
-  const scope = unique("outcome-forge-nested");
-  const id = unique("forger");
-  served.fileSets.set(`${id}@1`, storedFiles({ "index.html": pageOf(FORGE) }));
-  const instance: InstanceRef = {
-    scope,
-    document: { kind: "artifact", id, version: "1", preset: "artifactNested" },
-  };
-  const { read } = await mount(
-    page,
-    served.hostOrigin,
-    served.configs.artifactNested as PortholeConfig,
-    await served.porthole.issue(instance, { viewer: "probe" }),
-    instance,
-    {
-      runtime: {
-        key: scope,
-        scope,
-        artifact: id,
-        declaration: { capabilities: {}, runtime: "1" },
-        viewer: { level: "interact", id: "ada", name: "Ada" },
-      },
-    },
   );
   untold(await forgedHeard(read));
 });

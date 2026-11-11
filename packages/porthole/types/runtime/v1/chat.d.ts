@@ -2,8 +2,8 @@
 
 interface PortholeChat {
   /**
-   * Sends text to the agent as the person's message ("explain this point"). Call it from a click.
-   * Resolves true if it was sent. Level: interact.
+   * Sends text to the agent as the person's message ("explain this point"); the app asks them
+   * first. Resolves true if it was sent. Level: interact.
    */
   send(text: string): Promise<boolean>;
 }

@@ -63,7 +63,7 @@ const NOBODY: PlatformHost = {
     return { ...surface, userActivation: () => false };
   },
   // A served display's door (P125), as the web platform makes it: a platform without doors frames
-  // no served display that isn't nested.
+  // no served display.
   createDoor: (container, spec) => webPlatform.createDoor!(container, spec),
 };
 

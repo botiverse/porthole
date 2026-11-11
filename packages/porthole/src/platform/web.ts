@@ -1,93 +1,7 @@
 import { DOOR_SANDBOX_TOKENS } from "../compile/policy.ts";
 import type { ColorScheme } from "../config/schema.ts";
-import {
-  SHELL_BEAT_METHOD,
-  SHELL_FOCUS_METHOD,
-  SHELL_LOOK_METHOD,
-  SHELL_METHOD_PREFIX,
-  SHELL_STATE_METHOD,
-} from "../isolation/types.ts";
 import { postMessageTransport } from "../transport/post-message.ts";
-import { focusGuard, type FocusGuard, type FocusTake } from "./focus-guard.ts";
-import type { Transport } from "../transport/types.ts";
 import type { DoorSurface, PlatformHost, Surface, SurfaceSpec } from "./types.ts";
-
-/** A shell's own message (P111), by its namespace. */
-const isShellWord = (data: unknown): data is { method: string; params?: unknown } =>
-  data !== null &&
-  typeof data === "object" &&
-  typeof (data as { method?: unknown }).method === "string" &&
-  (data as { method: string }).method.startsWith(SHELL_METHOD_PREFIX);
-
-/**
- * A nested page's transport (P111): the shell's state, checked, to the focus guard; the rest of
- * the shell's namespace dropped; everything else as it came.
- */
-function shellWords(opened: Transport, frame: HTMLIFrameElement, guard: FocusGuard): Transport {
-  const listeners = new Set<(message: unknown) => void>();
-  opened.listen((message) => {
-    if (!isShellWord(message)) {
-      for (const listener of listeners) {
-        listener(message);
-      }
-      return;
-    }
-    const params = message.params;
-    if (params === null || typeof params !== "object") {
-      return;
-    }
-    const { supported, ago, focused, gap, asked, pressed, presses } = params as Record<
-      string,
-      unknown
-    >;
-    const span = (value: unknown) =>
-      typeof value === "number" && Number.isFinite(value) && value >= 0;
-    if (message.method === SHELL_BEAT_METHOD) {
-      if (span(gap)) {
-        guard.beat(frame);
-      }
-      return;
-    }
-    if (
-      message.method !== SHELL_STATE_METHOD ||
-      typeof supported !== "boolean" ||
-      typeof focused !== "boolean" ||
-      !(ago === null || span(ago)) ||
-      !span(gap) ||
-      !(asked === undefined || (Number.isSafeInteger(asked) && (asked as number) >= 0)) ||
-      // The page's presses (P148): absent from a shell older than them, or both there.
-      !(
-        (pressed === undefined && presses === undefined) ||
-        ((pressed === null || span(pressed)) &&
-          Number.isSafeInteger(presses) &&
-          (presses as number) >= 0)
-      )
-    ) {
-      return;
-    }
-    guard.shell(frame, {
-      supported,
-      ago: ago as number | null,
-      focused,
-      gap: gap as number,
-      ...(asked === undefined ? {} : { asked: asked as number }),
-      ...(presses === undefined
-        ? {}
-        : { pressed: pressed as number | null, presses: presses as number }),
-    });
-  });
-  return {
-    send: (message) => opened.send(message),
-    listen(listener) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    close() {
-      listeners.clear();
-      opened.close();
-    },
-  };
-}
 
 /**
  * The web platform: an `<iframe>` whose policy attributes are set before its document is given,
@@ -141,37 +55,10 @@ export const webPlatform: PlatformHost = {
     container.append(frame);
 
     const view = container.ownerDocument.defaultView ?? window;
-    // The focus guard (P109): a move of the keyboard into this frame from one of the page's text
-    // fields that the person didn't make is undone.
-    const guard = focusGuard(view);
-    const taken = new Set<(take: FocusTake) => void>();
-    const nested = spec.nested === true && spec.source.kind === "url";
     // A frame is heard from its own window and its located origin alone: never the host's own
     // origin (P125 removed P068's in-frame pages and the channel that heard them), so no page of
     // the host's own can speak for a frame either.
-    const opened = postMessageTransport(() => frame.contentWindow, origin, view);
-    const unguard = guard.add(
-      frame,
-      (take) => {
-        for (const listener of taken) {
-          listener(take);
-        }
-      },
-      {
-        nested,
-        // A nested page's shell is asked to look as the guard hears a move into its frame (P120).
-        ...(nested
-          ? {
-              ask: (n: number) =>
-                opened.send({ jsonrpc: "2.0", method: SHELL_LOOK_METHOD, params: { n } }),
-            }
-          : {}),
-      },
-    );
-    // A nested page's shell (P111): its own words go to the guard, by the frame's window and the
-    // content origin (the transport's checks); the page's pass on. The shell drops any page
-    // message in its namespace, so there none is the page's.
-    const transport = nested ? shellWords(opened, frame, guard) : opened;
+    const transport = postMessageTransport(() => frame.contentWindow, origin, view);
     return {
       transport,
       element: frame,
@@ -199,20 +86,15 @@ export const webPlatform: PlatformHost = {
         ).userActivation;
         return activation === undefined ? undefined : activation.isActive;
       },
+      // Where the keyboard is, as the frame's own tree says it (its document's, or the shadow
+      // root's it is in): no more than that. A frame may take the focus by itself (0.16.0
+      // removed the guard that took it back, P149), so this is no word on who put it there.
       focused() {
-        return guard.focused(frame) || (nested && guard.gesture(frame));
-      },
-      onFocusTaken(listener) {
-        taken.add(listener);
-        return () => taken.delete(listener);
+        const root = frame.getRootNode() as Partial<DocumentOrShadowRoot>;
+        return root.activeElement === frame;
       },
       focus() {
-        guard.focus(frame);
-        // A nested page (P136): the move stops at its shell on every engine, one way or another,
-        // and only the shell can pass it on. Only a move that landed: the shell asks no more of it.
-        if (nested && view.document.activeElement === frame) {
-          opened.send({ jsonrpc: "2.0", method: SHELL_FOCUS_METHOD });
-        }
+        frame.focus();
       },
       onLoad(listener) {
         loaded.add(listener);
@@ -225,8 +107,6 @@ export const webPlatform: PlatformHost = {
       destroy() {
         navigated.clear();
         loaded.clear();
-        taken.clear();
-        unguard();
         transport.close();
         frame.remove();
       },
@@ -236,8 +116,7 @@ export const webPlatform: PlatformHost = {
    * A served display's door (P125): hidden (no size, `visibility: hidden`, which still runs its
    * script and fires its load on all three engines), out of focus and of the accessibility tree,
    * sandboxed with scripts alone, no `allow`, no name. Nothing but its frame status is heard from
-   * it, from its window and the opaque origin alone; the focus guard, the bridge and annotations
-   * never see it.
+   * it, from its window and the opaque origin alone; the bridge and annotations never see it.
    */
   createDoor(container: HTMLElement, spec: { readonly url: string }): DoorSurface {
     // oxlint-disable-next-line react/iframe-missing-sandbox -- set from the door's list, next

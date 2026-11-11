@@ -259,17 +259,6 @@ export interface PortholeConfig {
    */
   readonly runtime?: RuntimeVersion;
   /**
-   * Domain isolation, artifact pages (P111): the address the host frames serves Porthole's shell
-   * alone, a document of Porthole's own with no content in it, and the page runs in a child frame
-   * of the shell's, sandboxed without `allow-same-origin` (an opaque origin), served from the same
-   * origin at its files' sealed address. The shell is then a realm the page can't reach, above the
-   * page's frame: it relays the page's messages, and tells the host when its own transient
-   * activation turns on (a press in the page activates its ancestors only), which is how the host
-   * knows the person, not the page, moved the keyboard into the frame or opened a comment. The
-   * page has no storage of its own (an in-memory stand-in) and fetches nothing with a cookie.
-   */
-  readonly nested?: true;
-  /**
    * Which nested frames content may make (P128). `none` (default, and absent): the shell removes
    * every frame-like element content adds, and the CSP's `frame-src` is `'none'`. `own`: an
    * `<iframe>` of one of the page's own files (its `src` under its version's own address, P082)
@@ -278,8 +267,8 @@ export interface PortholeConfig {
    * A weakening, opted into: a child frame is a realm of its own, where the shell's WebRTC
    * removal, clipboard guards and navigation cancel never ran (a page of the set framed there has
    * its own shell; a `srcdoc` frame, or the `about:blank` a new frame starts as, has none), so
-   * content reaches WebRTC and the clipboard's events there. Not for url mode, a live widget
-   * (no network of its own, P079) or a nested page (P111).
+   * content reaches WebRTC and the clipboard's events there. Not for url mode or a live widget
+   * (no network of its own, P079).
    */
   readonly nestedFrames?: "none" | "own";
 }

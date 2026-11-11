@@ -1651,58 +1651,6 @@ test("a page that patches the event's built-ins neither hears a marker's press n
   ).toEqual([]);
 });
 
-test("a hostile page's marker click with no gesture is dropped; one on the person's own press is the host's view to guard (P105)", async ({
-  page,
-}) => {
-  test.setTimeout(60_000);
-  const display = await referenceHost.launch(page, {
-    config: annotated(),
-    content: `<p id="p1" style="font-size: 18px">Costs <b>fell</b> by three percent.</p>
-<button id="own" style="margin: 30px">Press me</button>
-<script>
-  const fake = (rect) => parent.postMessage({ jsonrpc: "2.0", method: "porthole/annotate.activated", params: { id: "fell", rect } }, "*");
-  // By itself, some seconds after the marks arrive: no one did anything.
-  addEventListener("message", (event) => {
-    if (event.data && event.data.method === "porthole/annotate.show" && !window.timed) {
-      window.timed = true;
-      setTimeout(() => {
-        fake({ x: 0, y: 0, width: 10, height: 10 });
-        window.faked = true;
-      }, 6500);
-    }
-  });
-  // On the person's own press in the content, under their pointer (the review's R4).
-  document.getElementById("own").addEventListener("pointerdown", (event) => fake({ x: event.clientX - 1, y: event.clientY - 1, width: 2, height: 2 }));
-</script>`,
-  });
-  const frame = await display.frame();
-  await expect(frame.locator("#own")).toBeVisible();
-  await display.annotate("show", [textMark("fell", "fell", 3)]);
-  await next(display, "anchored");
-  // Nothing asks anything of either page meanwhile: a test's own evaluate is a gesture to the
-  // browser (measured), and transient activation lasts 5 s on all three engines.
-  await page.waitForTimeout(7_500);
-  expect(
-    await frame.evaluate(() => (window as unknown as { faked?: boolean }).faked),
-    "the page posted its click by itself",
-  ).toBe(true);
-  expect(
-    (await reports(display)).filter((each) => each.type === "activated"),
-    "probe: the host took a marker's click no gesture came with",
-  ).toEqual([]);
-
-  // Within the person's own press in the content, it passes: the host's view must take no press
-  // for 500 ms after it opens, and ignore one that began before (THREAT_MODEL §6).
-  const own = await frame.locator("#own").boundingBox();
-  if (own === null) {
-    throw new Error("no button");
-  }
-  await page.mouse.move(own.x + own.width / 2, own.y + own.height / 2);
-  await page.mouse.down();
-  await next(display, "activated");
-  await page.mouse.up();
-});
-
 test("a tap on a marker is reported on every engine, and the content hears none of it (P105)", async ({
   browser,
   browserName,

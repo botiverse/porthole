@@ -1,13 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { compile, presets } from "../src/index.ts";
 import { hostOriginProblem, isHostOrigin } from "../src/isolation/served.ts";
-import {
-  createServer,
-  doorResponse,
-  doorStatusResponse,
-  nestedShellCsp,
-  statusPage,
-} from "../src/server/index.ts";
+import { createServer, doorResponse, doorStatusResponse, statusPage } from "../src/server/index.ts";
 
 /**
  * Host origins of any scheme (item 0 of 0.1.1): a desktop app serves its UI from its own
@@ -76,7 +70,6 @@ describe("host origins", () => {
   // bad one, and four didn't check them at all. They go into a header (`frame-ancestors`) and
   // into the page's own list of whom it tells.
   const HOST = "https://app.example.com";
-  const NESTED = `https://porthole-${"a".repeat(24)}.example-usercontent.com`;
   const helpers: Record<string, (hostOrigins: readonly string[]) => unknown> = {
     statusPage: (hostOrigins) => statusPage({ status: 404, title: "t", detail: "d", hostOrigins }),
     "statusPage, its frame-ancestors given": (hostOrigins) =>
@@ -86,7 +79,6 @@ describe("host origins", () => {
       doorResponse({ hostOrigins, frameAncestors: HOST }),
     doorStatusResponse: (hostOrigins) =>
       doorStatusResponse({ hostOrigins, status: 401, reason: "session" }),
-    nestedShellCsp: (hostOrigins) => nestedShellCsp("0", NESTED, hostOrigins),
   };
   describe.each(Object.entries(helpers))("%s", (name, helper) => {
     test.each([

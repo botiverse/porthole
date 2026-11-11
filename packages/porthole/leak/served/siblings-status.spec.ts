@@ -2,9 +2,8 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 import type { PortholeConfig } from "../../src/index.ts";
 import type { InstanceRef } from "../../src/isolation/types.ts";
 import { MEASURED_SKIP } from "../controls.ts";
-import { storedFiles } from "./files.ts";
+import { storedFiles, unique } from "./files.ts";
 import { harness } from "./harness.ts";
-import { unique } from "./nested-pages.ts";
 import { mount, outcomeOf, type Mounted } from "./porthole-host.ts";
 
 /**
@@ -630,48 +629,5 @@ test.describe("a served display's word comes from a door no sibling can reach (P
       await outcomeOf(bHandle.read, 12_000),
       "probe: no false framing while a sibling churns",
     ).toEqual({ state: "loaded" });
-  });
-
-  test("[nested-sibling] a nested display beside a hostile sibling is unaffected (control)", async ({
-    page,
-  }) => {
-    const served = await harness();
-    const scope = unique("nested");
-    const id = unique("nestedpage");
-    served.fileSets.set(
-      `${id}@1`,
-      storedFiles({ "index.html": "<!doctype html><html><body><p id=b>nested</p></body></html>" }),
-    );
-    const bHandle = await mountAthenB(
-      page,
-      served,
-      scope,
-      hostile(wipePost(POST_BLOCKED)),
-      async () => {
-        const instance: InstanceRef = {
-          scope,
-          document: { kind: "artifact", id, version: "1", preset: "artifactNested" },
-        };
-        return mount(
-          page,
-          served.hostOrigin,
-          served.configs.artifactNested as PortholeConfig,
-          await served.porthole.issue(instance, { viewer: "probe" }),
-          instance,
-          {
-            runtime: {
-              key: scope,
-              scope,
-              artifact: id,
-              declaration: { capabilities: {}, runtime: "1" },
-              viewer: { level: "interact", id: "ada", name: "Ada" },
-            },
-          },
-        );
-      },
-    );
-    expect(await outcomeOf(bHandle.read), "probe: the nested display loaded, untouched").toEqual({
-      state: "loaded",
-    });
   });
 });

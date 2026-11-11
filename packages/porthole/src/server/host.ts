@@ -113,7 +113,7 @@ export interface ContentHostOptions<V> {
   /**
    * Origins of an outer page that frame the app itself (P141): each may be an ancestor of every frame
    * the app shows, above an app origin's page, so it is in every `frame-ancestors` Porthole sends
-   * (content, nested pages, doors, status and entry pages, the authorize route's pages) after
+   * (content, doors, status and entry pages, the authorize route's pages) after
    * `appOrigins`, and nowhere else. Never an origin a frame hears or tells, never an app origin for
    * redirect entry or the handoff; the app's own page must still be the frame's parent. Exact https
    * origins (`http://` on loopback), none an app origin, none the content domain's site. The app's

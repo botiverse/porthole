@@ -73,8 +73,8 @@ export interface FrameLocation {
    * The display's door (P125): a page of Porthole's on the same origin, at
    * `/__porthole/door/<instance key>?ticket=<its own ticket>`, that says how loading went before
    * any content is framed. The host frames it opaque and hidden, and takes its one frame status
-   * (`open`, or `blocked` and why); then frames `url`. Given for a served shell, a page that isn't
-   * nested and the sandbox proxy: content of the scope runs on their origin, so no frame status
+   * (`open`, or `blocked` and why); then frames `url`. Given for a served shell, a page and the
+   * sandbox proxy: content of the scope runs on their origin, so no frame status
    * from their own frame is ever Porthole's. A host that is given none for one of them takes no
    * frame status at all (a load that shows nothing is a timeout) and says so (`hostError` kind
    * `door`). A custom locator passes it on as it came.
@@ -87,35 +87,6 @@ export const DOOR_PATH = "/__porthole/door/";
 
 /** The message a served page sends its host about loading (own-prefixed, P040). */
 export const FRAME_STATUS_METHOD = "porthole/notifications/frame-status";
-
-/** A nested page's shell's report of its own state to the host (P111). */
-export const SHELL_STATE_METHOD = "porthole/shell/state";
-
-/** A nested page's shell's heartbeat, every 50 ms while it runs (P111, after its review). */
-export const SHELL_BEAT_METHOD = "porthole/shell/beat";
-
-/**
- * The host's ask to a nested page's shell (P120): look now, and say what it saw in a state report
- * that names the ask (`asked`). The host asks as it hears focus move into the frame.
- */
-export const SHELL_LOOK_METHOD = "porthole/shell/look";
-
-/**
- * The host's word to a nested page's shell (P136) that it moved the focus into the frame: pass it on
- * to the page, in this task, not in the focus event (where the shell's move doesn't take). Sent by
- * `display.focus()` alone; a page has no way to say it.
- */
-export const SHELL_FOCUS_METHOD = "porthole/shell/focus";
-
-/**
- * A nested page's shell's word to its page's runtime (P148): one `MessagePort`, sent at each load
- * of the page's frame, over which the runtime tells the shell each real press in the page. The
- * runtime takes the first one alone, before any content runs, and no content ever holds it.
- */
-export const SHELL_PRESS_PORT_METHOD = "porthole/shell/press-port";
-
-/** The shell's own namespace (P111): the shell drops a page's message that names a method in it. */
-export const SHELL_METHOD_PREFIX = "porthole/shell/";
 
 /** A page's word that it used storage, once per load (P111): never a key or a value. */
 export const STORAGE_USED_METHOD = "porthole/storage-used";

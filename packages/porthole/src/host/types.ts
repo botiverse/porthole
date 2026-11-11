@@ -137,12 +137,12 @@ export type HostErrorKind =
   /**
    * A frame status (`porthole/notifications/frame-status`) the host didn't take, since it came
    * from the frame's content, not from a page of Porthole's server (P124): never shown, never an
-   * outcome. Told once a run. A served display that isn't nested takes none from its frame at
+   * outcome. Told once a run. A served display takes none from its frame at
    * all: its door says how loading went (P125).
    */
   | "frame-status"
   /**
-   * A served display that has a door (P125: a served shell, a page that isn't nested, the sandbox
+   * A served display that has a door (P125: a served shell, a page, the sandbox
    * proxy) was located without one: the server is older than the host (upgrade it first), or a
    * locator dropped `FrameLocation.door`. The display shows, but no frame status is taken, so a
    * block is told as a timeout. Told once a mount.
@@ -226,16 +226,8 @@ export interface DisplayEvents {
   /** Too many declines: the display stops asking until it runs again. */
   readonly muted: undefined;
   /**
-   * The content moved the keyboard into its frame from one of the page's text fields without the
-   * person (no press on the frame, no Tab, P109), and focus went back where it was; `typing`: the
-   * person had pressed a key on the page within the last second. The content's doing. Three while
-   * typing within 10 s, or five within 2 s, stop the display (`contentError` says so; `reload()`
-   * runs it again).
-   */
-  readonly focusTaken: { readonly typing: boolean };
-  /**
    * Whether the page touched `localStorage` or `sessionStorage` (the in-memory stand-in of a frame
-   * without storage of its own: opaque, or a nested page, P111): once per run, `used: true` when
+   * without storage of its own: an opaque one): once per run, `used: true` when
    * the page first did, else `used: false` as the run ends. Never what it kept: for a host to count
    * the pages that would need storage.
    */
@@ -352,9 +344,7 @@ export interface AnnotationControls {
    * comes of it. Nothing happens, and nothing throws, for an id no mark with a marker is shown
    * under, or if the frame has no such marker now (its words are gone, elements are being picked):
    * the display's own `focus()` isn't used, so the frame takes no focus for a marker it hasn't got.
-   * Call it once the view is closed: from one of the page's text fields that still has focus, the
-   * move is the frame's own to the focus guard, undone and counted (P109). The page can take the
-   * focus back at once. Not kept for a frame that runs later.
+   * The page can take the focus back at once. Not kept for a frame that runs later.
    *
    * On a calm page it lands at once, from anywhere on the host's page. While the frame is finding
    * its marks (a `show` just sent, the content just changed) it waits, and is then dropped unless
@@ -362,8 +352,7 @@ export interface AnnotationControls {
    * it (its page is busy) is held to the same test (P137), so a word that comes late takes no
    * keyboard from a person who moved on. Nothing says it was dropped: if the frame isn't your page's
    * `document.activeElement` soon after and the person hasn't moved on, call `focus()` and then
-   * `focusMark(id)` again. On a nested page only `focus()` reaches the page (P136): the frame's own
-   * `focus()` stops at its shell, and a second call that waits is dropped.
+   * `focusMark(id)` again.
    */
   focusMark(id: string): void;
 }
@@ -387,10 +376,7 @@ export interface DisplayControls {
   readonly find: FindControls;
   /** Runs the content again from the start, in a new frame. */
   reload(): void;
-  /**
-   * Moves focus into the display's frame, as the host's own move: from one of the page's text
-   * fields, a frame's own `focus()` is taken for the content's and undone (P109).
-   */
+  /** Moves focus into the display's frame. */
   focus(): void;
   /** Tears the view down and removes the frame. */
   destroy(): void;

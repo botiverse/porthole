@@ -32,7 +32,6 @@ import { watchDoor, type DoorWatch } from "./door.ts";
 import { outcomeOfRefusal } from "./locator.ts";
 import { STORAGE_USED_METHOD, type FrameSource } from "../isolation/types.ts";
 import { webPlatform } from "../platform/web.ts";
-import { TAKES } from "../platform/focus-guard.ts";
 import type { DoorSurface, Surface } from "../platform/types.ts";
 import type { AdapterConnection, ProtocolAdapter, ShellConnection } from "../protocol/adapter.ts";
 import {
@@ -75,7 +74,7 @@ export const REUSED_LOCATION =
 
 /** What the host is told when its platform makes no doors (P125): no served frame is made. */
 export const NO_DOOR_PLATFORM =
-  "This platform makes no door frames (PlatformHost.createDoor, P125), so no served display that isn't nested is framed on it";
+  "This platform makes no door frames (PlatformHost.createDoor, P125), so no served display is framed on it";
 
 const BASE_KEYS = new Set(["hostContextChanged", "teardown", "close"]);
 
@@ -120,10 +119,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
   }
   // A url frame is someone else's app: no shell, no protocol, and its navigations are its own.
   const speaks = config.mode !== "url";
-  const nested = config.nested === true;
   // A served display on its scope's origin, beside the scope's other content (P125): its door
   // says how loading went, before its frame is made.
-  const hasDoor = config.isolation === "domain" && speaks && !nested;
+  const hasDoor = config.isolation === "domain" && speaks;
   const adapter = (options.adapter ?? shellAdapter) as ProtocolAdapter<C>;
   const platform = options.platform ?? webPlatform;
   const hostInfo = options.hostInfo ?? { name: "porthole", version: "0" };
@@ -382,18 +380,6 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         }
       };
       /**
-       * Whether the person is known to have made no gesture just now (P105): the platform says the
-       * page has no transient activation, or fails to say. Where it can't tell (undefined), as for
-       * the gesture gate, a report passes.
-       */
-      const noGesture = (): boolean => {
-        try {
-          return surface?.userActivation() === false;
-        } catch {
-          return true;
-        }
-      };
-      /**
        * Every box a report carries, clamped to the frame's viewport as it is now (P104): the page
        * places the host's own UI nowhere outside its frame. A mark's `documentRect` and the
        * document's `scroll` (P132) pass as they were checked: where a mark is in the document,
@@ -432,7 +418,10 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       /**
        * A report from the frame: checked, taken only while the host asked for it (a selection
        * only in select mode, results only for its own marks, a marker's click only for a mark it
-       * shows with one, a count's or a draft's, within a gesture), then through the bridge's gates.
+       * shows with one, a count's or a draft's), then through the bridge's gates. No proof of a
+       * gesture is asked of a marker's click (0.16.0, P149): what a host opens for one takes no
+       * focus and does nothing by itself (THREAT_MODEL §6), and a page that says it unasked only
+       * shows that.
        */
       const onAnnotation = (raw: unknown, through: HostFunctionBridge) => {
         if (
@@ -534,13 +523,6 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           case "activated": {
             const { id } = report;
             if (!marks.some((mark) => mark.id === id && hasMarker(mark))) {
-              return;
-            }
-            // A marker's real click gives the host's page transient activation (measured on all
-            // three engines, P105); a click a page posts at load, on a timer or on a scroll has
-            // none and is dropped. One posted on the person's own press in the content passes: the
-            // host's view guards itself against that (THREAT_MODEL §6).
-            if (noGesture()) {
               return;
             }
             break;
@@ -910,8 +892,6 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           allow: compiled.allow,
           referrerPolicy: compiled.referrerPolicy,
           colorScheme: scheme,
-          // A nested page's shell (P111): the config's word, never the frame's.
-          ...(config.nested === true ? { nested: true } : {}),
           // An app reports no size: its frame fills the host's container, at least the minimum;
           // so does any display the host mounts to fill, or whose layout fills (P065): its
           // content scrolls itself.
@@ -939,34 +919,10 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             })
           : framed;
         surface = created;
-        // The focus guard undid a move of the keyboard into this frame (P109): heard each time,
-        // and a frame that keeps taking it is stopped, as one that keeps navigating away is.
-        const takes: { at: number; counts: boolean }[] = [];
-        created.onFocusTaken?.(({ typing, failed }) => {
-          const at = Date.now();
-          // While the person typed, or a take-back that failed (the keys then go to the frame and
-          // the page sees no typing): either counts toward the first rule.
-          takes.push({ at, counts: typing || failed });
-          const within = (ms: number) => takes.filter((take) => at - take.at <= ms);
-          emit("focusTaken", { typing });
-          if (
-            surface === created &&
-            (within(TAKES.typing.withinMs).filter((take) => take.counts).length >=
-              TAKES.typing.most ||
-              within(TAKES.any.withinMs).length >= TAKES.any.most)
-          ) {
-            stop();
-            contentError("The content kept taking the keyboard from the page; it was stopped.");
-          }
-          while (takes.length > 0 && at - (takes[0] as { at: number }).at > TAKES.typing.withinMs) {
-            takes.shift();
-          }
-        });
         const watch = watchOutcome({
           surface: created,
           source,
           speaks,
-          nested,
           timeoutMs: timeLeft,
           onOutcome: (outcome) => emit("outcome", outcome),
           // A frame status from the content (P124): never shown, the host's to hear.
@@ -1000,8 +956,6 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           ...(options.show === undefined ? {} : { show: options.show }),
           ...(options.cached === undefined ? {} : { cached: options.cached }),
           userActivation: () => created.userActivation(),
-          // The person in this frame (P109): the page's focus in it, after the focus guard.
-          focused: () => created.focused?.(),
           onEvent: onBridge,
           ...(declaration === null ? {} : { declaration }),
           ...(viewer === undefined ? {} : { viewer }),

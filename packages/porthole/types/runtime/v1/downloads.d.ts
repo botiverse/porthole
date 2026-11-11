@@ -11,8 +11,8 @@ interface PortholeDownload {
 
 interface PortholeDownloads {
   /**
-   * Hands the person a file to save (<a download> and script-driven saves don't work here).
-   * Call it from a click. Resolves true if the download started. Level: view.
+   * Hands the person a file to save (<a download> and script-driven saves don't work here);
+   * the app asks them first. Resolves true if the download started. Level: view.
    */
   save(file: PortholeDownload): Promise<boolean>;
 }

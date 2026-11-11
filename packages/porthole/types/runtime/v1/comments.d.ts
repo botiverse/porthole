@@ -28,7 +28,7 @@ interface PortholeComments {
    * Opens the app's comment composer at the anchor (a name alone is { name }), starting with
    * `options.draft` if given. The person writes and posts it in the app. Resolves true if the
    * composer opened, false if it didn't (the app may refuse while the person is writing).
-   * Write-only: a page never reads comments. Call it from a click in the page. Level: view.
+   * Write-only: a page never reads comments. Level: view.
    */
   open(anchor: PortholeCommentAnchor | string, options?: PortholeCommentOptions): Promise<boolean>;
 }

@@ -28,15 +28,8 @@ import {
   tabOnlyPage,
 } from "./pages.ts";
 import { libraryFile } from "./libraries.ts";
-import { isNavigation, ownLoad, serveAsset, serveFile, ticketPage } from "./files.ts";
-import {
-  isNestedLabel,
-  nestedAncestors,
-  nestedLabelOf,
-  nestedFileCsp,
-  nestedShellResponse,
-  PORTHOLE_LABEL_PREFIX,
-} from "./nested.ts";
+import { ownLoad, serveAsset, serveFile, ticketPage } from "./files.ts";
+import { PORTHOLE_LABEL_PREFIX } from "../isolation/served.ts";
 import { DEFAULT_ENTRY } from "../files/paths.ts";
 import { isPagePath } from "../files/types.ts";
 import { isPortholeCookie, setsPortholeCookie } from "./proxy.ts";
@@ -95,10 +88,8 @@ const BASE = /^\/(?:(?!\.{1,2}\/)[A-Za-z0-9._:~-]{1,200}\/){0,16}$/u;
 const ENTER_PATH = "/__porthole/enter";
 /** Where a redirect entry's code is redeemed, before its clean address (P068). */
 const ENTRY_PATH = "/__porthole/entry";
-/** How long a nested page's ticket from its clean address to its shell's label lasts (P114). */
-const HOP_SECONDS = 60;
 /**
- * A path below a file set's base, as a hop's ticket carries it (P114): a relative path of URL path
+ * A path below a file set's base, as a ticket carries it (a page of a set, P125): a relative path of URL path
  * characters, no empty segment but a last one, no dot segment (encoded or not), no query.
  */
 const isPageRest = (rest: unknown): rest is string =>
@@ -373,32 +364,13 @@ export function createServer(options: ServerOptions): PortholeServer {
     }
     return label;
   };
-  /**
-   * The label an instance is served on: its scope's, or a nested page's shell's own (P114), on
-   * which nothing but nested pages' shells, their pages and those pages' files is ever served.
-   * Every other display of the scope runs agent-made content on the scope's origin with
-   * `allow-same-origin`: on that origin, the shell's realm (its word to the host, the page's
-   * sealed address) would be theirs.
-   */
-  const labelFor = (instance: InstanceRef): string => {
-    const label = nameOf(instance.scope);
-    if (instance.document.kind !== "artifact" || compiledFor(instance)?.config.nested !== true) {
-      return label;
-    }
-    const own = nestedLabelOf(label);
-    if (isReserved(own)) {
-      throw new TypeError(
-        `content.reserved holds ${own}, a nested page's shell's label: reserve no ${PORTHOLE_LABEL_PREFIX} label`,
-      );
-    }
-    return own;
-  };
-  /** Whether a request's label may be one this server named (a nested page's shell's, P114). */
+  /** The label an instance is served on: its scope's. */
+  const labelFor = (instance: InstanceRef): string => nameOf(instance.scope);
+  /** Whether a request's label may be one this server named: never one of Porthole's own. */
   const ours = (label: string): boolean =>
     !isReserved(label) &&
-    (isNestedLabel(label) ||
-      (!label.startsWith(PORTHOLE_LABEL_PREFIX) &&
-        (content.name === undefined ? LABEL.test(label) : isHostLabel(label))));
+    !label.startsWith(PORTHOLE_LABEL_PREFIX) &&
+    (content.name === undefined ? LABEL.test(label) : isHostLabel(label));
   const secure = content.scheme === "https";
   const defaultPort = secure ? 443 : 80;
   const portPart =
@@ -408,7 +380,6 @@ export function createServer(options: ServerOptions): PortholeServer {
   const contentSource = `${content.scheme}://*.${domain}${portPart}`;
   const sampleHost = `${keys.label("")}.${domain}`;
   const sampleOrigin = originOfLabel(keys.label(""));
-  const sampleNestedOrigin = originOfLabel(nestedLabelOf(keys.label("")));
   const authorize = options.authorize;
   const authorizeTtl = authorize?.ttlSeconds ?? 0;
   if (!Number.isInteger(authorizeTtl) || authorizeTtl < 0 || authorizeTtl > 300) {
@@ -618,13 +589,7 @@ export function createServer(options: ServerOptions): PortholeServer {
         `The config ${JSON.stringify(name)} (${config.mode}, ${config.isolation}) can't serve a ${kind}: it needs ${MODES[kind].join(" or ")} mode with domain isolation`,
       );
     }
-    // A nested page's shell is on a label of its own (P114): its frame source is the same.
-    const samples = config.nested === true ? [sampleOrigin, sampleNestedOrigin] : [sampleOrigin];
-    if (
-      !samples.every((sample) =>
-        config.contentOrigins.some((source) => originMatchesSource(sample, source)),
-      )
-    ) {
+    if (!config.contentOrigins.some((source) => originMatchesSource(sampleOrigin, source))) {
       throw new TypeError(
         `The config ${JSON.stringify(name)}'s contentOrigins don't include this server's (${contentSource})`,
       );
@@ -679,8 +644,6 @@ export function createServer(options: ServerOptions): PortholeServer {
   ): Promise<
     | {
         readonly html: string;
-        /** An artifact's own page, before the shell (a nested page's is made apart, P111). */
-        readonly document?: string;
         readonly compiled: CompiledConfig;
         /** Whether its CSP opens its artifact's asset library (P089): an artifact's page. */
         readonly assets: boolean;
@@ -715,7 +678,6 @@ export function createServer(options: ServerOptions): PortholeServer {
         }
         return {
           html: config.shellDocument({ origins, document: stored.html, cspMeta: false }),
-          document: stored.html,
           compiled: config,
           assets: true,
         };
@@ -977,8 +939,8 @@ export function createServer(options: ServerOptions): PortholeServer {
   }
 
   /**
-   * A taken ticket, if it is good for `label`'s origin: its instance's own (a nested page's shell's,
-   * P114), or for an entry code (`entry`) its scope's, where a clean address is.
+   * A taken ticket, if it is good for `label`'s origin: its instance's own, or for an entry code
+   * (`entry`) its scope's, where a clean address is.
    */
   async function take(
     ticket: string | null,
@@ -1149,23 +1111,20 @@ export function createServer(options: ServerOptions): PortholeServer {
           true,
         );
       }
-      // In a nested page's frame (P111) its shell frames it and hears it, on this origin; a
-      // config without nesting never frames this address but at the host.
       return statusPage(
         401,
         "This has ended",
         "Content here opens for a while. Open it again from the app that showed it.",
-        nestedAncestors(origin, frameAncestors),
+        frameAncestors,
         method,
         "session",
-        [...options.hostOrigins, origin],
+        options.hostOrigins,
       );
     }
     // An asset of this artifact's library, at the frame's own sealed address (P091): every engine
     // sends a frame's path, where some send no Referer that names it.
     const blob = SEALED_ASSET.exec(rest)?.[1];
     if (blob !== undefined) {
-      // A nested page loads no assets (its config refuses them): none on its shell's label (P114).
       const none = () =>
         page(
           404,
@@ -1176,7 +1135,7 @@ export function createServer(options: ServerOptions): PortholeServer {
           undefined,
           access.embed === true,
         );
-      if (options.assets === undefined || isNestedLabel(label)) {
+      if (options.assets === undefined) {
         return none();
       }
       return (await assetFor(request, label, access, blob)) ?? none();
@@ -1270,7 +1229,7 @@ export function createServer(options: ServerOptions): PortholeServer {
         "session",
       );
     }
-    // A nested page's hop from its clean address (P114): the page below its base it was entered at.
+    // The page below its base the ticket was issued for (a page of a set, P125).
     const asked = cookie === null ? undefined : record?.page;
     const rest = isPageRest(asked) ? asked : undefined;
     return serveAccess(request, access, cookie, undefined, rest);
@@ -1290,8 +1249,7 @@ export function createServer(options: ServerOptions): PortholeServer {
   /**
    * A served display's door (P125): its own ticket's, taken once, for this instance on this
    * origin; then the door's answer for that ticket's grant (`answerDoor`, the one `doorAnswer`
-   * gives, P126). No other ticket opens it, and a nested page's shell's label serves none
-   * (`serveShellLabel`).
+   * gives, P126). No other ticket opens it.
    */
   async function serveDoor(
     request: Request,
@@ -1312,8 +1270,7 @@ export function createServer(options: ServerOptions): PortholeServer {
         record.embed === true ||
         record.entry !== undefined ||
         record.instance.document.kind === "external" ||
-        keys.instanceKey(record.instance) !== key ||
-        compiledFor(record.instance)?.config.nested === true
+        keys.instanceKey(record.instance) !== key
       ) {
         return doorSays(401, "session", method);
       }
@@ -1382,7 +1339,7 @@ export function createServer(options: ServerOptions): PortholeServer {
     access: Access,
     cookie: string | null,
     at?: FilesAt,
-    /** A nested page's path below its files' base, from its hop's ticket (P114). */
+    /** The page below its files' base its ticket was issued for (a page of a set, P125). */
     pageAt?: string,
   ): Promise<Response> {
     const method = request.method.toUpperCase();
@@ -1420,55 +1377,8 @@ export function createServer(options: ServerOptions): PortholeServer {
     ) {
       return missing();
     }
-    // A nested page (P111): the address the host frames (a ticket's, a cookie's, an entered
-    // one's) answers Porthole's shell, which frames the page at its sealed files' address; only
-    // that address, below the sealed prefix, answers the page and its files, without a cookie.
-    const nested = served.compiled.config.nested === true;
-    const sealedAt = at !== undefined && at.base.startsWith(FILES_PREFIX);
-    if (nested && !sealedAt) {
-      if (!isNavigation(request)) {
-        return page(404, "Not found", "This page's files are at its own address.", method);
-      }
-      // Its shell is served on its own label alone (P114): a clean address, entered on the scope's
-      // label (P068), goes there with a one-time ticket of its own, for what is left of its session.
-      const own = originOfLabel(labelFor(access.instance));
-      if (access.origin !== own) {
-        return hop(access, own, "files" in served && at !== undefined ? at.rest : "");
-      }
-      const sealed = await sealFiles(access);
-      let rest = "";
-      if ("files" in served) {
-        const entry = served.files.entry ?? DEFAULT_ENTRY;
-        rest =
-          pageAt !== undefined
-            ? pageAt
-            : at !== undefined && at.rest !== ""
-              ? at.rest
-              : entry.includes("/")
-                ? entry
-                    .split("/")
-                    .map((segment) => encodeURIComponent(segment))
-                    .join("/")
-                : "";
-      }
-      const shell = nestedShellResponse(served.compiled, {
-        origin: access.origin,
-        origins: options.hostOrigins,
-        framedBy,
-        page: `${access.origin}${sealed.base}${rest}`,
-        renew: { url: `${access.origin}${sealed.base}__porthole/renew`, expires: sealed.expires },
-        method,
-      });
-      if (cookie !== null) {
-        shell.headers.set("set-cookie", cookie);
-      }
-      return shell;
-    }
-    // Below the sealed prefix, a nested page and its files are framed by its shell too. An embed
-    // session is never nested (`issue`): its answers are framed by any page (P143).
-    const ancestors = nested
-      ? nestedAncestors(access.origin, frameAncestors)
-      : ancestorsFor(access);
+    // An embed session's answers are framed by any page (P143).
+    const ancestors = ancestorsFor(access);
     // Whom its pages hear and tell: the host origins, or no one for an embed session (P143).
     const hostOrigins = embed ? [] : options.hostOrigins;
     if ("files" in served) {
@@ -1523,55 +1433,14 @@ export function createServer(options: ServerOptions): PortholeServer {
       ? assetCspDirectives(config, cspDirectives, access.origin)
       : cspDirectives;
     const headers = documentHeaders(
-      nested ? nestedFileCsp("page", directives) : servedDocumentCsp(config, directives),
+      servedDocumentCsp(config, directives),
       servedPermissionsPolicy(config),
       ancestors,
     );
     if (cookie !== null) {
       headers.set("set-cookie", cookie);
     }
-    // A nested page's document takes messages from its shell, on its own origin (P111).
-    const html = nested
-      ? served.compiled.shellDocument({
-          origins: [access.origin],
-          document: served.document ?? "",
-          cspMeta: false,
-        })
-      : served.html;
-    return new Response(method === "HEAD" ? null : html, { status: 200, headers });
-  }
-
-  /**
-   * A nested page entered at its clean address (P114), whose shell is never served there: on to the
-   * shell's own label, with a one-time ticket for the same access (its viewer, its subject, what is
-   * left of its session) and the path below its base it was entered at. Only this server's own
-   * answer carries the ticket, as `issue`'s frame address does; the host's check already let the
-   * request in.
-   */
-  async function hop(access: Access, own: string, rest: string): Promise<Response> {
-    const now = Date.now();
-    const ticket = newTicket();
-    await tickets.put(ticketId(ticket), {
-      instance: access.instance,
-      viewer: access.viewer,
-      expiresAt: now + HOP_SECONDS * 1_000,
-      sessionSeconds: Math.min(
-        MAX_SESSION_SECONDS,
-        Math.max(1, Math.floor((access.expiresAt - now) / 1_000)),
-      ),
-      ...(access.anonymous === true ? { anonymous: true } : {}),
-      ...(access.subject === undefined ? {} : { subject: access.subject }),
-      ...(isPageRest(rest) ? { page: rest } : {}),
-    });
-    return new Response(null, {
-      status: 303,
-      headers: {
-        location: `${own}${PREFIX}d/${keys.instanceKey(access.instance)}?ticket=${ticket}`,
-        "cache-control": "no-store",
-        "referrer-policy": "no-referrer",
-        "x-robots-tag": "noindex, nofollow",
-      },
-    });
+    return new Response(method === "HEAD" ? null : served.html, { status: 200, headers });
   }
 
   /**
@@ -2035,29 +1904,6 @@ export function createServer(options: ServerOptions): PortholeServer {
     }
   }
 
-  /**
-   * A nested page's shell's own label (P114): Porthole's shell at a frame's address, its page and
-   * that page's files below the sealed prefix, and Porthole's status pages (and their script).
-   * Nothing else: no clean address, entry, asset, library or app, so no agent-made content ever
-   * runs on this origin with it (every file below the prefix carries a sandbox without it).
-   */
-  async function serveShellLabel(request: Request, url: URL, label: string): Promise<Response> {
-    const method = request.method.toUpperCase();
-    const script = pageScript(url.pathname);
-    if (script !== null) {
-      return script;
-    }
-    const document = DOCUMENT_PATH.exec(url.pathname);
-    if (document?.[1] !== undefined) {
-      return serveDocument(request, url, label, document[1]);
-    }
-    const sealed = FILES_PATH.exec(url.pathname);
-    if (sealed?.[1] !== undefined) {
-      return serveSealed(request, url, label, sealed[1], sealed[2]);
-    }
-    return page(404, "Nothing here", "This address names no content.", method);
-  }
-
   /** A grant, checked for an instance (`issue`'s rules, and `doorAnswer`'s, P126). */
   function checkGrant(
     clean: InstanceRef,
@@ -2066,7 +1912,7 @@ export function createServer(options: ServerOptions): PortholeServer {
     const anonymous = grant.anonymous === true;
     // An embedded document (P143): a public page with no host, which any page may frame. Only
     // where the host opted in, and only as narrow as that: anonymous, no level, no user, an
-    // artifact's page that isn't nested.
+    // artifact's page.
     // Read as given: a host's grant is checked here, not trusted to its type.
     const asked: unknown = grant.embed;
     const embed = asked !== undefined;
@@ -2084,9 +1930,9 @@ export function createServer(options: ServerOptions): PortholeServer {
           "An embed grant is anonymous, with no viewer, level or user: it has no host to give them to (P143)",
         );
       }
-      if (clean.document.kind !== "artifact" || compiledFor(clean)?.config.nested === true) {
+      if (clean.document.kind !== "artifact") {
         throw new TypeError(
-          "An embed grant opens an artifact's page that isn't nested: never a url-mode app, a served shell, the sandbox proxy or a nested display (P143)",
+          "An embed grant opens an artifact's page: never a url-mode app, a served shell or the sandbox proxy (P143)",
         );
       }
     }
@@ -2182,11 +2028,11 @@ export function createServer(options: ServerOptions): PortholeServer {
 
   /**
    * Whether an instance's frame has a door (P125): a document framed on its scope's origin, where
-   * the scope's other displays run content (a served shell, a page that isn't nested, the sandbox
-   * proxy). A nested page's frame is its shell, on a label of its own; a url-mode app has none.
+   * the scope's other displays run content (a served shell, a page, the sandbox proxy). A
+   * url-mode app has none.
    */
   function hasDoor(instance: InstanceRef): boolean {
-    return instance.document.kind !== "external" && compiledFor(instance)?.config.nested !== true;
+    return instance.document.kind !== "external";
   }
 
   const underDomain = (host: string): boolean => host === domain || host.endsWith(`.${domain}`);
@@ -2250,7 +2096,6 @@ export function createServer(options: ServerOptions): PortholeServer {
         );
       }
       const { clean, key, ticket, door } = await mint(instance, grant, undefined, below);
-      // A nested page's frame is its shell, on the shell's own label (P114).
       const origin = originOfLabel(labelFor(clean));
       const path =
         clean.document.kind === "external"
@@ -2274,9 +2119,7 @@ export function createServer(options: ServerOptions): PortholeServer {
       const clean = cleanInstance(instance);
       check(clean);
       if (!hasDoor(clean)) {
-        throw new TypeError(
-          "This instance has no door (P125): a nested page's frame is its shell, a url-mode app has none",
-        );
+        throw new TypeError("This instance has no door (P125): a url-mode app has none");
       }
       const below = at.page;
       if (below !== undefined && (!isPageRest(below) || clean.document.kind !== "artifact")) {
@@ -2434,9 +2277,6 @@ export function createServer(options: ServerOptions): PortholeServer {
       try {
         if (!ours(label)) {
           return page(404, "Nothing here", "This address names no content.", method);
-        }
-        if (isNestedLabel(label)) {
-          return await serveShellLabel(request, url, label);
         }
         if (url.pathname === ENTER_PATH) {
           return await enter(request, url, label);
