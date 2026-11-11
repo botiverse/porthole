@@ -87,6 +87,11 @@ const FORGET_PREFIX = "/__porthole/forget/";
 const FORGET_ROUTE = /^\/__porthole\/forget\/([A-Za-z0-9_-]{16,128})$/u;
 /** How long a forget address is good for: long enough for the host's page to load it once. */
 const FORGET_SECONDS = 300;
+/**
+ * The id a forget address's ticket is kept under: not a document's ticket's (`ticketId`), so
+ * neither kind can be taken, or spent, at the other's address.
+ */
+const forgetId = (ticket: string): string => ticketId(`forget:${ticket}`);
 const FILES_PREFIX = "/__porthole/f/";
 /** An asset's address (P089): `/_blob/` and 32 lowercase hex characters (`ASSET_ID`). */
 const ASSET_ROUTE = /^\/_blob\/([0-9a-f]{32})$/u;
@@ -1029,8 +1034,10 @@ export function createServer(options: ServerOptions): PortholeServer {
    */
   async function serveForget(request: Request, label: string, ticket: string): Promise<Response> {
     const method = request.method.toUpperCase();
+    // Under an id of its own (`forgetId`): a document's ticket brought here names no record, and
+    // is not spent by the asking.
     const record =
-      method === "GET" || method === "HEAD" ? await tickets.take(ticketId(ticket)) : null;
+      method === "GET" || method === "HEAD" ? await tickets.take(forgetId(ticket)) : null;
     let named: string | null = null;
     try {
       named = record === null ? null : nameOf(cleanInstance(record.instance).scope);
@@ -2388,8 +2395,9 @@ export function createServer(options: ServerOptions): PortholeServer {
         throw new TypeError("forgetStorage: a scope is 1 to 512 characters");
       }
       const ticket = newTicket();
-      await tickets.put(ticketId(ticket), {
-        // No document: the ticket opens none (`take` refuses it), and names its scope alone.
+      await tickets.put(forgetId(ticket), {
+        // No document: the ticket opens none (it is kept under another id than a document's
+        // ticket, and `take` refuses its record besides), and names its scope alone.
         instance: { scope, document: { kind: "shell", preset: "forget" } },
         viewer: "",
         expiresAt: Date.now() + FORGET_SECONDS * 1000,

@@ -19,9 +19,11 @@ P-numbers below.
   (`server.forgetStorage`) returns an address your page loads once when a scope is gone, the one
   answer that carries `Clear-Site-Data: "storage"`. `/server` answers `/__porthole/store/<token>`
   and `/__porthole/forget/<ticket>` on scope labels; a content Worker of your own uses
-  `storeResponse` and `forgetResponse` (ADOPTING, "A nested page's storage"). The nested shell's
-  script and the shell runtime every served document inlines change again (their pins; the nested
-  shell's `script-src` hash with it). Both sides need 0.16.0.
+  `storeResponse` and `forgetResponse` (ADOPTING, "A nested page's storage"). Both documents are
+  sandboxed to scripts and their own origin, and a forget address clears the copy kept under
+  your page: one kept under another top-level site stays until the browser evicts it. The nested
+  shell's script and the shell runtime every served document inlines change again (their pins;
+  the nested shell's `script-src` hash with it). Both sides need 0.16.0.
 
 ## 0.15.3
 

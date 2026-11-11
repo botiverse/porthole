@@ -950,7 +950,11 @@ and hands it and the page's runtime the two ends of one channel. What differs fr
 - **`host.forgetStorage(scope)`** (`server.forgetStorage`) for a scope that is gone: call it from
   your backend when the thing the scope stood for is deleted, and have your page load the address
   it returns once, in a hidden frame; the browser then drops what that origin kept. It is good
-  once and for five minutes. Nothing else clears storage: no status page does.
+  once and for five minutes. Nothing else clears storage: no status page does. What it reaches:
+  browsers key a framed origin's storage by the page at the top, so loading the address in your
+  page clears the copy kept under your page, which is the one your displays used. A copy made
+  with the scope's address open on a tab of its own, or framed under another host, is another
+  partition and stays until the browser evicts it.
 - `storage: { shared: "…" }` is refused with `nested`.
 
 A content Worker of your own answers two more addresses **on the scope's own label** (not the

@@ -289,7 +289,7 @@ describe("what a content origin answers", () => {
     const script = inlineScriptOf(await answer.text());
     expect(script).toBe(storeScript({ shell: SHELL }));
     expect(csp).toBe(
-      `default-src 'none'; script-src ${hashOf(script)}; base-uri 'none'; form-action 'none'; frame-ancestors ${HOST} ${SHELL}`,
+      `default-src 'none'; script-src ${hashOf(script)}; base-uri 'none'; form-action 'none'; sandbox allow-scripts allow-same-origin; frame-ancestors ${HOST} ${SHELL}`,
     );
     expect(answer.headers.get("cache-control")).toBe("no-store");
     expect(answer.headers.get("clear-site-data")).toBeNull();
@@ -305,6 +305,7 @@ describe("what a content origin answers", () => {
     const csp = answer.headers.get("content-security-policy") ?? "";
     expect(csp).toContain(`script-src ${hashOf(FORGET_SCRIPT)}`);
     expect(csp).toContain(`frame-ancestors ${HOST}`);
+    expect(csp).toContain("sandbox allow-scripts allow-same-origin;");
     expect(inlineScriptOf(await answer.text())).toBe(FORGET_SCRIPT);
     expect(FORGET_SCRIPT).toContain("localStorage.clear()");
   });
@@ -321,6 +322,10 @@ describe("what a content origin answers", () => {
     const page = `${SHELL}/__porthole/f/abc/`;
     const script = frameShellScript({ origins: [HOST], page, store: `${SCOPE}${STORE_PREFIX}tok` });
     expect(script).toContain(`"store":"${SCOPE}${STORE_PREFIX}tok"`);
+    // The store's frame has its own origin and scripts, and nothing else a frame may do.
+    expect(FRAME_SHELL_RUNTIME).toContain(
+      'storeFrame.setAttribute("sandbox", "allow-scripts allow-same-origin");',
+    );
     expect(frameShellScript({ origins: [HOST], page })).not.toContain('"store"');
     for (const store of [
       `${SHELL}${STORE_PREFIX}tok`,
@@ -430,12 +435,26 @@ describe("/server", () => {
     const second = await porthole.handle(ask(again));
     expect(second?.status).toBe(404);
     expect(second?.headers.get("clear-site-data")).toBeNull();
-    // As a document's ticket it opens nothing.
+    // As a document's ticket it opens nothing, and is not spent by the try.
     const third = await porthole.forgetStorage("one");
     const ticket = new URL(third).pathname.split("/").at(-1) ?? "";
-    const asTicket = await porthole.handle(ask(`${scope}/?t=${ticket}`));
-    expect(asTicket?.status).not.toBe(200);
-    expect(asTicket?.headers.get("clear-site-data")).toBeNull();
+    const location = await porthole.issue(
+      { scope: "one", document: { kind: "artifact", id: "page", version: "1" } },
+      { viewer: "ada" },
+    );
+    const asTicket = new URL(location.url);
+    asTicket.searchParams.set("ticket", ticket);
+    const refused = await porthole.handle(ask(asTicket.href));
+    expect(refused?.status).not.toBe(200);
+    expect(refused?.headers.get("clear-site-data")).toBeNull();
+    expect((await porthole.handle(ask(third)))?.status).toBe(200);
+    // And a document's ticket brought to the forget address is not spent there: its own address
+    // still opens.
+    const real = new URL(location.url).searchParams.get("ticket") ?? "";
+    expect(real.length).toBeGreaterThan(10);
+    const misplaced = await porthole.handle(ask(`${scope}/__porthole/forget/${real}`));
+    expect(misplaced?.status).toBe(404);
+    expect((await porthole.handle(ask(location.url)))?.status).toBe(200);
     await expect(porthole.forgetStorage("")).rejects.toThrow(/scope/u);
   });
 });

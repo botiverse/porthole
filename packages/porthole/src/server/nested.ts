@@ -193,6 +193,9 @@ export function storeResponse(options: {
     ["script-src", `'sha256-${base64(sha256(utf8(script)))}'`],
     ["base-uri", "'none'"],
     ["form-action", "'none'"],
+    // Its own origin and scripts, nothing else: in its answer too, for a frame whose attribute a
+    // shell of a host's own forgot.
+    ["sandbox", "allow-scripts", "allow-same-origin"],
     [
       "frame-ancestors",
       ...ancestorsOf(options.hostOrigins, options.framedBy).split(" "),
@@ -261,7 +264,7 @@ export function forgetResponse(options: {
       headers: {
         "content-type": "text/html; charset=utf-8",
         "clear-site-data": '"storage"',
-        "content-security-policy": `default-src 'none'; script-src 'sha256-${base64(sha256(utf8(FORGET_SCRIPT)))}'; base-uri 'none'; form-action 'none'; frame-ancestors ${ancestorsOf(options.hostOrigins, options.framedBy)}`,
+        "content-security-policy": `default-src 'none'; script-src 'sha256-${base64(sha256(utf8(FORGET_SCRIPT)))}'; base-uri 'none'; form-action 'none'; sandbox allow-scripts allow-same-origin; frame-ancestors ${ancestorsOf(options.hostOrigins, options.framedBy)}`,
         "cache-control": "no-store",
         "referrer-policy": "no-referrer",
         "x-content-type-options": "nosniff",

@@ -148,6 +148,9 @@ const frameShellRuntime = (strict: boolean): string => String.raw`(() => {
     if (at !== null && at.origin !== own && at.pathname.indexOf("/__porthole/store/") === 0) {
       storeOrigin = at.origin;
       storeFrame = document.createElement("iframe");
+      // Its own origin (localStorage needs it) and scripts, and nothing else a frame may do: no
+      // window of its own, no navigating the pages above it, should the store ever go wrong.
+      storeFrame.setAttribute("sandbox", "allow-scripts allow-same-origin");
       storeFrame.setAttribute("referrerpolicy", "no-referrer");
       storeFrame.setAttribute("aria-hidden", "true");
       storeFrame.tabIndex = -1;

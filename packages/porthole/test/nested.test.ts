@@ -142,10 +142,20 @@ describe("the sandbox (P111): never allow-same-origin on a nested page", () => {
       expect.stringMatching(
         /^conformance\/host-kit\.ts: body: `<!doctype html><title>Foreign<\/title>/u,
       ),
+      // P149's two documents of Porthole's own on a scope's origin, which hold no content: the
+      // store needs that origin (its localStorage is what it keeps), the forget document clears
+      // it. Their answers say scripts and their own origin, and nothing else a frame may do.
+      'server/nested.ts: ["sandbox", "allow-scripts", "allow-same-origin"],',
+      expect.stringMatching(
+        /^server\/nested\.ts: "content-security-policy": `default-src 'none'; script-src 'sha256-\$\{base64\(sha256\(utf8\(FORGET_SCRIPT\)\)\)\}'; base-uri 'none'; form-action 'none'; sandbox allow-scripts allow-same-origin; frame-ancestors /u,
+      ),
       // The shell's refusal of a plan that names it.
       'shell/frame.ts: if (typeof plan.sandbox !== "string" || /allow-same-origin/i.test(plan.sandbox)) {',
+      // The store's frame, in the shell: the same two tokens as its answer.
+      'shell/frame.ts: storeFrame.setAttribute("sandbox", "allow-scripts allow-same-origin");',
     ]);
-    // And every attribute write takes a value from these, never a literal of its own.
+    // And every attribute write takes a value from these, never a literal of its own, but the
+    // store's: the shell's runtime is text that imports nothing, and a plan's word is not asked.
     const writes = files.flatMap((file) =>
       readFileSync(file, "utf8")
         .split("\n")
@@ -157,6 +167,7 @@ describe("the sandbox (P111): never allow-same-origin on a nested page", () => {
       // A served display's door (P125): scripts alone, from its own list.
       'platform/web.ts: frame.setAttribute("sandbox", DOOR_SANDBOX_TOKENS.join(" "));',
       'shell/frame.ts: frame.setAttribute("sandbox", plan.sandbox);',
+      'shell/frame.ts: storeFrame.setAttribute("sandbox", "allow-scripts allow-same-origin");',
     ]);
     expect(DOOR_SANDBOX_TOKENS).toEqual(["allow-scripts"]);
     // The door frame has no name (P125): nothing can target it (`window.open(url, name)`, a link's or

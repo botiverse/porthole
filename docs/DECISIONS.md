@@ -9555,8 +9555,10 @@ handed to the page.
 3. **The store answers its own scope's shell alone.** It is on a content origin: to answer
    anyone's port would hand over the whole storage. Its `frame-ancestors` is that shell's origin
    and the pages above it (the header is matched against every ancestor, so the host's page is
-   named; nothing else is). And it takes a port only from the browser's own message whose
-   `source` is its parent and whose `origin` is exactly that shell's: a host's page that framed
+   named; nothing else is), and it is sandboxed to scripts and its own origin, in the frame's
+   attribute and in its answer (it opens no window and navigates nothing above it, should it
+   ever go wrong; Ferryman, on the code). And it takes a port only from the browser's own message
+   whose `source` is its parent and whose `origin` is exactly that shell's: a host's page that framed
    the store directly passes the header and fails this, which is the gate. A new port from its
    shell replaces the one before (the shell makes a channel at each load of the page's frame).
    `/server` answers the address only for a token it sealed for that shell (the shell's label is
@@ -9591,7 +9593,11 @@ handed to the page.
    that answer and no other: the origin is the whole scope's, so no status page may carry either
    (a version gone, a ticket ended, a file's 404, which content can cause), and the header never
    says `"cookies"` or `"*"`. It does not wait for the page's own address to be asked again, which
-   a deleted document's never is.
+   a deleted document's never is. Its ticket is kept under an id of its own, so a document's
+   ticket brought to the forget address is not spent there, and a forget ticket opens no
+   document. It reaches the copy of the storage kept under the host's page (browsers partition a
+   framed origin's storage by the top page): a copy made on a tab of the scope's own, or under
+   another host, stays until the browser evicts it.
 8. **Opted into.** `nested: true` may now keep `storage.scope`; `storage.shared` it may not (a
    scope several displays share is several pages' storage at once, which one peer and one cap
    don't cover). Without `storage`, a nested page is as before: memory, no store framed.

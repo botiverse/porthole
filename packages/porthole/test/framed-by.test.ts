@@ -675,8 +675,8 @@ const V0_14_16 = {
  * change to it is said too. The default path's still carries nothing of `framedBy`'s (P144).
  */
 const SHELL_V0_16_0 = {
-  shellRuntime: "'sha256-3IR3m+VUCRXPA1LYDuAnHUJzthqObGlKAUCqU0zDnVA='",
-  shell: "'sha256-hZKkObbkIeqBJv0qQLSrJogy/Fxlqhy1YihJgaUACic='",
+  shellRuntime: "'sha256-7LpAlWbdvPXvwBhMdauWU8+ijjcaARRIux6IX/3iw/w='",
+  shell: "'sha256-D2Btp9c6nhW3S1+JEfeDU3hAEu3GWKGYEynBZLsygBQ='",
 };
 const PINNED_HOSTS = ["https://host.example", "ferry://app"];
 const PINNED_ORIGIN = "https://porthole-abcdefghijklmnopqrstuvwx.content.example";
