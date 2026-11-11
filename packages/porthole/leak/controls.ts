@@ -239,6 +239,10 @@ export const STORAGE_PEER =
   "the store answers its own shell alone: the host's page, framing it and handing it a port, is told nothing (P149)";
 export const STORAGE_FORGET =
   "a scope's forget address empties what its origin kept, once, and nothing of another scope's (P149)";
+export const STORAGE_NEXT_PAGE =
+  "what a page wrote as it went on to the next page of its set is what that page reads, and what that page then writes is what stays (P149)";
+export const STORAGE_SAME_DOCUMENT =
+  "a write after a link within the document is kept once, and is not told back to the page (P149)";
 export const STORAGE_CONTENT_WORDS =
   "what a page says to its parent in the shell's name clears nothing and writes nothing (P149)";
 const HONEST_SCROLL =
@@ -962,6 +966,14 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     fails: all(STORAGE_CAPS_THROW, STORAGE_CAPS_KEPT),
   },
   // A load that started on memory takes no port after: nothing of it is ever written back.
+  // The port before is heard until its page is done: what a page wrote as it left is kept.
+  "store-drain": {
+    specs: [NESTED_STORAGE],
+    fails: { chromium: [], webkit: [STORAGE_NEXT_PAGE], firefox: [] },
+    holds: {
+      why: "no probe can see it on Chromium and Firefox: there the store has kept what the page before sent by the time the next page's port comes (measured, now that it counts as it writes; Firefox lost the last write while it counted the whole origin at each one); the store's unit test holds the order there",
+    },
+  },
   "storage-late": { specs: [NESTED_STORAGE], fails: all(STORAGE_LATE) },
   // The host's word to clear is the host's alone: the shell takes it from no page.
   "storage-clear-source": { specs: [NESTED_STORAGE], fails: all(STORAGE_CONTENT_WORDS) },

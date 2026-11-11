@@ -9560,8 +9560,8 @@ handed to the page.
    ever go wrong; Ferryman, on the code). And it takes a port only from the browser's own message
    whose `source` is its parent and whose `origin` is exactly that shell's: a host's page that framed
    the store directly passes the header and fails this, which is the gate. A new port from its
-   shell replaces the one before (the shell makes a channel at each load of the page's frame).
-   `/server` answers the address only for a token it sealed for that shell (the shell's label is
+   shell takes the place of the one before (the shell makes a channel at each load of the page's
+   frame), once that one's page is done (item 9). `/server` answers the address only for a token it sealed for that shell (the shell's label is
    the scope's label's own, so a token minted for another scope names another shell), not ended,
    and only to a GET.
 4. **The runtime has the keys before content runs.** It takes the storage port as it takes the
@@ -9602,6 +9602,36 @@ handed to the page.
    scope several displays share is several pages' storage at once, which one peer and one cap
    don't cover). Without `storage`, a nested page is as before: memory, no store framed.
 
+9. **One page after another** (added on the code's review, before 0.16.0 went out; Ferryman,
+   Tenny). A page writes and goes on to the next page of its set, the commonest way a page
+   saves: its last writes are still on the way, or waiting in the store behind others, when the
+   next page's port comes. The first cut closed the port before at once: those writes were lost,
+   and the next page read what was kept before them (measured: Firefox lost a write made in the
+   task that left, WebKit one made in the page's own `pagehide` handler). Now:
+   - the page's runtime says `bye` on its port as its document goes (`pagehide`, heard before
+     any listener of the content's), and before it takes a port in the place of one it had
+     (WebKit's load for a link within the document). No count goes with it: a port delivers in
+     order, so what was sent before `bye` has come when `bye` has;
+   - the store hears the port before, **for writes alone**, until its page said `bye` (or 300 ms,
+     for one that never does: a frame taken away, a page stuck) **and** a turn of the store's
+     own has then passed with nothing more from it (a message to itself: a browser may hear a
+     port one message at a time with other tasks between, and a page's own `pagehide` handler
+     writes after the runtime's `bye`), and never longer than a second in all from the next
+     port (a page that goes on writing keeps the next one waiting no longer; what it still had
+     on the way is then dropped). What the next page says meanwhile waits, in order;
+   - so the next page's first answer has everything the one before wrote, and what it writes
+     itself comes after: a late write of the page before never lands on top of the next page's.
+     Nothing is told back to a page of its own or its predecessor's writes (a value told back
+     late would undo a later one in the page's map);
+   - the host's clearing closes the port before first: nothing a page that has gone still had
+     on the way is written after it;
+   - the store counts what the origin holds once and keeps the count up with its own writes
+     (again when another document of the origin wrote: its `storage` event, or a number of keys
+     that differs; when a write threw; when it was cleared). It counted the whole origin at
+     every write, so a few thousand writes took seconds and everything behind them waited.
+   The port before is the same scope's last page's runtime's: hearing it a moment longer gives
+   no one anything they did not have.
+
 **What the store's word is.** The scope's content's word, and no more. A served display of the
 same scope runs content with `allow-same-origin` on the store's origin (P114 keeps the shell off
 it for that): it can read and write the same `localStorage` and watch every write by the
@@ -9624,16 +9654,19 @@ tabs of one page each hold the keys as they were at their load; a write in one r
 (the store passes the origin's `storage` event on) without a `storage` event of the page's own.
 A load whose store answers late runs on memory and saves nothing. A write is kept when its
 message reaches the store, a moment after the page made it, where a served page's is kept at
-once: one made as the display goes may be lost, and the store checks the caps against the whole
-origin at each write, so a burst of thousands is worked through in seconds, not at once (CI's
-Firefox, the full run on this decision's own PR: four writes queued behind two thousand were not
-kept half a second later). A browser that never opens the
+once: one made as the whole display goes (the tab closed, the host's frame removed) may be
+lost, as may what a page still had on the way a second after its next page's port came, or
+300 ms after it for a page that never said it was going. (Found by CI's Firefox on this
+decision's own PR, when the store still counted the whole origin at each write: four writes
+queued behind two thousand were not kept half a second later.) A browser that never opens the
 host again keeps what it has (at most what it had, never grown past 1 MiB by a nested page) until
 the browser evicts it.
 
 **Tested.** `test/nested-storage.test.ts`: the config and plan; the store's script against a
-stub origin (its one peer, a replaced port, strings alone, the caps by its own count and an origin
-already past them, the host's clear, another tab's change, a browser with no storage); the
+stub origin (its one peer; the port before heard until its page is done: `bye` and a quiet
+turn, 300 ms without one, a second in all, a third port, the host's clear; strings alone; the
+caps by its own count, kept up and made again, and an origin already past them; another tab's
+change; a browser with no storage); the
 store's and the forget address's answers; the shell's CSP and script with a store; `/server`'s
 store and forget routes (another scope's label, a files token, another method, once, the header
 there alone, the ticket opening nothing else). `leak/served/nested-storage.spec.ts` on full
@@ -9644,10 +9677,15 @@ engine); past the caps `setItem` throws, and nothing past them is kept; names an
 trip on; `display.storage.clear()`; a store held back 4 s leaves the load on memory, tells the
 host, and writes nothing back then or later; the host's page framing the store and handing it a
 port is told nothing; the forget address empties its scope's and no other's, once, and no status
-page carries the header; what a page says in the shell's name clears and writes nothing. Negative
+page carries the header; what a page says in the shell's name clears and writes nothing; what a
+page wrote as it went on to its next page (in the task that left, and in its own `pagehide`
+handler) is what that page reads, and what that page then writes to the same key is what stays;
+a write after a link within the document is kept once. Negative
 controls, each failing its probe on Chromium, WebKit and Firefox: `store-origin`, `storage-caps`,
 `store-caps` (behind `storage-caps`: it fails its probe with both out), `storage-late`,
-`storage-clear-source`. No browser control for the store's `frame-ancestors` (the port check is
+`storage-clear-source`; and `store-drain` (the port before closed at once), which fails its
+probe on WebKit alone: on Chromium and Firefox the store has kept what the page before sent by
+the time the next port comes, now that it counts as it writes, and its unit test holds the order. No browser control for the store's `frame-ancestors` (the port check is
 the gate; the header's exact value is the unit test's) nor for the forget ticket (the unit
 test's).
 

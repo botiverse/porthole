@@ -68,6 +68,11 @@ describe("config and plan", () => {
     expect(STORE_RUNTIME).toContain(`"${SHELL_STORE_CLEAR_METHOD}"`);
     expect(SHELL_RUNTIME).toContain(`data.method === "${SHELL_STORAGE_PORT_METHOD}"`);
     expect(SHELL_STORAGE_CLEAR_METHOD).toBe("porthole/shell/storage-clear");
+    // The page's runtime tells the store it is going: as its document goes, and as it takes a
+    // port in the place of one it had.
+    expect(SHELL_RUNTIME.split("storeSay({ bye: 1 });")).toHaveLength(3);
+    expect(SHELL_RUNTIME).toContain('"pagehide",');
+    expect(STORE_RUNTIME).toContain("data.bye === 1");
     // The caps, the same number on both sides.
     expect(SHELL_RUNTIME).toContain(`const MAX_UNITS = ${STORE_MAX_UNITS};`);
     expect(SHELL_RUNTIME).toContain(`const MAX_KEYS = ${STORE_MAX_KEYS};`);
@@ -94,11 +99,21 @@ function storeAt(options: { storage?: Map<string, string> | null; shell?: string
         removeItem: (key: string) => void items.delete(key),
         clear: () => items.clear(),
       };
+  // Its timers and its messages to itself, run by hand: `elapse` and `turn`.
+  const timers: { run: () => void; at: number }[] = [];
+  let now = 0;
+  const own: (() => void)[] = [];
+  class OwnChannel {
+    port1 = { onmessage: null as (() => void) | null, close() {} };
+    port2 = { postMessage: () => void own.push(() => this.port1.onmessage?.()) };
+  }
   const context: Record<string, unknown> = {
     parent,
     addEventListener: (type: string, listener: (event: unknown) => void) => {
       (type === "message" ? heard : type === "storage" ? onStorage : []).push(listener);
     },
+    setTimeout: (run: () => void, ms: number) => void timers.push({ run, at: now + ms }),
+    MessageChannel: OwnChannel,
   };
   Object.defineProperty(context, "localStorage", {
     get() {
@@ -142,7 +157,21 @@ function storeAt(options: { storage?: Map<string, string> | null; shell?: string
     post({ jsonrpc: "2.0", method: SHELL_STORE_PORT_METHOD }, { ...more, ports: [made.end] });
     return made;
   };
-  return { items, post, give, onStorage, storage };
+  /** The store's next message to itself comes back (one turn of its own); false when none waits. */
+  const turn = () => {
+    const next = own.shift();
+    next?.();
+    return next !== undefined;
+  };
+  const elapse = (ms: number) => {
+    now += ms;
+    const due = timers.filter((each) => each.at <= now);
+    for (const timer of due) {
+      timers.splice(timers.indexOf(timer), 1);
+      timer.run();
+    }
+  };
+  return { items, post, give, onStorage, storage, turn, elapse };
 }
 
 describe("the store's script", () => {
@@ -167,14 +196,98 @@ describe("the store's script", () => {
     expect(port.said).toEqual([{ keys: [["k", "v"]], kept: true }]);
   });
 
-  test("a new port from its shell replaces the one before, which hears nothing more", () => {
-    const { give } = storeAt({ storage: new Map([["k", "v"]]) });
+  test("a new port takes the place of the one before once that one's page is done: it said bye, and a turn passed with nothing more from it", () => {
+    const { give, items, turn } = storeAt({ storage: new Map([["k", "v"]]) });
+    const first = give();
+    first.tell({ set: ["a", "1"] });
+    // The page goes: its runtime's bye, then what its own pagehide handler still writes.
+    first.tell({ bye: 1 });
+    first.tell({ set: ["late", "x"] });
+    const second = give();
+    expect(first.end.closed, "still heard").toBe(false);
+    second.tell({ ask: 1 });
+    expect(second.said, "the next page waits").toEqual([]);
+    // One more write of the page before arrives during the store's turn: another turn.
+    first.tell({ set: ["later", "y"] });
+    expect(turn()).toBe(true);
+    expect(first.end.closed).toBe(false);
+    expect(second.said).toEqual([]);
+    expect(turn()).toBe(true);
+    expect(first.end.closed, "a quiet turn: done").toBe(true);
+    expect(second.said).toEqual([
+      {
+        keys: [
+          ["k", "v"],
+          ["a", "1"],
+          ["late", "x"],
+          ["later", "y"],
+        ],
+        kept: true,
+      },
+    ]);
+    // What the next page writes comes after all of it; the one before is heard no more.
+    second.tell({ set: ["a", "2"] });
+    first.tell({ set: ["a", "stale"] });
+    expect(items.get("a")).toBe("2");
+    expect(first.said, "and it was told nothing").toEqual([]);
+    expect(turn(), "no turn left over").toBe(false);
+  });
+
+  test("a page that never says bye is waited for 300 ms, then a quiet turn; one that goes on writing, a second in all", () => {
+    const quiet = storeAt();
+    const gone = quiet.give();
+    const next = quiet.give();
+    next.tell({ ask: 1 });
+    gone.tell({ set: ["a", "1"] });
+    quiet.elapse(299);
+    expect(quiet.turn(), "not yet").toBe(false);
+    expect(next.said).toEqual([]);
+    quiet.elapse(1);
+    expect(quiet.turn()).toBe(true);
+    expect(gone.end.closed).toBe(true);
+    expect(next.said).toEqual([{ keys: [["a", "1"]], kept: true }]);
+
+    const busy = storeAt();
+    const writer = busy.give();
+    const waiting = busy.give();
+    waiting.tell({ ask: 1 });
+    writer.tell({ bye: 1 });
+    for (let i = 0; i < 5; i += 1) {
+      writer.tell({ set: ["n", String(i)] });
+      expect(busy.turn()).toBe(true);
+      expect(waiting.said, "it writes on: the next page still waits").toEqual([]);
+    }
+    busy.elapse(1000);
+    expect(writer.end.closed, "a second in all, and no longer").toBe(true);
+    expect(waiting.said).toEqual([{ keys: [["n", "4"]], kept: true }]);
+    writer.tell({ set: ["n", "dropped"] });
+    expect(busy.items.get("n")).toBe("4");
+  });
+
+  test("the port before is heard for writes alone; a third port waits in the second's place; the host's clearing is the last word", () => {
+    const { give, items, turn, post } = storeAt({ storage: new Map([["k", "v"]]) });
     const first = give();
     const second = give();
-    expect(first.end.closed).toBe(true);
     second.tell({ ask: 1 });
-    expect(second.said).toHaveLength(1);
+    // No answer to the one before, whatever it asks.
+    first.tell({ ask: 1 });
     expect(first.said).toEqual([]);
+    const third = give();
+    expect(second.end.closed, "the second's page never ran").toBe(true);
+    expect(first.end.closed).toBe(false);
+    third.tell({ ask: 1 });
+    first.tell({ set: ["a", "1"] });
+    // The host clears: nothing the page before still had on the way is written after it.
+    post({ jsonrpc: "2.0", method: SHELL_STORE_CLEAR_METHOD });
+    expect(first.end.closed).toBe(true);
+    first.tell({ set: ["a", "again"] });
+    expect(Array.from(items)).toEqual([]);
+    expect(third.said).toEqual([{ cleared: 1 }, { keys: [], kept: true }]);
+    expect(second.said).toEqual([]);
+    while (turn()) {
+      // What was left of the turns changes nothing.
+    }
+    expect(third.said).toHaveLength(2);
   });
 
   test("set, remove and clear are strings into the origin's storage, and nothing else is anything", () => {
@@ -243,6 +356,32 @@ describe("the store's script", () => {
     expect(full.items.has("new")).toBe(false);
     other.tell({ set: ["old", "y".repeat(STORE_MAX_UNITS + 5)] });
     expect(full.items.get("old")?.length).toBe(STORE_MAX_UNITS + 5);
+  });
+
+  test("its count is kept up with its own writes, and made again when another document of the origin wrote", () => {
+    const { give, items, onStorage, storage } = storeAt();
+    const port = give();
+    const most = "x".repeat(STORE_MAX_UNITS - 10);
+    port.tell({ set: ["a", most] });
+    port.tell({ remove: "a" });
+    port.tell({ set: ["b", most] });
+    expect(items.has("b"), "what a removal freed is free").toBe(true);
+    port.tell({ set: ["c", most] });
+    expect(items.has("c")).toBe(false);
+    // Another document shrinks b, the same number of keys, and its storage event says so.
+    items.set("b", "y");
+    for (const listener of onStorage) {
+      listener({ storageArea: storage, key: "b", newValue: "y" });
+    }
+    port.tell({ set: ["c", most] });
+    expect(items.has("c"), "counted again").toBe(true);
+    // Another adds a key, its event not here yet: the number of keys differs, counted again.
+    items.set("d", "z".repeat(10));
+    port.tell({ set: ["e", ""] });
+    expect(items.has("e"), "past the cap as it now is").toBe(false);
+    port.tell({ clear: 1 });
+    port.tell({ set: ["e", most] });
+    expect(items.has("e"), "cleared: all of it is free").toBe(true);
   });
 
   test("the host's word to clear, from its shell alone; another tab's change is passed on", () => {

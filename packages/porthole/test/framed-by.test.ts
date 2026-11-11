@@ -804,7 +804,7 @@ const RUNTIME_V0_16_0 = {
   // page's shell its real presses (P148: 'sha256-kWx9H3mLZTPs2MHT4fmpNuaZN9qIXLAVePeULjBsq/U=');
   // 0.16.0's keeps a nested page's storage where its config does (P149). Each is installed only
   // under a nested page's plan.
-  shell: "'sha256-oaHI5QMTPlPqvjNZ/U1acbXOchDS0Rk7BfIzQu4lI48='",
+  shell: "'sha256-N62mdhZwjDQgA7YW7C2iB1xdy8uVmGGgy8aE+wyISG0='",
   // 0.15.0's was 'sha256-3PZMe4arifdWHJU1jS0laR49wiWc/uBWIFddGJPyf/w=': 0.15.2's marks ride the
   // document's scroll (P147). The other three are 0.15.0's.
   annotate: "'sha256-uQ77dZDXcY6pKRoTylHpGXY+ZhhCt4WZhB/qDTQJ6BE='",

@@ -873,8 +873,18 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "store-caps": [
     {
       file: "src/shell/store.ts",
-      find: "        if (fits(data.set[0], data.set[1])) {",
-      replace: "        if (true) {",
+      find: "        const room = fits(data.set[0], data.set[1]);",
+      replace: "        const room = [0, 0];",
+    },
+  ],
+  // The store closes the port before as soon as the next comes (0.16.0's first cut): what its
+  // page still had on the way is dropped, and the next page is answered without it.
+  "store-drain": [
+    {
+      file: "src/shell/store.ts",
+      find: "    } else if (port !== null) {\n      before = port;",
+      replace:
+        "    } else if (port !== null && (port.onmessage = null, port.close(), false)) {\n      before = port;",
     },
   ],
   // A load that fell back to memory still takes the store's port when it comes, and writes to it.
@@ -1108,6 +1118,7 @@ const SERVED = [
   "store-origin",
   "storage-caps",
   "store-caps",
+  "store-drain",
   "storage-late",
   "storage-clear-source",
   // A hostless plan's shell (P143): an embed session's documents, made in the embed spec's process.

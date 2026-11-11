@@ -1804,6 +1804,12 @@ export const SHELL_RUNTIME = String.raw`(() => {
               return;
             }
             const taken = ports[0];
+            // A port in the place of one this document already had (WebKit's load for a link
+            // within the document): the store is told the first is done with, so what was
+            // written on it is kept before anything written on this one.
+            if (storeSay !== null) {
+              storeSay({ bye: 1 });
+            }
             callOf(storeListen, taken, [
               "message",
               (message) => {
@@ -1835,6 +1841,18 @@ export const SHELL_RUNTIME = String.raw`(() => {
               storeSay({ ask: 1 });
             }
           } catch (_) {}
+        },
+        true,
+      ]);
+      // Going (to the next page of its set, or away): the store is told, so it knows when it
+      // has everything this page wrote, and the next page starts from all of it. Before any
+      // listener of the content's, whose own writes as it leaves follow this on the same port.
+      callOf(storeListen, window, [
+        "pagehide",
+        () => {
+          if (storeSay !== null) {
+            storeSay({ bye: 1 });
+          }
         },
         true,
       ]);

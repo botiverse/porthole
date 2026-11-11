@@ -12,11 +12,19 @@ import { scriptJson } from "./frame.ts";
  * - **a port**, from its parent alone, at its shell's origin alone, in a message that is the
  *   browser's own (`porthole/shell/store-port`, one port). The store is on a content origin: to
  *   answer anyone else's port would be to hand over the whole storage. A new port from its shell
- *   (the page's frame loaded again) replaces the one before;
+ *   (the page's frame loaded again) takes the place of the one before, once what that one's page
+ *   wrote before it went has been kept (below);
  * - **the host's word to clear** (`porthole/shell/store-clear`), from its shell the same way;
  * - **data**, on the port: `ask` (answered with every key the origin holds), `set`, `remove`,
- *   `clear`. Keys and values are strings and nothing else; they are the content's words, kept as
- *   they come and never read as anything.
+ *   `clear`, and `bye` (its page is going). Keys and values are strings and nothing else; they
+ *   are the content's words, kept as they come and never read as anything.
+ *
+ * **One page after another.** A page writes, and goes on to the next page of its set: its last
+ * writes are still on the way when the next page's port comes. The port before stays heard, for
+ * writes alone, until its page said `bye` (or 300 ms, for one that never does) and a turn of this
+ * document's own has passed with nothing more from it, and never longer than a second in all;
+ * what the next page says meanwhile waits, in order. So the next page starts with everything
+ * the one before wrote, and its own writes come after them.
  *
  * It never grows the origin's `localStorage` past the caps (`units`: the sum of every key's and
  * value's length, in UTF-16 code units; `keys`): a write that would is dropped, and the page's
@@ -43,7 +51,29 @@ export const STORE_RUNTIME = String.raw`(() => {
   } catch (_) {
     storage = null;
   }
+  // The port answered: the page's frame's current load's.
   let port = null;
+  // Whether that load said it is going ("bye": its document's pagehide, or its runtime taking a
+  // port in this one's place).
+  let leaving = false;
+  // The port before it, while what its page sent before going is worked through, and what the
+  // current one has said meanwhile, in order. A page that saves as it leaves and goes on to the
+  // next page of its set has its last writes still on the way, or waiting here behind others,
+  // when the next page's port comes: closed then, they were lost, and the next page read what
+  // was kept before them. So the port before is heard on, for writes alone, until its page has
+  // said bye (or DRAIN_MS, for one that never does: a frame taken away) and a whole turn of this
+  // document's own then passes with nothing more from it; only then is the next page answered,
+  // with everything the one before wrote, and what it writes itself comes after.
+  let before = null;
+  let gone = false;
+  let since = 0;
+  let held = null;
+  const DRAIN_MS = 300;
+  // And never longer than this in all, from the next page's port: a page that goes on writing
+  // (stuck in a loop, or meaning to) keeps the next one waiting no longer, and what it still
+  // had on the way then is dropped.
+  const SETTLE_MS = 1000;
+  const later = setTimeout;
   const say = (message) => {
     if (port !== null) {
       try {
@@ -68,40 +98,121 @@ export const STORE_RUNTIME = String.raw`(() => {
     return all;
   };
   const answer = () => say({ keys: pairs(), kept: storage !== null });
-  // Whether writing value under key keeps the origin within the caps, or at least grows neither
-  // count (what is already past them can shrink).
+  // What the origin holds, counted once and then kept up with this document's own writes: every
+  // key's and value's length, and how many keys. Counted again when it may no longer be right:
+  // another document of the origin wrote (its storage event, or a count of keys that differs),
+  // a write threw, the storage was cleared. (Counting it all at every write made a few thousand
+  // writes take seconds, with the page's next ones waiting behind them.)
+  let units = 0;
+  let count = 0;
+  let counted = false;
+  // What writing value under key would add, [units, keys], if that keeps the origin within the
+  // caps or at least grows neither count (what is already past them can shrink); else null.
   const fits = (key, value) => {
-    let units = 0;
-    let count = 0;
-    let before = null;
-    for (const [each, held] of pairs()) {
-      units += each.length + held.length;
-      count += 1;
-      if (each === key) {
-        before = held;
+    if (!counted || storage.length !== count) {
+      units = 0;
+      count = 0;
+      for (const [each, held] of pairs()) {
+        units += each.length + held.length;
+        count += 1;
       }
+      counted = true;
     }
-    const grown = before === null ? key.length + value.length : value.length - before.length;
-    const more = before === null ? 1 : 0;
-    return (units + grown <= plan.units || grown <= 0) && (count + more <= plan.keys || more === 0);
+    const had = storage.getItem(key);
+    const grown = had === null ? key.length + value.length : value.length - had.length;
+    const more = had === null ? 1 : 0;
+    return (units + grown <= plan.units || grown <= 0) && (count + more <= plan.keys || more === 0) ? [grown, more] : null;
   };
-  const heard = (data) => {
+  // One message from a port: the current one's (asked: it may be answered), or the one before's.
+  const heard = (data, asked) => {
     if (storage === null || data === null || typeof data !== "object") {
       return;
     }
     try {
       if (data.ask === 1) {
-        answer();
+        if (asked) {
+          answer();
+        }
       } else if (Array.isArray(data.set) && data.set.length === 2 && typeof data.set[0] === "string" && typeof data.set[1] === "string") {
-        if (fits(data.set[0], data.set[1])) {
+        const room = fits(data.set[0], data.set[1]);
+        if (room !== null) {
           storage.setItem(data.set[0], data.set[1]);
+          units += room[0];
+          count += room[1];
         }
       } else if (typeof data.remove === "string") {
+        const had = storage.getItem(data.remove);
         storage.removeItem(data.remove);
+        if (counted && had !== null) {
+          units -= data.remove.length + had.length;
+          count -= 1;
+        }
       } else if (data.clear === 1) {
         storage.clear();
+        counted = false;
       }
-    } catch (_) {}
+    } catch (_) {
+      counted = false;
+    }
+  };
+  // The port before is done with: closed, and what the current one said meanwhile is heard.
+  const settle = () => {
+    if (before !== null) {
+      before.onmessage = null;
+      before.close();
+      before = null;
+    }
+    const waiting = held;
+    held = null;
+    if (waiting !== null) {
+      for (let i = 0; i < waiting.length; i += 1) {
+        heard(waiting[i], true);
+      }
+    }
+  };
+  // A turn of this document's own: a message to itself, which comes back after what was already
+  // waiting on the port before has had its turn (a browser may hear a port one message at a
+  // time, with other tasks between). With something heard from it meanwhile, another turn.
+  const turn = (was) => {
+    since = 0;
+    const own = new MessageChannel();
+    own.port1.onmessage = () => {
+      own.port1.close();
+      if (before !== was) {
+        return;
+      }
+      if (since === 0) {
+        settle();
+      } else {
+        turn(was);
+      }
+    };
+    own.port2.postMessage(0);
+  };
+  const listen = (taken) => {
+    taken.onmessage = (message) => {
+      const data = message.data;
+      const bye = data !== null && typeof data === "object" && data.bye === 1;
+      if (taken === before) {
+        since += 1;
+        if (bye) {
+          if (!gone) {
+            gone = true;
+            turn(taken);
+          }
+        } else {
+          heard(data, false);
+        }
+      } else if (taken === port) {
+        if (bye) {
+          leaving = true;
+        } else if (held !== null) {
+          held.push(data);
+        } else {
+          heard(data, true);
+        }
+      }
+    };
   };
   addEventListener("message", (event) => {
     if (event.isTrusted !== true || event.source !== window.parent || event.origin !== plan.shell) {
@@ -112,29 +223,66 @@ export const STORE_RUNTIME = String.raw`(() => {
       return;
     }
     if (data.method === CLEAR) {
+      // The host's word is the last word: nothing a page that has gone still had on the way is
+      // written after it.
+      if (before !== null) {
+        before.onmessage = null;
+        before.close();
+        before = null;
+      }
       try {
         if (storage !== null) {
           storage.clear();
         }
       } catch (_) {}
+      counted = false;
       say({ cleared: 1 });
+      settle();
       return;
     }
     if (data.method !== PORT || event.ports.length !== 1) {
       return;
     }
-    if (port !== null) {
-      port.onmessage = null;
-      port.close();
+    const taken = event.ports[0];
+    if (before !== null) {
+      // A third while the first is worked through: the second's page never ran (it had no
+      // answer yet), so it is closed and the third waits in its place.
+      if (port !== null) {
+        port.onmessage = null;
+        port.close();
+      }
+      held = [];
+    } else if (port !== null) {
+      before = port;
+      gone = leaving;
+      held = [];
+      const was = before;
+      if (gone) {
+        turn(was);
+      } else {
+        later(() => {
+          if (before === was && !gone) {
+            gone = true;
+            turn(was);
+          }
+        }, DRAIN_MS);
+      }
+      later(() => {
+        if (before === was) {
+          settle();
+        }
+      }, SETTLE_MS);
     }
-    port = event.ports[0];
-    port.onmessage = (message) => heard(message.data);
+    port = taken;
+    leaving = false;
+    listen(taken);
   });
   // Another tab of this origin wrote: its page's map follows.
   addEventListener("storage", (event) => {
     if (storage === null || event.storageArea !== storage) {
       return;
     }
+    counted = false;
     if (event.key === null) {
       say({ cleared: 1 });
     } else {

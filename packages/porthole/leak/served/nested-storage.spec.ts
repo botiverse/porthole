@@ -10,11 +10,13 @@ import {
   STORAGE_FORGET,
   STORAGE_KEPT,
   STORAGE_LATE,
+  STORAGE_NEXT_PAGE,
   STORAGE_PEER,
+  STORAGE_SAME_DOCUMENT,
   STORAGE_SCOPES,
 } from "../controls.ts";
 import { harness, showServed } from "./harness.ts";
-import { seen, show, unique, type Shown } from "./nested-pages.ts";
+import { pageOf, seen, show, unique, type Shown } from "./nested-pages.ts";
 
 /**
  * A nested page's kept storage (P149): its scope's own `localStorage`, kept for it by the store
@@ -288,6 +290,65 @@ test.describe("a nested page's kept storage (P149)", () => {
     expect(await reads(page, gone, "k"), "probe: the forgotten scope kept nothing").toBeNull();
     expect(await reads(page, other, "k"), "probe: another scope's is as it was").toBe("v");
   });
+  test(STORAGE_NEXT_PAGE, async ({ page }) => {
+    // A page that saves as it leaves, the tightest order there is: its writes, the last of them
+    // and the move to its next page in one task, and one more in its own pagehide handler
+    // (after the runtime's own word that it is going). The next page reads all of it as it
+    // starts, and writes the same key at once: its value is the one that stays.
+    const scope = unique("kept");
+    const next = pageOf(
+      `say("next", { last: localStorage.getItem("last"), hide: localStorage.getItem("hide"), both: localStorage.getItem("both"), length: localStorage.length });
+      localStorage.setItem("both", "second");`,
+    );
+    const shown = await show(
+      page,
+      `if (localStorage.getItem("last") === null) {
+        addEventListener("pagehide", () => { localStorage.setItem("hide", "h"); });
+        for (let i = 0; i < 40; i += 1) localStorage.setItem("n" + i, "x".repeat(200) + i);
+        localStorage.setItem("both", "first");
+        localStorage.setItem("last", "v");
+        location.href = "next.html";
+      }`,
+      undefined,
+      { "next.html": next },
+      scope,
+      KEPT,
+    );
+    await expect.poll(() => said(shown, "next") !== undefined).toBe(true);
+    expect(said(shown, "next")?.last, "probe: the write made in the task that left").toBe("v");
+    expect(said(shown, "next")?.hide, "probe: and the one made in its pagehide handler").toBe("h");
+    expect(said(shown, "next")?.both).toBe("first");
+    expect(said(shown, "next")?.length, "the forty keys, and the three").toBe(43);
+    expect((await seen(page)).kept, "no load fell back to memory").not.toContain(false);
+    await written(page);
+    expect(await reads(page, scope, "both"), "probe: the next page's write is what stays").toBe(
+      "second",
+    );
+  });
+
+  test(STORAGE_SAME_DOCUMENT, async ({ page }) => {
+    // WebKit fires the frame's load for a link within the document, so the shell hands the same
+    // document a second channel. What the page writes after it is kept, once, and the store tells
+    // the page nothing of its own write (a value told back late would undo a later one).
+    const scope = unique("kept");
+    const shown = await kept(
+      page,
+      scope,
+      `localStorage.setItem("k", "one");
+      location.hash = "#there";
+      setTimeout(() => {
+        localStorage.setItem("k", "two");
+        localStorage.setItem("k", "three");
+        setTimeout(() => say("after", { value: localStorage.getItem("k"), length: localStorage.length }), 400);
+      }, 300);`,
+    );
+    await expect.poll(() => said(shown, "after") !== undefined).toBe(true);
+    expect(said(shown, "after")?.value, "probe: the page reads its own last write").toBe("three");
+    expect(said(shown, "after")?.length).toBe(1);
+    await written(page);
+    expect(await reads(page, scope, "k"), "probe: and it is what was kept").toBe("three");
+  });
+
   test(STORAGE_CONTENT_WORDS, async ({ page }) => {
     // The host's word to clear, and the ports' own messages, said by the page: to its parent
     // (its shell) and to the top (the host's page). The shell takes the first from its host alone

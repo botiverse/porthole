@@ -21,7 +21,9 @@ P-numbers below.
   and `/__porthole/forget/<ticket>` on scope labels; a content Worker of your own uses
   `storeResponse` and `forgetResponse` (ADOPTING, "A nested page's storage"). Both documents are
   sandboxed to scripts and their own origin, and a forget address clears the copy kept under
-  your page: one kept under another top-level site stays until the browser evicts it. The nested
+  your page: one kept under another top-level site stays until the browser evicts it. A write
+  is kept a moment after the page makes it; one page of a set after another is kept in order
+  (the next page starts with what the one before wrote as it left). The nested
   shell's script and the shell runtime every served document inlines change again (their pins;
   the nested shell's `script-src` hash with it). Both sides need 0.16.0.
 
