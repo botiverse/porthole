@@ -23,6 +23,10 @@ import { servedShellWeakened, weakened, weakenServed } from "../weakenings.ts";
 const bytesOf = (body: string | Uint8Array): Uint8Array =>
   typeof body === "string" ? new TextEncoder().encode(body) : body;
 
+let count = 0;
+/** A name no other case of this run has: scopes, artifact ids. */
+export const unique = (name: string): string => `${name}-${process.pid}-${(count += 1)}`;
+
 /** A version made of `files` (path → text or bytes), as a host's store gives it. */
 export function storedFiles(
   files: Readonly<Record<string, string | Uint8Array>>,
@@ -134,26 +138,6 @@ export function withoutResourcePolicy(response: Response): Response {
 export function withoutDocumentSandbox(response: Response): Response {
   const csp = response.headers.get("content-security-policy");
   if (csp === null || !(response.headers.get("content-type") ?? "").startsWith("text/html")) {
-    return response;
-  }
-  const headers = new Headers(response.headers);
-  headers.set(
-    "content-security-policy",
-    csp
-      .split(";")
-      .filter((directive) => directive.trim().split(/\s+/u)[0] !== "sandbox")
-      .join(";"),
-  );
-  return new Response(response.body, { status: response.status, headers });
-}
-
-/**
- * The `file-sandbox` control (P111, after its review): a file that isn't a page goes out without
- * its sandbox, so one opened on its own tab (an SVG, an XML file) has the content origin's.
- */
-export function withoutFileSandbox(response: Response): Response {
-  const csp = response.headers.get("content-security-policy");
-  if (csp === null || (response.headers.get("content-type") ?? "").startsWith("text/html")) {
     return response;
   }
   const headers = new Headers(response.headers);

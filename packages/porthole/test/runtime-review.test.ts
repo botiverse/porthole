@@ -155,16 +155,15 @@ describe("2: db's checks are linear in what was sent, and cheap ones come first"
   });
 });
 
-describe("3: what changes the artifact for everyone asks for a click and a yes", () => {
+describe("3: what changes the artifact for everyone asks for a yes (and no proof of a click since 0.16.0, P149)", () => {
   const config = runtime({ artifact: {}, assets: {} });
   const declaration = declared({ artifact: {}, assets: {} });
 
-  test("artifact.publish and assets.delete: a gesture, then a confirmation", async () => {
+  test("artifact.publish and assets.delete: a confirmation, with or without a gesture", async () => {
     const publish = { op: "publish", base: "ver_1", files: { "a.txt": { text: "x" } } };
     const still = bridgeOf(config, { declaration, viewer: viewer("admin"), activated: false });
-    expect(await still.bridge.call("artifact", publish)).toMatchObject({
-      refusal: "no-user-activation",
-    });
+    expect((await still.bridge.call("artifact", publish)).ok, "confirmed, no gesture").toBe(true);
+    expect(still.asked).toEqual(["artifact"]);
     const unasked = bridgeOf(config, { declaration, viewer: viewer("admin"), confirm: false });
     expect(await unasked.bridge.call("artifact", publish)).toMatchObject({ refusal: "no-confirm" });
     expect(await unasked.bridge.call("assets", { op: "delete", id: "0".repeat(32) })).toMatchObject(
@@ -218,15 +217,21 @@ describe("3: what changes the artifact for everyone asks for a click and a yes",
     expect(() => runtime({ artifact: { methodGates: { publish: ["often"] } } } as never)).toThrow(
       ConfigError,
     );
-    // The shell knows which methods want a gesture, as the manual says.
-    expect(shellPlan(runtime({ artifact: {}, assets: {} }))?.methodActivation).toEqual([
-      "artifact.publish",
-      "assets.delete",
-    ]);
-    const words = compile(runtime({ artifact: {} })).guide(["interactive"]);
-    expect(words).toMatch(
+    // The shell knows which methods want a gesture, as the manual says: none by default, and
+    // the ones a host's methodGates say.
+    expect(shellPlan(runtime({ artifact: {}, assets: {} }))?.methodActivation).toEqual([]);
+    const gated = runtime({
+      artifact: { methodGates: { publish: ["user-activation", "confirm"] } },
+    });
+    expect(shellPlan(gated)?.methodActivation).toEqual(["artifact.publish"]);
+    expect(compile(gated).guide(["interactive"])).toMatch(
       /publish: The app shows the person it first, and nothing happens unless they confirm\. Call it from a click/u,
     );
+    const words = compile(runtime({ artifact: {} })).guide(["interactive"]);
+    expect(words).toMatch(
+      /publish: The app shows the person it first, and nothing happens unless they confirm\./u,
+    );
+    expect(words).not.toMatch(/publish: [^\n]*Call it from a click/u);
   });
 });
 

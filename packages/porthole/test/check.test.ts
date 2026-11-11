@@ -1105,7 +1105,9 @@ describe("checkPage's report", () => {
   });
 
   it("words host-function calls: what hosts refuse is a problem, what a person may decline a note (P074)", async () => {
-    const config = presets.inlineWidget({ capabilities: { sendPrompt: {}, readData: {} } });
+    const config = presets.inlineWidget({
+      capabilities: { sendPrompt: {}, copyText: {}, readData: {} },
+    });
     const refused = await checkPage({
       config,
       content: "<p>x</p>",
@@ -1113,7 +1115,7 @@ describe("checkPage's report", () => {
       settleMs: 0,
       driver: saw({
         calls: [
-          { capability: "sendPrompt", outcome: "no-user-activation" },
+          { capability: "copyText", outcome: "no-user-activation" },
           { capability: "readData", outcome: "answered" },
         ],
       }),
@@ -1121,7 +1123,7 @@ describe("checkPage's report", () => {
     expect(refused.ok).toBe(false);
     expect(refused.text.split("\n")).toEqual([
       expect.stringMatching(/^The widget has 1 problem/u),
-      "- It called sendPrompt at load, with no click: hosts refuse that. Call sendPrompt from a click (at every width and scheme).",
+      "- It called copyText at load, with no click: hosts refuse that. Call copyText from a click (at every width and scheme).",
       "Note: it called readData at load; the check answered no, as a host or a person may. Make sure the widget still works then.",
     ]);
     const declined = await checkPage({

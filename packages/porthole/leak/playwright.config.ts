@@ -18,12 +18,12 @@ const webkitPath = process.env.PORTHOLE_WEBKIT_PATH;
 
 const all = [
   { name: "chromium", use: { ...devices["Desktop Chrome"] } },
-  // Full Chromium (P111), not the headless shell Playwright runs by default: its cross-site frames
-  // are out of process, so the host's page sees nothing of a press in them (no :active, no pointer
-  // events), as in a person's browser. The cases that hold the keyboard rule to that.
+  // Full Chromium, not the headless shell Playwright runs by default: its cross-site frames are
+  // out of process, on a thread of their own, as in a person's browser. The one case that needs
+  // that (a word a busy page takes late, P137).
   {
     name: "chromium-oopif",
-    testMatch: "**/nested*.spec.ts",
+    testMatch: "**/late-word.spec.ts",
     use: { ...devices["Desktop Chrome"], channel: "chromium" },
   },
   {

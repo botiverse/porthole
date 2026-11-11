@@ -80,8 +80,8 @@ export type Grant = (
   /**
    * An embedded document (P143): a public page that any site may frame, with no host. Only where
    * the server opted in (`ServerOptions.embeds`), only with `anonymous: true` and no `level` or
-   * `user`, and only for an artifact's page that isn't nested (never a url-mode app, a served shell,
-   * the sandbox proxy or a nested display); anything else throws at `issue`. Carried signed in the
+   * `user`, and only for an artifact's page (never a url-mode app, a served shell or the sandbox
+   * proxy); anything else throws at `issue`. Carried signed in the
    * session (and in a frame's sealed files' address), so it is never added to a session or taken
    * from one. Every answer of such a session says `frame-ancestors *` (no other session's changes),
    * its shell's plan names no host (it asks no host, hears none and tells no parent anything; the
@@ -113,14 +113,14 @@ export interface TicketRecord {
     readonly pinned?: boolean;
   };
   /**
-   * A nested page's ticket from its clean address to its shell's own label (P114): the path below
-   * its files' base the shell opens (the entry page when absent).
+   * The page below its files' base the ticket was issued for (a page of a set, P125): the entry
+   * page when absent.
    */
   readonly page?: string;
   /**
    * A door's ticket (P125): `issue` mints one beside the content's, for the same grant and as
-   * long, for a display whose frame is on its scope's origin (a served shell, a page that isn't
-   * nested, the sandbox proxy). Taken only at the door (`/__porthole/door/<key>`), never at the
+   * long, for a display whose frame is on its scope's origin (a served shell, a page, the sandbox
+   * proxy). Taken only at the door (`/__porthole/door/<key>`), never at the
    * content's address; the door takes no other.
    */
   readonly door?: true;
@@ -396,7 +396,7 @@ export interface PortholeServer {
    * is what `authorize.check` is handed (and gives the method: HEAD has no body, a method other
    * than GET or HEAD is 405); default, a GET of the door on the instance's origin. Throws, as
    * `issue` does, for an instance or grant `issue` would refuse, and for an instance with no door
-   * (a nested page, a url-mode app).
+   * (a url-mode app).
    */
   doorAnswer(
     instance: InstanceRef,

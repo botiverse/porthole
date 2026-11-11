@@ -55,11 +55,6 @@ const configs = {
     contentOrigins: [CONTENT],
     nestedFrames: "own",
   }),
-  artifactNested: presets.artifact({
-    isolation: "domain",
-    contentOrigins: [CONTENT],
-    nested: true,
-  }),
   inlineWidget: presets.inlineWidget({ isolation: "domain", contentOrigins: [CONTENT] }),
   mcpApp: presets.mcpApp({ isolation: "domain", contentOrigins: [CONTENT] }),
   url: presets.url({ contentOrigins: [CONTENT] }),
@@ -271,7 +266,7 @@ describe("an embed grant is taken only as narrow as P143 says", () => {
     ).rejects.toThrow(/true or absent/u);
   });
 
-  it("is refused for a url-mode app, a nested display, a served shell and the sandbox proxy", async () => {
+  it("is refused for a url-mode app, a served shell and the sandbox proxy", async () => {
     const porthole = server({ embeds: true, upstream: () => new Response("app") });
     await expect(
       porthole.issue(
@@ -279,9 +274,6 @@ describe("an embed grant is taken only as narrow as P143 says", () => {
         EMBED,
       ),
     ).rejects.toThrow(/url-mode/u);
-    await expect(porthole.issue(page("n", "set", "artifactNested"), EMBED)).rejects.toThrow(
-      /nested/u,
-    );
     await expect(
       porthole.issue({ scope: "s", document: { kind: "shell", preset: "inlineWidget" } }, EMBED),
     ).rejects.toThrow(/served shell/u);

@@ -477,30 +477,28 @@ describe("a marker's click (P104), on createHost over a stand-in platform", () =
     ]);
   });
 
-  test("is taken only within a gesture, where the platform can tell (P105)", async () => {
+  test("is taken with or without a gesture: no proof of a click is asked (0.16.0, P149)", async () => {
     const marks = [{ id: "c1", anchor: text, count: 2 }];
-    // No transient activation on the host's page: a click the page posted by itself.
-    const idle = mount({ userActivation: () => false });
-    idle.display.annotations.show(marks);
-    await idle.activate({ id: "c1", rect });
-    expect(idle.reports).toEqual([]);
-    expect(idle.refused).toEqual([]);
-    // A platform that fails to say is taken as saying no.
-    const failing = mount({
-      userActivation: () => {
+    // Whatever the host's page says of its activation (none, a platform that fails to say, one,
+    // one that can't tell), the click is a report like any other: checked, for a mark the host
+    // shows a marker for, within its rate.
+    const says = [
+      () => false,
+      () => {
         throw new Error("can't tell");
       },
-    });
-    failing.display.annotations.show(marks);
-    await failing.activate({ id: "c1", rect });
-    expect(failing.reports).toEqual([]);
-    expect(failing.thrown).toEqual([]);
-    // Within one, and where the platform can't tell (as for the gesture gate): taken.
-    for (const userActivation of [() => true, () => undefined]) {
+      () => true,
+      () => undefined,
+    ];
+    for (const userActivation of says) {
       const t = mount({ userActivation });
       t.display.annotations.show(marks);
       await t.activate({ id: "c1", rect });
       expect(t.reports).toEqual([{ type: "activated", id: "c1", rect }]);
+      expect(t.thrown).toEqual([]);
+      // Still only for a mark it shows a marker for.
+      await t.activate({ id: "c2", rect });
+      expect(t.reports).toHaveLength(1);
     }
   });
 

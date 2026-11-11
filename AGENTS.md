@@ -65,7 +65,7 @@ pnpm check            # typecheck + lint + format check + unit tests (run before
 pnpm test             # unit tests (vitest; packages/porthole/test), with /server in workerd (Miniflare)
 pnpm test:leak        # every Playwright suite (leak, served, MCP examples, React) on Chromium, WebKit, Firefox
 PORTHOLE_LEAK_ENGINES=chromium pnpm test:leak   # a subset, where an engine can't run
-PORTHOLE_LEAK_ENGINES=chromium-oopif pnpm test:leak   # full Chromium, frames out of process (P111)
+PORTHOLE_LEAK_ENGINES=chromium-oopif pnpm test:leak   # full Chromium, frames out of process (P137's case)
 PORTHOLE_WEBKIT_PATH=<wrapper> pnpm test:leak   # WebKit through a launcher that supplies its libraries
 PORTHOLE_LEAK_WEAKEN=sync-guard pnpm test:leak  # a negative control: its probes must fail (P032)
 pnpm --filter @botiverse/porthole test:controls # every control fails exactly its probes (leak/controls.ts, P096)
@@ -91,7 +91,7 @@ stamp workflow run ci.yml --repo botiverse/porthole                  # main's he
 ```
 
 - **Start it on your branch** when the change touches a wall, a probe, a control, the
-  shell or the focus guard (step 2 of "Verify your change" below), and wait for it before
+  shell or a gate (step 2 of "Verify your change" below), and wait for it before
   the pull request merges: nothing else runs those suites until the next release.
 - **A release is two commands**: the full run on main's head, then
   `stamp workflow run release.yml --repo botiverse/porthole -f version=X.Y.Z`. The

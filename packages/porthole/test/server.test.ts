@@ -32,11 +32,6 @@ const configs = {
   inlineWidget: presets.inlineWidget({ isolation: "domain", contentOrigins: [CONTENT] }),
   artifact: presets.artifact({ isolation: "domain", contentOrigins: [CONTENT] }),
   mcpApp: presets.mcpApp({ isolation: "domain", contentOrigins: [CONTENT] }),
-  artifactNested: presets.artifact({
-    isolation: "domain",
-    contentOrigins: [CONTENT],
-    nested: true,
-  }),
 };
 
 const pages: Record<string, string> = {
@@ -414,17 +409,13 @@ describe("a served display's door (P125)", () => {
     document: { kind: "artifact", id: "page", version: "1" },
   };
   const proxied: InstanceRef = { scope: "app-1", document: { kind: "mcp-proxy" } };
-  const nested: InstanceRef = {
-    scope: "nest-1",
-    document: { kind: "artifact", id: "page", version: "1", preset: "artifactNested" },
-  };
 
   const doorOf = (location: { readonly door?: { readonly url: string } }): string => {
-    expect(location.door, "a served non-nested display has a door").toBeDefined();
+    expect(location.door, "a served display has a door").toBeDefined();
     return location.door!.url;
   };
 
-  it("issue mints a door for a shell, a page and the proxy, on the same origin, not for nested or url", async () => {
+  it("issue mints a door for a shell, a page and the proxy, on the same origin, not for url", async () => {
     const porthole = server({ upstream: proxyTo({ target: () => "https://app.test" }) });
     for (const instance of [shell, artifact, proxied]) {
       const location = await porthole.issue(instance, { viewer: "v" });
@@ -434,10 +425,6 @@ describe("a served display's door (P125)", () => {
       // Its key is the instance's, as the content's address is.
       expect(url.pathname.split("/").at(-1)).toBe(new URL(location.url).pathname.split("/").at(-1));
     }
-    expect(
-      (await porthole.issue(nested, { viewer: "v" })).door,
-      "a nested page has no door: its shell is Porthole's own first document",
-    ).toBeUndefined();
     const app = await porthole.issue(
       { scope: "app-2", document: { kind: "external", url: "https://app.test/" } },
       { viewer: "v" },
@@ -685,7 +672,6 @@ describe("a served display's door (P125)", () => {
 
     it("throws for what issue refuses, and for an instance with no door", async () => {
       const porthole = server({ upstream: proxyTo({ target: () => "https://app.test" }) });
-      await expect(porthole.doorAnswer(nested, { viewer: "v" })).rejects.toThrow(/no door/u);
       await expect(
         porthole.doorAnswer(
           { scope: "a", document: { kind: "external", url: "https://app.test/" } },

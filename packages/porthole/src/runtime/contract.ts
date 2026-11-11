@@ -51,8 +51,8 @@ export interface RuntimeMethod {
   readonly watch?: true;
   /**
    * Gates of its own, over its host function's (after the review, P088): what changes the
-   * artifact for everyone needs the person's click and their yes. A host's config may replace
-   * them (`CapabilityConfig.methodGates`).
+   * artifact for everyone needs the person's yes. A host's config may replace them
+   * (`CapabilityConfig.methodGates`).
    */
   readonly gates?: readonly Gate[];
 }
@@ -82,8 +82,8 @@ const method = (
   ...(extra.gates === undefined ? {} : { gates: extra.gates }),
 });
 
-/** What changes the artifact for everyone: the person's click, then their yes. */
-const CHANGES: readonly Gate[] = ["user-activation", "confirm"];
+/** What changes the artifact for everyone: the person's yes, to its whole effect (no proof of a click since 0.16.0, P149). */
+const CHANGES: readonly Gate[] = ["confirm"];
 
 /** Contract 1's capabilities, by the name a page passes to `use`. */
 export const RUNTIME_CAPABILITIES = {

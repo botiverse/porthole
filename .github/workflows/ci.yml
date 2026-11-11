@@ -64,9 +64,9 @@ jobs:
       - run: pnpm --filter @botiverse/porthole exec playwright install --with-deps chromium
       - run: pnpm --filter @botiverse/porthole run test:bundle
 
-  # The quick set's browser suites: every spec on Chromium. `chromium-oopif` is full Chromium (P111),
-  # not the headless shell: its cross-site frames are out of process, as in a person's browser, and
-  # the nested page's cases (leak/served/nested*.spec.ts) hold the keyboard rule there.
+  # The quick set's browser suites: every spec on Chromium. `chromium-oopif` is full Chromium, not
+  # the headless shell: its cross-site frames are out of process, as in a person's browser, and
+  # the one case that needs that (leak/late-word.spec.ts, P137) runs there.
   loopback:
     runs-on: ubuntu-24.04
     timeout-minutes: 45

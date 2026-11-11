@@ -3,7 +3,7 @@ import { parseFrameStatus, SETTLE_MS } from "./outcome.ts";
 import type { FrameOutcome } from "./types.ts";
 
 /**
- * A served display's door (P125). A served display that isn't nested (a served shell, a page, a
+ * A served display's door (P125). A served display (a served shell, a page, a
  * view through the sandbox proxy) is framed on its scope's origin, where the scope's other displays
  * run content with `allow-same-origin`: one of them reaches a new document there before its first
  * script runs, so nothing its frame says, and nothing its silence suggests, is Porthole's word.

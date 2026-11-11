@@ -324,7 +324,6 @@ export function validateConfig(
       "storage",
       "errors",
       "runtime",
-      "nested",
       "nestedFrames",
     ],
     "config",
@@ -689,28 +688,6 @@ export function validateConfig(
     }
   }
 
-  if (config.nested !== undefined) {
-    if (config.nested !== true) {
-      fail("config.nested", "must be true, or left out");
-    }
-    if (config.isolation !== "domain" || config.mode !== "artifact") {
-      fail("config.nested", "nests artifact pages served on their own origin (domain isolation)");
-    }
-    // The page's origin is opaque (P111): nothing of the content origin's own is its.
-    if (config.storage !== undefined) {
-      fail("config.nested", "a nested page keeps no storage: drop config.storage");
-    }
-    if (capabilities.assets !== undefined) {
-      fail(
-        "config.nested",
-        "a nested page can't load its asset library (/_blob/) yet: drop assets",
-      );
-    }
-    if (isObject(config.egress) && config.egress.libraries === true) {
-      fail("config.nested", "a nested page can't load Porthole's libraries from its origin yet");
-    }
-  }
-
   // A page's own nested frames (P128): opted into, never a default.
   if (config.nestedFrames !== undefined) {
     if (config.nestedFrames !== "none" && config.nestedFrames !== "own") {
@@ -718,11 +695,6 @@ export function validateConfig(
     }
     if (config.nestedFrames === "own" && config.mode === "url") {
       fail("config.nestedFrames", "url mode has no shell: its app's frames are its own");
-    }
-    // A nested page's frames have an opaque ancestor, which no frame-ancestors source matches:
-    // none of its own files would load in one. Not measured yet.
-    if (config.nestedFrames === "own" && config.nested === true) {
-      fail("config.nestedFrames", 'a nested page (P111) has no "own" frames yet: leave it out');
     }
   }
 

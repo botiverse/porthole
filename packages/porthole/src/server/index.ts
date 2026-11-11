@@ -70,27 +70,15 @@ export {
   type D1StatementLike,
 } from "./tickets.ts";
 export { DOOR_PATH, FRAME_STATUS_METHOD } from "../isolation/types.ts";
-// A served display's door (P125): `/server` serves it for a shell, a page that isn't nested and the
+// A served display's door (P125): `/server` serves it for a shell, a page and the
 // sandbox proxy; a content Worker of a host's own answers the same at `DOOR_PATH<key>`, after
 // taking the door's own ticket (`TicketRecord.door`) and running the checks its content's address
 // runs (docs/ADOPTING.md, "The door"). A host that signs its own tickets answers it with
 // `PortholeServer.doorAnswer` once it has admitted the request itself (P126).
 export { doorResponse, doorStatusResponse, type DoorOptions } from "./pages.ts";
-// A nested page (P111): Porthole's shell at the framed address, the page and its files below the
-// sealed prefix, all on the shell's own label (P114, `nestedLabelOf`). `/server` serves them for a
-// config with `nested`; a content Worker of its own answers the same (docs/ADOPTING.md, "Nested
-// pages").
-export {
-  isNestedLabel,
-  NESTED_FILE_HEADERS,
-  NESTED_FILES_PREFIX,
-  nestedAncestors,
-  nestedFileCsp,
-  nestedLabelOf,
-  nestedShellCsp,
-  nestedShellResponse,
-  PORTHOLE_LABEL_PREFIX,
-} from "./nested.ts";
+// Labels that start so are Porthole's own (its health label; until 0.16.0 a nested page's shell's,
+// P114): no host's naming makes one.
+export { PORTHOLE_LABEL_PREFIX } from "../isolation/served.ts";
 export { isHostLabel, prefixedName, type Naming } from "./naming.ts";
 // The page an app serves in conformance test mode (P071).
 export { conformancePage } from "../conformance/page.ts";

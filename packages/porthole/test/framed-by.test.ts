@@ -3,20 +3,12 @@ import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { presets } from "../src/index.ts";
 import type { InstanceRef } from "../src/isolation/types.ts";
-import {
-  FRAME_SHELL_RUNTIME,
-  frameShellScript,
-  STRICT_FRAME_SHELL_RUNTIME,
-} from "../src/shell/frame.ts";
 import { includesOrigin, normalOrigin } from "../src/isolation/served.ts";
 import {
   createContentHost,
   createServer,
   doorResponse,
   doorStatusResponse,
-  nestedLabelOf,
-  nestedShellCsp,
-  nestedShellResponse,
   statusPage,
   type ServerOptions,
 } from "../src/server/index.ts";
@@ -27,7 +19,6 @@ import {
   STRICT_ENTER_SCRIPT_PATH,
   STRICT_STATUS_SCRIPT_PATH,
 } from "../src/server/pages.ts";
-import { compile } from "../src/compile/compile.ts";
 import { ANNOTATE_RUNTIME } from "../src/shell/annotate.ts";
 import { FIND_RUNTIME } from "../src/shell/find.ts";
 import { LEGACY_GLOBALS_RUNTIME } from "../src/shell/legacy.ts";
@@ -39,7 +30,7 @@ import { FRAME_STATUS_METHOD } from "../src/isolation/types.ts";
  * `framedBy` (P141): an outer page's origins that may be an ancestor of every frame a host shows,
  * above the host's own page. They are in every `frame-ancestors` Porthole sends and nowhere else:
  * never a host origin a frame hears or tells, never in a page's `data-porthole-hosts` or a shell's
- * plan. Where they are set, a page or a nested page's shell says `*` (a desktop scheme among the
+ * plan. Where they are set, a page says `*` (a desktop scheme among the
  * host origins) only to a parent the engine names as a host origin, never to an outer page.
  */
 
@@ -76,11 +67,6 @@ const configs = {
     isolation: "domain",
     contentOrigins: [CONTENT],
     nestedFrames: "own",
-  }),
-  artifactNested: presets.artifact({
-    isolation: "domain",
-    contentOrigins: [CONTENT],
-    nested: true,
   }),
 };
 
@@ -121,7 +107,7 @@ function ancestorsOf(response: Response): string[] | null {
 
 /**
  * Every kind of answer `/server` frames, under one `framedBy`: a shell, an artifact page, a page of
- * a file set and its files, a page's own frames, a nested page's shell, page and files, an MCP
+ * a file set and its files, a page's own frames, an MCP
  * Apps proxy, a door and a used door, a url-mode app's entry page and its answers, the 401, 404
  * and renew answers.
  */
@@ -173,25 +159,6 @@ async function everyAnswer(porthole: ReturnType<typeof server>) {
       await porthole.handle(ask(`${at}__porthole/renew`, "empty")),
     );
   }
-  const nested = await porthole.issue(
-    {
-      scope: "n1",
-      document: { kind: "artifact", id: "set", version: "1", preset: "artifactNested" },
-    },
-    { viewer: "v" },
-  );
-  const nestedShell = await keep("nested shell", await porthole.handle(ask(nested.url)));
-  const nestedPage = /"page":"([^"]+)"/u.exec(await nestedShell.clone().text())?.[1] ?? "";
-  expect(nestedPage).toContain("/__porthole/f/");
-  await keep("nested page", await porthole.handle(ask(nestedPage)));
-  await keep(
-    "nested script",
-    await porthole.handle(ask(new URL("app.js", nestedPage).href, "script")),
-  );
-  await keep(
-    "nested page, its access ended",
-    await porthole.handle(ask(nestedPage.replace(/\/f\/[^/]+\//u, "/f/AAAA/"))),
-  );
   const app = await porthole.issue(
     { scope: "u1", document: { kind: "external", url: "https://app.test/landing" } },
     { viewer: "v" },
@@ -256,9 +223,6 @@ describe("framedBy is checked like a host origin (P141)", () => {
     expect(() =>
       statusPage({ status: 401, title: "t", detail: "d", hostOrigins: [HOST], framedBy: [HOST] }),
     ).toThrow(/host origin/u);
-    expect(() => nestedShellCsp("1;", "https://porthole-x.example", [HOST], ["*"])).toThrow(
-      /framedBy/u,
-    );
   });
 });
 
@@ -294,14 +258,6 @@ describe("framedBy's port and host are as a browser serializes them (P145, Ferry
       "doorStatusResponse",
       (origin) =>
         doorStatusResponse({ hostOrigins, framedBy: [origin], status: 401, reason: "session" }),
-    ],
-    [
-      "nestedShellCsp",
-      (origin) => nestedShellCsp("1;", "https://porthole-x.example", hostOrigins, [origin]),
-    ],
-    [
-      "frameShellScript",
-      (origin) => frameShellScript({ ...PINNED_SHELL, origins: hostOrigins, framedBy: [origin] }),
     ],
   ];
 
@@ -378,7 +334,7 @@ describe("framedBy's port and host are as a browser serializes them (P145, Ferry
 describe("framedBy is in every frame-ancestors, and nowhere else (P141)", () => {
   it("every answer that names frame-ancestors names the outer page after the host origins; none says it elsewhere", async () => {
     const answers = await everyAnswer(server());
-    expect(answers.map(({ name }) => name)).toHaveLength(23);
+    expect(answers.map(({ name }) => name)).toHaveLength(19);
     for (const { name, response } of answers) {
       const ancestors = ancestorsOf(response);
       if (ancestors !== null) {
@@ -433,8 +389,6 @@ describe("framedBy is in every frame-ancestors, and nowhere else (P141)", () => 
     for (const { name, response } of strict) {
       expect(await response.text(), name).toContain("data-porthole-strict-parent");
     }
-    const nested = answers.find(({ name }) => name === "nested shell");
-    expect(await nested?.response.text()).toContain('"strictParent":true');
   });
 
   it("the helpers for a content Worker of its own: framedBy in frame-ancestors, the hosts alone told", async () => {
@@ -450,17 +404,6 @@ describe("framedBy is in every frame-ancestors, and nowhere else (P141)", () => 
     }
     // The defaults are as before: the host origins alone.
     expect(ancestorsOf(doorResponse({ hostOrigins: [HOST] }))).toEqual([HOST]);
-    const origin = `https://${nestedLabelOf("abc")}.${DOMAIN}`;
-    const shell = nestedShellResponse(compile(configs.artifactNested), {
-      origin,
-      origins: [HOST],
-      framedBy: [DECK],
-      page: `${origin}/__porthole/f/x/`,
-    });
-    expect(ancestorsOf(shell)).toEqual([HOST, DECK]);
-    const html = await shell.text();
-    expect(html).toContain(`"origins":["${HOST}"]`);
-    expect(html).not.toContain("deck.example.net");
   });
 });
 
@@ -505,95 +448,6 @@ describe("an outer page as the parent is never told, nor heard (P141, negative c
     // the parent would have heard * (were it framable), as an unnamed parent still does.
     expect(await statusSaid(false, DECK)).toEqual([HOST, "*"]);
     expect(await statusSaid(false, undefined)).toEqual([HOST, "*"]);
-  });
-
-  /** The nested page's shell's word to its host, with the engine naming `parent`. */
-  function shellSaid(framedBy: readonly string[], parent: string | undefined, from: string) {
-    const origin = `https://${nestedLabelOf("abc")}.${DOMAIN}`;
-    const script = frameShellScript({
-      origins: [HOST, DESKTOP],
-      framedBy,
-      page: `${origin}/__porthole/f/x/`,
-    });
-    const posted: string[] = [];
-    const delivered: unknown[] = [];
-    const listeners: ((event: unknown) => void)[] = [];
-    const parentWindow = {
-      postMessage: (_message: unknown, target: string) => {
-        if (target !== "*" && !/^https?:\/\/[^/]+$/u.test(target)) {
-          throw new SyntaxError(`Invalid target origin '${target}'`);
-        }
-        posted.push(target);
-      },
-    };
-    const child = { postMessage: (message: unknown) => delivered.push(message), focus: () => {} };
-    const element = () => ({
-      setAttribute: () => {},
-      style: {},
-      contentWindow: child,
-      addEventListener: () => {},
-      focus: () => {},
-    });
-    const self: Record<string, unknown> = {};
-    Object.assign(self, {
-      parent: parentWindow,
-      addEventListener: (type: string, listener: (event: unknown) => void) => {
-        if (type === "message") {
-          listeners.push(listener);
-        }
-      },
-    });
-    runInNewContext(script, {
-      window: self,
-      location: {
-        origin,
-        hostname: new URL(origin).hostname,
-        ...(parent === undefined ? {} : { ancestorOrigins: [parent] }),
-      },
-      document: {
-        documentElement: { style: {} },
-        body: { style: {}, append: () => {} },
-        createElement: element,
-        hasFocus: () => false,
-        addEventListener: () => {},
-      },
-      navigator: {},
-      performance: { now: () => 0 },
-      requestAnimationFrame: () => 0,
-      setTimeout: () => 0,
-      setInterval: () => 0,
-      clearTimeout: () => {},
-      addEventListener: self.addEventListener,
-      fetch: () => new Promise(() => {}),
-      URL,
-    });
-    // The page says something (its child window is the source), then the parent says something.
-    for (const listener of listeners) {
-      listener({
-        source: child,
-        origin: "null",
-        data: { jsonrpc: "2.0", method: "ui/ping", id: 1 },
-      });
-      listener({
-        source: parentWindow,
-        origin: from,
-        data: { jsonrpc: "2.0", method: "ui/notifications/host-context-changed", params: {} },
-      });
-    }
-    return { posted, delivered };
-  }
-
-  it("a nested page's shell: the outer page as its parent hears no * and its words never reach the page", () => {
-    const strict = shellSaid([DECK], DECK, DECK);
-    expect(strict.posted).not.toContain("*");
-    expect(strict.posted.length).toBeGreaterThan(0);
-    expect(strict.delivered, "the outer page's word reached the page").toEqual([]);
-    // The host's own word goes on, and a desktop parent named so still hears *.
-    const desktop = shellSaid([DECK], DESKTOP, HOST);
-    expect(desktop.posted).toContain("*");
-    expect(desktop.delivered).toHaveLength(1);
-    // The control: without framedBy the shell says * to a parent it can't place (the old rule).
-    expect(shellSaid([], DECK, HOST).posted).toContain("*");
   });
 
   it("a content Worker's door and status pages tell the hosts alone", async () => {
@@ -652,37 +506,19 @@ describe("the host kit passes framedBy on (P141)", () => {
 
 /**
  * 0.14.16's scripts, by their sha256 as a policy names them: the status, entry and door pages'
- * (`git show v0.14.16:packages/porthole/src/server/pages.ts`). 0.14.17 changed them and the nested
- * page's shell on every path, with a branch only `framedBy` takes (P144, after Ferryman's audit of
+ * (`git show v0.14.16:packages/porthole/src/server/pages.ts`). 0.14.17 changed them
+ * on every path, with a branch only `framedBy` takes (P144, after Ferryman's audit of
  * 0.14.18): without `framedBy` (and without embed, P143), every response that carries one of the
- * pages' scripts carries 0.14.16's again, byte for byte (the nested page's shell was 0.14.16's too
- * until 0.15.3, below: P148; the shell runtime served documents inline is another matter: P145).
+ * pages' scripts carries 0.14.16's again, byte for byte (the shell runtime served documents inline
+ * is another matter: P145). The nested page's shell, pinned here until 0.15.3, went with nested
+ * pages in 0.16.0 (P149).
  */
 const V0_14_16 = {
   status: "'sha256-XB1Co2NQ5DJ8+kmWSugeVUXsldJaHiI7gXXoH+yitRw='",
   enter: "'sha256-Lzrcu1/YmcGN5E7MYSqe2IBdqoDfIZXsCiQn3fJclJY='",
   door: "'sha256-v9Jwr3GLqqhJUL7YFH0fgjsdZgRs8zIYdIvmchvGd3A='",
 };
-/**
- * The nested page's shell: 0.15.3's, no longer 0.14.16's. P148 changes it on every path (a port
- * for its page at each load, the presses it hears in its state), so its `script-src` hash changes
- * for every host, which the CHANGELOG says. 0.14.16's were
- * 'sha256-0nIZ304ltfsUzuaJh0kqjvbMpA4cPJT1suOXSIRIPMA=' (its runtime) and
- * 'sha256-pzr8GzzEGqwx1Kqp7zaknNd3kSfdsrZXQrdtRrDrBm8=' (its script for `PINNED_SHELL`). Pinned as
- * the pages' are, so the next change to it is said too. The default path's still carries nothing
- * of `framedBy`'s (P144).
- */
-const SHELL_V0_15_3 = {
-  shellRuntime: "'sha256-QyOMnn/OtyVsbtPdzm3O4Ukmt4TexmpMMPZqt/dS+jY='",
-  shell: "'sha256-chcrn5hFVbPIkXKYTaZDKpCJnn+VkxJXickgRiImAGc='",
-};
 const PINNED_HOSTS = ["https://host.example", "ferry://app"];
-const PINNED_ORIGIN = "https://porthole-abcdefghijklmnopqrstuvwx.content.example";
-const PINNED_SHELL = {
-  origins: PINNED_HOSTS,
-  page: `${PINNED_ORIGIN}/__porthole/f/x/`,
-  title: "T",
-};
 
 const hashOf = (script: string): string =>
   `'sha256-${createHash("sha256").update(script).digest("base64")}'`;
@@ -691,7 +527,7 @@ const scriptSrcOf = (response: Response): string =>
 const inlineScriptOf = (html: string): string =>
   /<script>([\s\S]*)<\/script>/u.exec(html)?.[1] ?? "";
 
-describe("without framedBy, the pages' scripts are 0.14.16's, byte for byte, and the nested shell's is 0.15.3's (P144, P148)", () => {
+describe("without framedBy, the pages' scripts are 0.14.16's, byte for byte (P144)", () => {
   it("the status and entry pages' scripts", async () => {
     expect(hashOf((await pageScript(STATUS_SCRIPT_PATH)?.text()) ?? "")).toBe(V0_14_16.status);
     expect(hashOf((await pageScript(ENTER_SCRIPT_PATH)?.text()) ?? "")).toBe(V0_14_16.enter);
@@ -710,18 +546,7 @@ describe("without framedBy, the pages' scripts are 0.14.16's, byte for byte, and
     }
   });
 
-  it("the nested page's shell: 0.15.3's (P148)", async () => {
-    expect(hashOf(FRAME_SHELL_RUNTIME)).toBe(SHELL_V0_15_3.shellRuntime);
-    expect(hashOf(frameShellScript(PINNED_SHELL))).toBe(SHELL_V0_15_3.shell);
-    const shell = nestedShellResponse(compile(configs.artifactNested), {
-      ...PINNED_SHELL,
-      origin: PINNED_ORIGIN,
-    });
-    expect(scriptSrcOf(shell)).toBe(SHELL_V0_15_3.shell);
-    expect(await shell.text()).not.toContain("strictParent");
-  });
-
-  it("a server without framedBy answers with them: its pages load 0.14.16's scripts, its door and nested shell carry them", async () => {
+  it("a server without framedBy answers with them: its pages load 0.14.16's scripts, its door carries them", async () => {
     const porthole = server({ framedBy: [] });
     const answers = await everyAnswer(porthole);
     const named = (name: string) => answers.find((each) => each.name === name)?.response;
@@ -747,12 +572,6 @@ describe("without framedBy, the pages' scripts are 0.14.16's, byte for byte, and
       expect(response, name).toBeDefined();
       expect([V0_14_16.door, V0_14_16.status], name).toContain(scriptSrcOf(response!));
     }
-    // The nested shell: the default runtime (0.15.3's), its own plan spliced in.
-    const nested = named("nested shell")!;
-    const script = inlineScriptOf(await nested.clone().text());
-    expect(scriptSrcOf(nested)).toBe(hashOf(script));
-    const [before = "", after = ""] = FRAME_SHELL_RUNTIME.split("__PLAN__");
-    expect(script.startsWith(before) && script.endsWith(after)).toBe(true);
   });
 
   it("with framedBy, the strict pages load scripts of their own, and the default paths still serve 0.14.16's", async () => {
@@ -778,29 +597,28 @@ describe("without framedBy, the pages' scripts are 0.14.16's, byte for byte, and
     const door = doorResponse({ hostOrigins: PINNED_HOSTS, framedBy: [DECK] });
     expect(scriptSrcOf(door)).not.toBe(V0_14_16.door);
     expect(hashOf(inlineScriptOf(await door.text()))).toBe(scriptSrcOf(door));
-    expect(STRICT_FRAME_SHELL_RUNTIME).not.toBe(FRAME_SHELL_RUNTIME);
-    expect(frameShellScript({ ...PINNED_SHELL, framedBy: [DECK] })).toContain(
-      '"strictParent":true',
-    );
   });
 });
 
 /**
  * The shell runtime every served document inlines (a served shell, an artifact page, a file set's
- * pages, the MCP Apps proxy, a nested page): not 0.14.16's. It carries P142's changes (0.14.18) and
+ * pages, the MCP Apps proxy): not 0.14.16's. It carries P142's changes (0.14.18) and
  * P143's `hostless` branches (0.15.0), inert wherever the plan names a host. 0.15.0 said "the
  * default path is 0.14.16's again, byte for byte", which held for the four scripts above and every
  * header, not for this (Ferryman's audit of 0.15.0, P145). No hash covers it (`script-src` is
  * `'unsafe-inline'` for these documents), so it is pinned here: a change to its bytes fails this
  * test, and is said in the CHANGELOG, not assumed away (0.15.2: annotations', P147; 0.15.3: the
- * shell's, P148). From `git show v0.15.0:…/src/shell/*.ts`
+ * shell's, P148; 0.16.0: the shell's again, P149). From `git show v0.15.0:…/src/shell/*.ts`
  * and `git show v0.14.16:…` (`SHELL_RUNTIME`, `ANNOTATE_RUNTIME`, `FIND_RUNTIME`, `USE_RUNTIME`,
  * `LEGACY_GLOBALS_RUNTIME`).
  */
-const RUNTIME_V0_15_3 = {
-  // 0.15.0's was 'sha256-kafLnuVV2E6YUJtxXEooMNi8MNwbMJRdYi+0PTOe1RA=': 0.15.3's tells a nested
-  // page's shell its real presses (P148), installed only under a nested page's plan.
-  shell: "'sha256-kWx9H3mLZTPs2MHT4fmpNuaZN9qIXLAVePeULjBsq/U='",
+const RUNTIME_V0_16_0 = {
+  // 0.15.0's, and 0.15.2's, was 'sha256-kafLnuVV2E6YUJtxXEooMNi8MNwbMJRdYi+0PTOe1RA='; 0.15.3's
+  // told a nested page's shell its real presses (P148: 'sha256-kWx9H3mLZTPs2MHT4fmpNuaZN9qIXLAVePeULjBsq/U=').
+  // 0.16.0's is 0.15.2's less nine lines: the hook by which a nested page's shell renewed its
+  // files' address, gone with nested pages (P149). `git diff v0.15.2 -- src/shell/runtime.ts`
+  // shows those lines and no others.
+  shell: "'sha256-RWgbBR8osnoAwlATYK0bglHOOpBB8KVrDa1OM6+gWRQ='",
   // 0.15.0's was 'sha256-3PZMe4arifdWHJU1jS0laR49wiWc/uBWIFddGJPyf/w=': 0.15.2's marks ride the
   // document's scroll (P147). The other three are 0.15.0's.
   annotate: "'sha256-uQ77dZDXcY6pKRoTylHpGXY+ZhhCt4WZhB/qDTQJ6BE='",
@@ -816,7 +634,7 @@ const RUNTIME_V0_14_16 = {
   legacy: "'sha256-ZEVJsezqV7n+Ho0m7Y92NYxAZqf8ynKq/rDdXrJUKp0='",
 };
 
-describe("the served shell runtime is 0.15.3's (0.15.0's, but for annotations, P147, and a nested page's presses, P148), not 0.14.16's: pinned, so what the CHANGELOG says of it is checked (P145)", () => {
+describe("the served shell runtime is 0.16.0's (0.15.2's, less a nested page's files hook, P149), not 0.14.16's: pinned, so what the CHANGELOG says of it is checked (P145)", () => {
   const now = {
     shell: hashOf(SHELL_RUNTIME),
     annotate: hashOf(ANNOTATE_RUNTIME),
@@ -825,8 +643,8 @@ describe("the served shell runtime is 0.15.3's (0.15.0's, but for annotations, P
     legacy: hashOf(LEGACY_GLOBALS_RUNTIME),
   };
 
-  it("its bytes are 0.15.3's (a change here is a change every served document carries: say it)", () => {
-    expect(now).toEqual(RUNTIME_V0_15_3);
+  it("its bytes are 0.16.0's (a change here is a change every served document carries: say it)", () => {
+    expect(now).toEqual(RUNTIME_V0_16_0);
   });
 
   it("which are not 0.14.16's: the shell's, annotations' and find's differ (P142, P143)", () => {
@@ -910,17 +728,6 @@ describe("framedBy is compared with the host origins as browsers serialize origi
         detail: "d",
         hostOrigins: [`${HOST}:443`],
         framedBy: [HOST],
-      }),
-    ).toThrow(/host origin/u);
-    expect(() =>
-      nestedShellCsp("1;", "https://porthole-x.example", [HOST], [`${HOST}:443`]),
-    ).toThrow(/host origin/u);
-    const origin = `https://${nestedLabelOf("abc")}.${DOMAIN}`;
-    expect(() =>
-      frameShellScript({
-        origins: [HOST],
-        framedBy: [`${HOST}:443`],
-        page: `${origin}/__porthole/f/x/`,
       }),
     ).toThrow(/host origin/u);
   });

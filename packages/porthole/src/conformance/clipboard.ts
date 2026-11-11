@@ -52,6 +52,20 @@ async function pasted(page: Page): Promise<string> {
   );
 }
 
+/**
+ * Lets any user activation the test harness gave the host page lapse: Playwright's own
+ * evaluations count as gestures in some engines, and Chromium keeps one for 5 s. Between this and
+ * the next raw input, the test must not evaluate anything in the page.
+ */
+const ACTIVATION_LAPSE_MS = 6_000;
+
+/** The refusals the display reported, by capability. */
+async function refusals(display: LaunchedDisplay): Promise<string[]> {
+  return (await display.events()).flatMap((event) =>
+    event.type === "refused" ? [`${event.detail.capability}:${event.detail.refusal}`] : [],
+  );
+}
+
 /** Clicks `selector` in the display (a real click: the user activation a person gives). */
 async function click(display: LaunchedDisplay, selector: string): Promise<void> {
   await (await display.frame()).locator(selector).click();
@@ -206,12 +220,53 @@ export const CLIPBOARD_PROBES: readonly Probe[] = [
         await bodyData(display, "onload", "probe: copyText without a click is refused"),
         "probe: copyText without a click is refused",
       ).toMatch(/^refused/u);
-      await click(display, "#copy");
+      // The host's own check needs the frame's click to reach the host page (activation
+      // propagates to ancestors): measured with raw input, after the harness's activation lapsed.
+      const frame = await display.frame();
+      const box = await frame.locator("#copy").boundingBox();
+      if (box === null) {
+        throw new Error("#copy is not on screen");
+      }
+      await context.page.waitForTimeout(ACTIVATION_LAPSE_MS);
+      await context.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await context.page.waitForTimeout(500);
+      const refused = await refusals(display);
+      context.measured(
+        `${context.engine}: a click in the frame ${refused.includes("copyText:no-user-activation") ? "does not reach" : "reaches"} the host page's user activation`,
+      );
+      expect(refused, "the frame's click didn't count as a gesture on the host page").toEqual([]);
       expect(await bodyData(display, "result")).toBe("true");
       expect(
         await display.calls(),
         "probe: only the click's whole text reached the host's handler",
       ).toEqual([{ capability: "copyText", args: { text: "npm test -- --run" } }]);
+    },
+  },
+  {
+    id: "12.raw-copy",
+    item: 12,
+    title: "a copy sent around the shell (raw porthole/copy-text, no click) is refused by the host",
+    async run(context) {
+      const display = await context.launch({
+        config: inline({ capabilities: { copyText: {} } }),
+        content: `<script>
+  addEventListener("message", (event) => {
+    if (event.data && event.data.id === "raw-1") document.body.dataset.answer = JSON.stringify(event.data.result ?? event.data.error);
+  });
+  // Late enough that no harness gesture is still active on the host page.
+  setTimeout(() => parent.postMessage({ jsonrpc: "2.0", id: "raw-1", method: "porthole/copy-text", params: { text: "copied around the shell" } }, "*"), ${ACTIVATION_LAPSE_MS});
+</script>`,
+      });
+      // Nothing is evaluated in the page until the message has been answered.
+      await context.page.waitForTimeout(ACTIVATION_LAPSE_MS + 1_500);
+      expect(
+        await bodyData(display, "answer", "probe: a raw copy without a click is refused"),
+        "probe: a raw copy without a click is refused",
+      ).toBe(JSON.stringify({ isError: true }));
+      expect(await display.calls(), "probe: a raw copy reached the host's handler").toEqual([]);
+      expect(await refusals(display), "probe: the host refused it for no user activation").toEqual([
+        "copyText:no-user-activation",
+      ]);
     },
   },
 ];

@@ -4874,7 +4874,7 @@ when someone remembered, and what DESIGN.md said they fail had drifted from what
 a control's run makes a CI job too long (shard the controls across jobs), or the kit's app gains
 a weakening seam (then its controls join the registry).
 
-## P105 · 2026-10-20 · After the review of P104: a marker's click within a gesture and the host's view guarded, one clock for follow-ups, text markers beside their line · Accepted; amended by P133
+## P105 · 2026-10-20 · After the review of P104: a marker's click within a gesture and the host's view guarded, one clock for follow-ups, text markers beside their line · Accepted; amended by P133; superseded in part by P149 (a marker's click within a gesture)
 
 Amends P104 (its points 1, 3, 5 and 7, and its Trust) and P053's Trust. From the independent
 review of P104 and 0.9.0 (botiverse/porthole#37: no P0 or P1, two P2s, six P3s) and from #36
@@ -5500,7 +5500,7 @@ the anchor). Negative control `comment-draft` (the draft taken as given) → the
 engine. `types/runtime/v1/check.ts` (the page-shaped call compiles); the runtime conformance's
 comments case sends a draft.
 
-## P109 · 2026-10-26 · After the review of 0.12.0's drafts: the keyboard given back, `comments.open` from the frame the person is in, a page's draft the person's to act on, stricter draft text · Accepted
+## P109 · 2026-10-26 · After the review of 0.12.0's drafts: the keyboard given back, `comments.open` from the frame the person is in, a page's draft the person's to act on, stricter draft text · Superseded in part by P149 (the keyboard given back, `comments.open` from the frame the person is in; the draft rules stand)
 
 Amends P090 and P108, and THREAT_MODEL §6 and §7. From the review of P107 and P108 at 0.12.0
 (2026-10-26: no P0, two P1s, three P2s, two P3s) and the review of the 0.11.0 and 0.12.0 releases
@@ -5845,7 +5845,7 @@ that throws gives the "wasn't checked" warning; `admitFiles` with `\ffffff` in a
 **Revisit when** a page's own document is ever shown outside the shell (then quirks mode is real),
 or an engine starts counting fixed boxes in what the viewport scrolls.
 
-## P111 · 2026-10-28 · A nested page: Porthole's shell at the framed address, the page its opaque child, and the shell's own activation decides the keyboard and `comments.open` · Accepted; amended by P148
+## P111 · 2026-10-28 · A nested page: Porthole's shell at the framed address, the page its opaque child, and the shell's own activation decides the keyboard and `comments.open` · Superseded by P149
 
 **Context.** P109's focus guard and `comments.open`'s gate ask whether the person, not the page,
 moved the keyboard into a frame or clicked in it. In full Chromium a cross-site frame is out of
@@ -6112,7 +6112,7 @@ told selection kept: each alone fails the probe, measured on Chromium).
 **Revisit when** a host needs the element picked (`elements: true`) or a held block cleared too
 (they leave no highlight now), or the MCP Apps spec gains a host-to-view way to clear a selection.
 
-## P114 · 2026-10-28 · A nested page's shell on a label of its own, where nothing else is ever served · Accepted
+## P114 · 2026-10-28 · A nested page's shell on a label of its own, where nothing else is ever served · Superseded by P149
 
 **Context.** porthole#56 (Ferry's audit of what merged after 0.13.0). P111 rests on the shell
 being a realm content can't reach (ARCHITECTURE "Trust boundaries" 4): the host trusts the shell's
@@ -6375,7 +6375,7 @@ pinned at the frame's top… takes a mouse click and a tap where it is drawn" (a
 pixels); "a mouse is as before…" (a click 11 px below or 4 px beside the bubble is the page's,
 with no touch and on a touch screen after a finger).
 
-## P120 · 2026-10-29 · A nested page's keyboard: a fight is judged without the shell, the shell is asked to look, a key is no press where the pointer is seen · Accepted; amended by P122
+## P120 · 2026-10-29 · A nested page's keyboard: a fight is judged without the shell, the shell is asked to look, a key is no press where the pointer is seen · Superseded by P149
 
 Amends P111. **Context.** The audit of P111's guard (2026-10-28, NG-1, P0 on Firefox; porthole#56):
 a nested page that focuses its field as it loads and focuses it again whenever it loses focus read
@@ -6511,7 +6511,7 @@ out-of-process frame, says what turned activation on, or tells a frame's parent 
 into it; or a host can tell a frame in its own process from one out of it before the pointer has
 been over one (then a first move into a nested page there is judged as 0.13 judged it, P120-1).
 
-## P121 · 2026-10-29 · After the audit of 0.14.2: a nested page's shell held to its own label outside `/server`, one source for its files' CSP, what `clearSelection` tells the page, `tracked` guarded · Accepted
+## P121 · 2026-10-29 · After the audit of 0.14.2: a nested page's shell held to its own label outside `/server`, one source for its files' CSP, what `clearSelection` tells the page, `tracked` guarded · Superseded in part by P149 (a nested page's shell held to its own label, one source for its files' CSP)
 
 Amends P114 and P115. From the audit of aedc412 (2026-10-29; no P0 or P1): two findings on nested
 pages (M1, P2; M2, P3) and two on annotations (AN-1, P2; AN-2, P3).
@@ -6580,7 +6580,7 @@ second display kind from the app under test, and what it would hold (a Worker's 
 host's; left for when a host with its own Worker asks for one. Hiding the clear from the page:
 the `selectionchange` gives it away whatever the message says.
 
-## P122 · 2026-10-29 · After 0.14.4's CI: no press within 250 ms of the person's key, and the pointer rule reads the typing before an activation · Accepted
+## P122 · 2026-10-29 · After 0.14.4's CI: no press within 250 ms of the person's key, and the pointer rule reads the typing before an activation · Superseded by P149
 
 Amends P120. **Context.** CI on 0.14.4 (run 40822963445, `loopback (chromium-oopif)`): P120's
 case "a page that starts taking the keyboard back on its own blur while the person types…" failed
@@ -6650,7 +6650,7 @@ pass on full Chromium, the headless shell and Firefox; `navigate-guard`, `pointe
 it (then the press itself can be told from a key, and the window can go).
 
 
-## P123 · 2026-10-29 · A page taking the keyboard is an accepted risk; the guard stays best effort · Accepted
+## P123 · 2026-10-29 · A page taking the keyboard is an accepted risk; the guard stays best effort · Superseded in part by P149 (the risk stays accepted; the guard is gone)
 
 **Context.** P109, P120 and P122 built a guard that gives the keyboard back when a display moves
 focus into its frame while the person types in the host's page. P122's review (porthole#81) showed
@@ -7975,7 +7975,7 @@ Safari; Safari and iOS are unmeasured. Playwright emulates a focused window on e
 Safari shows `hasFocus` disagreeing with the host's `activeElement` after `display.focus()`; or a
 word must expire by itself (a host that sends many, or content that stays out for long).
 
-## P136 · 2026-11-06 · `display.focus()` reaches a nested page: the host's word to its shell, in a task of its own · Accepted
+## P136 · 2026-11-06 · `display.focus()` reaches a nested page: the host's word to its shell, in a task of its own · Superseded by P149
 
 Amends P111 and closes P135's known gap (#proj-workspace:#214). Tenny's requirement, #proj-workspace:#211:
 `marker-late` covers the nested case.
@@ -9357,7 +9357,7 @@ would then be no better than the event, and no worse); a host needs marks in the
 scrollers to ride too (a timeline per scroller, named from the mark's nearest one); or decision 6's
 case is reported.
 
-## P148 · 2026-11-11 · A nested page's real presses, told to its shell over a port no content holds · Accepted
+## P148 · 2026-11-11 · A nested page's real presses, told to its shell over a port no content holds · Superseded by P149
 
 Amends P111 (its "Rejected", and item 4 of its "Threat it re-opens"). From Raft (xxchan,
 2026-11-11): a page's own button that calls `comments.open`; the host answers with a dialog; the
@@ -9524,3 +9524,103 @@ held: a second wall behind item 2, held by the unit test).
 condition: this and the activation rule could then both go); a host reports the residual for
 controls that aren't native (then a rule for `role` that typing can't satisfy); or the 500 ms
 after a stall drops presses people notice.
+
+## P149 · 2026-11-11 · What guessed at the person's intent is taken out: nested pages, the focus guard, the proof of a click but `copyText`'s · Accepted
+
+**Context.** A host reported that a page's own "comment" button, pressed by a real person,
+was refused: "This needs a click". The press was real. `comments.open` asked for a gesture
+*with the host page's focus in the calling frame* (P109), the host's page can't see a press
+inside a cross-site frame (out of process on full Chromium; no event on Firefox), and so the
+rule ran on a guess: `:active`, the pointer's place, the time since the last key, and for a
+nested page its shell's word on its activation (P111), then on which keys count (P120, P122),
+then on each real press told over a port (P148), with a storage design for nested pages next in
+line. Each step made the guess better and the machine larger, and each release still refused
+some real clicks. The question that should have come first: what does the check protect?
+
+**What the checks protected.** Followed to the end, each one of them stops a page from *asking
+at a moment it picks*, never from doing:
+
+- `sendPrompt`, `openLink`, `downloadFile`, `artifact.publish`, `assets.delete`: each already
+  ends at the person's confirmation, shown the whole effect, and declines mute the display. A
+  page that asks unprompted gets a dialog the person says no to.
+- `comments.open`: opens the host's composer with a draft that posts nothing by itself; the
+  host's handler may answer no (P108's duties stand).
+- A marker's `activated`: opens the host's view of a mark, which takes no focus and no press
+  for its first 500 ms (§6's guard stands).
+- The focus guard: gave the keyboard back when a page took it. P123 had already accepted that
+  it couldn't hold (typing slower than one key per 250 ms passed it), so it was a wall with a
+  known hole whose false positives were the person's own clicks.
+
+And the proof itself proved little: the host-side check passed for any click anywhere on the
+host's page in the last 5 s, and the shell-side one is the content's own realm speaking.
+
+**Decision.**
+
+1. **No proof of a click is asked by default, but `copyText`'s.** The default gates of
+   `sendPrompt`, `openLink` and `downloadFile` are `confirm` and a rate of 30 a minute (they had
+   no rate: the gesture was their bound, so they get one); `comments` keeps its rate alone;
+   `artifact.publish` and `assets.delete` keep `confirm`. `copyText` keeps `user-activation`:
+   it has no confirmation, the clipboard is the person's, and the browser's own rule for writing
+   it is a gesture. The gate itself stays in the vocabulary: a host may name `user-activation`
+   for any capability or method (`gates`, `methodGates`), and the shell and the bridge check it
+   as before. `CapabilitySpec.inFrame` (P109's "in the calling frame") is removed.
+2. **A marker's `activated` is taken with or without a gesture** (supersedes P105's point 2).
+   Every other check on it stands: only for a mark the host shows with a marker, rebuilt,
+   clamped, within the rate.
+3. **The focus guard is removed** (supersedes P109's decisions 1 and 2; P123's risk stays
+   accepted, now without a guard in front of it). No `focusTaken`, no `onFocusTaken`, no display
+   stopped for taking the keyboard, no shell words about focus. `display.focus()` is the
+   frame's own `focus()`. `focusField(field)` stays as a plain helper (it blurs a frame that
+   holds the focus, then focuses the field: Firefox ignores a plain `focus()` there).
+   `Surface.focused`, where a platform gives it, says only whether the keyboard is in the
+   display (the frame's root's `activeElement`), and only the find shortcut reads it (P131).
+4. **Nested pages are removed** (supersedes P111, P114, P120, P121's M1 and M2, P122, P136,
+   P148). `nested: true` is no field; the shell document, its label (`porthole-<…>`), its
+   namespace (`porthole/shell/*`), its press port and the `/server` routes and helpers for it
+   are gone. They existed to give the guard and `comments.open` a realm the page couldn't speak
+   for; with nothing left to ask it, the mode is a second way to serve a page with no reader.
+   The label prefix `porthole-` stays reserved (`PORTHOLE_LABEL_PREFIX`): no host's naming makes
+   one.
+5. **What stays, and is not this kind of rule.** P135 and P137 (a late `focusMark` doesn't land
+   once the person has moved on) guard the host's *own* move of the focus, not the page's. The
+   find shortcut's focus rule (P131) refuses no real press: the key is always pressed in the
+   frame. The host view's 500 ms (§6) is the host's own guard of its own controls.
+
+**The served path.** No wall moves: origins, sandboxes, CSP, tickets, the door and every message
+check are as in 0.15.3. The page runtime every served document inlines is 0.15.2's with the
+nine lines of the nested-only renewal hook taken out (its pin in `test/framed-by.test.ts`);
+`use` and `legacy` are unchanged, and follow the plan's gates as they did.
+
+**Rejected.** *Keep the checks and widen the guess again* (a storage relay for nested pages was
+designed next): the fifth step on the same road, for a check that protects a moment, not an
+effect. *Keep nested mode without the guard*, as an opaque page for scopes that distrust their
+own displays: no host uses it, and different scopes already give displays that distrust each
+other different origins (THREAT_MODEL S7); it can come back as its own decision with its own
+reader. *Remove `copyText`'s click too*: it is the one call with no person between the page and
+the effect. *Remove the `user-activation` gate from the vocabulary*: a host with a reason of its
+own may still want it, and `copyText` needs it.
+
+**Cost.** A page can interrupt: a confirmation, a composer or a comment view at a moment the
+person didn't pick, within 30 a minute, until declines mute it. A page that takes the keyboard
+keeps it until the person clicks back. A host that wants the old default for one capability names
+the gate again (`gates: ["user-activation", "confirm"]`), with the false refusals that come with
+it. A host that served nested pages must go back to served ones (CHANGELOG 0.16.0 says how).
+
+**Tested.** `test/bridge.test.ts` (a gesture gate refuses where named and for `copyText`;
+nothing else asks one); `test/agreement.test.ts` (every capability a page can call without a
+gesture has a default rate, P103's rule, now three more); `test/runtime-review.test.ts`
+(publish and delete: a confirmation with or without a gesture; a host's `methodGates` bring the
+gesture back, in the plan and the manual); `test/annotate.test.ts` (a marker's click taken
+whatever the platform says of activation, still only for a shown marker); `test/config.test.ts`
+(`nested` is refused as an unknown field); `test/sandbox.test.ts` (the static rule on
+`allow-same-origin`, re-homed from the nested suite); `test/framed-by.test.ts` (the runtime's
+pins). Conformance: `12.prompt-confirm` (a prompt on load is asked, and a no sends nothing),
+`12.raw-message` (a raw `ui/message` is asked too), `12.copy-text` and the new `12.raw-copy`
+(the gesture gate that stays, shell side and host side; controls `shell-gesture`,
+`host-gesture`). 28 negative controls go with the code they took out (the registry and
+DESIGN.md's table); `leak/late-word.spec.ts` keeps `chromium-oopif`'s one case.
+
+**Revisit when** an engine tells a host's page, truthfully, that the person pressed inside a
+cross-site frame (then a check could be a fact, not a guess); a host reports the interruptions
+as abuse its own handler can't bound; or a host needs an opaque page inside a shared scope
+(nested pages' one use that was not the guard).

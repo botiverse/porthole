@@ -53,8 +53,10 @@ export type CapabilityName = (typeof CAPABILITY_NAMES)[number];
  *   propagates to, and which lasts 5 s after any gesture anywhere on the host's page: a click on
  *   the host's own UI, or the person typing in its own composer, counts. So it stops calls made on
  *   load, or on a timer while nobody does anything; it is not proof that the gesture was in this
- *   frame, nor of intent. Where a capability needs that (`comments`, P109: its draft goes into
- *   the person's composer), the host also asks that its page's focus be in the calling frame.
+ *   frame, nor of intent. Since 0.16.0 (P149) only `copyText` has it by default: nothing else
+ *   stands between a page and the person's clipboard. Every other call either shows the person
+ *   its whole effect first (`confirm`) or opens something of the host's that does nothing by
+ *   itself (`comments`), and a guess at who pressed what refused real presses.
  * - `confirm`: the host's `confirm` function shows a person the call's whole effect, and the call
  *   goes only if they accept. No `confirm` function means the call is refused (fail closed).
  * - `rateLimit`: at most `perMinute` calls per display per minute; the rest are refused.
@@ -89,13 +91,6 @@ export interface CapabilitySpec {
    * Absent for what the shell does by itself (sizes, errors, annotations, find).
    */
   readonly request?: { readonly method: string; readonly sdk?: string };
-  /**
-   * Its `user-activation` gate also needs the person in the calling frame (P109): the host page's
-   * focus in that frame, which a press on it or a Tab into it gives and the focus guard keeps from
-   * a frame's own `focus()`. Activation alone lasts 5 s after any gesture on the host's page,
-   * typing in its own composer included.
-   */
-  readonly inFrame?: true;
 }
 
 const rate = (perMinute: number): Gate => ({ rateLimit: { perMinute } });
@@ -111,19 +106,19 @@ export const MAX_CONTEXT_CHARS = 20_000;
 
 export const CAPABILITIES = {
   sendPrompt: {
-    defaultGates: ["user-activation", "confirm"],
+    defaultGates: ["confirm", rate(30)],
     served: "handler",
     global: "sendPrompt",
     request: { method: "ui/message", sdk: "app.sendMessage" },
   },
   openLink: {
-    defaultGates: ["user-activation", "confirm"],
+    defaultGates: ["confirm", rate(30)],
     served: "handler",
     global: "openLink",
     request: { method: "ui/open-link", sdk: "app.openLink" },
   },
   downloadFile: {
-    defaultGates: ["user-activation", "confirm"],
+    defaultGates: ["confirm", rate(30)],
     served: "handler",
     request: { method: "ui/download-file", sdk: "app.downloadFile" },
   },
@@ -188,10 +183,9 @@ export const CAPABILITIES = {
   user: { defaultGates: [rate(60)], served: "viewer", request: { method: "porthole/call" } },
   /** Opens the host's comment composer at the page's anchor (P090): write-only. */
   comments: {
-    defaultGates: ["user-activation", rate(30)],
+    defaultGates: [rate(30)],
     served: "handler",
     request: { method: "porthole/call" },
-    inFrame: true,
   },
   /** This artifact's current version, and a new version of it, base-checked (P088). */
   artifact: { defaultGates: [rate(10)], served: "handler", request: { method: "porthole/call" } },

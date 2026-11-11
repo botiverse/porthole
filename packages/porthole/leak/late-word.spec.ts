@@ -9,8 +9,8 @@ import { referenceHost, type ReferenceDisplay } from "./reference-host.ts";
 
 /**
  * A `focusMark` a page takes late because it is busy, not because the shell parked it (P137). The
- * name is for the config's `nested*` match, so `chromium-oopif` runs it: this is the one case that
- * needs a frame on a thread of its own, as in a person's browser. These frames aren't nested.
+ * config's `chromium-oopif` project runs this file alone: it is the one case that needs a frame
+ * on a thread of its own, as in a person's browser.
  *
  * On a shared thread the host's page freezes with the frame, so a real click can only come after
  * the word: the first case shows the harm on `chromium-oopif` alone, and passes on the others. The

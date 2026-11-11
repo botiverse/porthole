@@ -81,31 +81,14 @@ export const UNWEAKENED: Readonly<Record<string, string>> = {
 
 const LEAK = "leak/leak.spec.ts";
 const RUNTIME = "leak/served/runtime.spec.ts";
-const NESTED = "leak/served/nested.spec.ts";
-const NESTED_SIBLINGS = "leak/served/nested-siblings.spec.ts";
-const NESTED_PRESS = "leak/served/nested-press.spec.ts";
-const STALL_RULE =
-  "a shell's activation seen after a stall is no one's gesture until it goes off (P111, after its review)";
 const FILES = "leak/served/files.spec.ts";
 const SERVED = "leak/served/served.spec.ts";
 const TAB = "leak/served/tab.spec.ts";
 const OUTCOME = "leak/served/outcome.spec.ts";
 const SIBLINGS_STATUS = "leak/served/siblings-status.spec.ts";
 const ANNOTATE = "leak/annotate.spec.ts";
-const LATE_WORD = "leak/nested-late-word.spec.ts";
+const LATE_WORD = "leak/late-word.spec.ts";
 const EMBED = "leak/served/embed.spec.ts";
-
-/** The keyboard's probes (P109). */
-const TAKE =
-  "a page that takes the keyboard while the person types in the host's composer gets a key or two at most, and is stopped";
-const BLUR_TAKE =
-  "a page that takes the keyboard back on its own blur keeps none of it: the composer keeps its words, and comments.open reaches no handler";
-const FIELD_TAKE =
-  "a composer the host focuses with focusField, beside a page with the person's gesture that takes focus back on its blur, gets their words";
-
-/** A nested page's keyboard in a fight over the host's composer (P120). */
-const NESTED_FIGHT =
-  "a page that holds the keyboard from its load and takes it back on its own blur gets none of what the person types in the host's composer, and is stopped (P120)";
 
 /** What the CSP sandbox alone holds on a tab (P099), every engine. */
 const TAB_SANDBOX = [
@@ -170,55 +153,15 @@ const MARKER_MOVED_ON_WAITING =
   "a focusMark parked with the focus in the frame doesn't land once the person moves on while it waits (P135)";
 const MARKER_SECOND =
   "a parked focusMark with the focus on the host's body is dropped; after the host's own move into the frame a second one, parked too, lands on the marker (P135)";
-/** The nested page's own case of it (#proj-workspace:#214); `nested.spec.ts` takes its title here. */
-export const NESTED_MOVED_ON =
-  "a parked focusMark doesn't land on a nested page once the person has moved on to the host's button (P135)";
-/** The host's word takes no focus that has left the shell (P136). */
-export const NESTED_WORD_LATE =
-  "the host's move takes no keyboard from where the host's page went on to in the same task (P136)";
-/** A second host's move finds the focus handed on (P136): the page hears nothing of it. */
-export const NESTED_SECOND_MOVE =
-  "a second host's move into a page it just handed the focus to leaves it there: no blur, and its field keeps the keyboard (P136)";
 const MARKER_PATCHED_FOCUS =
   "a page that patched hasFocus to say yes gets no landing the platform's own answer refuses (P135)";
-/** A word a busy page takes late (P137); `nested-late-word.spec.ts` takes these titles here. */
+/** A word a busy page takes late (P137); `late-word.spec.ts` takes these titles here. */
 export const LATE_WORD_MOVED_ON =
   "a focusMark a busy page takes late doesn't land once the host's page has moved on (P137)";
 export const LATE_WORD_PATCHED_CLOCK =
   "a page that stopped Date.now gets no landing for a word it took late (P137)";
 export const LATE_WORD_PATCHED_FOCUS =
   "a page that patched hasFocus to say yes gets no landing for a word it took late (P137)";
-/** The nested page's own case of it: the word through the shell, the same test in the page. */
-export const NESTED_LATE_WORD =
-  "a focusMark a busy nested page takes late doesn't land once the host's page has moved on (P137)";
-/** A nested page's real presses (P148); `nested-press.spec.ts` takes these titles here. */
-export const PRESS_SECOND =
-  "a press in the page within 5 s of the last, after the person pressed the host's page, opens comments as the first did (P148)";
-export const PRESS_KEY_ORDER =
-  "Enter on the page's button, within 5 s of a press on the host's page: the call its click makes arrives after the press (P148)";
-export const PRESS_MADE_UP =
-  "a press the page makes up is none: a dispatched pointer, key or click tells the shell nothing (P148)";
-export const PRESS_ROLE =
-  "typing is no press, whatever the content calls the field: a role of button, a custom element's, an editable button (P148)";
-export const PRESS_REPEAT = "a key held down is one press, however long it repeats (P148)";
-export const PRESS_KEY_FOCUS =
-  "Enter typed in a text field is no press, though the page moves the focus to its button as the key goes down (P148)";
-export const PRESS_SUBMIT =
-  "Enter in a form's text field is no press, though the form clicks its submit button (P148)";
-export const PRESS_SCROLL = "a finger that scrolls the page is no press; a tap is (P148)";
-export const PRESS_PORT_UNHEARD =
-  "the shell's port is the runtime's alone: content's first listener hears no message that carries one (P148)";
-export const PRESS_FORGED_PORT =
-  "a port message content sends itself first is not taken, and takes no place: the person's press still reaches the shell (P148)";
-export const PRESS_OPEN_LOCKED =
-  "a page can't open its document again to hear the port the shell sends at the next load (P148)";
-export const PRESS_OPEN_EARLY =
-  "nor as soon as it runs, to hear the first port in the runtime's place (P148)";
-export const PRESS_SAME_DOCUMENT =
-  "a press after a link within the document is heard: the load WebKit fires for it leaves the first port the one (P148)";
-export const PRESS_STALL = "a press a shell tells after a stall is no one's (P148)";
-export const PRESS_WENT_BACK =
-  "a page's focus() just after a second press in it, the person gone back to the host's composer, is taken back (P148)";
 const HONEST_SCROLL =
   "an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second";
 /** A served page's own frames (P128): a frame of elsewhere stays out of the tree (files.spec.ts). */
@@ -354,7 +297,8 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   "confirm-gate": {
     specs: [LEAK],
     fails: all(
-      "[12.prompt-gesture-confirm]",
+      "[12.prompt-confirm]",
+      "[12.raw-message]",
       "[12.link]",
       "[12.mute]",
       "[12.no-confirm]",
@@ -363,9 +307,9 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   },
   "shell-gesture": {
     specs: [LEAK],
-    fails: all("[12.prompt-gesture-confirm]", "[12.mute]", "[12.copy-text]"),
+    fails: all("[12.copy-text]"),
   },
-  "host-gesture": { specs: [LEAK], fails: all("[12.raw-message]") },
+  "host-gesture": { specs: [LEAK], fails: all("[12.raw-copy]") },
   // The show gate (P100): a model context update reaches the handler unseen.
   "model-context-show": { specs: [LEAK], fails: all("[12.model-context]") },
   "link-scheme": { specs: [LEAK], fails: all("[12.link]") },
@@ -435,27 +379,16 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   "marker-focus": { specs: [ANNOTATE], fails: all(MARKER_FOCUS) },
   // P135: a parked focusMark lands only with the focus still in the document, by the kept hasFocus.
   "marker-late": {
-    specs: [ANNOTATE, NESTED],
-    fails: all(
-      MARKER_MOVED_ON,
-      MARKER_MOVED_ON_WAITING,
-      MARKER_SECOND,
-      MARKER_PATCHED_FOCUS,
-      NESTED_MOVED_ON,
-    ),
+    specs: [ANNOTATE],
+    fails: all(MARKER_MOVED_ON, MARKER_MOVED_ON_WAITING, MARKER_SECOND, MARKER_PATCHED_FOCUS),
   },
   // P137: a word a busy page took late is held to the same test, by the host's stamp and the kept
   // clock. An engine with one thread for the frames can't show a person's click in that wait, so
   // the probes move the focus in the task that sends the word. The click's own case needs
   // `chromium-oopif`, which no control runs.
   "marker-busy": {
-    specs: [LATE_WORD, NESTED],
-    fails: all(
-      LATE_WORD_MOVED_ON,
-      LATE_WORD_PATCHED_CLOCK,
-      LATE_WORD_PATCHED_FOCUS,
-      NESTED_LATE_WORD,
-    ),
+    specs: [LATE_WORD],
+    fails: all(LATE_WORD_MOVED_ON, LATE_WORD_PATCHED_CLOCK, LATE_WORD_PATCHED_FOCUS),
   },
   "marker-clock": { specs: [LATE_WORD], fails: all(LATE_WORD_PATCHED_CLOCK) },
   "marker-has-focus": {
@@ -482,12 +415,6 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     specs: [ANNOTATE],
     fails: all(
       "the shell's own checks on a raw show (P107): a draft draws no number, a kind it doesn't know is no mark",
-    ),
-  },
-  "annotation-activated-gesture": {
-    specs: [ANNOTATE],
-    fails: all(
-      "a hostile page's marker click with no gesture is dropped; one on the person's own press is the host's view to guard (P105)",
     ),
   },
   // The host clamps every reported box to the frame (P104); the cases that read a mark below the
@@ -680,34 +607,8 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   },
   "comments-result": {
     specs: [RUNTIME],
-    fails: all("comments are write-only: the composer opens from a click, content hears only that"),
-  },
-  // The focus guard (P109): a page's focus() keeps the person's keys, and is never stopped.
-  "focus-guard": {
-    specs: [RUNTIME],
-    // A page that takes focus back on its blur gets nothing on Chromium and WebKit, guard or not:
-    // they don't let it take focus back from its own blur (measured).
-    fails: {
-      chromium: [TAKE],
-      webkit: [TAKE],
-      firefox: [TAKE, BLUR_TAKE, FIELD_TAKE],
-    },
-  },
-  // What the guard does after a take-back (P109, GK-1): the watch, the look at every animation
-  // frame, focus left on nothing taken back. Only Firefox lands a fought take-back on nothing.
-  "focus-guard-watch": {
-    specs: [RUNTIME],
-    fails: { chromium: [], webkit: [], firefox: [BLUR_TAKE, FIELD_TAKE] },
-    holds: {
-      why: "no probe can see it on Chromium and WebKit: they blur the host's window on every move into a frame and a take-back lands, and a page can't take focus back from its own blur there (measured)",
-    },
-  },
-  // comments.open needs the person in the calling frame (P109): without it, any gesture on the
-  // host's page (typing in its composer) opens it.
-  "comments-in-frame": {
-    specs: [RUNTIME],
     fails: all(
-      "comments.open while the person types in the host's composer reaches no handler, by the page's own call or the shell's; from a press in the frame it does",
+      "comments are write-only: the composer opens when the page asks, with a click or without one, and content hears only that",
     ),
   },
   // A cancel only while the host asked for a pick or for text (P112).
@@ -756,10 +657,10 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     ),
   },
   // Who may say how loading went (P124, P125). The rule split per the audit of 2026-10-30: a
-  // served display that isn't nested takes no frame status from its frame at all (its door told);
-  // a nested page's shell keeps the ordering rule; an opaque frame's rule 1 is proven by
-  // test/outcome.test.ts alone (P124-3), with no leak probe of its own.
-  // Content's own word taken again: a served non-nested display's frame status is an outcome,
+  // served display takes no frame status from its frame at all (its door told); an opaque
+  // frame's rule 1 is proven by test/outcome.test.ts alone (P124-3), with no leak probe of its
+  // own.
+  // Content's own word taken again: a served display's frame status is an outcome,
   // whether its own content's (the two P124 outcome cases) or a sibling's (inject, reload, proxy).
   "content-status": {
     specs: [OUTCOME, SIBLINGS_STATUS],
@@ -773,13 +674,13 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     measured: { webkit: WEBKIT_SIBLING_WRITE },
   },
   // P124's first-word rule in place of the door: a sibling that speaks first in a served
-  // non-nested display's frame (its own, or the sandbox proxy's) is taken.
+  // display's frame (its own, or the sandbox proxy's) is taken.
   "door-status": {
     specs: [SIBLINGS_STATUS],
     fails: all("[sibling-inject]", "[sibling-reload]", "[proxy]"),
     measured: { webkit: WEBKIT_SIBLING_WRITE },
   },
-  // A served non-nested display's silence read as `framing` again: a sibling that wipes it.
+  // A served display's silence read as `framing` again: a sibling that wipes it.
   "door-silence": {
     specs: [SIBLINGS_STATUS],
     fails: all("[sibling-wipe]"),
@@ -805,149 +706,6 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   "embed-origins": {
     specs: [EMBED],
     fails: all("[embed.unheard]"),
-  },
-  // The ordering rule taken out for a nested page's shell: a page's word after its hello taken.
-  "frame-status-order": {
-    specs: [OUTCOME],
-    fails: all(
-      "a nested page that says it is blocked, through its shell or past it, is told nothing and shown nothing (P124)",
-    ),
-  },
-  "shell-namespace": {
-    specs: [NESTED],
-    fails: all(
-      "the shell's words are the shell's alone: a page that says them, to its parent or to the host's window, moves nothing",
-    ),
-  },
-  // The host's word (P136) moves only a focus that is on the shell.
-  "shell-focus-held": { specs: [NESTED], fails: all(NESTED_WORD_LATE, NESTED_SECOND_MOVE) },
-  // A nested page's shell on a label of its own (P114, porthole#56): on its scope's, a same-scope
-  // inline widget or artifact reads the shell's document, and in it the page's sealed address.
-  // Alone, the host's mount refuses the scope's label (P121), and the shell wouldn't run there: run
-  // with both taken out too, as a content Worker of a host's own and an old host would be.
-  "shell-label,nested-host-label,nested-shell-origin": {
-    specs: [NESTED_SIBLINGS],
-    fails: all("[nested-siblings]", "[nested-label]"),
-  },
-  // The host's mount refuses a nested page located anywhere but a shell's own label (P121).
-  "nested-host-label": {
-    specs: [NESTED_SIBLINGS],
-    fails: all("[nested-label]"),
-  },
-  // The shell runs on a shell's own label alone (P121): the wall behind the host's mount, for a
-  // host whose platform isn't Porthole's.
-  "nested-shell-origin": {
-    specs: [NESTED_SIBLINGS],
-    fails: NOTHING,
-    holds: {
-      why: "the host's mount refuses a shell located on any other label first, and /server serves none there",
-      by: "shell-label,nested-host-label,nested-shell-origin",
-    },
-  },
-  // Every file below a nested page's sealed prefix is sandboxed (P111, after its review).
-  "file-sandbox": {
-    specs: [NESTED],
-    fails: all(
-      "a page's SVG or XML file opened on a tab of its own is an opaque origin, and its script touches nothing of the shell's (P111, after its review)",
-    ),
-  },
-  // A nested page's frame that takes focus back in a fight over a text field is judged as any
-  // frame is, its shell not asked (P120): let be, the page keeps the keyboard. Only Firefox lets a
-  // page take focus back on its own blur.
-  "nested-fight": {
-    specs: [NESTED],
-    fails: { chromium: [], webkit: [], firefox: [NESTED_FIGHT] },
-    holds: {
-      why: "no probe can see it on Chromium and WebKit: a page can't take focus back from its own blur there, so no fight has a frame take focus again (measured)",
-    },
-  },
-  // A stalled shell's activation is uncertain (P111, after its review), and a press it tells then
-  // is no one's (P148).
-  "shell-stall": {
-    specs: [NESTED, NESTED_PRESS],
-    fails: all(STALL_RULE, PRESS_STALL),
-  },
-  // A nested page's real presses (P148). A press is the browser's own event alone.
-  "press-untrusted": { specs: [NESTED_PRESS], fails: all(PRESS_MADE_UP) },
-  // A control is one by its tag and type, never the role its content gives it.
-  "press-role": { specs: [NESTED_PRESS], fails: all(PRESS_ROLE) },
-  // An editable control is a place to type.
-  "press-editable": { specs: [NESTED_PRESS], fails: all(PRESS_ROLE) },
-  // A held key's repeats are no press.
-  "press-repeat": { specs: [NESTED_PRESS], fails: all(PRESS_REPEAT) },
-  // No click while a key is down is a press.
-  "press-key-click": { specs: [NESTED_PRESS], fails: all(PRESS_KEY_FOCUS, PRESS_REPEAT) },
-  // The click a form gives its submit button for Enter in another of its fields is typing. A key
-  // is down for the whole of that Enter, and no click counts then: the wall in front of this one.
-  "press-submit": {
-    specs: [NESTED_PRESS],
-    fails: NOTHING,
-    holds: {
-      why: "a key is down while a form clicks its submit button for an Enter, and no click is a press then: that rule refuses the click first",
-      by: "press-key-click,press-submit",
-    },
-  },
-  "press-key-click,press-submit": {
-    specs: [NESTED_PRESS],
-    fails: all(PRESS_KEY_FOCUS, PRESS_REPEAT, PRESS_SUBMIT),
-  },
-  // A finger counts as it lifts, never as it lands: one that scrolls never lifts as a press.
-  "press-touch-down": {
-    specs: [NESTED_PRESS],
-    fails: { chromium: [PRESS_SCROLL], webkit: [], firefox: [] },
-    holds: {
-      why: "no probe can drive a finger's drag on WebKit and Firefox: a test has a tap there and no touch scroll",
-    },
-  },
-  // The runtime's listener stops the shell's port message: content's listener never hears it.
-  "press-port-heard": { specs: [NESTED_PRESS], fails: all(PRESS_PORT_UNHEARD) },
-  // The port is taken only from the browser's own message event.
-  "press-port-forged": {
-    specs: [NESTED_PRESS],
-    fails: { chromium: [PRESS_FORGED_PORT], webkit: [PRESS_FORGED_PORT], firefox: [] },
-    holds: {
-      why: "no probe can make the event on Firefox: its MessageEvent constructor takes no window of another origin as a source (measured), and the runtime takes a port from its parent's alone",
-    },
-  },
-  // document.open is fixed shut: no page clears the runtime's listener and loads again.
-  "press-open-lock": {
-    specs: [NESTED_PRESS],
-    fails: all(PRESS_OPEN_LOCKED, PRESS_OPEN_EARLY),
-  },
-  // A load that left the document where it was: the runtime says so on the port it holds.
-  "press-still-here": {
-    specs: [NESTED_PRESS],
-    fails: { chromium: [], webkit: [PRESS_SAME_DOCUMENT], firefox: [] },
-    holds: {
-      why: "no probe can see it on Chromium and Firefox: they fire no load for a navigation within the document (measured), so the shell sends no second port",
-    },
-  },
-  // A press told to the shell needs a quiet host as its activation does: the person's press in the
-  // page counts for a second, but not after they pressed or typed on the host's page.
-  "press-host-input": { specs: [NESTED_PRESS], fails: all(PRESS_WENT_BACK) },
-  // A nested page's gesture needs a quiet host (P111): a page that takes the keyboard within a
-  // second of the person's press in it keeps it though they went back to the host's composer.
-  "shell-host-input": {
-    specs: [NESTED],
-    fails: all(
-      "a page's focus() just after the person pressed it and went back to the host's composer is taken back",
-    ),
-  },
-  // Where the host's page sees the pointer, an activation that turned on as the person typed, the
-  // pointer elsewhere, is their key landing in the page, judged as it turned on (P120).
-  // No press comes within 250 ms of the person's key on the host's page (P122): an activation that
-  // turns on then is their key landing in the page, where the pointer is never seen too.
-  "key-press": {
-    specs: ["leak/served/nested-key.spec.ts"],
-    fails: all(
-      "an activation that turned on within 250 ms of the person's key on the host's page is no gesture, where the pointer is never seen too (P122)",
-    ),
-  },
-  "pointer-rule": {
-    specs: [NESTED],
-    fails: all(
-      "an activation that came as the person typed, the pointer elsewhere, is no gesture a second on either (P120, after its review)",
-    ),
   },
   "comment-draft": {
     specs: [RUNTIME],
@@ -1356,7 +1114,6 @@ const MEASURED: Readonly<Record<string, number>> = {
   "follow-throttle": 70,
   "selection-follow": 70,
   "follow-count": 70,
-  "annotation-activated-gesture": 69,
   "marker-place": 83,
 };
 

@@ -50,28 +50,6 @@ async function click(display: LaunchedDisplay, selector: string): Promise<void> 
 }
 
 /**
- * Lets any user activation the test harness gave the host page lapse: Playwright's own
- * evaluations count as gestures in some engines, and Chromium keeps one for 5 s. Between this and
- * the next raw input, the test must not evaluate anything in the page.
- */
-const ACTIVATION_LAPSE_MS = 6_000;
-
-/** A click by raw mouse input at `selector`'s center, after any harness activation has lapsed. */
-async function clickAfterLapse(
-  context: ProbeContext,
-  display: LaunchedDisplay,
-  selector: string,
-): Promise<void> {
-  const frame = await display.frame();
-  const box = await frame.locator(selector).boundingBox();
-  if (box === null) {
-    throw new Error(`${selector} is not on screen`);
-  }
-  await context.page.waitForTimeout(ACTIVATION_LAPSE_MS);
-  await context.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-}
-
-/**
  * The attribute `name` of the frame's body, once set. Where it is a gate's answer to the content,
  * `verdict` is the probe's: an answer that never comes (a call left waiting on a gate that should
  * have refused it) fails the probe's verdict, not its setup (P096).
@@ -130,8 +108,13 @@ const PROMPT_CONTENT = `<button id="ask">Explain March</button>
       (error) => (document.body.dataset.result = "refused: " + error.message),
     );
   });
+</script>`;
+
+/** A prompt asked as the page loads, with no click anywhere. */
+const PROMPT_ON_LOAD = `<p>Asks on load</p>
+<script>
   sendPrompt("asked on load").then(
-    () => (document.body.dataset.onload = "sent"),
+    (sent) => (document.body.dataset.onload = String(sent)),
     (error) => (document.body.dataset.onload = "refused: " + error.message),
   );
 </script>`;
@@ -466,29 +449,36 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
 
   // ── 12: the host-function gates ────────────────────────────────────────────────────────────
   {
-    id: "12.prompt-gesture-confirm",
+    id: "12.prompt-confirm",
     item: 12,
-    title: "sendPrompt needs a click and the person's yes; a no sends nothing",
+    title: "sendPrompt needs the person's yes, from a click or not; a no sends nothing",
     async run(context) {
-      const display = await context.launch({ config: prompts(), content: PROMPT_CONTENT });
-      expect(
-        await bodyData(display, "onload", "probe: a call made on load is refused by the shell"),
-        "probe: a call made on load is refused by the shell",
-      ).toContain("needs a click");
-      expect(
-        await display.calls(),
-        "probe: a call made on load reached the host's handler",
-      ).toEqual([]);
-
-      // The host's own check needs the frame's click to reach the host page (activation
-      // propagates to ancestors): measured with raw input, after the harness's activation lapsed.
-      await clickAfterLapse(context, display, "#ask");
-      await context.page.waitForTimeout(500);
-      const refused = await refusals(display);
-      context.measured(
-        `${context.engine}: a click in the frame ${refused.includes("sendPrompt:no-user-activation") ? "does not reach" : "reaches"} the host page's user activation`,
+      // No proof of a click is asked (0.16.0, P149): a prompt made as the page loads is the
+      // person's to answer like any other, and their no sends nothing.
+      const loading = await context.launch({ config: prompts(), content: PROMPT_ON_LOAD });
+      const unasked = await answered(
+        loading,
+        false,
+        "probe: the person was asked about a prompt made on load",
       );
-      expect(refused, "the frame's click didn't count as a gesture on the host page").toEqual([]);
+      expect(unasked, "probe: the person was asked about the whole prompt").toMatchObject({
+        capability: "sendPrompt",
+        args: { text: "asked on load" },
+      });
+      expect(
+        await bodyData(
+          loading,
+          "onload",
+          "probe: the content is told a declined prompt wasn't sent",
+        ),
+        "probe: the content is told a declined prompt wasn't sent",
+      ).toBe("false");
+      expect(await loading.calls(), "probe: a declined prompt reached the host's handler").toEqual(
+        [],
+      );
+
+      const display = await context.launch({ config: prompts(), content: PROMPT_CONTENT });
+      await click(display, "#ask");
       const declined = await answered(
         display,
         false,
@@ -522,7 +512,8 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
   {
     id: "12.raw-message",
     item: 12,
-    title: "a prompt sent around the shell (raw ui/message, no click) is refused by the host",
+    title:
+      "a prompt sent around the shell (raw ui/message, no click) is the person's to answer too; a no sends nothing",
     async run(context) {
       const display = await context.launch({
         config: prompts(),
@@ -530,22 +521,29 @@ export const BEHAVIOR_PROBES: readonly Probe[] = [
   addEventListener("message", (event) => {
     if (event.data && event.data.id === "raw-1") document.body.dataset.answer = JSON.stringify(event.data.result ?? event.data.error);
   });
-  // Late enough that no harness gesture is still active on the host page.
-  setTimeout(() => parent.postMessage({ jsonrpc: "2.0", id: "raw-1", method: "ui/message", params: { role: "user", content: [{ type: "text", text: "sent around the shell" }] } }, "*"), ${ACTIVATION_LAPSE_MS});
+  parent.postMessage({ jsonrpc: "2.0", id: "raw-1", method: "ui/message", params: { role: "user", content: [{ type: "text", text: "sent around the shell" }] } }, "*");
 </script>`,
       });
-      // Nothing is evaluated in the page until the message has been answered.
-      await context.page.waitForTimeout(ACTIVATION_LAPSE_MS + 1_500);
+      const asked = await answered(
+        display,
+        false,
+        "probe: the person was asked about a raw ui/message",
+      );
+      expect(asked, "probe: the person was asked about the whole prompt").toMatchObject({
+        capability: "sendPrompt",
+        args: { text: "sent around the shell" },
+      });
       expect(
-        await bodyData(display, "answer", "probe: a raw ui/message without a click is refused"),
-        "probe: a raw ui/message without a click is refused",
+        await bodyData(
+          display,
+          "answer",
+          "probe: a declined raw ui/message is answered as not sent",
+        ),
+        "probe: a declined raw ui/message is answered as not sent",
       ).toBe(JSON.stringify({ isError: true }));
       expect(await display.calls(), "probe: a raw ui/message reached the host's handler").toEqual(
         [],
       );
-      expect(await refusals(display), "probe: the host refused it for no user activation").toEqual([
-        "sendPrompt:no-user-activation",
-      ]);
     },
   },
   {

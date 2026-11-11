@@ -24,10 +24,9 @@ import type { FrameBlock, FrameOutcome } from "./types.ts";
  *
  * - An opaque frame's only document is the host's own shell, with the content in it: no page of
  *   Porthole's server ever loads there, so its every frame status is the content's.
- * - A frame that speaks (a served shell, a view through the sandbox proxy, a nested page's shell)
+ * - A frame that speaks (a served shell, a view through the sandbox proxy)
  *   says Porthole's own word first in every document that holds content, before any of the
- *   content's code runs: the shell's hello, the proxy's ready (a nested page's own runtime's hello
- *   reaches the host before anything its page says, through its shell). A status page says
+ *   content's code runs: the shell's hello, the proxy's ready. A status page says
  *   nothing but its frame status. So a frame status is taken only before anything else was heard
  *   from the frame in this run: from its first document, which then was a page of Porthole's.
  *   After that, it came from the content (or from a later document, which in a display without
@@ -35,9 +34,9 @@ import type { FrameBlock, FrameOutcome } from "./types.ts";
  *   That holds against the display's own content, not against another display's (P125): a
  *   scope's displays share its origin, and one that runs reaches a new document of another's
  *   before that document's first script, where it can speak first, or stop or rewrite it so it
- *   says nothing. So the rule holds only where no content runs on the frame's origin: a nested
- *   page's shell, on a label of its own (P114).
- * - A served display that isn't nested (a served shell, a page, a view through the sandbox proxy)
+ *   says nothing. So the rule holds only where no content runs on the frame's origin, and no
+ *   served frame is such a place (the nested shell that was, P114, went in 0.16.0: P149).
+ * - A served display (a served shell, a page, a view through the sandbox proxy)
  *   takes no frame status from its frame at all, and infers nothing from its silence (a load and
  *   no word is a timeout, never `framing`): its door said how loading went before the frame was
  *   made (P125, `watchDoor`), from an opaque frame of the host's that no content can reach.
@@ -129,19 +128,12 @@ export function watchOutcome(options: {
   readonly source: FrameSource;
   /** Whether the frame speaks for itself (a shell or a view): then its handshake is the proof. */
   readonly speaks: boolean;
-  /**
-   * The config nests its pages (P111): the frame holds Porthole's shell, on a label no content
-   * runs on, whose first word may be a frame status. Any other served frame that speaks takes
-   * none: its door told (P125).
-   */
-  readonly nested?: boolean;
   readonly timeoutMs: number;
   readonly onOutcome: (outcome: FrameOutcome) => void;
   /** A frame status that wasn't taken, once a run (P124): the host's to hear, never shown. */
   readonly refused?: (message: string) => void;
 }): OutcomeWatch {
   const { surface, source, speaks } = options;
-  const nested = options.nested === true;
   const reports = source.kind === "url" && source.reports === true;
   // The first outcome; after a load, only a later block (a status page, access revoked) is told.
   let decided: FrameOutcome["state"] | null = null;
@@ -181,7 +173,7 @@ export function watchOutcome(options: {
     }
   };
   // Whether a frame status may be the word of a page of Porthole's (P124, P125, above).
-  const mayBePorthole = () => source.kind === "url" && (!speaks || (nested && !spoke));
+  const mayBePorthole = () => source.kind === "url" && !speaks;
   const unlisten = surface.transport.listen((data) => {
     heard = true;
     if (!namesFrameStatus(data)) {
@@ -229,15 +221,10 @@ export function watchOutcome(options: {
       return;
     }
     if (speaks) {
-      // A served shell or view says something before its first load ends; a nested page's shell
-      // that never did never ran. Any other served frame's silence tells nothing (P125). (An
+      // A served frame's silence tells nothing (P125): its door said how loading went. (An
       // opaque srcdoc frame always runs: its handshake decides.)
       if (source.kind === "url") {
-        if (nested) {
-          neverRan();
-        } else {
-          silent();
-        }
+        silent();
       }
       return;
     }

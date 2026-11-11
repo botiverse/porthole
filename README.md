@@ -42,11 +42,6 @@ config, so the sandbox, the shell and the manual never drift apart.
   bar where the host takes it. The query is the page's to read: declare `find` where it may be,
   and send queries on a pause or Enter, not each key. A query holds for the content it was asked
   of: a reload or other content forgets it, so clear the host's find bar then.
-- **Nested pages** (0.14, P111, `nested: true`): a served artifact's frame loads Porthole's shell
-  alone, and the page runs in its child frame with an opaque origin, so it reaches nothing of the
-  shell's realm. The host trusts the shell's own word on the person's press and focus there (for
-  the keyboard guard and `comments.open`), and only for nested frames
-  ([ARCHITECTURE.md § Trust boundaries](docs/ARCHITECTURE.md#trust-boundaries)).
 - **The agent's side** (`/check`, 0.3, P073): `lintContent`, `admitContent` and `checkPage` check
   a page before people see it, and warn of one its own styles hold to one screen (P106, P110).
 
@@ -117,8 +112,7 @@ the network, [Choosing egress](docs/ADOPTING.md#choosing-egress): the three leve
 opens and the risk it re-opens; for content that reads your data,
 [Live widgets](docs/ADOPTING.md#live-widgets-content-that-reads-your-data); for comments,
 [Annotations](docs/ADOPTING.md#annotations-comments-on-a-display); for a find bar,
-[Find in page](docs/ADOPTING.md#find-in-page-the-hosts-find-bar); for the page below the shell,
-[Nested pages](docs/ADOPTING.md#nested-pages-the-page-below-portholes-shell). Before you show
+[Find in page](docs/ADOPTING.md#find-in-page-the-hosts-find-bar). Before you show
 content that matters, the [threat model](docs/THREAT_MODEL.md)'s section for your use says what
 is left to you.
 

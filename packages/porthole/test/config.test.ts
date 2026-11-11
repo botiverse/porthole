@@ -459,7 +459,7 @@ describe("a page's own nested frames (P128)", () => {
     expect(compile(presets.inlineWidget({ nestedFrames: "own" })).shell?.nestedFrames).toBe("own");
   });
 
-  test("refuses another value, url mode, a nested page and a live widget", () => {
+  test("refuses another value, url mode and a live widget", () => {
     expect(refusal(withField({ nestedFrames: "all" }))).toMatch(/config\.nestedFrames/u);
     expect(refusal(withField({ nestedFrames: true }))).toMatch(/config\.nestedFrames/u);
     expect(
@@ -468,17 +468,13 @@ describe("a page's own nested frames (P128)", () => {
         nestedFrames: "own",
       }),
     ).toMatch(/url mode has no shell/u);
-    expect(() =>
-      presets.artifact({
-        isolation: "domain",
-        contentOrigins: [DOMAIN],
-        nested: true,
-        nestedFrames: "own",
-      }),
-    ).toThrow(/nested page/u);
     expect(() => presets.liveWidget({ nestedFrames: "own" })).toThrow(/no network of its own/u);
     // A live widget's own default, said out loud, stays.
     expect(presets.liveWidget({ nestedFrames: "none" }).nestedFrames).toBe("none");
+  });
+
+  test("`nested` is no field any more (0.16.0, P149): a config that still names it is refused, by name", () => {
+    expect(refusal(withField({ nested: true }))).toMatch(/config\.nested.*not a known field/u);
   });
 
   test("a display kind's option reaches both its served and its opaque config", () => {

@@ -4,6 +4,64 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## 0.16.0
+
+**Breaking.** What guessed at the person's intent is taken out (P149; supersedes P111, P114,
+P120, P122, P136, P148, and parts of P105, P109, P121, P123). It began with a host's report
+that a page's own comment button, pressed by a real person, was refused ("This needs a click"):
+the checks below ran on a guess at where the person was, each release made the guess larger,
+and none of them protected more than the moment a page asks. No isolation wall changes: origins,
+sandboxes, CSP, tickets, the door and every message check are as in 0.15.3.
+
+- **No proof of a click is asked, except for `copyText`.** Default gates: `sendPrompt`,
+  `openLink` and `downloadFile` are `confirm` and 30 a minute (they had no rate); `comments` is
+  30 a minute alone; `artifact.publish` and `assets.delete` are `confirm`. A page may call them
+  as it loads or on a timer: each still ends at the person's confirmation, or at a composer that
+  posts nothing by itself, and declines still mute the display. A marker's `activated` is taken
+  with or without a gesture (a view it opens still takes no press for 500 ms: that is your
+  view's guard, ADOPTING § Annotations). `copyText` keeps its click. The `user-activation` gate
+  stays in the vocabulary: name it for any capability (`gates`) or method (`methodGates`) to get
+  0.15's default back for it. `CapabilitySpec.inFrame` is gone.
+  **For a host:** remove any `gates` override you wrote only to drop `user-activation`; the
+  default is now what you overrode to, plus the rate. A handler for `comments` is asked more
+  freely: answer `false` while the person is writing, and space out or refuse a page whose opens
+  the person keeps closing. The manual and the typed runtime (`types/runtime/v1`) no longer say
+  "call it from a click" for these.
+- **The focus guard is removed.** A display that takes the keyboard keeps it until the person
+  clicks back (the accepted risk of THREAT_MODEL §5; the guard could not hold it and refused
+  people's own clicks). Gone: the `focusTaken` event, `PortholeFrame`'s and `PortholeView`'s
+  `onFocusTaken`, `Surface.onFocusTaken`, the "kept taking the keyboard" content error.
+  `display.focus()` is the frame's own `focus()`. `focusField(field)` stays, as a plain helper.
+  `Surface.focused`, optional, is read by the find shortcut alone.
+  **For a host:** delete your `focusTaken` / `onFocusTaken` handlers. Nothing else to do.
+- **Nested pages are removed** (`nested: true`). The config field is refused as unknown. Gone
+  from the main entry: `SHELL_STATE_METHOD`, `SHELL_GESTURE_MS`, `PAGE_SANDBOX_TOKENS`. Gone from
+  `/server`: `isNestedLabel`, `nestedLabelOf`, `nestedShellResponse`, `nestedShellCsp`,
+  `nestedFileCsp`, `nestedAncestors`, `NESTED_FILE_HEADERS`, `NESTED_FILES_PREFIX`. The
+  `porthole-` label prefix stays reserved (`PORTHOLE_LABEL_PREFIX`).
+  **For a host that used `nested: true`:** go back to a served page.
+  1. Remove `nested: true` from the kind's options. The page is then framed on its scope's own
+     label, as every served artifact is, with `allow-same-origin`: it has that origin's storage
+     again (`localStorage` lasts; set `served.storage` as you would for any served kind), and
+     the asset library and Porthole's libraries, which nested pages never had.
+  2. A nested page was opaque to its scope's other displays. A served one shares its scope's
+     origin with them (THREAT_MODEL S7): if displays in one scope must not reach each other,
+     give them different scopes.
+  3. A content Worker of your own: drop the routes for the shell's label
+     (`porthole-<…>.<domain>`) and the calls to the helpers above; `/server` users have nothing
+     to change. An edge route for that label can go too.
+  4. Do step 1 before you upgrade: 0.15 serves the kind as a served page once the field is
+     gone, on both sides, and 0.16.0 refuses a config that still has it.
+- **The page runtime.** The shell runtime every served document inlines is 0.15.2's without the
+  nested-only renewal hook (nine lines); `use` and `legacy` are unchanged. A page published
+  under 0.15 runs under 0.16 unchanged, and its calls that needed a click no longer need one.
+- **Conformance.** `12.prompt-gesture-confirm` is `12.prompt-confirm` (a prompt on load is
+  asked, and a no sends nothing); `12.raw-message` now expects a raw `ui/message` to be asked
+  too; `12.raw-copy` is new (a raw copy with no click is refused by the host). 28 negative
+  controls are removed with the code they weakened.
+- **The find shortcut in a shadow root.** `focused` reads the `activeElement` of the frame's own
+  root, so a display mounted inside a shadow root no longer reads as unfocused.
+
 ## 0.15.3
 
 - **A nested page's real presses count, each of them** (P148, amends P111). A nested page's shell
