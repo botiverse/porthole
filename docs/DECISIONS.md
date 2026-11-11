@@ -9622,7 +9622,12 @@ No message carries anything to the host but `kept`.
 **Residual.** A page that uses IndexedDB, the Cache API or a cookie has none when nested. Two
 tabs of one page each hold the keys as they were at their load; a write in one reaches the other
 (the store passes the origin's `storage` event on) without a `storage` event of the page's own.
-A load whose store answers late runs on memory and saves nothing. A browser that never opens the
+A load whose store answers late runs on memory and saves nothing. A write is kept when its
+message reaches the store, a moment after the page made it, where a served page's is kept at
+once: one made as the display goes may be lost, and the store checks the caps against the whole
+origin at each write, so a burst of thousands is worked through in seconds, not at once (CI's
+Firefox, the full run on this decision's own PR: four writes queued behind two thousand were not
+kept half a second later). A browser that never opens the
 host again keeps what it has (at most what it had, never grown past 1 MiB by a nested page) until
 the browser evicts it.
 

@@ -942,6 +942,10 @@ document of Porthole's own (the store) holds it on the scope's origin; the page'
 and hands it and the page's runtime the two ends of one channel. What differs from a served page:
 - **`localStorage` only**, and writes never grow it past about 1 MB or 1,024 keys (`setItem`
   throws `QuotaExceededError`). No IndexedDB, Cache API or cookie; `sessionStorage` lasts the load.
+- **A write is kept a moment after it is made**, not at once: the page reads its own write back
+  immediately, and the store keeps it when the message reaches it. A write made as the display
+  goes (the tab closed, your frame removed in the same instant) may not be kept, and a burst of
+  thousands of writes takes the store longer to work through than a served page's would.
 - **The `storage` event says `kept`.** `{ used: true, kept: true }` when the page first uses its
   storage and it is the kept one; `kept: false` when the store didn't answer in time (1.5 s after
   the page loaded) or the browser gives a framed page no storage: this visit's changes are then

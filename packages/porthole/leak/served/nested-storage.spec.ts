@@ -97,36 +97,41 @@ test.describe("a nested page's kept storage (P149)", () => {
   test(STORAGE_CAPS_THROW, async ({ page }) => {
     const scope = unique("kept");
     const names = ["__proto__", "hasOwnProperty", "toString", "constructor"];
+    // The names first, in a load of their own: four writes, which reach the store well within
+    // `written`. (After the flood below they waited behind some two thousand, and a slow Firefox
+    // had not kept them yet when the page went: a write is kept a moment after it is made, P149.)
     const first = await kept(
       page,
       scope,
-      `let threw = null;
-      try { localStorage.setItem("big", "x".repeat(1048577)); } catch (error) { threw = error.name; }
-      let many = null;
-      try { for (let i = 0; i < 1100; i += 1) localStorage.setItem("n" + i, ""); } catch (error) { many = error.name; }
-      const count = localStorage.length;
-      for (let i = 0; i < 1100; i += 1) localStorage.removeItem("n" + i);
-      for (const name of ${JSON.stringify(names)}) localStorage.setItem(name, "v:" + name);
-      say("caps", { threw, big: localStorage.getItem("big"), many, count, names: ${JSON.stringify(names)}.map((name) => localStorage.getItem(name)), length: localStorage.length });`,
+      `for (const name of ${JSON.stringify(names)}) localStorage.setItem(name, "v:" + name);
+      say("names", { names: ${JSON.stringify(names)}.map((name) => localStorage.getItem(name)), length: localStorage.length });`,
     );
-    await expect.poll(() => said(first, "caps") !== undefined).toBe(true);
-    const caps = said(first, "caps");
-    expect(caps?.threw, "probe: past 1 MiB, QuotaExceededError").toBe("QuotaExceededError");
-    expect(caps?.big, "probe: and nothing of it in the page's own map").toBeNull();
-    expect(caps?.many, "probe: past 1,024 keys, QuotaExceededError").toBe("QuotaExceededError");
-    expect(caps?.count, "probe: the keys stopped at the cap").toBe(1024);
-    expect(caps?.names, "names an object would trip on").toEqual(names.map((name) => `v:${name}`));
+    await expect.poll(() => said(first, "names") !== undefined).toBe(true);
+    expect(said(first, "names")?.names, "names an object would trip on").toEqual(
+      names.map((name) => `v:${name}`),
+    );
     await written(page);
+    // Read back at the next load, then the caps, last: nothing after them is read from the store.
     const second = await kept(
       page,
       scope,
-      `say("again", { names: ${JSON.stringify(names)}.map((name) => localStorage.getItem(name)), length: localStorage.length });`,
+      `say("again", { names: ${JSON.stringify(names)}.map((name) => localStorage.getItem(name)), length: localStorage.length });
+      let threw = null;
+      try { localStorage.setItem("big", "x".repeat(1048577)); } catch (error) { threw = error.name; }
+      let many = null;
+      try { for (let i = 0; i < 1100; i += 1) localStorage.setItem("n" + i, ""); } catch (error) { many = error.name; }
+      say("caps", { threw, big: localStorage.getItem("big"), many, count: localStorage.length });`,
     );
-    await expect.poll(() => said(second, "again") !== undefined).toBe(true);
+    await expect.poll(() => said(second, "caps") !== undefined).toBe(true);
     expect(said(second, "again")?.names, "kept under those names, and read back").toEqual(
       names.map((name) => `v:${name}`),
     );
     expect(said(second, "again")?.length, "nothing else was kept").toBe(names.length);
+    const caps = said(second, "caps");
+    expect(caps?.threw, "probe: past 1 MiB, QuotaExceededError").toBe("QuotaExceededError");
+    expect(caps?.big, "probe: and nothing of it in the page's own map").toBeNull();
+    expect(caps?.many, "probe: past 1,024 keys, QuotaExceededError").toBe("QuotaExceededError");
+    expect(caps?.count, "probe: the keys stopped at the cap").toBe(1024);
   });
 
   test(STORAGE_CAPS_KEPT, async ({ page }) => {
