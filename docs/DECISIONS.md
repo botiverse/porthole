@@ -9158,6 +9158,20 @@ each fail exactly their probe on all three. The old spec with its document in tw
 route (then it needs its own entry, never `access`), or a browser stops exposing
 `ancestorOrigins` to a framed page.
 
+**Amended in 0.15.3, after the audit of 0.15.1 (N1): the helpers that take host origins check
+them.** Decision 4 says every helper that takes host origins or `framedBy` throws on a bad one.
+For `framedBy` that held (`ancestorsOf`). For host origins it held in `createServer`, the host kit
+and `frameShellScript`, and not in four helpers a content Worker of a host's own calls itself:
+`statusPage`, `doorResponse`, `doorStatusResponse` and `nestedShellCsp` took `hostOrigins` as they
+came, so `https://app.example:0` passed and `"https://a; script-src *"` went into the
+`Content-Security-Policy` header as written. What they are given is the host's own configuration,
+not content's, so nothing reached them that a host didn't write; the claim was wrong, and a header
+built from an unchecked string is not something to leave. Each now runs `hostOriginProblem` over
+every origin and throws a `TypeError` naming itself (`doorResponse: hostOrigins: …`), with
+`frameAncestors` given or not; an embed's status pages name no host and check none. And the
+exported `isHostOrigin` now says no to what `hostOriginProblem` refuses (`:0`, a port past 65535 or
+with a leading zero, a host the URL parser rewrites): it tested the shape alone. `test/origins.test.ts`.
+
 ## P146 · 2026-11-10 · CI's full set runs before a release, not on every push · Accepted
 
 Amends P096 (its decision 4: what a push runs; its decision 6: the shards run by hand) and P097

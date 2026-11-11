@@ -9,7 +9,7 @@ import {
 import { frameShellDocument, frameShellScript, type FrameShellOptions } from "../shell/frame.ts";
 import { onNestedLabel, PORTHOLE_LABEL_PREFIX } from "../isolation/served.ts";
 import { sha256, utf8 } from "./crypto.ts";
-import { ancestorsOf } from "./pages.ts";
+import { ancestorsOf, checkHostOrigins } from "./pages.ts";
 import { base32 } from "./keys.ts";
 
 export { isNestedLabel, PORTHOLE_LABEL_PREFIX } from "../isolation/served.ts";
@@ -56,6 +56,7 @@ export function nestedShellCsp(
   hostOrigins: readonly string[],
   framedBy: readonly string[] = [],
 ): string {
+  checkHostOrigins("nestedShellCsp", hostOrigins);
   const files = `${origin}${NESTED_FILES_PREFIX}`;
   const directives: CspDirective[] = [
     ["default-src", "'none'"],
