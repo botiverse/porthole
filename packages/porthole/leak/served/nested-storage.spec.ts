@@ -1,6 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { InstanceRef } from "../../src/isolation/types.ts";
 import { storedFiles } from "./files.ts";
+import {
+  STORAGE_CAPS_KEPT,
+  STORAGE_CAPS_THROW,
+  STORAGE_CARRIED,
+  STORAGE_CLEAR,
+  STORAGE_CONTENT_WORDS,
+  STORAGE_FORGET,
+  STORAGE_KEPT,
+  STORAGE_LATE,
+  STORAGE_PEER,
+  STORAGE_SCOPES,
+} from "../controls.ts";
 import { harness, showServed } from "./harness.ts";
 import { seen, show, unique, type Shown } from "./nested-pages.ts";
 
@@ -31,9 +43,7 @@ async function reads(page: Page, scope: string, key: string): Promise<unknown> {
 test.describe("a nested page's kept storage (P149)", () => {
   test.setTimeout(90_000);
 
-  test("a value the page wrote is there at its next load, and the host hears that this load's storage is kept", async ({
-    page,
-  }) => {
+  test(STORAGE_KEPT, async ({ page }) => {
     const scope = unique("kept");
     const script = `say("had", { value: localStorage.getItem("k"), length: localStorage.length });
       localStorage.setItem("k", "v1");
@@ -52,9 +62,7 @@ test.describe("a nested page's kept storage (P149)", () => {
       "probe: the next load read what the last one wrote",
     ).toBe("v1");
   });
-  test("another scope's page reads nothing of it, and a second version of the same scope reads it", async ({
-    page,
-  }) => {
+  test(STORAGE_SCOPES, async ({ page }) => {
     const scope = unique("kept");
     const first = await kept(page, scope, `localStorage.setItem("mine", "one"); say("wrote");`);
     await expect.poll(() => said(first, "wrote") !== undefined).toBe(true);
@@ -67,9 +75,7 @@ test.describe("a nested page's kept storage (P149)", () => {
     expect(await reads(page, scope, "mine"), "probe: the scope's next page read it").toBe("one");
   });
 
-  test("what a served display of the scope wrote is what its nested display reads (the carry-over, on this engine)", async ({
-    page,
-  }) => {
+  test(STORAGE_CARRIED, async ({ page }) => {
     // A served page's frame and a nested page's store have the same top-level page above them:
     // the browser keeps them one storage. Checked, not assumed.
     const served = await harness();
@@ -88,9 +94,7 @@ test.describe("a nested page's kept storage (P149)", () => {
     ).toBe("from-served");
   });
 
-  test("past the caps setItem throws and nothing is stored; a key may have any name", async ({
-    page,
-  }) => {
+  test(STORAGE_CAPS_THROW, async ({ page }) => {
     const scope = unique("kept");
     const names = ["__proto__", "hasOwnProperty", "toString", "constructor"];
     const first = await kept(
@@ -108,7 +112,7 @@ test.describe("a nested page's kept storage (P149)", () => {
     await expect.poll(() => said(first, "caps") !== undefined).toBe(true);
     const caps = said(first, "caps");
     expect(caps?.threw, "probe: past 1 MiB, QuotaExceededError").toBe("QuotaExceededError");
-    expect(caps?.big, "probe: and nothing of it kept").toBeNull();
+    expect(caps?.big, "probe: and nothing of it in the page's own map").toBeNull();
     expect(caps?.many, "probe: past 1,024 keys, QuotaExceededError").toBe("QuotaExceededError");
     expect(caps?.count, "probe: the keys stopped at the cap").toBe(1024);
     expect(caps?.names, "names an object would trip on").toEqual(names.map((name) => `v:${name}`));
@@ -116,18 +120,45 @@ test.describe("a nested page's kept storage (P149)", () => {
     const second = await kept(
       page,
       scope,
-      `say("again", { big: localStorage.getItem("big"), names: ${JSON.stringify(names)}.map((name) => localStorage.getItem(name)), length: localStorage.length });`,
+      `say("again", { names: ${JSON.stringify(names)}.map((name) => localStorage.getItem(name)), length: localStorage.length });`,
     );
     await expect.poll(() => said(second, "again") !== undefined).toBe(true);
-    expect(said(second, "again")?.names, "probe: kept under those names, and read back").toEqual(
+    expect(said(second, "again")?.names, "kept under those names, and read back").toEqual(
       names.map((name) => `v:${name}`),
     );
     expect(said(second, "again")?.length, "nothing else was kept").toBe(names.length);
   });
 
-  test("the host's display.storage.clear() empties it, for the open page and for the next", async ({
-    page,
-  }) => {
+  test(STORAGE_CAPS_KEPT, async ({ page }) => {
+    // The store counts for itself. The page's runtime counts first and never sends it a write
+    // past the caps, so this holds twice over; with the runtime's count out (its control), the
+    // store's is what is left, and this is its probe.
+    const scope = unique("kept");
+    const first = await kept(
+      page,
+      scope,
+      `localStorage.setItem("small", "s");
+      try { localStorage.setItem("big", "x".repeat(1048577)); } catch (_) {}
+      try { for (let i = 0; i < 1100; i += 1) localStorage.setItem("n" + i, ""); } catch (_) {}
+      say("tried");`,
+    );
+    await expect.poll(() => said(first, "tried") !== undefined).toBe(true);
+    await written(page);
+    await written(page);
+    const second = await kept(
+      page,
+      scope,
+      `say("again", { big: localStorage.getItem("big"), small: localStorage.getItem("small"), length: localStorage.length });`,
+    );
+    await expect.poll(() => said(second, "again") !== undefined).toBe(true);
+    expect(said(second, "again")?.small, "what fits is kept").toBe("s");
+    expect(said(second, "again")?.big, "probe: nothing past 1 MiB was kept").toBeNull();
+    expect(said(second, "again")?.length, "probe: nor more than 1,024 keys").toBeLessThanOrEqual(
+      1024,
+    );
+  });
+
+  test(STORAGE_CLEAR, async ({ page }) => {
     const scope = unique("kept");
     const shown = await kept(
       page,
@@ -156,9 +187,7 @@ test.describe("a nested page's kept storage (P149)", () => {
     expect(await reads(page, scope, "k"), "probe: and the next page's").toBeNull();
   });
 
-  test("a store that answers late leaves the load on memory: the host hears it isn't kept, and nothing is written back", async ({
-    page,
-  }) => {
+  test(STORAGE_LATE, async ({ page }) => {
     const scope = unique("kept");
     const first = await kept(
       page,
@@ -175,13 +204,16 @@ test.describe("a nested page's kept storage (P149)", () => {
     const late = await kept(
       page,
       scope,
-      `say("had", { value: localStorage.getItem("k") }); localStorage.setItem("k", "written-on-memory"); say("wrote");`,
+      `say("had", { value: localStorage.getItem("k") }); localStorage.setItem("k", "written-on-memory"); say("wrote");
+      // And again once the store has answered at last: this load is on memory, and stays so.
+      setTimeout(() => { localStorage.setItem("k", "written-after-the-store-came"); say("wrote-late"); }, 6000);`,
     );
     await expect.poll(() => said(late, "wrote") !== undefined, { timeout: 15_000 }).toBe(true);
     expect(said(late, "had")?.value, "it started empty").toBeNull();
     await expect.poll(async () => (await seen(page)).kept).toEqual([false]);
-    // The store does answer in the end: nothing of this load's reaches it.
-    await page.waitForTimeout(4_500);
+    // The store does answer in the end: nothing of this load's reaches it, then or after.
+    await expect.poll(() => said(late, "wrote-late") !== undefined, { timeout: 15_000 }).toBe(true);
+    await written(page);
     await page.unroute("**/__porthole/store/**");
     expect(
       await reads(page, scope, "k"),
@@ -189,9 +221,7 @@ test.describe("a nested page's kept storage (P149)", () => {
     ).toBe("kept-before");
   });
 
-  test("the store answers its own shell alone: the host's page, framing it and handing it a port, is told nothing", async ({
-    page,
-  }) => {
+  test(STORAGE_PEER, async ({ page }) => {
     const scope = unique("kept");
     const shown = await kept(page, scope, `localStorage.setItem("secret", "s3"); say("wrote");`);
     await expect.poll(() => said(shown, "wrote") !== undefined).toBe(true);
@@ -223,9 +253,7 @@ test.describe("a nested page's kept storage (P149)", () => {
     expect(answer, "probe: the store told the host's own frame nothing").toBeNull();
   });
 
-  test("a scope's forget address empties what its origin kept, once, and nothing of another scope's", async ({
-    page,
-  }) => {
+  test(STORAGE_FORGET, async ({ page }) => {
     const served = await harness();
     const gone = unique("kept");
     const other = unique("kept");
@@ -254,5 +282,36 @@ test.describe("a nested page's kept storage (P149)", () => {
     ).toBeUndefined();
     expect(await reads(page, gone, "k"), "probe: the forgotten scope kept nothing").toBeNull();
     expect(await reads(page, other, "k"), "probe: another scope's is as it was").toBe("v");
+  });
+  test(STORAGE_CONTENT_WORDS, async ({ page }) => {
+    // The host's word to clear, and the ports' own messages, said by the page: to its parent
+    // (its shell) and to the top (the host's page). The shell takes the first from its host alone
+    // and the rest from no one; the host passes on nothing of the shell's namespace.
+    const scope = unique("kept");
+    const shown = await kept(
+      page,
+      scope,
+      `localStorage.setItem("k", "mine");
+      const words = [
+        { jsonrpc: "2.0", method: "porthole/shell/storage-clear" },
+        { jsonrpc: "2.0", method: "porthole/shell/store-clear" },
+        { jsonrpc: "2.0", method: "porthole/shell/store-port" },
+        { jsonrpc: "2.0", method: "porthole/shell/storage-port" },
+        { set: ["k", "theirs"] },
+        { clear: 1 },
+      ];
+      setTimeout(() => {
+        for (const word of words) {
+          try { parent.postMessage(word, "*"); } catch (_) {}
+          try { top.postMessage(word, "*"); } catch (_) {}
+        }
+        say("said");
+      }, 300);`,
+    );
+    await expect.poll(() => said(shown, "said") !== undefined).toBe(true);
+    await written(page);
+    expect(await reads(page, scope, "k"), "probe: what the page kept is as it wrote it").toBe(
+      "mine",
+    );
   });
 });

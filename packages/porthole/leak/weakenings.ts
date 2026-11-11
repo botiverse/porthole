@@ -853,6 +853,47 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "",
     },
   ],
+  // A nested page's kept storage (P149). The store answers whoever frames it and hands it a port.
+  "store-origin": [
+    {
+      file: "src/shell/store.ts",
+      find: "event.isTrusted !== true || event.source !== window.parent || event.origin !== plan.shell",
+      replace: "event.isTrusted !== true || event.source !== window.parent",
+    },
+  ],
+  // The page's runtime doesn't count: a write of any size goes into its map, and on to the store.
+  "storage-caps": [
+    {
+      file: RUNTIME,
+      find: "            if (!((units + grown <= MAX_UNITS || grown <= 0) && (items.size + more <= MAX_KEYS || more === 0))) {",
+      replace: "            if (false) {",
+    },
+  ],
+  // The store doesn't count: it keeps what it is sent.
+  "store-caps": [
+    {
+      file: "src/shell/store.ts",
+      find: "        if (fits(data.set[0], data.set[1])) {",
+      replace: "        if (true) {",
+    },
+  ],
+  // A load that fell back to memory still takes the store's port when it comes, and writes to it.
+  "storage-late": [
+    {
+      file: RUNTIME,
+      find: "          if (event.isTrusted !== true || storageKept === false) {",
+      replace: "          if (event.isTrusted !== true) {",
+    },
+  ],
+  // The shell takes the word to clear from its page too.
+  "storage-clear-source": [
+    {
+      file: "src/shell/frame.ts",
+      find: "      // Never the shell's words in the page's mouth.\n",
+      replace:
+        '      if (data !== null && typeof data === "object" && data.method === PREFIX + "storage-clear" && storeFrame !== null && storeFrame.contentWindow !== null) {\n        storeFrame.contentWindow.postMessage({ jsonrpc: "2.0", method: PREFIX + "store-clear" }, storeOrigin);\n      }\n',
+    },
+  ],
   // A press told to the shell (P148) needs no quiet host.
   "press-host-input": [
     {
@@ -1063,6 +1104,12 @@ const SERVED = [
   "press-port-forged",
   "press-open-lock",
   "press-still-here",
+  // A nested page's kept storage (P149): the store's document, the shell's and the page's runtime.
+  "store-origin",
+  "storage-caps",
+  "store-caps",
+  "storage-late",
+  "storage-clear-source",
   // A hostless plan's shell (P143): an embed session's documents, made in the embed spec's process.
   "embed-handshake",
   "embed-origins",

@@ -84,6 +84,7 @@ const RUNTIME = "leak/served/runtime.spec.ts";
 const NESTED = "leak/served/nested.spec.ts";
 const NESTED_SIBLINGS = "leak/served/nested-siblings.spec.ts";
 const NESTED_PRESS = "leak/served/nested-press.spec.ts";
+const NESTED_STORAGE = "leak/served/nested-storage.spec.ts";
 const STALL_RULE =
   "a shell's activation seen after a stall is no one's gesture until it goes off (P111, after its review)";
 const FILES = "leak/served/files.spec.ts";
@@ -219,6 +220,27 @@ export const PRESS_SAME_DOCUMENT =
 export const PRESS_STALL = "a press a shell tells after a stall is no one's (P148)";
 export const PRESS_WENT_BACK =
   "a page's focus() just after a second press in it, the person gone back to the host's composer, is taken back (P148)";
+/** A nested page's kept storage (P149); `nested-storage.spec.ts` takes these titles here. */
+export const STORAGE_KEPT =
+  "a value the page wrote is there at its next load, and the host hears that this load's storage is kept (P149)";
+export const STORAGE_SCOPES =
+  "another scope's page reads nothing of it, and a second version of the same scope reads it (P149)";
+export const STORAGE_CARRIED =
+  "what a served display of the scope wrote is what its nested display reads: the carry-over, on this engine (P149)";
+export const STORAGE_CAPS_THROW =
+  "past the caps setItem throws as the page writes, and a key may have any name (P149)";
+export const STORAGE_CAPS_KEPT =
+  "what is past the caps is not kept, whatever the page's own runtime let through (P149)";
+export const STORAGE_CLEAR =
+  "the host's display.storage.clear() empties it, for the open page and for the next (P149)";
+export const STORAGE_LATE =
+  "a store that answers late leaves the load on memory: the host hears it isn't kept, and nothing is written back, then or later (P149)";
+export const STORAGE_PEER =
+  "the store answers its own shell alone: the host's page, framing it and handing it a port, is told nothing (P149)";
+export const STORAGE_FORGET =
+  "a scope's forget address empties what its origin kept, once, and nothing of another scope's (P149)";
+export const STORAGE_CONTENT_WORDS =
+  "what a page says to its parent in the shell's name clears nothing and writes nothing (P149)";
 const HONEST_SCROLL =
   "an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second";
 /** A served page's own frames (P128): a frame of elsewhere stays out of the tree (files.spec.ts). */
@@ -922,6 +944,27 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       why: "no probe can see it on Chromium and Firefox: they fire no load for a navigation within the document (measured), so the shell sends no second port",
     },
   },
+  // A nested page's kept storage (P149). The store answers its own shell's origin alone.
+  "store-origin": { specs: [NESTED_STORAGE], fails: all(STORAGE_PEER) },
+  // The runtime counts as the page writes: past the caps, the error, at once.
+  "storage-caps": { specs: [NESTED_STORAGE], fails: all(STORAGE_CAPS_THROW) },
+  // The store counts again, and decides what is kept: behind the runtime's count.
+  "store-caps": {
+    specs: [NESTED_STORAGE],
+    fails: NOTHING,
+    holds: {
+      why: "the page's runtime counts first and never sends a write past the caps; with its count out too, the store's is what is left",
+      by: "storage-caps,store-caps",
+    },
+  },
+  "storage-caps,store-caps": {
+    specs: [NESTED_STORAGE],
+    fails: all(STORAGE_CAPS_THROW, STORAGE_CAPS_KEPT),
+  },
+  // A load that started on memory takes no port after: nothing of it is ever written back.
+  "storage-late": { specs: [NESTED_STORAGE], fails: all(STORAGE_LATE) },
+  // The host's word to clear is the host's alone: the shell takes it from no page.
+  "storage-clear-source": { specs: [NESTED_STORAGE], fails: all(STORAGE_CONTENT_WORDS) },
   // A press told to the shell needs a quiet host as its activation does: the person's press in the
   // page counts for a second, but not after they pressed or typed on the host's page.
   "press-host-input": { specs: [NESTED_PRESS], fails: all(PRESS_WENT_BACK) },
