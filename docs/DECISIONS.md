@@ -9624,3 +9624,8 @@ DESIGN.md's table); `leak/late-word.spec.ts` keeps `chromium-oopif`'s one case.
 cross-site frame (then a check could be a fact, not a guess); a host reports the interruptions
 as abuse its own handler can't bound; or a host needs an opaque page inside a shared scope
 (nested pages' one use that was not the guard).
+
+**Amended 2026-11-11, before the release.** `chromium-oopif` runs every served case too
+(`leak/served/*.spec.ts`, 142 more on full Chromium), not `leak/late-word.spec.ts` alone: with
+the nested cases gone the project had seven tests left, and a served display out of process is
+the setting the removed guesses failed in. No served case needed a change to pass there.

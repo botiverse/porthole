@@ -19,11 +19,13 @@ const webkitPath = process.env.PORTHOLE_WEBKIT_PATH;
 const all = [
   { name: "chromium", use: { ...devices["Desktop Chrome"] } },
   // Full Chromium, not the headless shell Playwright runs by default: its cross-site frames are
-  // out of process, on a thread of their own, as in a person's browser. The one case that needs
-  // that (a word a busy page takes late, P137).
+  // out of process, on a thread of their own, as in a person's browser. It runs the case that
+  // needs that (a word a busy page takes late, P137) and every served case (leak/served): a
+  // served display is a cross-site frame, and what a host's page can and can't see of one out
+  // of process is where 0.13 to 0.15's guesses went wrong (P149).
   {
     name: "chromium-oopif",
-    testMatch: "**/late-word.spec.ts",
+    testMatch: ["**/late-word.spec.ts", "**/served/*.spec.ts"],
     use: { ...devices["Desktop Chrome"], channel: "chromium" },
   },
   {

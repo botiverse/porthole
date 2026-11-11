@@ -66,7 +66,7 @@ jobs:
 
   # The quick set's browser suites: every spec on Chromium. `chromium-oopif` is full Chromium, not
   # the headless shell: its cross-site frames are out of process, as in a person's browser, and
-  # the one case that needs that (leak/late-word.spec.ts, P137) runs there.
+  # leak/late-word.spec.ts (P137) and every served case (leak/served) run there.
   loopback:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
