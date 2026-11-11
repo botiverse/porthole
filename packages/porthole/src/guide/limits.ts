@@ -204,13 +204,15 @@ export function manualLimits(config: PortholeConfig, network: string): ManualLim
   );
   add(
     "storage",
-    config.isolation === "opaque" || config.nested === true
+    config.isolation === "opaque" || (config.nested === true && config.storage === undefined)
       ? `State isn't saved: localStorage works but lasts only while the ${it} is on screen, and a reload or another device starts fresh. Keep what matters in the ${it}'s code.`
-      : config.storage?.scope !== undefined
-        ? `localStorage is kept for ${config.storage.scope}, in this browser; another browser or device starts fresh. Reads and writes can throw (private windows, strict settings): wrap them in try/catch and keep only what can be lost.`
-        : config.storage?.shared === undefined
-          ? `localStorage is kept for this ${it} in this browser; another device starts fresh. Reads and writes can throw (private windows, strict settings): wrap them in try/catch and keep only what can be lost.`
-          : `localStorage is shared by every ${it} in this ${config.storage.shared}, in this browser (another device starts fresh): prefix your keys with a name of this ${it}'s own ("budget:filters", not "filters"), or ${it}s overwrite each other. Reads and writes can throw (private windows, strict settings): wrap them in try/catch and keep only what can be lost.`,
+      : config.nested === true
+        ? `localStorage is kept for ${config.storage?.scope ?? `this ${it}`}, in this browser, up to about 1 MB in all (setItem throws past that, or past 1,024 keys); another browser or device starts fresh. Only localStorage: sessionStorage lasts while the ${it} is on screen, and there is no IndexedDB, Cache API or cookie. If the saved state can't be read in time the ${it} starts empty and this visit's changes aren't saved: keep only what can be lost.`
+        : config.storage?.scope !== undefined
+          ? `localStorage is kept for ${config.storage.scope}, in this browser; another browser or device starts fresh. Reads and writes can throw (private windows, strict settings): wrap them in try/catch and keep only what can be lost.`
+          : config.storage?.shared === undefined
+            ? `localStorage is kept for this ${it} in this browser; another device starts fresh. Reads and writes can throw (private windows, strict settings): wrap them in try/catch and keep only what can be lost.`
+            : `localStorage is shared by every ${it} in this ${config.storage.shared}, in this browser (another device starts fresh): prefix your keys with a name of this ${it}'s own ("budget:filters", not "filters"), or ${it}s overwrite each other. Reads and writes can throw (private windows, strict settings): wrap them in try/catch and keep only what can be lost.`,
   );
   // Where the content's errors go (P065): never promise feedback that doesn't come.
   const reports = config.limits.maxErrorReports;

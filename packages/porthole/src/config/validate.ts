@@ -696,9 +696,15 @@ export function validateConfig(
     if (config.isolation !== "domain" || config.mode !== "artifact") {
       fail("config.nested", "nests artifact pages served on their own origin (domain isolation)");
     }
-    // The page's origin is opaque (P111): nothing of the content origin's own is its.
-    if (config.storage !== undefined) {
-      fail("config.nested", "a nested page keeps no storage: drop config.storage");
+    // The page's origin is opaque (P111): nothing of the content origin's own is its. With
+    // `storage`, its scope's own `localStorage` is kept for it by the store (P149), and only that
+    // one scope's: a scope several displays share is several pages' storage at once, which the
+    // store's caps and its one peer don't cover yet.
+    if (isObject(config.storage) && config.storage.shared !== undefined) {
+      fail(
+        "config.nested",
+        "a nested page keeps its own scope's storage alone: storage.scope, not storage.shared",
+      );
     }
     if (capabilities.assets !== undefined) {
       fail(

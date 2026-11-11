@@ -49,8 +49,12 @@ export interface ShellPlan {
   readonly themeEvent: string;
   /** Whether a whole document takes the person's scheme: when it declares it, or always. */
   readonly themeDocuments: "declared" | "always" | "never";
-  /** `memory`: an opaque origin has no storage, so a map stands in for the frame's life. */
-  readonly storage: "memory" | "native";
+  /**
+   * `memory`: an opaque origin has no storage, so a map stands in for the frame's life. `kept`: a
+   * nested page whose config keeps storage (P149): the map starts as its scope's `localStorage`,
+   * which the store hands the runtime before content runs, and writes go back to it.
+   */
+  readonly storage: "memory" | "native" | "kept";
   readonly maxErrorReports: number;
   readonly maxPromptChars: number;
   /** The most text `copyText` carries. */
@@ -108,7 +112,14 @@ export function shellPlan(config: PortholeConfig): ShellPlan | null {
     themeEvent: config.theme.event,
     themeDocuments: config.theme.documents ?? "declared",
     // An opaque origin has no storage: an opaque frame's, and a nested page's (P111).
-    storage: config.isolation === "opaque" || config.nested === true ? "memory" : "native",
+    storage:
+      config.isolation === "opaque"
+        ? "memory"
+        : config.nested === true
+          ? config.storage === undefined
+            ? "memory"
+            : "kept"
+          : "native",
     maxErrorReports: config.limits.maxErrorReports,
     maxPromptChars: config.limits.maxPromptChars,
     maxCopyChars: MAX_COPY_CHARS,

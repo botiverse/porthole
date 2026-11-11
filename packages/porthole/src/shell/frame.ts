@@ -116,6 +116,54 @@ const frameShellRuntime = (strict: boolean): string => String.raw`(() => {
       port.postMessage(0);
     };
   };
+  // The page's store (P149), where its config keeps storage: a document of Porthole's own on the
+  // page's scope's own origin, which keeps that origin's localStorage for the page. The shell
+  // frames it, and at each load of the page's frame (once the store has loaded) makes one channel
+  // and hands an end to each: the store's in a message to its window at its origin, the page's as
+  // the press port goes. Nothing that crosses the channel is read here. The host's word to clear
+  // it (porthole/shell/storage-clear) is passed to the store, and to no one else.
+  let storeFrame = null;
+  let storeOrigin = "";
+  let storeLoaded = false;
+  let pageLoaded = false;
+  const joinStore = () => {
+    if (storeFrame === null || !storeLoaded || !pageLoaded || typeof MessageChannel !== "function") {
+      return;
+    }
+    const child = frame.contentWindow;
+    const keeper = storeFrame.contentWindow;
+    if (child === null || keeper === null) {
+      return;
+    }
+    const channel = new MessageChannel();
+    keeper.postMessage({ jsonrpc: "2.0", method: PREFIX + "store-port" }, storeOrigin, [channel.port1]);
+    child.postMessage({ jsonrpc: "2.0", method: PREFIX + "storage-port" }, "*", [channel.port2]);
+  };
+  if (typeof plan.store === "string") {
+    let at = null;
+    try {
+      at = new URL(plan.store);
+    } catch (_) {}
+    // Another origin than this one, under the store's own prefix: nothing else is framed there.
+    if (at !== null && at.origin !== own && at.pathname.indexOf("/__porthole/store/") === 0) {
+      storeOrigin = at.origin;
+      storeFrame = document.createElement("iframe");
+      storeFrame.setAttribute("referrerpolicy", "no-referrer");
+      storeFrame.setAttribute("aria-hidden", "true");
+      storeFrame.tabIndex = -1;
+      storeFrame.title = "";
+      storeFrame.style.display = "none";
+      storeFrame.addEventListener("load", () => {
+        storeLoaded = true;
+        joinStore();
+      });
+      storeFrame.src = at.href;
+    }
+  }
+  frame.addEventListener("load", () => {
+    pageLoaded = true;
+    joinStore();
+  });
   frame.addEventListener("load", () => {
     shut(asidePort);
     const before = pressPort;
@@ -150,6 +198,9 @@ const frameShellRuntime = (strict: boolean): string => String.raw`(() => {
   });
   frame.src = page.href;
   document.body.append(frame);
+  if (storeFrame !== null) {
+    document.body.append(storeFrame);
+  }
 
   const framed = window.parent !== window;
   const web = plan.origins.filter((origin) => origin.indexOf("https://") === 0 || origin.indexOf("http://") === 0);
@@ -293,6 +344,13 @@ const frameShellRuntime = (strict: boolean): string => String.raw`(() => {
         if (data.method === PREFIX + "look" && typeof n === "number" && n >= 0 && Math.floor(n) === n) {
           look(n);
         }
+        // The host's word to empty the page's storage (P149): to the store, at its origin.
+        if (data.method === PREFIX + "storage-clear" && storeFrame !== null && storeLoaded) {
+          const keeper = storeFrame.contentWindow;
+          if (keeper !== null) {
+            keeper.postMessage({ jsonrpc: "2.0", method: PREFIX + "store-clear" }, storeOrigin);
+          }
+        }
         // The host's own move into the frame, done (P136): on to the page.
         if (data.method === PREFIX + "focus") {
           if (holds) {
@@ -373,6 +431,12 @@ export interface FrameShellOptions {
   readonly title?: string;
   /** Where the page's sealed address is renewed (`<base>__porthole/renew`), and when it ends. */
   readonly renew?: { readonly url: string; readonly expires: number };
+  /**
+   * The page's store's address (P149), where its config keeps storage: absolute, on the page's
+   * scope's own origin (never the shell's), under `/__porthole/store/`. The shell frames it and
+   * hands it and the page's runtime the two ends of one channel.
+   */
+  readonly store?: string;
 }
 
 /** JSON that is safe inside a `<script>`. */
@@ -411,6 +475,26 @@ export function frameShellScript(options: FrameShellOptions): string {
       "frameShellScript: page is on a nested page's own label (porthole-<24 base32>, nestedLabelOf)",
     );
   }
+  let store: URL | null = null;
+  if (options.store !== undefined) {
+    try {
+      store = new URL(options.store);
+    } catch {
+      throw new TypeError("frameShellScript: store is an absolute URL");
+    }
+    // The store is the scope's origin's, another than the shell's: the shell takes none of it.
+    if (
+      store.origin === page.origin ||
+      !store.pathname.startsWith("/__porthole/store/") ||
+      store.search !== "" ||
+      store.hash !== "" ||
+      hostOriginProblem(store.origin) !== null
+    ) {
+      throw new TypeError(
+        "frameShellScript: store is under /__porthole/store/ on the page's scope's own origin, not the shell's",
+      );
+    }
+  }
   const strict = (options.framedBy ?? []).length > 0;
   return (strict ? STRICT_FRAME_SHELL_RUNTIME : FRAME_SHELL_RUNTIME).replace("__PLAN__", () =>
     scriptJson({
@@ -422,6 +506,7 @@ export function frameShellScript(options: FrameShellOptions): string {
       ...(options.renew === undefined
         ? {}
         : { renew: { url: options.renew.url, expires: options.renew.expires } }),
+      ...(store === null ? {} : { store: store.href }),
     }),
   );
 }

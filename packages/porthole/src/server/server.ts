@@ -30,12 +30,15 @@ import {
 import { libraryFile } from "./libraries.ts";
 import { isNavigation, ownLoad, serveAsset, serveFile, ticketPage } from "./files.ts";
 import {
+  forgetResponse,
   isNestedLabel,
   nestedAncestors,
   nestedLabelOf,
   nestedFileCsp,
   nestedShellResponse,
   PORTHOLE_LABEL_PREFIX,
+  STORE_PREFIX,
+  storeResponse,
 } from "./nested.ts";
 import { DEFAULT_ENTRY } from "../files/paths.ts";
 import { isPagePath } from "../files/types.ts";
@@ -77,6 +80,13 @@ const DOOR_ROUTE = /^\/__porthole\/door\/([a-z2-7]{16})$/u;
  * in the path, so a frame whose engine keeps no cookie (WebKit, P025) loads them too.
  */
 const FILES_PATH = /^\/__porthole\/f\/([A-Za-z0-9_-]{40,4096})(\/.*)?$/u;
+/** A nested page's store (P149): `STORE_PREFIX<token>`, on its scope's own label. */
+const STORE_ROUTE = /^\/__porthole\/store\/([A-Za-z0-9_-]{40,4096})$/u;
+/** A scope's forget address (P149): `/__porthole/forget/<ticket>`, on its own label, once. */
+const FORGET_PREFIX = "/__porthole/forget/";
+const FORGET_ROUTE = /^\/__porthole\/forget\/([A-Za-z0-9_-]{16,128})$/u;
+/** How long a forget address is good for: long enough for the host's page to load it once. */
+const FORGET_SECONDS = 300;
 const FILES_PREFIX = "/__porthole/f/";
 /** An asset's address (P089): `/_blob/` and 32 lowercase hex characters (`ASSET_ID`). */
 const ASSET_ROUTE = /^\/_blob\/([0-9a-f]{32})$/u;
@@ -977,6 +987,68 @@ export function createServer(options: ServerOptions): PortholeServer {
   }
 
   /**
+   * A nested page's store's address (P149): on its scope's own origin, the token sealed for the
+   * one shell that frames it (`h`, the shell's origin) and good as long as that shell's session.
+   */
+  async function storeAt(access: Access): Promise<string> {
+    const token = await keys.seal({ k: "store", h: access.origin, x: access.expiresAt });
+    return `${originOfLabel(nameOf(access.instance.scope))}${STORE_PREFIX}${token}`;
+  }
+
+  /**
+   * The store's answer (P149), on a scope's own label: only for a token sealed for that scope's
+   * own shell (the shell's label is the scope's label's, `nestedLabelOf`: a token minted for
+   * another scope names another shell), not ended, and only as a document. Anything else is not
+   * found: there is no session here to end, and nothing to say to a page that frames it.
+   */
+  async function serveStore(request: Request, label: string, token: string): Promise<Response> {
+    const method = request.method.toUpperCase();
+    const shell = originOfLabel(nestedLabelOf(label));
+    let opened: unknown = null;
+    try {
+      opened = await keys.unseal(token);
+    } catch {
+      opened = null;
+    }
+    if (
+      (method !== "GET" && method !== "HEAD") ||
+      !isRecord(opened) ||
+      opened.k !== "store" ||
+      opened.h !== shell ||
+      typeof opened.x !== "number" ||
+      opened.x <= Date.now()
+    ) {
+      return page(404, "Nothing here", "This address names no content.", method);
+    }
+    return storeResponse({ shell, hostOrigins: options.hostOrigins, framedBy, method });
+  }
+
+  /**
+   * A scope's forget address's answer (P149): its ticket taken, once, and only on the label it
+   * was minted for. Anything else is not found, without the header.
+   */
+  async function serveForget(request: Request, label: string, ticket: string): Promise<Response> {
+    const method = request.method.toUpperCase();
+    const record =
+      method === "GET" || method === "HEAD" ? await tickets.take(ticketId(ticket)) : null;
+    let named: string | null = null;
+    try {
+      named = record === null ? null : nameOf(cleanInstance(record.instance).scope);
+    } catch {
+      named = null;
+    }
+    if (
+      record === null ||
+      record.forget !== true ||
+      record.expiresAt <= Date.now() ||
+      named !== label
+    ) {
+      return page(404, "Nothing here", "This address names no content.", method);
+    }
+    return forgetResponse({ hostOrigins: options.hostOrigins, framedBy, method });
+  }
+
+  /**
    * A taken ticket, if it is good for `label`'s origin: its instance's own (a nested page's shell's,
    * P114), or for an entry code (`entry`) its scope's, where a clean address is.
    */
@@ -989,7 +1061,8 @@ export function createServer(options: ServerOptions): PortholeServer {
       return null;
     }
     const record = await tickets.take(ticketId(ticket));
-    if (record === null || record.expiresAt <= Date.now()) {
+    // A forget address's ticket (P149) opens no content: it is spent, and nothing is served.
+    if (record === null || record.expiresAt <= Date.now() || record.forget === true) {
       return null;
     }
     try {
@@ -1451,12 +1524,16 @@ export function createServer(options: ServerOptions): PortholeServer {
                     .join("/")
                 : "";
       }
+      // Its store (P149), where the config keeps storage: on the scope's own origin, sealed for
+      // this shell alone and for as long as its session.
+      const store = served.compiled.shell?.storage === "kept" ? await storeAt(access) : undefined;
       const shell = nestedShellResponse(served.compiled, {
         origin: access.origin,
         origins: options.hostOrigins,
         framedBy,
         page: `${access.origin}${sealed.base}${rest}`,
         renew: { url: `${access.origin}${sealed.base}__porthole/renew`, expires: sealed.expires },
+        ...(store === undefined ? {} : { store }),
         method,
       });
       if (cookie !== null) {
@@ -2306,6 +2383,21 @@ export function createServer(options: ServerOptions): PortholeServer {
       );
     },
 
+    async forgetStorage(scope) {
+      if (typeof scope !== "string" || scope.length === 0 || scope.length > 512) {
+        throw new TypeError("forgetStorage: a scope is 1 to 512 characters");
+      }
+      const ticket = newTicket();
+      await tickets.put(ticketId(ticket), {
+        // No document: the ticket opens none (`take` refuses it), and names its scope alone.
+        instance: { scope, document: { kind: "shell", preset: "forget" } },
+        viewer: "",
+        expiresAt: Date.now() + FORGET_SECONDS * 1000,
+        forget: true,
+      });
+      return `${originOfLabel(nameOf(scope))}${FORGET_PREFIX}${ticket}`;
+    },
+
     forget(filter = {}) {
       for (const [key, each] of answers) {
         if (
@@ -2476,6 +2568,14 @@ export function createServer(options: ServerOptions): PortholeServer {
         const sealed = FILES_PATH.exec(url.pathname);
         if (sealed?.[1] !== undefined) {
           return await serveSealed(request, url, label, sealed[1], sealed[2]);
+        }
+        const store = STORE_ROUTE.exec(url.pathname);
+        if (store?.[1] !== undefined) {
+          return await serveStore(request, label, store[1]);
+        }
+        const forgotten = FORGET_ROUTE.exec(url.pathname);
+        if (forgotten?.[1] !== undefined) {
+          return await serveForget(request, label, forgotten[1]);
         }
         if (url.pathname.startsWith(PREFIX)) {
           return page(404, "Nothing here", "This address names no content.", method);

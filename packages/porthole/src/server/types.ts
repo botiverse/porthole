@@ -118,6 +118,11 @@ export interface TicketRecord {
    */
   readonly page?: string;
   /**
+   * A forget address's ticket (P149, `forgetStorage`): it opens no content and is taken only at
+   * `/__porthole/forget/<ticket>` on its scope's own label.
+   */
+  readonly forget?: true;
+  /**
    * A door's ticket (P125): `issue` mints one beside the content's, for the same grant and as
    * long, for a display whose frame is on its scope's origin (a served shell, a page that isn't
    * nested, the sandbox proxy). Taken only at the door (`/__porthole/door/<key>`), never at the
@@ -419,6 +424,16 @@ export interface PortholeServer {
    * revocation holds at once (P072).
    */
   forget(filter?: { readonly scope?: string; readonly subject?: string }): void;
+  /**
+   * A scope's forget address (P149): a URL on the scope's own origin that, loaded once within five
+   * minutes, answers an empty document with `Clear-Site-Data: "storage"`, so the browser that
+   * loads it drops what that origin kept (a nested page's `localStorage`, through its store; a
+   * served page's own). For a scope that is gone: call it from your backend when the thing the
+   * scope stood for is deleted, and have your page load the address in a hidden frame. Nothing
+   * else mints one: no request to a content origin does, and no page can ask for it. The ticket
+   * names that scope alone and is taken at that scope's origin alone.
+   */
+  forgetStorage(scope: string): Promise<string>;
   /** A clean address on a scope's origin (P068): what a tab, a link, a bookmark opens. */
   urlOf(scope: string, path?: string): string;
   /** A redirect entry's state, signature checked; null for one this server didn't make. */

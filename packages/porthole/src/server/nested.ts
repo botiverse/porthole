@@ -7,7 +7,8 @@ import {
   type CspDirective,
 } from "../compile/policy.ts";
 import { frameShellDocument, frameShellScript, type FrameShellOptions } from "../shell/frame.ts";
-import { onNestedLabel, PORTHOLE_LABEL_PREFIX } from "../isolation/served.ts";
+import { storeDocument, storeScript } from "../shell/store.ts";
+import { hostOriginProblem, onNestedLabel, PORTHOLE_LABEL_PREFIX } from "../isolation/served.ts";
 import { sha256, utf8 } from "./crypto.ts";
 import { ancestorsOf, checkHostOrigins } from "./pages.ts";
 import { base32 } from "./keys.ts";
@@ -42,6 +43,9 @@ export function nestedLabelOf(label: string): string {
 /** Where every page and file of a nested page is, on its origin: its sealed files' prefix. */
 export const NESTED_FILES_PREFIX = "/__porthole/f/";
 
+/** Where a nested page's store is, on its scope's own origin (P149): `<prefix><token>`. */
+export const STORE_PREFIX = "/__porthole/store/";
+
 const base64 = (bytes: Uint8Array): string => btoa(String.fromCharCode(...bytes));
 
 /**
@@ -55,13 +59,18 @@ export function nestedShellCsp(
   origin: string,
   hostOrigins: readonly string[],
   framedBy: readonly string[] = [],
+  /** The origin of the page's store (P149), where its config keeps storage: framed too, there alone. */
+  store?: string,
 ): string {
   checkHostOrigins("nestedShellCsp", hostOrigins);
   const files = `${origin}${NESTED_FILES_PREFIX}`;
+  if (store !== undefined && (hostOriginProblem(store) !== null || store === origin)) {
+    throw new TypeError("nestedShellCsp: store is an origin, and not the shell's own");
+  }
   const directives: CspDirective[] = [
     ["default-src", "'none'"],
     ["script-src", `'sha256-${base64(sha256(utf8(script)))}'`],
-    ["frame-src", files],
+    ["frame-src", files, ...(store === undefined ? [] : [`${store}${STORE_PREFIX}`])],
     ["connect-src", files],
     ["base-uri", "'none'"],
     ["form-action", "'none'"],
@@ -96,6 +105,7 @@ export function nestedShellResponse(
       options.origin,
       options.origins,
       options.framedBy,
+      options.store === undefined ? undefined : new URL(options.store).origin,
     ),
     "cache-control": "no-store",
     "referrer-policy": "no-referrer",
@@ -155,3 +165,81 @@ export const NESTED_FILE_HEADERS: Readonly<Record<string, string>> = {
   "cross-origin-resource-policy": "cross-origin",
   "access-control-allow-origin": "*",
 };
+
+/**
+ * A nested page's store (P149): the answer at `STORE_PREFIX<token>` on the page's scope's own
+ * origin, once the token was checked (`/server` does; a content Worker of a host's own that
+ * answers the content origins itself calls this after its own check). A document of Porthole's
+ * own: its one script under its hash, nothing else loaded, never cached, framed by the shell it
+ * answers and the pages above that shell (the header is matched against every ancestor, so the
+ * host's page is named; the store itself takes a port from its parent at `shell` alone).
+ * `shell` is that scope's nested shell's origin, on its own label.
+ */
+export function storeResponse(options: {
+  readonly shell: string;
+  readonly hostOrigins: readonly string[];
+  readonly framedBy?: readonly string[];
+  readonly method?: string;
+}): Response {
+  checkHostOrigins("storeResponse", options.hostOrigins);
+  if (!onNestedLabel(options.shell)) {
+    throw new TypeError(
+      `storeResponse: shell ${options.shell} isn't on a nested page's own label (${PORTHOLE_LABEL_PREFIX}<24 base32>, nestedLabelOf)`,
+    );
+  }
+  const script = storeScript({ shell: options.shell });
+  const csp = serializeCsp([
+    ["default-src", "'none'"],
+    ["script-src", `'sha256-${base64(sha256(utf8(script)))}'`],
+    ["base-uri", "'none'"],
+    ["form-action", "'none'"],
+    [
+      "frame-ancestors",
+      ...ancestorsOf(options.hostOrigins, options.framedBy).split(" "),
+      options.shell,
+    ],
+  ]);
+  return new Response(options.method?.toUpperCase() === "HEAD" ? null : storeDocument(script), {
+    status: 200,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy": csp,
+      "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "x-robots-tag": "noindex, nofollow",
+    },
+  });
+}
+
+/**
+ * The answer at a scope's forget address (P149): an empty document that tells the browser to drop
+ * that origin's storage. `Clear-Site-Data: "storage"` is on this answer and no other: the origin
+ * is the whole scope's, every version's, so no status page may carry it (a version gone, a ticket
+ * ended, a file's 404, which content can cause), and never `"cookies"` (cleared for the whole
+ * site) or `"*"`.
+ */
+export function forgetResponse(options: {
+  readonly hostOrigins: readonly string[];
+  readonly framedBy?: readonly string[];
+  readonly method?: string;
+}): Response {
+  checkHostOrigins("forgetResponse", options.hostOrigins);
+  return new Response(
+    options.method?.toUpperCase() === "HEAD"
+      ? null
+      : '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Porthole</title></head><body></body></html>\n',
+    {
+      status: 200,
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "clear-site-data": '"storage"',
+        "content-security-policy": `default-src 'none'; frame-ancestors ${ancestorsOf(options.hostOrigins, options.framedBy)}`,
+        "cache-control": "no-store",
+        "referrer-policy": "no-referrer",
+        "x-content-type-options": "nosniff",
+        "x-robots-tag": "noindex, nofollow",
+      },
+    },
+  );
+}
