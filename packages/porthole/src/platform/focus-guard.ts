@@ -113,6 +113,15 @@ export const SHELL_EARLY_MS = 150;
  */
 export const SHELL_STALL_MS = 100;
 
+/**
+ * A press a nested page's runtime told its shell (P148) within this long after the shell was seen
+ * to have stalled is no one's. The shell notes a press when it hears it, and a page that holds the
+ * thread it shares with its shell makes that late, by as long as it likes: when the page lets go,
+ * what waited behind it runs at once, the shell's own look among it, which may come first and say
+ * the stall, the press following a moment later as if it were new.
+ */
+export const SHELL_AFTER_STALL_MS = 500;
+
 /** What a nested page's shell last said (P111), on the host's clock. */
 export interface ShellWord {
   /** Whether its engine tells activation at all (`navigator.userActivation`). */
@@ -130,6 +139,15 @@ export interface ShellWord {
    * host's page sees the pointer, their key landing in the page, no press (P120).
    */
   readonly keyed?: boolean;
+  /**
+   * When it last heard a real press from its page's runtime (P148); -Infinity, or absent, if it
+   * heard none, or the one it heard is uncertain (judged as an activation that turned on is).
+   */
+  readonly pressedAt?: number;
+  /** How many presses it said it had heard, the last time it spoke: more is a new one. */
+  readonly presses?: number;
+  /** `keyed`, for the press at `pressedAt`: judged as the shell told it. */
+  readonly pressKeyed?: boolean;
 }
 
 /** One move of the keyboard the guard undid. */
@@ -211,8 +229,12 @@ export function personMoved(move: FocusMove): boolean {
     return (
       (move.seen && move.pressed) ||
       (move.now - move.typedAt >= KEY_PRESS_MS &&
-        shellGesture(move.shell.word, move.shell.hostInputAt, move.now) &&
-        !(move.shell.pointerShown === true && move.shell.word.keyed === true))
+        shellSaw(
+          move.shell.word,
+          move.shell.hostInputAt,
+          move.now,
+          move.shell.pointerShown === true,
+        ))
     );
   }
   if (
@@ -236,6 +258,39 @@ export function shellGesture(word: ShellWord, hostInputAt: number, now: number):
     now - word.activatedAt <= SHELL_GESTURE_MS &&
     now >= word.activatedAt &&
     hostInputAt < word.activatedAt
+  );
+}
+
+/**
+ * Whether a nested page's runtime told its shell a real press just now (P148): the shell heard it
+ * within `SHELL_GESTURE_MS`, after the host's page's last trusted press or key. What the shell's
+ * activation can't say: a press while it is already on (within 5 s of the last gesture).
+ */
+export function shellPress(word: ShellWord, hostInputAt: number, now: number): boolean {
+  const pressedAt = word.pressedAt ?? -Infinity;
+  return (
+    word.supported &&
+    now - pressedAt <= SHELL_GESTURE_MS &&
+    now >= pressedAt &&
+    hostInputAt < pressedAt
+  );
+}
+
+/**
+ * Whether a nested page's shell saw the person's gesture just now, either way: its activation
+ * turned on (`shellGesture`, P111), or its page's runtime told it a press (`shellPress`, P148);
+ * each only where a press could have made it (P120: `shown`, the host's page sees the pointer over
+ * its frames, and the word is `keyed`, the person's key landing in the page).
+ */
+export function shellSaw(
+  word: ShellWord,
+  hostInputAt: number,
+  now: number,
+  shown: boolean,
+): boolean {
+  return (
+    (shellGesture(word, hostInputAt, now) && !(shown && word.keyed === true)) ||
+    (shellPress(word, hostInputAt, now) && !(shown && word.pressKeyed === true))
   );
 }
 
@@ -317,6 +372,12 @@ export interface FocusGuard {
       readonly gap: number;
       /** The ask this report answers (P120), if it answers one. */
       readonly asked?: number;
+      /**
+       * Its page's runtime's real presses (P148): how long ago the shell heard the last (null:
+       * none since the frame's last load), and how many it has heard. Absent from an older shell.
+       */
+      readonly pressed?: number | null;
+      readonly presses?: number;
     },
   ): void;
   /** A nested page's shell's heartbeat (P111): it is looking. */
@@ -341,6 +402,8 @@ interface Guarded {
   word: ShellWord | null;
   /** When the host last heard the shell (a report or a heartbeat). */
   heardAt: number;
+  /** When the shell was last seen to have stalled (`SHELL_STALL_MS`); -Infinity if never. */
+  stalledAt: number;
   /** Asks the shell to look now (P120), the last ask's number, and whether it was answered. */
   readonly ask: ((n: number) => void) | undefined;
   asked: number;
@@ -543,8 +606,7 @@ export function focusGuard(view: Window): FocusGuard {
     // The shell's activation, where a press could have made it: within a second of the person's
     // typing on the host's page with the pointer elsewhere, it is their keys landing in the page
     // (P120). Read as of the move.
-    const theirs =
-      word !== null && shellGesture(word, inputAt, at) && !(pointerShown && word.keyed === true);
+    const theirs = word !== null && shellSaw(word, inputAt, at, pointerShown);
     // It said focus came in around the move, or answered the ask the move made with focus in it.
     const spoke =
       word !== null &&
@@ -853,6 +915,7 @@ export function focusGuard(view: Window): FocusGuard {
           taken: new Set(),
           overSince: -Infinity,
           heardAt: -Infinity,
+          stalledAt: -Infinity,
           ask: options?.nested === true ? options.ask : undefined,
           asked: 0,
           answered: false,
@@ -893,6 +956,9 @@ export function focusGuard(view: Window): FocusGuard {
       // before it (P122): that key's successor, landing in the page.
       const turnedOn = said.ago !== null && before.activatedAt === -Infinity && !before.uncertain;
       const stalled = said.gap > SHELL_STALL_MS || at - guarded.heardAt > SHELL_STALL_MS;
+      if (stalled) {
+        guarded.stalledAt = at;
+      }
       const fought = contest !== null && contest.fight && contest.frame === frame;
       // The typing before it, never after: a key the person typed on the host's page after they
       // pressed the page, before the shell's word came, says nothing of that press (P122, after
@@ -918,6 +984,41 @@ export function focusGuard(view: Window): FocusGuard {
           : turnedOn
             ? !pressPossible(true, frame.matches(":hover"), guarded.overSince, typing, turnedAt)
             : before.keyed === true;
+      // A press its page's runtime told it (P148), new when it has heard more than it had: judged
+      // as an activation that turned on is. Heard in or just after a stall
+      // (`SHELL_AFTER_STALL_MS`), in a fight for a text field, or within `KEY_PRESS_MS` of a key
+      // the person typed on the host's page before it, it is no one's (a press says nothing of
+      // when it was until the shell hears it, and Enter or Space on a button the page put the
+      // focus on is the person's key landing in the page); and whether a press could have made
+      // it is judged now, as the shell tells it (P120).
+      const pressNew = typeof said.presses === "number" && said.presses !== (before.presses ?? 0);
+      const pressHeardAt =
+        typeof said.pressed === "number"
+          ? at - said.pressed - Math.min(said.gap, SHELL_STALL_MS)
+          : -Infinity;
+      const pressTyping = typedBefore(pressHeardAt);
+      const pressedAt =
+        typeof said.pressed !== "number"
+          ? -Infinity
+          : !pressNew
+            ? (before.pressedAt ?? -Infinity)
+            : at - guarded.stalledAt <= SHELL_AFTER_STALL_MS ||
+                fought ||
+                pressHeardAt - pressTyping < KEY_PRESS_MS
+              ? -Infinity
+              : at - said.pressed;
+      const pressKeyed =
+        pressedAt === -Infinity
+          ? false
+          : pressNew
+            ? !pressPossible(
+                true,
+                frame.matches(":hover"),
+                guarded.overSince,
+                pressTyping,
+                pressHeardAt,
+              )
+            : before.pressKeyed === true;
       guarded.word = {
         supported: said.supported,
         activatedAt,
@@ -925,15 +1026,34 @@ export function focusGuard(view: Window): FocusGuard {
         focusedAt: said.focused && !before.focused ? at : before.focusedAt,
         ...(uncertain ? { uncertain: true } : {}),
         ...(keyed ? { keyed: true } : {}),
+        ...(said.presses === undefined ? {} : { pressedAt, presses: said.presses }),
+        ...(pressKeyed ? { pressKeyed: true } : {}),
       };
       if (waiting?.frame === frame) {
         settle(at);
+      } else if (
+        pressNew &&
+        known === frame &&
+        document.activeElement === frame &&
+        contest === null &&
+        shellPress(guarded.word, inputAt, at) &&
+        !(pointerShown && pressKeyed)
+      ) {
+        // Focus is in the frame already and the person pressed in its page: theirs from here on,
+        // as a move into it they made is (the shell's word on the move may have come before the
+        // press's did).
+        earned = true;
       }
     },
     beat(frame) {
       const guarded = frames.get(frame);
       if (guarded !== undefined && guarded.word !== null) {
-        guarded.heardAt = now();
+        const at = now();
+        // The first word after a silence may be a heartbeat: the stall is the same.
+        if (at - guarded.heardAt > SHELL_STALL_MS) {
+          guarded.stalledAt = at;
+        }
+        guarded.heardAt = at;
       }
     },
     gesture(frame) {
@@ -942,12 +1062,7 @@ export function focusGuard(view: Window): FocusGuard {
       const at = now();
       // Where a press could have made it (P120): a key the person typed into the page, meant for
       // the host's composer, turns the shell's activation on too.
-      return (
-        guarded !== undefined &&
-        word !== null &&
-        shellGesture(word, inputAt, at) &&
-        !(pointerShown && word.keyed === true)
-      );
+      return guarded !== undefined && word !== null && shellSaw(word, inputAt, at, pointerShown);
     },
     focus(frame) {
       hostMove = { frame, at: now() };

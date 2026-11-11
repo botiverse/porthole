@@ -5845,7 +5845,7 @@ that throws gives the "wasn't checked" warning; `admitFiles` with `\ffffff` in a
 **Revisit when** a page's own document is ever shown outside the shell (then quirks mode is real),
 or an engine starts counting fixed boxes in what the viewport scrolls.
 
-## P111 · 2026-10-28 · A nested page: Porthole's shell at the framed address, the page its opaque child, and the shell's own activation decides the keyboard and `comments.open` · Accepted
+## P111 · 2026-10-28 · A nested page: Porthole's shell at the framed address, the page its opaque child, and the shell's own activation decides the keyboard and `comments.open` · Accepted; amended by P148
 
 **Context.** P109's focus guard and `comments.open`'s gate ask whether the person, not the page,
 moved the keyboard into a frame or clicked in it. In full Chromium a cross-site frame is out of
@@ -9342,3 +9342,157 @@ P132's reports (through the root's box; here through `scrollTop`, the number the
 would then be no better than the event, and no worse); a host needs marks in the page's own
 scrollers to ride too (a timeline per scroller, named from the mark's nearest one); or decision 6's
 case is reported.
+
+## P148 · 2026-11-11 · A nested page's real presses, told to its shell over a port no content holds · Accepted
+
+Amends P111 (its "Rejected", and item 4 of its "Threat it re-opens"). From Raft (xxchan,
+2026-11-11): a page's own button that calls `comments.open`; the host answers with a dialog; the
+person cancels it and presses the button again, and nothing happens ("This needs a click"), nor at
+the next press; some seconds later it works. Designed on one page first, attacked by Ferryman
+before any code (his findings are items 2, 4 and 5 below), accepted by the CTO with the bounds of
+item 1.
+
+**Context.** P111 takes "the person is in this frame" from the shell's own transient activation
+turning on: within the last second, with no trusted press or key on the host's page since. An
+activation stays on for about 5 s, so a press in the page within 5 s of the last gesture turns
+nothing on, and a press in the page within 5 s of a press on the host's page can't be told from
+the page borrowing the host's. P111 accepted that. In use it is a button that does nothing:
+measured in full Chromium, a press one second after the host's dialog was cancelled is refused,
+and the one after it too.
+
+P111 rejected "the page's runtime reporting its own gestures (the page's word, in the page's
+realm)": the runtime and the content share a document, and whatever the runtime posts to the
+shell, the content can post from the same window. That holds for a message to a window. It doesn't
+for a `MessagePort` only the runtime holds, carrying an event only the browser makes.
+
+**Decision.**
+1. **A port per load, from the shell.** At each `load` of its page's frame the shell makes a
+   `MessageChannel`, keeps one end and posts the other to the page (`porthole/shell/press-port`,
+   in the shell's own namespace, which it passes neither way). It hears only the port of the
+   frame's last load, and forgets what it heard of a press before that load.
+2. **The runtime takes it before any content runs, and no content ever holds it.** The first
+   listener there is (on `window`, capturing) takes the port from the first message that is the
+   browser's own (`isTrusted`), from the parent read at the runtime's start, naming the method,
+   with exactly one port, and stops the event there. Every other event of that name is stopped
+   too. One that fails a check doesn't use up the one port (a page that dispatches a
+   `MessageEvent` of its own before the shell's arrives would otherwise have the real port dropped:
+   no press forged, but the feature silently off). The port lives in the runtime's closure.
+   Two walls this rests on, both already there, now named as its preconditions:
+   `document.open()` takes every listener off a window, the runtime's among them, and a document
+   opened and closed again fires the frame's `load` again (measured on Chromium 153 and Firefox
+   155, and WebKit here): the runtime's lock on `Document.prototype.open`, `write` and `writeln`
+   (there for declarative shadow DOM) is what keeps a page from hearing the port in the runtime's
+   place; and a nested page is `sandbox="allow-scripts"`, so every frame of its own is another
+   opaque origin, with no unlocked `open` to borrow. If the lock on any of the three couldn't be
+   fixed in place, or any built-in this uses is missing, or the plan names no host, **none of it is
+   installed**: no port is taken and no press is told, and the host has the shell's activation
+   alone, as before.
+3. **What is told is that there was a press, and nothing else**: no place, no target, no time. The
+   shell notes when it heard it, on its own clock, and tells the host in its state (`pressed`: how
+   long ago; `presses`: how many it has heard, so the host knows a new one).
+4. **What a press is** (every one the browser's own event, read through getters kept before
+   content ran):
+   - a mouse going down (`pointerdown`, `pointerType` `mouse`);
+   - a finger or a pen coming up (`pointerup`, any other `pointerType`). A finger that scrolls goes
+     down too and ends in `pointercancel`: counted as it lands, scrolling the page would open the
+     gate for a second. This is HTML's own list of what activates;
+   - Enter or Space going down, not a repeat of a held key, on a native control that isn't
+     editable: `button`, `summary`, `input` of type button, submit or reset; Enter alone on
+     `a[href]`. By tag and type, never `role`, which is the content's word: `role="button"` on a
+     text field (or on a custom element around one) would make every space typed there a press,
+     and P120's "typing is no press" would be the content's to decide. A custom element is never
+     one, so the focus inside its shadow tree, open or closed, tells nothing;
+   - a click on such a control (an assistive technology activates a button with a click alone),
+     but not the click a form gives its submit button for Enter in another of its controls (the
+     two forms read through each control's own `form`: a field tied by its `form` attribute is not
+     inside the form's element), nor one that a held key's repeat gives.
+5. **The host judges a press told exactly as an activation that turned on.** For a second
+   (`SHELL_GESTURE_MS`), a move of focus into the frame, or a `comments.open`, is the person's,
+   **with no trusted press or key on the host's page since** (the design page had this signal
+   need no quiet host; it keeps one, which costs the case this is for nothing: the dialog's
+   Cancel is before the press). And, as for an activation: not a press told in a fight over a
+   text field (P120), not one within 250 ms of the person's key on the host's page (P122), not
+   one told within a second of their typing with the pointer elsewhere, where the host's page
+   sees the pointer (P120), and not one told in or just after a stall of the shell (below). A
+   press told while the focus is already in the frame makes the frame the person's from there on,
+   as a move they made into it does.
+6. **A stalled shell.** The shell notes a press when it hears it. Where the page shares the
+   shell's thread, a page that holds it from its own click handler makes that as late as it
+   likes, past the person going back to the host's page (P111, after its review). An activation
+   seen after a stall is uncertain because the look that sees it turn on is the first look after
+   the stall, and says its gap. A press is another message: when the page lets go, the shell's own
+   timer may run first and say the stall, and the press follow a moment later with no gap of its
+   own (seen on the first cut of this decision: `leak/served/nested-stall.spec.ts` failed on
+   Chromium with frames in process). So the host notes when the shell was last seen to have
+   stalled (a report or a heartbeat after more than `SHELL_STALL_MS` of silence, or a report that
+   says such a gap), and a press told within `SHELL_AFTER_STALL_MS` (500 ms) of that is no one's.
+7. **What the page says next follows the press.** A call made in the press's own handler (a tap's
+   click, a key's click) leaves the page a moment after the press does, on another channel, and
+   could arrive first. After it tells a press, the runtime holds what it posts to its host until
+   the shell answers on the port, which the shell does only after it has told the host; 250 ms
+   without an answer and it holds nothing back. Content that posts past the runtime orders its
+   own messages, at its own cost.
+8. **A load that isn't a new document.** WebKit fires the frame's `load` for a navigation within
+   the document (P142). The shell then sends a second port to a runtime that takes only one, and
+   would hear the first no more. That runtime answers the second port on the first (`1`: this
+   document is still here), which only it can, and the shell goes back to the first and shuts the
+   new one. A new document's runtime never has the port before.
+9. **Nested pages only** (`plan.press`, from `nested: true`). A served, opaque or proxied page's
+   runtime carries the code and installs none of it; their plans are as before.
+
+**Why the rejected alternative holds now.** What P111 feared was the content speaking as the
+runtime. It can't post on a port it never holds (2), and can't make the runtime post for an event
+it made up (4: `isTrusted` is an own, unforgeable property of each event; nothing else it could
+shape decides, since the tag, type, key, repeat, pointer type, target and form are read through
+getters taken before it ran). The runtime's word here stands where its other walls do (the
+navigation guard, P129, P130): its code runs first and calls only what it kept.
+
+**What it does not say.** Which element was pressed, or that the press was meant for the call
+that follows. That is the activation rule's own limit. Content can put the focus on its own
+button and wait for the person's Enter meant for something else: with the shell's activation off
+that already passed for a gesture (P111, P120's residual); now it does within 5 s of the last
+gesture too, under the same rules of item 5.
+
+**Threat.** One message more from the shell to the page (a port, nothing in it), two content-free
+values on that port, and two numbers more in the shell's state. No secret is in any of them. The
+gate P111 keeps shut for 5 s after any gesture now opens for a second after a real press in the
+page: the case P111's "Threat it re-opens" (4) accepted as a loss is the one given back. A page
+that could take the port could tell presses that never were, and with the person active on the
+host's page within 5 s open a comment composer or keep the keyboard: items 2 and 4 are what
+stands in the way, each with a control that takes it out.
+
+**Residual.** A key on a control that isn't native (a `div` with `role="button"`, a custom
+element) tells nothing: the 5 s of P111 stay for it. So they do on an engine where the runtime
+can't install all of this (one without `PointerEvent`, say): nothing is told there. A press within 500 ms
+of a stall of the shell is dropped, a slow page's own included. The shell's stamp is when it
+heard the press, a message's time after it was made: a press on the host's page within that time
+of a press in the page reads as before it.
+
+**Tested.** `test/nested.test.ts` (the shell's script in a stub page): one port per load; a press
+is told to the host before it is answered; anything else on the port is none; a new load's port
+replaces the last and forgets its press; "still here" restores the port before; the plan asks
+only a nested page; `shellPress`, `shellSaw` and `personMoved` on a press told.
+`leak/served/nested-press.spec.ts`, real input only, on full Chromium, the headless shell, WebKit
+and Firefox: a second and a third press after presses on the host's page open `comments` (refused
+before this decision on full Chromium); Enter on the page's button, its call made in the key's
+own click, is allowed (not Firefox, where a page's own `focus()` puts no key on its button); a
+page's `focus()` 700 ms after a second press, the person back in the host's composer, is taken
+back; every event a page can dispatch tells nothing; typing in a text field, one with
+`role="button"`, one in a custom element with that role, and an editable button tells nothing; a
+held key is one press; Enter in a form's field tells none though the form clicks its button; a
+finger that scrolls tells none and a tap one (Chromium, the only engine a test can drag a finger
+on); content's first listener hears no port; a port message content sends itself first is not
+taken and takes no place (Firefox makes no such event); a page can't open its document again; a
+press after a link within the document is heard; the host's rule on a press told after a stall.
+Negative controls, each failing its probe on every engine it names: `press-untrusted`,
+`press-role`, `press-editable`, `press-repeat`, `press-submit`, `press-touch-down` (Chromium),
+`press-port-heard`, `press-port-forged` (Chromium, WebKit), `press-open-lock`,
+`press-still-here` (WebKit), `press-host-input`, and `shell-stall` (now this rule's too). No
+control for item 7 (an order between two channels: with the hold out it is lost only sometimes),
+nor for "only the last load's port" (nothing of a document outlives it to speak on the port it
+held: a second wall behind item 2, held by the unit test).
+
+**Revisit when** an engine shows the host's page a press in an out-of-process frame (P111's own
+condition: this and the activation rule could then both go); a host reports the residual for
+controls that aren't native (then a rule for `role` that typing can't satisfy); or the 500 ms
+after a stall drops presses people notice.

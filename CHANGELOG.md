@@ -4,6 +4,26 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## 0.15.3
+
+- **A nested page's real presses count, each of them** (P148, amends P111). A nested page's shell
+  knew of a press in the page only as its own activation turning on, and an activation stays on
+  for 5 s: a second press in that time, or a press within 5 s of one on the host's page (a
+  dialog's Cancel), turned nothing on, and `comments.open` from it was refused ("This needs a
+  click"), or a move into the page taken back. The page's runtime now tells its shell each press
+  the browser itself made (a mouse down; a finger or pen up; Enter or Space, not held, on a native
+  control that isn't editable; a click on one), over a `MessagePort` the shell sends at each load
+  and the runtime takes before any content runs. The shell says when it heard the last
+  (`porthole/shell/state`: `pressed`, `presses`), and the host takes it as it takes the
+  activation turning on: for a second, with no press or key on the host's page since, and under
+  P120's and P122's rules. Nothing a page dispatches is a press, and no content holds the port;
+  where the runtime can't install all of it, nothing is told and P111's rule stands alone.
+  **For a host:** no API change. The nested shell's script and the shell runtime every served
+  document inlines change (the nested shell's `script-src` hash with it; `nestedShellResponse`
+  and `/server` compute it, as before). Both sides need 0.15.3 for the change to show: the host's
+  page (`createHost`) and whatever serves the content origins. Either side alone behaves as
+  0.15.2.
+
 ## 0.15.2
 
 - **Marks ride the document's scroll** (P147, amends P104 and P132). A commented passage's

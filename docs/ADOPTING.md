@@ -683,8 +683,11 @@ focusField(composer.textarea); // Firefox ignores a plain focus() while a fighti
   frame there is out of process: your page sees no press in it, so a person's click into the
   page's field is taken back. A nested page's shell sees it: a move into the frame is the
   person's if the shell's activation turned on within the last second and you saw no press or key
-  of your own since. A second press in the page within 5 s of the last turns nothing on: after the
-  person went back to your composer, their next move in is taken back until then, or a Tab. A
+  of your own since. A second press in the page within 5 s of the last turns nothing on; from
+  0.15.3 the page's runtime tells its shell each real press (P148), so the person's next press in
+  the page counts as the first did, after they went back to your composer too. Nothing for you to
+  do but run 0.15.3 on both sides (your page, and whatever serves the content origins): an older
+  side ignores what the newer says, and the 5 s stay until both are new. A
   nested page that takes the keyboard back as the guard returns it is fought as any page is, and
   stopped (P120). A move into the page within 250 ms of the person's key on your page is taken
   back on every engine (no hand presses that fast after typing, P122); on full Chromium a key the

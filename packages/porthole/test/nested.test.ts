@@ -18,9 +18,13 @@ import {
   personMoved,
   pressPossible,
   shellGesture,
+  shellPress,
+  shellSaw,
   type FocusMove,
 } from "../src/platform/focus-guard.ts";
 import { FRAME_SHELL_RUNTIME, frameShellScript } from "../src/shell/frame.ts";
+import { SHELL_RUNTIME } from "../src/shell/runtime.ts";
+import { SHELL_METHOD_PREFIX, SHELL_PRESS_PORT_METHOD } from "../src/isolation/types.ts";
 import { nestedFileCsp, nestedShellCsp, nestedShellResponse } from "../src/server/nested.ts";
 import { checkFrameLocation, onNestedLabel } from "../src/isolation/served.ts";
 import { createServer, isNestedLabel, nestedLabelOf, prefixedName } from "../src/server/index.ts";
@@ -220,10 +224,49 @@ describe("the shell's document (P111)", () => {
 });
 
 /** The shell's script run against a stand-in of its window: what it says, to whom. */
+/**
+ * A message port as the shell's script uses one (P148): `tell` is the page's runtime posting on
+ * its end, heard by the shell's `onmessage` on the other; `heard` what the shell posted back.
+ */
+class FakePort {
+  other: FakePort | null = null;
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  closed = false;
+  readonly heard: unknown[] = [];
+  postMessage(data: unknown) {
+    this.other?.heard.push(data);
+  }
+  close() {
+    this.closed = true;
+  }
+  /** The runtime's word on this end, to the shell's end. */
+  tell(data: unknown) {
+    const shell = this.other;
+    if (shell !== null && !shell.closed) {
+      shell.onmessage?.({ data });
+    }
+  }
+}
+class FakeChannel {
+  readonly port1 = new FakePort();
+  readonly port2 = new FakePort();
+  constructor() {
+    this.port1.other = this.port2;
+    this.port2.other = this.port1;
+  }
+}
+
 const shellAt = (at = ORIGIN) => {
   const said: { to: "host" | "page"; message: Record<string, unknown> }[] = [];
   const heard: ((event: unknown) => void)[] = [];
-  const page = { postMessage: (message: never) => said.push({ to: "page", message }) };
+  /** The ports the shell sent its page (P148): the page's end of each. */
+  const ports: FakePort[] = [];
+  const page = {
+    postMessage: (message: never, _origin?: string, transfer?: readonly FakePort[]) => {
+      said.push({ to: "page", message });
+      ports.push(...(transfer ?? []));
+    },
+  };
   const parent = { postMessage: (message: never) => said.push({ to: "host", message }) };
   const style = {};
   const moves: string[] = [];
@@ -232,9 +275,13 @@ const shellAt = (at = ORIGIN) => {
   const later: (() => void)[] = [];
   const onDocument: ((event: unknown) => void)[] = [];
   const onWindow: Record<string, ((event: unknown) => void)[]> = { focus: [], blur: [] };
+  const onFrame: Record<string, (() => void)[]> = { load: [] };
   const frame = {
     style,
     setAttribute() {},
+    addEventListener: (type: string, listener: () => void) => {
+      onFrame[type]?.push(listener);
+    },
     contentWindow: page,
     focus: () => moves.push("focus"),
     blur: () => moves.push("blur"),
@@ -266,6 +313,7 @@ const shellAt = (at = ORIGIN) => {
       onWindow[type]?.push(listener);
     },
     URL,
+    MessageChannel: FakeChannel,
   };
   context.window = context;
   // The script as a host's own Worker might make it for `at` (P121: `frameShellScript` refuses
@@ -311,10 +359,18 @@ const shellAt = (at = ORIGIN) => {
       run();
     }
   };
+  /** The page's frame loads: the shell's port for that load is the last of `ports`. */
+  const load = () => {
+    for (const listener of onFrame.load ?? []) {
+      listener();
+    }
+    return ports.at(-1) as FakePort;
+  };
   return {
     said,
     fromHost,
     fromPage,
+    load,
     focusOnWindow,
     focusOnDocument,
     blurWindow,
@@ -484,7 +540,16 @@ describe("the host's ask to the shell (P120)", () => {
         message: {
           jsonrpc: "2.0",
           method: "porthole/shell/state",
-          params: { supported: true, active: false, ago: null, focused: true, gap: 0, asked: 3 },
+          params: {
+            supported: true,
+            active: false,
+            ago: null,
+            focused: true,
+            gap: 0,
+            pressed: null,
+            presses: 0,
+            asked: 3,
+          },
         },
       },
     ]);
@@ -500,6 +565,153 @@ describe("the host's ask to the shell (P120)", () => {
     expect(said).toEqual([]);
     fromHost({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: {} });
     expect(said.map((each) => each.to)).toEqual(["page"]);
+  });
+});
+
+describe("the page's real presses, told to the shell over a port (P148)", () => {
+  const states = (said: { to: string; message: Record<string, unknown> }[]) =>
+    said
+      .filter((each) => each.to === "host" && each.message.method === "porthole/shell/state")
+      .map((each) => each.message.params as { pressed: number | null; presses: number });
+
+  test("at each load of its page's frame the shell sends the page one port, in its own namespace", () => {
+    const { said, load } = shellAt();
+    said.length = 0;
+    const port = load();
+    expect(said).toEqual([
+      { to: "page", message: { jsonrpc: "2.0", method: "porthole/shell/press-port" } },
+    ]);
+    expect(port).toBeDefined();
+    expect(port.heard, "the shell says nothing on it until a press").toEqual([]);
+  });
+
+  test("a press: its state to the host first (how long ago, how many), then its answer on the port", () => {
+    const { said, load, clock } = shellAt();
+    const port = load();
+    said.length = 0;
+    clock.now = 2_000;
+    port.tell(0);
+    expect(states(said)).toEqual([expect.objectContaining({ pressed: 0, presses: 1 })]);
+    expect(port.heard, "answered once the host was told").toEqual([0]);
+    clock.now = 2_300;
+    port.tell(0);
+    expect(states(said).at(-1)).toMatchObject({ pressed: 0, presses: 2 });
+    expect(port.heard).toEqual([0, 0]);
+  });
+
+  test("anything on the port but a press's own word is none, and is not answered", () => {
+    const { said, load } = shellAt();
+    const port = load();
+    said.length = 0;
+    for (const word of [1, "0", null, { pressed: true }, 2]) {
+      port.tell(word);
+    }
+    expect(states(said)).toEqual([]);
+    expect(port.heard).toEqual([]);
+  });
+
+  test("a new load: a new port, the one before heard no more, and the press before forgotten", () => {
+    const { said, fromHost, load, clock } = shellAt();
+    const first = load();
+    first.tell(0);
+    clock.now += 200;
+    const second = load();
+    expect(second).not.toBe(first);
+    said.length = 0;
+    fromHost({ jsonrpc: "2.0", method: "porthole/shell/look", params: { n: 1 } });
+    expect(states(said).at(-1), "nothing of the page before").toMatchObject({
+      pressed: null,
+      presses: 1,
+    });
+    said.length = 0;
+    first.tell(0);
+    expect(states(said), "the port before says nothing more").toEqual([]);
+    second.tell(0);
+    expect(states(said).at(-1)).toMatchObject({ pressed: 0, presses: 2 });
+    // The next load shuts the one set aside.
+    load();
+    expect((first.other as FakePort).closed).toBe(true);
+  });
+
+  test("a load that left the document where it was (WebKit, P142): its runtime says so on the port it holds, and that port is the one again", () => {
+    const { said, load } = shellAt();
+    const first = load();
+    const second = load();
+    said.length = 0;
+    // Until it says so, the port before is heard no more.
+    first.tell(0);
+    expect(states(said)).toEqual([]);
+    first.tell(1);
+    expect((second.other as FakePort).closed, "the new port is shut").toBe(true);
+    first.tell(0);
+    expect(states(said).at(-1)).toMatchObject({ pressed: 0, presses: 1 });
+    expect(first.heard).toEqual([0]);
+    // Said again, it changes nothing; and the new port, which no one took, is not heard.
+    first.tell(1);
+    second.tell(0);
+    expect(states(said)).toHaveLength(1);
+  });
+
+  test("only a nested page's plan asks its runtime for it", () => {
+    // The one name, as each side writes it in its own script.
+    expect(SHELL_PRESS_PORT_METHOD).toBe(`${SHELL_METHOD_PREFIX}press-port`);
+    expect(SHELL_RUNTIME).toContain(`data.method === "${SHELL_PRESS_PORT_METHOD}"`);
+    expect(FRAME_SHELL_RUNTIME).toContain('method: PREFIX + "press-port"');
+    expect(SHELL_RUNTIME).toContain("plan.press === true && !hostless");
+    expect(compile(nested()).shell).toMatchObject({ press: true });
+    expect(compile(presets.artifact()).shell).not.toHaveProperty("press");
+    expect(compile(presets.inlineWidget()).shell).not.toHaveProperty("press");
+  });
+
+  const word = {
+    supported: true,
+    // On since 3 s ago: no edge of its own within the second.
+    activatedAt: 7_000,
+    focused: true,
+    focusedAt: 9_850,
+    pressedAt: 9_800,
+    presses: 1,
+  };
+  const move: FocusMove = {
+    now: 10_000,
+    seen: true,
+    pressed: false,
+    over: false,
+    overSince: -Infinity,
+    lastKey: { key: "a", at: 9_500 },
+    typedAt: 9_500,
+    focusedAt: 5_000,
+    gestureAt: 9_500,
+    activation: true,
+    hostMoved: false,
+    shell: { word, hostInputAt: 9_500 },
+  };
+
+  test("a press told within the second, after the host's last press or key: the person's, though the activation turned nothing on", () => {
+    expect(shellGesture(word, 9_500, 10_000)).toBe(false);
+    expect(shellPress(word, 9_500, 10_000)).toBe(true);
+    expect(shellSaw(word, 9_500, 10_000, false)).toBe(true);
+    expect(personMoved(move)).toBe(true);
+  });
+
+  test("a press or key on the host's page since, more than a second on, or none told: the page's", () => {
+    expect(shellPress(word, 9_900, 10_000)).toBe(false);
+    expect(personMoved({ ...move, shell: { word, hostInputAt: 9_900 } })).toBe(false);
+    expect(shellPress(word, 9_500, 10_801)).toBe(false);
+    expect(personMoved({ ...move, now: 10_801 })).toBe(false);
+    const { pressedAt: _pressedAt, ...older } = word;
+    expect(shellPress(older, 0, 10_000), "a shell older than the port").toBe(false);
+    expect(shellPress({ ...word, pressedAt: -Infinity }, 0, 10_000)).toBe(false);
+    expect(shellPress({ ...word, supported: false }, 9_500, 10_000)).toBe(false);
+  });
+
+  test("it is judged as an activation is: not within KEY_PRESS_MS of the person's key on the host's page, and not a key landing in the page where the pointer is seen", () => {
+    expect(personMoved({ ...move, typedAt: 10_000 - KEY_PRESS_MS + 1 })).toBe(false);
+    const keyed = { ...word, pressKeyed: true };
+    expect(shellSaw(keyed, 9_500, 10_000, true)).toBe(false);
+    expect(shellSaw(keyed, 9_500, 10_000, false)).toBe(true);
+    // Each word by its own mark: an activation that was a key says nothing of a press told since.
+    expect(shellSaw({ ...word, keyed: true }, 9_500, 10_000, true)).toBe(true);
   });
 });
 

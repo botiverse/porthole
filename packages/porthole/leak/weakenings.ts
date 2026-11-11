@@ -762,6 +762,96 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "      const stalled = false;",
     },
   ],
+  // A nested page's real presses (P148): any event the page dispatches is one.
+  "press-untrusted": [
+    {
+      file: RUNTIME,
+      find: "      const real = (event) => event.isTrusted === true;",
+      replace: "      const real = (event) => true;",
+    },
+  ],
+  // What the content calls a button is one: its role is read.
+  "press-role": [
+    {
+      file: RUNTIME,
+      find: '        let kind = "";\n        if (name === "button" || name === "summary") {',
+      replace:
+        '        let kind = callOf(getAttributeIn, node, ["role"]) === "button" ? "both" : "";\n        if (kind !== "") {\n        } else if (name === "button" || name === "summary") {',
+    },
+  ],
+  // An editable control is pressed by the keys typed into it.
+  "press-editable": [
+    {
+      file: RUNTIME,
+      find: '        return kind !== "" && callOf(editableOf, node, []) !== true ? kind : "";',
+      replace: "        return kind;",
+    },
+  ],
+  // A held key's repeats are presses, and so are the clicks they give a button.
+  "press-repeat": [
+    {
+      file: RUNTIME,
+      find: "            keyHeld = callOf(repeatOf, event, []) === true;",
+      replace: "            keyHeld = false;",
+    },
+  ],
+  // The click a form gives its submit button for Enter in one of its fields is a press.
+  "press-submit": [
+    {
+      file: RUNTIME,
+      find: "              if (form !== null && form === formOf(active)) {\n                return;\n              }\n",
+      replace: "",
+    },
+  ],
+  // A finger is a press as it lands: one that goes on to scroll was one.
+  "press-touch-down": [
+    {
+      file: RUNTIME,
+      find: '          if ((callOf(pointerTypeOf, event, []) === "mouse") === down) {',
+      replace: "          if (down) {",
+    },
+  ],
+  // The shell's port message goes on to content's listeners.
+  "press-port-heard": [
+    {
+      file: RUNTIME,
+      find: "          callOf(stopNow, event, []);\n          if (event.isTrusted !== true) {",
+      replace: "          if (event.isTrusted !== true) {",
+    },
+  ],
+  // A port message the page dispatches is taken as the shell's.
+  "press-port-forged": [
+    {
+      file: RUNTIME,
+      find: "          callOf(stopNow, event, []);\n          if (event.isTrusted !== true) {\n            return;\n          }\n",
+      replace: "          callOf(stopNow, event, []);\n",
+    },
+  ],
+  // document.open, write and writeln are the page's to call: it clears the window's listeners.
+  "press-open-lock": [
+    {
+      file: RUNTIME,
+      find: '  for (const name of ["open", "write", "writeln"]) {\n    lock(Document.prototype, name, noRewrite);\n  }\n',
+      replace: "",
+    },
+  ],
+  // A load that left the document where it was: its runtime says nothing, and the shell hears the
+  // new port alone, which no one took.
+  "press-still-here": [
+    {
+      file: RUNTIME,
+      find: "              callOf(portPost, port, [1]);\n",
+      replace: "",
+    },
+  ],
+  // A press told to the shell (P148) needs no quiet host.
+  "press-host-input": [
+    {
+      file: "src/platform/focus-guard.ts",
+      find: "    hostInputAt < pressedAt\n",
+      replace: "    true\n",
+    },
+  ],
   // A nested page's gesture (P111) needs no quiet host: the person's press in the page counts for
   // a second even after they pressed or typed on the host's page.
   "shell-host-input": [
@@ -952,6 +1042,17 @@ const SERVED = [
   // served shell.
   "marker-late",
   "marker-busy",
+  // A nested page's real presses (P148): the page's runtime, in its served shell.
+  "press-untrusted",
+  "press-role",
+  "press-editable",
+  "press-repeat",
+  "press-submit",
+  "press-touch-down",
+  "press-port-heard",
+  "press-port-forged",
+  "press-open-lock",
+  "press-still-here",
   // A hostless plan's shell (P143): an embed session's documents, made in the embed spec's process.
   "embed-handshake",
   "embed-origins",

@@ -36,7 +36,10 @@ function shellWords(opened: Transport, frame: HTMLIFrameElement, guard: FocusGua
     if (params === null || typeof params !== "object") {
       return;
     }
-    const { supported, ago, focused, gap, asked } = params as Record<string, unknown>;
+    const { supported, ago, focused, gap, asked, pressed, presses } = params as Record<
+      string,
+      unknown
+    >;
     const span = (value: unknown) =>
       typeof value === "number" && Number.isFinite(value) && value >= 0;
     if (message.method === SHELL_BEAT_METHOD) {
@@ -51,7 +54,14 @@ function shellWords(opened: Transport, frame: HTMLIFrameElement, guard: FocusGua
       typeof focused !== "boolean" ||
       !(ago === null || span(ago)) ||
       !span(gap) ||
-      !(asked === undefined || (Number.isSafeInteger(asked) && (asked as number) >= 0))
+      !(asked === undefined || (Number.isSafeInteger(asked) && (asked as number) >= 0)) ||
+      // The page's presses (P148): absent from a shell older than them, or both there.
+      !(
+        (pressed === undefined && presses === undefined) ||
+        ((pressed === null || span(pressed)) &&
+          Number.isSafeInteger(presses) &&
+          (presses as number) >= 0)
+      )
     ) {
       return;
     }
@@ -61,6 +71,9 @@ function shellWords(opened: Transport, frame: HTMLIFrameElement, guard: FocusGua
       focused,
       gap: gap as number,
       ...(asked === undefined ? {} : { asked: asked as number }),
+      ...(presses === undefined
+        ? {}
+        : { pressed: pressed as number | null, presses: presses as number }),
     });
   });
   return {

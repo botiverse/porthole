@@ -28,6 +28,15 @@ import {
  *   before the shell's next frame would turn its activation on as a press does). What it can't
  *   see: a gesture while its activation is already on (within 5 s of the last one) turns nothing
  *   on;
+ * - hears each real press in the page from the page's runtime (P148), over a `MessagePort` it makes
+ *   at each load of the page's frame and sends down (`porthole/shell/press-port`): the runtime
+ *   takes it before any content runs, and no content holds it. A message on it says only that
+ *   there was a press; the shell notes when it heard it, on its own clock, tells the host in its
+ *   state (how long ago, and how many it has heard), and then answers on the port, so what the
+ *   page says next arrives after the state that says so. Only the port of the frame's last load is
+ *   heard, and what was said of a press before it is forgotten; the port before is heard again
+ *   only if the runtime that holds it says, on it, that its document is still there (WebKit fires
+ *   a load for a navigation within the document, P142);
  * - renews the page's sealed files' address before it ends, and gives the page the new one
  *   (`porthole/files-renewed`): the page's own loads aren't its origin's (an opaque origin's never
  *   are), so only the shell, on that origin, may renew it (P083);
@@ -82,6 +91,63 @@ const frameShellRuntime = (strict: boolean): string => String.raw`(() => {
   frame.style.width = "100%";
   frame.style.height = "100%";
   frame.style.background = "transparent";
+  // The page's real presses (P148): when the last one was heard (null: none since the frame's last
+  // load), how many were heard in all, and the one port listened to.
+  let pressedAt = null;
+  let presses = 0;
+  let pressPort = null;
+  // The port a load set aside, until the next one: its document may still be there (below).
+  let asidePort = null;
+  const shut = (port) => {
+    if (port !== null) {
+      port.onmessage = null;
+      port.close();
+    }
+  };
+  const hear = (port) => {
+    port.onmessage = (event) => {
+      if (pressPort !== port || event.data !== 0) {
+        return;
+      }
+      pressedAt = performance.now();
+      presses += 1;
+      // To the host first, then the answer: what the page held back follows the state.
+      look(undefined, true);
+      port.postMessage(0);
+    };
+  };
+  frame.addEventListener("load", () => {
+    shut(asidePort);
+    const before = pressPort;
+    asidePort = before;
+    pressedAt = null;
+    const child = frame.contentWindow;
+    if (child === null || typeof MessageChannel !== "function") {
+      shut(before);
+      asidePort = null;
+      pressPort = null;
+      return;
+    }
+    const channel = new MessageChannel();
+    const port = channel.port1;
+    pressPort = port;
+    hear(port);
+    if (before !== null) {
+      // A load is a new document, whose runtime takes this port, and the one before is heard no
+      // more. But not every load is one: WebKit fires it for a navigation within the document
+      // (P142), whose runtime is still there and takes no second port. It says so (1) on the port
+      // it holds, which no one else can: that port is then the one again, and the new one is shut.
+      before.onmessage = (event) => {
+        if (event.data === 1 && pressPort === port && asidePort === before) {
+          shut(port);
+          asidePort = null;
+          pressPort = before;
+          hear(before);
+        }
+      };
+    }
+    child.postMessage({ jsonrpc: "2.0", method: PREFIX + "press-port" }, "*", [channel.port2]);
+  });
   frame.src = page.href;
   document.body.append(frame);
 
@@ -126,6 +192,9 @@ const frameShellRuntime = (strict: boolean): string => String.raw`(() => {
       ago: active ? Math.max(0, Math.round(performance.now() - since)) : null,
       focused,
       gap: Math.max(0, Math.round(gap)),
+      // The page's last real press (P148): how long ago the shell heard it, and how many so far.
+      pressed: pressedAt === null ? null : Math.max(0, Math.round(performance.now() - pressedAt)),
+      presses,
     };
     // The answer to the host's ask (P120), by its number.
     if (asked !== undefined) {
@@ -133,7 +202,7 @@ const frameShellRuntime = (strict: boolean): string => String.raw`(() => {
     }
     toHost({ jsonrpc: "2.0", method: PREFIX + "state", params });
   };
-  const look = (asked) => {
+  const look = (asked, pressed) => {
     const now = performance.now();
     const gap = now - lookedAt;
     lookedAt = now;
@@ -151,7 +220,7 @@ const frameShellRuntime = (strict: boolean): string => String.raw`(() => {
       focused = inside;
       changed = true;
     }
-    if (changed || typeof asked === "number") {
+    if (changed || pressed === true || typeof asked === "number") {
       tell(gap, typeof asked === "number" ? asked : undefined);
     } else if (now - toldAt >= 50) {
       // The heartbeat: the host knows the shell was looking, every 50 ms.
@@ -283,7 +352,11 @@ export const FRAME_SHELL_RUNTIME = frameShellRuntime(false);
 /** A strict shell's runtime (P141): its parent may be an outer page. */
 export const STRICT_FRAME_SHELL_RUNTIME = frameShellRuntime(true);
 
-export { SHELL_METHOD_PREFIX, SHELL_STATE_METHOD } from "../isolation/types.ts";
+export {
+  SHELL_METHOD_PREFIX,
+  SHELL_PRESS_PORT_METHOD,
+  SHELL_STATE_METHOD,
+} from "../isolation/types.ts";
 
 export interface FrameShellOptions {
   /** The host origins: the shell takes messages from its parent only from these. */
