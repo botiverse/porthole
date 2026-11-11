@@ -5,7 +5,7 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes Porthole 0.15.1 (2026-11-10). A review on 2026-10-19 found gaps, and every decision it led to
+**Status.** This describes Porthole 0.15.2 (2026-11-11). A review on 2026-10-19 found gaps, and every decision it led to
 has merged ([§8](#8-fixes-in-flight) lists them). P096 changed the negative-control runner and CI,
 and the shipped conformance probes' messages and timing, not what they check. P104 (0.9.0's
 annotation markers) had a review of its own, and P105, in 0.10.0, is what it led to. 0.11.0 was
@@ -69,6 +69,11 @@ P144: their "byte for byte" is said as it holds (above); the host kit refuses an
 with `embed`, so a reader's issue endpoint never mints an embed session (S4); an embed page learns
 where it is embedded (S4); and a host origin's or `framedBy`'s port is 1 to 65535, without a
 leading zero, and its host as the URL parser gives it. No wall moves.
+0.15.2: P147, annotations' marks ride the document's scroll: the boxes of the shell's layer are
+placed down the document and moved by a scroll-driven animation in the layer's closed shadow root,
+so they no longer trail the text for the frames before the scroll event is heard. No message and
+no reading is added (the scroll offset was read already, P132), and the layer still adds nothing to
+what a page can scroll. No wall moves.
 
 ## 1. Two layers
 
