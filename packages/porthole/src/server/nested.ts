@@ -213,11 +213,38 @@ export function storeResponse(options: {
 }
 
 /**
- * The answer at a scope's forget address (P149): an empty document that tells the browser to drop
- * that origin's storage. `Clear-Site-Data: "storage"` is on this answer and no other: the origin
- * is the whole scope's, every version's, so no status page may carry it (a version gone, a ticket
- * ended, a file's 404, which content can cause), and never `"cookies"` (cleared for the whole
- * site) or `"*"`.
+ * What the forget address's document runs (P149): the origin's own storage emptied by the origin's
+ * own script, for the engine that doesn't act on `Clear-Site-Data` for a framed answer (WebKit,
+ * measured). `localStorage` is what a nested page's store keeps; the rest is what a served page of
+ * the scope may have kept before its scope was nested.
+ */
+export const FORGET_SCRIPT = `(() => {
+  "use strict";
+  try { localStorage.clear(); } catch (_) {}
+  try { sessionStorage.clear(); } catch (_) {}
+  try {
+    if (typeof indexedDB === "object" && indexedDB !== null && typeof indexedDB.databases === "function") {
+      indexedDB.databases().then((all) => {
+        for (const each of all) {
+          if (typeof each.name === "string") indexedDB.deleteDatabase(each.name);
+        }
+      }, () => {});
+    }
+  } catch (_) {}
+  try {
+    if (typeof caches === "object" && caches !== null) {
+      caches.keys().then((all) => { for (const each of all) void caches.delete(each); }, () => {});
+    }
+  } catch (_) {}
+})();`;
+
+/**
+ * The answer at a scope's forget address (P149): a document that tells the browser to drop that
+ * origin's storage, by the header (`Clear-Site-Data: "storage"`) and by its one script, which
+ * empties the same storage itself. Both are on this answer and no other: the origin is the whole
+ * scope's, every version's, so no status page may carry either (a version gone, a ticket ended,
+ * a file's 404, which content can cause); and the header never says `"cookies"` (cleared for the
+ * whole site) or `"*"`.
  */
 export function forgetResponse(options: {
   readonly hostOrigins: readonly string[];
@@ -228,13 +255,13 @@ export function forgetResponse(options: {
   return new Response(
     options.method?.toUpperCase() === "HEAD"
       ? null
-      : '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Porthole</title></head><body></body></html>\n',
+      : `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Porthole</title></head><body><script>${FORGET_SCRIPT}</script></body></html>\n`,
     {
       status: 200,
       headers: {
         "content-type": "text/html; charset=utf-8",
         "clear-site-data": '"storage"',
-        "content-security-policy": `default-src 'none'; frame-ancestors ${ancestorsOf(options.hostOrigins, options.framedBy)}`,
+        "content-security-policy": `default-src 'none'; script-src 'sha256-${base64(sha256(utf8(FORGET_SCRIPT)))}'; base-uri 'none'; form-action 'none'; frame-ancestors ${ancestorsOf(options.hostOrigins, options.framedBy)}`,
         "cache-control": "no-store",
         "referrer-policy": "no-referrer",
         "x-content-type-options": "nosniff",
