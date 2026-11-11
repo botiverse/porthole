@@ -63,8 +63,17 @@ export function isExactOrigin(origin: unknown): origin is string {
 const HOST_ORIGIN =
   /^[a-z][a-z0-9+.-]*:\/\/([a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*|\[[0-9a-f:.]+\])(:\d{1,5})?$/u;
 
+/** Whether `origin` is written as an origin is (`HOST_ORIGIN`), whatever a browser makes of it. */
+const shapedAsOrigin = (origin: unknown): origin is string =>
+  typeof origin === "string" && origin.length <= 300 && HOST_ORIGIN.test(origin);
+
+/**
+ * Whether `origin` can be a host origin: written as one, and one a browser serializes as it is
+ * written (`serializable`: never `:0`, a port past 65535 or with a leading zero, a host the URL
+ * parser would rewrite). `hostOriginProblem` says why not.
+ */
 export function isHostOrigin(origin: unknown): origin is string {
-  return typeof origin === "string" && origin.length <= 300 && HOST_ORIGIN.test(origin);
+  return shapedAsOrigin(origin) && serializable(origin);
 }
 
 /**
@@ -94,7 +103,7 @@ function serializable(origin: string): boolean {
 
 /** Why `origin` can't be a host origin, in words a host's developer can act on; null if it can. */
 export function hostOriginProblem(origin: unknown): string | null {
-  if (isHostOrigin(origin)) {
+  if (shapedAsOrigin(origin)) {
     return serializable(origin)
       ? null
       : `${JSON.stringify(origin)} is not an origin a browser serializes so (a port is 1 to 65535, no leading zero; a host as the URL parser gives it)`;
@@ -142,7 +151,7 @@ const LOOPBACK_HOST = (host: string): boolean =>
  * in plain decimal, and its host is as the URL parser gives it back (P145). Null if it can be.
  */
 export function framedByProblem(origin: unknown): string | null {
-  const parsed = typeof origin === "string" && isHostOrigin(origin) ? parseOrigin(origin) : null;
+  const parsed = shapedAsOrigin(origin) ? parseOrigin(origin) : null;
   if (
     parsed === null ||
     !(parsed.scheme === "https" || (parsed.scheme === "http" && LOOPBACK_HOST(parsed.host)))

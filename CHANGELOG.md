@@ -26,6 +26,14 @@ P-numbers below.
   and `/server` compute it, as before). Both sides need 0.15.3 for the change to show: the host's
   page (`createHost`) and whatever serves the content origins. Either side alone behaves as
   0.15.2.
+- **The helpers that take host origins check them** (amends P145, after the audit of 0.15.1).
+  `statusPage`, `doorResponse`, `doorStatusResponse` and `nestedShellCsp` took `hostOrigins`
+  unchecked: `:0` passed, and a string with a `;` went into the CSP header as written. They are a
+  host's own configuration, never content's; each helper now throws a `TypeError` on one
+  `hostOriginProblem` refuses, as `createServer` and the host kit already did. `isHostOrigin` now
+  refuses what `hostOriginProblem` does (it took `:0`, a port past 65535 and a host the URL parser
+  rewrites). **For a host:** a content Worker of your own that passed a malformed origin to one of
+  these now gets an error where it got a header no browser would match.
 
 ## 0.15.2
 

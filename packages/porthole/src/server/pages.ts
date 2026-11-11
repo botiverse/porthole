@@ -1,5 +1,10 @@
 import { DOOR_SANDBOX_TOKENS } from "../compile/policy.ts";
-import { framedByProblem, includesOrigin, normalOrigin } from "../isolation/served.ts";
+import {
+  framedByProblem,
+  hostOriginProblem,
+  includesOrigin,
+  normalOrigin,
+} from "../isolation/served.ts";
 import { FRAME_STATUS_METHOD } from "../isolation/types.ts";
 import type { FrameBlock } from "../host/types.ts";
 import { base64url, sha256, utf8 } from "./crypto.ts";
@@ -32,8 +37,23 @@ const isStrict = (frameAncestors: string, hostOrigins: readonly string[]): boole
 const strictParent = (strict: boolean): string => (strict ? ' data-porthole-strict-parent=""' : "");
 
 /**
- * Who may frame a page: the host origins, then a host's `framedBy` (P141), each checked (they go
- * into a header).
+ * The host origins a helper was given, each checked as a config's are (`hostOriginProblem`, P145):
+ * they go into a header (`frame-ancestors`) and into the page's own list of whom it tells, and a
+ * content Worker of a host's own passes them here itself. `who` names the helper in the error.
+ */
+export function checkHostOrigins(who: string, hostOrigins: readonly string[]): void {
+  for (const origin of hostOrigins) {
+    const problem = hostOriginProblem(origin);
+    if (problem !== null) {
+      throw new TypeError(`${who}: hostOrigins: ${problem}`);
+    }
+  }
+}
+
+/**
+ * Who may frame a page: the host origins, then a host's `framedBy` (P141), each `framedBy`
+ * checked here (they go into a header); the host origins by whoever was given them (a config's by
+ * `createServer`, a helper's by `checkHostOrigins`).
  */
 export function ancestorsOf(
   hostOrigins: readonly string[],
@@ -289,14 +309,19 @@ export interface EmbedPage {
 
 /** Whom a page tells, and who may frame it: the host origins' (P141), or an embed's (P143). */
 const framingOf = (
+  who: string,
   options: HostedPage | EmbedPage,
-): { readonly hosts: readonly string[]; readonly ancestors: string } =>
-  options.embed === true
-    ? { hosts: [], ancestors: "*" }
-    : {
-        hosts: options.hostOrigins,
-        ancestors: options.frameAncestors ?? ancestorsOf(options.hostOrigins, options.framedBy),
-      };
+): { readonly hosts: readonly string[]; readonly ancestors: string } => {
+  if (options.embed === true) {
+    return { hosts: [], ancestors: "*" };
+  }
+  // Checked here too: with `frameAncestors` given, `ancestorsOf` never sees them.
+  checkHostOrigins(who, options.hostOrigins);
+  return {
+    hosts: options.hostOrigins,
+    ancestors: options.frameAncestors ?? ancestorsOf(options.hostOrigins, options.framedBy),
+  };
+};
 
 /**
  * A page saying why a frame shows nothing, for a relay of the app's own (P072): told to the page
@@ -314,7 +339,7 @@ export function statusPageOf(
     readonly method?: string;
   } & (HostedPage | EmbedPage),
 ): Response {
-  const { hosts, ancestors } = framingOf(options);
+  const { hosts, ancestors } = framingOf("statusPage", options);
   return appStatusPage(
     options.status,
     options.title,
@@ -372,6 +397,7 @@ export interface DoorOptions {
  * own ticket was taken and the checks the content's address runs passed for the same grant.
  */
 export function doorResponse(options: DoorOptions): Response {
+  checkHostOrigins("doorResponse", options.hostOrigins);
   const hosts = escape(JSON.stringify(options.hostOrigins));
   const ancestors = options.frameAncestors ?? ancestorsOf(options.hostOrigins, options.framedBy);
   const strict = isStrict(ancestors, options.hostOrigins);
@@ -401,7 +427,7 @@ export function doorStatusResponse(
   },
 ): Response {
   const { status, reason, code } = options;
-  const framing = framingOf(options);
+  const framing = framingOf("doorStatusResponse", options);
   const hosts = escape(JSON.stringify(framing.hosts));
   const ancestors = framing.ancestors;
   const strict = isStrict(ancestors, framing.hosts);
