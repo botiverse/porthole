@@ -825,7 +825,12 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
 
       const stop = () => {
         // A run that ran a page with storage of its own making and never heard it used: no (P111).
-        if (bridge !== null && handshaken && !storageTold && compiled.shell?.storage === "memory") {
+        if (
+          bridge !== null &&
+          handshaken &&
+          !storageTold &&
+          (compiled.shell?.storage === "memory" || compiled.shell?.storage === "kept")
+        ) {
           emit("storage", { used: false });
         }
         storageTold = false;
@@ -1022,7 +1027,10 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             !("id" in raw)
           ) {
             storageTold = true;
-            emit("storage", { used: true });
+            // A nested page's kept storage (P149) says whether this load's is kept: a boolean, or
+            // nothing. The page's word, as `used` is.
+            const kept = isRecord(raw.params) ? raw.params.kept : undefined;
+            emit("storage", { used: true, ...(typeof kept === "boolean" ? { kept } : {}) });
           }
         });
         bridge = opening;
@@ -1188,6 +1196,13 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         },
         focus() {
           surface?.focus?.();
+        },
+        storage: {
+          clear() {
+            if (compiled.shell?.storage === "kept") {
+              surface?.clearStorage?.();
+            }
+          },
         },
         destroy() {
           destroyed = true;

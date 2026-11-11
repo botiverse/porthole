@@ -219,15 +219,95 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // Whether the page touched storage, told to the host once (P111): yes, never what it keeps.
   let storageTouched = false;
   let tellStorage = () => {};
-  if (plan.storage === "memory") {
-    // An opaque origin has no storage: a map stands in, for as long as the frame lives.
-    const store = () => {
+  // A nested page's kept storage (P149): what its localStorage's map is filled with and writes
+  // to, set below once the store's port is held; and whether this load's is kept at all (null
+  // until that is known: content doesn't run before).
+  let storageKept = null;
+  let storeSay = null;
+  let storeFill = null;
+  if (plan.storage === "memory" || plan.storage === "kept") {
+    // An opaque origin has no storage: a map stands in, for as long as the frame lives. A nested
+    // page whose config keeps storage (P149) has its scope's own localStorage in that map: the
+    // store's keys before content runs, each write sent on to the store. Keys are the content's
+    // names (__proto__ among them): a Map's keys, never an object's properties. It counts as the
+    // store does, so the page hears QuotaExceededError as it writes: the sum of every key's and
+    // value's length, and the number of keys, never grown past the caps (what the origin already
+    // holds past them stays, and can shrink).
+    const MAX_UNITS = 1048576;
+    const MAX_KEYS = 1024;
+    const store = (kept) => {
       const items = new Map();
+      let units = 0;
+      const put = (key, value) => {
+        const before = items.get(key);
+        units += before === undefined ? key.length + value.length : value.length - before.length;
+        items.set(key, value);
+      };
+      const drop = (key) => {
+        const before = items.get(key);
+        if (before !== undefined) {
+          units -= key.length + before.length;
+          items.delete(key);
+        }
+      };
+      const empty = () => {
+        items.clear();
+        units = 0;
+      };
+      if (kept) {
+        // What the store says is the content's word: strings alone, into the map, nothing else.
+        storeFill = (data) => {
+          if (data === null || typeof data !== "object") {
+            return;
+          }
+          if (Array.isArray(data.keys)) {
+            empty();
+            for (let i = 0; i < data.keys.length; i += 1) {
+              const pair = data.keys[i];
+              if (Array.isArray(pair) && typeof pair[0] === "string" && typeof pair[1] === "string") {
+                put(pair[0], pair[1]);
+              }
+            }
+          } else if (Array.isArray(data.changed) && typeof data.changed[0] === "string") {
+            if (typeof data.changed[1] === "string") {
+              put(data.changed[0], data.changed[1]);
+            } else {
+              drop(data.changed[0]);
+            }
+          } else if (data.cleared === 1) {
+            empty();
+          }
+        };
+      }
+      const say = (message) => {
+        if (kept && storeSay !== null) {
+          storeSay(message);
+        }
+      };
       return {
         getItem: (key) => (items.has(String(key)) ? items.get(String(key)) : null),
-        setItem: (key, value) => void items.set(String(key), String(value)),
-        removeItem: (key) => void items.delete(String(key)),
-        clear: () => items.clear(),
+        setItem: (key, value) => {
+          const name = String(key);
+          const text = String(value);
+          if (kept) {
+            const before = items.get(name);
+            const grown = before === undefined ? name.length + text.length : text.length - before.length;
+            const more = before === undefined ? 1 : 0;
+            if (!((units + grown <= MAX_UNITS || grown <= 0) && (items.size + more <= MAX_KEYS || more === 0))) {
+              throw new DOMException("The page's storage is full", "QuotaExceededError");
+            }
+          }
+          put(name, text);
+          say({ set: [name, text] });
+        },
+        removeItem: (key) => {
+          drop(String(key));
+          say({ remove: String(key) });
+        },
+        clear: () => {
+          empty();
+          say({ clear: 1 });
+        },
         key: (index) => Array.from(items.keys())[index] ?? null,
         get length() {
           return items.size;
@@ -235,7 +315,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
       };
     };
     for (const name of ["localStorage", "sessionStorage"]) {
-      const kept = store();
+      const kept = store(plan.storage === "kept" && name === "localStorage");
       try {
         Object.defineProperty(window, name, {
           configurable: true,
@@ -1650,6 +1730,133 @@ export const SHELL_RUNTIME = String.raw`(() => {
     }
   }
 
+  // A nested page's kept storage (P149): the store's port, and the wait for its keys. The page's
+  // shell hands this runtime one end of a channel whose other end is the page's store, a document
+  // of Porthole's own on the page's scope's own origin (porthole/shell/storage-port, one port).
+  // Taken as the press port is: by the first listener there is, from the browser's own message,
+  // from the parent read at start, the event stopped there. A later one replaces it (the shell
+  // makes a new channel at each load of the frame, and the store drops the one before): what
+  // crosses is data alone, the content's own words by another road, so no port here is worth
+  // keeping from the one that follows it. Asked for its keys, the store answers, and content runs
+  // only then: or, 1.5 s after this document loaded with no answer, on a map of memory alone,
+  // nothing of which is ever written back (a page that started empty must not overwrite what is
+  // kept), and the host is told so.
+  let storageWaiting = [];
+  const whenStored = (run) => {
+    if (storageWaiting === null) {
+      run();
+    } else {
+      storageWaiting[storageWaiting.length] = run;
+    }
+  };
+  const storageSettled = (kept) => {
+    if (storageWaiting === null) {
+      return;
+    }
+    storageKept = kept;
+    const waiting = storageWaiting;
+    storageWaiting = null;
+    for (let i = 0; i < waiting.length; i += 1) {
+      waiting[i]();
+    }
+  };
+  if (plan.storage !== "kept" || storeFill === null) {
+    storageSettled(false);
+  } else {
+    const storeParent = window.parent;
+    const messageProto = typeof MessageEvent === "function" ? MessageEvent.prototype : null;
+    const storeSourceOf = getterOf(messageProto, "source");
+    const storeDataOf = getterOf(messageProto, "data");
+    const storePortsOf = getterOf(messageProto, "ports");
+    const storeStop = Event.prototype.stopImmediatePropagation;
+    const portProto = typeof MessagePort === "function" ? MessagePort.prototype : null;
+    const storePost = portProto === null ? null : portProto.postMessage;
+    const storeStart = portProto === null ? null : portProto.start;
+    const storeListen = EventTarget.prototype.addEventListener;
+    const storeLater = setTimeout;
+    const fill = storeFill;
+    if (
+      hostless || storeParent === window || !rewriteFixed ||
+      storeSourceOf === null || storeDataOf === null || storePortsOf === null ||
+      typeof storeStop !== "function" || typeof storePost !== "function" || typeof storeStart !== "function"
+    ) {
+      storageSettled(false);
+    } else {
+      callOf(storeListen, window, [
+        "message",
+        (event) => {
+          let named = false;
+          try {
+            const data = callOf(storeDataOf, event, []);
+            named = data !== null && typeof data === "object" && data.method === "porthole/shell/storage-port";
+          } catch (_) {}
+          if (!named) {
+            return;
+          }
+          callOf(storeStop, event, []);
+          // Once this load runs on memory alone, it stays so: no port is taken, nothing written.
+          if (event.isTrusted !== true || storageKept === false) {
+            return;
+          }
+          try {
+            const ports = callOf(storePortsOf, event, []);
+            if (callOf(storeSourceOf, event, []) !== storeParent || ports === null || ports.length !== 1) {
+              return;
+            }
+            const taken = ports[0];
+            callOf(storeListen, taken, [
+              "message",
+              (message) => {
+                let data = null;
+                try {
+                  data = callOf(storeDataOf, message, []);
+                } catch (_) {}
+                if (storageKept === false || data === null || typeof data !== "object") {
+                  return;
+                }
+                // Its keys, with whether the origin gives it any storage at all: the answer the
+                // wait is for. Then, from another tab of the origin, a change or a clearing.
+                fill(data);
+                if (storageKept === null && Array.isArray(data.keys)) {
+                  storageSettled(data.kept === true);
+                  if (storageKept !== true) {
+                    storeSay = null;
+                  }
+                }
+              },
+            ]);
+            callOf(storeStart, taken, []);
+            storeSay = (message) => {
+              try {
+                callOf(storePost, taken, [message]);
+              } catch (_) {}
+            };
+            if (storageKept === null) {
+              storeSay({ ask: 1 });
+            }
+          } catch (_) {}
+        },
+        true,
+      ]);
+      const giveUp = () => {
+        callOf(storeLater, window, [
+          () => {
+            if (storageKept === null) {
+              storeSay = null;
+              storageSettled(false);
+            }
+          },
+          1500,
+        ]);
+      };
+      if (document.readyState === "complete") {
+        giveUp();
+      } else {
+        callOf(storeListen, window, ["load", giveUp, { once: true }]);
+      }
+    }
+  }
+
   // The clipboard is the host's to write (P051): content can neither write nor read it. A copy
   // the person makes (their keys, their menu) copies their selection as the browser makes it: no
   // copy or cut listener of the content's runs, so none can swap what goes on the clipboard.
@@ -1895,7 +2102,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
   const notice = (url, more) => post({ method: "porthole/navigating", params: Object.assign({ url: ownAddresses(url).slice(0, 4096) }, filesSet === null ? {} : { set: filesSet }, more) });
   navigating = (url) => notice(url, {});
   // The page used storage (P111): said once, as soon as the shell can speak; never keys or values.
-  tellStorage = () => post({ method: "porthole/storage-used", params: {} });
+  tellStorage = () => post({ method: "porthole/storage-used", params: plan.storage === "kept" ? { kept: storageKept === true } : {} });
   if (storageTouched) {
     tellStorage();
   }
@@ -2543,7 +2750,8 @@ export const SHELL_RUNTIME = String.raw`(() => {
     receive(event.data);
   });
   if (typeof plan.document === "string") {
-    whenLoaded(() => void render({ html: plan.document }));
+    // A nested page's kept storage first (P149): its keys, or the word that there are none.
+    whenStored(() => whenLoaded(() => void render({ html: plan.document })));
   }
 
   // The handshake (HANDSHAKE, P085): asked until answered, since the host may start listening

@@ -114,6 +114,17 @@ export const SHELL_FOCUS_METHOD = "porthole/shell/focus";
  */
 export const SHELL_PRESS_PORT_METHOD = "porthole/shell/press-port";
 
+/**
+ * A nested page's kept storage (P149), all in the shell's own namespace, each said by one party
+ * to one other: the host's word to its shell to empty the page's storage (`display.storage.clear()`);
+ * the shell's to the page's runtime, with the page's end of the store's channel; the shell's to
+ * the store, with the store's end; and the shell's to the store, passing the host's word on.
+ */
+export const SHELL_STORAGE_CLEAR_METHOD = "porthole/shell/storage-clear";
+export const SHELL_STORAGE_PORT_METHOD = "porthole/shell/storage-port";
+export const SHELL_STORE_PORT_METHOD = "porthole/shell/store-port";
+export const SHELL_STORE_CLEAR_METHOD = "porthole/shell/store-clear";
+
 /** The shell's own namespace (P111): the shell drops a page's message that names a method in it. */
 export const SHELL_METHOD_PREFIX = "porthole/shell/";
 

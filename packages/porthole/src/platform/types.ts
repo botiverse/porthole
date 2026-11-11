@@ -71,6 +71,11 @@ export interface Surface {
   /** The host moves focus into the frame itself: the guard takes it as the person's (P109). */
   focus?(): void;
   /**
+   * The host's word to a nested page's shell to empty the page's kept storage (P149): passed to
+   * the page's store, and to nothing else. Absent, or a no-op, where the frame holds no shell.
+   */
+  clearStorage?(): void;
+  /**
    * The frame loaded a document other than the one it was given: the content navigated it. The
    * framework starts it again from its content and reports it.
    */

@@ -239,7 +239,17 @@ export interface DisplayEvents {
    * the page first did, else `used: false` as the run ends. Never what it kept: for a host to count
    * the pages that would need storage.
    */
-  readonly storage: { readonly used: boolean };
+  readonly storage: {
+    readonly used: boolean;
+    /**
+     * A nested page whose config keeps storage (P149), when it first used it: whether this load's
+     * `localStorage` is its scope's kept one (`true`), or a map in memory because the store didn't
+     * answer in time or the browser gives a framed page no storage (`false`): what the person
+     * changes on this visit is then not saved, which a host may say. A hint to show, never grounds
+     * for anything: it is the page's word. Absent for every other page.
+     */
+    readonly kept?: boolean;
+  };
   /**
    * What the frame reported about annotations (`annotate`, P053), checked and taken only while
    * the host asked for it: a selection, its clearing, a cancelled pick, where marks are. The
@@ -392,6 +402,12 @@ export interface DisplayControls {
    * fields, a frame's own `focus()` is taken for the content's and undone (P109).
    */
   focus(): void;
+  /**
+   * A nested page's kept storage (P149). `clear()` empties what its scope's origin keeps for it
+   * in this browser (the person's "clear this page's saved data"): the host's word to the page's
+   * shell, which passes it to the page's store. Nothing where the display keeps none.
+   */
+  readonly storage: { clear(): void };
   /** Tears the view down and removes the frame. */
   destroy(): void;
 }

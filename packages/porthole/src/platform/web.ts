@@ -6,6 +6,7 @@ import {
   SHELL_LOOK_METHOD,
   SHELL_METHOD_PREFIX,
   SHELL_STATE_METHOD,
+  SHELL_STORAGE_CLEAR_METHOD,
 } from "../isolation/types.ts";
 import { postMessageTransport } from "../transport/post-message.ts";
 import { focusGuard, type FocusGuard, type FocusTake } from "./focus-guard.ts";
@@ -212,6 +213,11 @@ export const webPlatform: PlatformHost = {
         // and only the shell can pass it on. Only a move that landed: the shell asks no more of it.
         if (nested && view.document.activeElement === frame) {
           opened.send({ jsonrpc: "2.0", method: SHELL_FOCUS_METHOD });
+        }
+      },
+      clearStorage() {
+        if (nested) {
+          opened.send({ jsonrpc: "2.0", method: SHELL_STORAGE_CLEAR_METHOD });
         }
       },
       onLoad(listener) {
