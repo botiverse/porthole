@@ -376,7 +376,7 @@ export interface FrameShellOptions {
 }
 
 /** JSON that is safe inside a `<script>`. */
-const scriptJson = (value: unknown): string =>
+export const scriptJson = (value: unknown): string =>
   JSON.stringify(value)
     .replace(/</gu, "\\u003c")
     .replace(/\u2028/gu, "\\u2028")
