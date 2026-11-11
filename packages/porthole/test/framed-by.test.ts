@@ -781,13 +781,15 @@ describe("without framedBy, the pages' and the nested shell's scripts are 0.14.1
  * default path is 0.14.16's again, byte for byte", which held for the four scripts above and every
  * header, not for this (Ferryman's audit of 0.15.0, P145). No hash covers it (`script-src` is
  * `'unsafe-inline'` for these documents), so it is pinned here: a change to its bytes fails this
- * test, and is said in the CHANGELOG, not assumed away. From `git show v0.15.0:…/src/shell/*.ts`
+ * test, and is said in the CHANGELOG, not assumed away (0.15.2: annotations', P147). From `git show v0.15.0:…/src/shell/*.ts`
  * and `git show v0.14.16:…` (`SHELL_RUNTIME`, `ANNOTATE_RUNTIME`, `FIND_RUNTIME`, `USE_RUNTIME`,
  * `LEGACY_GLOBALS_RUNTIME`).
  */
-const RUNTIME_V0_15_0 = {
+const RUNTIME_V0_15_2 = {
   shell: "'sha256-kafLnuVV2E6YUJtxXEooMNi8MNwbMJRdYi+0PTOe1RA='",
-  annotate: "'sha256-3PZMe4arifdWHJU1jS0laR49wiWc/uBWIFddGJPyf/w='",
+  // 0.15.0's was 'sha256-3PZMe4arifdWHJU1jS0laR49wiWc/uBWIFddGJPyf/w=': 0.15.2's marks ride the
+  // document's scroll (P147). The other four are 0.15.0's.
+  annotate: "'sha256-uQ77dZDXcY6pKRoTylHpGXY+ZhhCt4WZhB/qDTQJ6BE='",
   find: "'sha256-invvWJWqsN6Zv0kMLG2eeofMX6XmKNSqsvYydiElDGc='",
   use: "'sha256-TJx7YF/WvrHHkz8iTPfUfH6GNUEgES6O+0+igLRmyPQ='",
   legacy: "'sha256-ZEVJsezqV7n+Ho0m7Y92NYxAZqf8ynKq/rDdXrJUKp0='",
@@ -800,7 +802,7 @@ const RUNTIME_V0_14_16 = {
   legacy: "'sha256-ZEVJsezqV7n+Ho0m7Y92NYxAZqf8ynKq/rDdXrJUKp0='",
 };
 
-describe("the served shell runtime is 0.15.0's, not 0.14.16's: pinned, so what the CHANGELOG says of it is checked (P145)", () => {
+describe("the served shell runtime is 0.15.2's (0.15.0's, but for annotations: P147), not 0.14.16's: pinned, so what the CHANGELOG says of it is checked (P145)", () => {
   const now = {
     shell: hashOf(SHELL_RUNTIME),
     annotate: hashOf(ANNOTATE_RUNTIME),
@@ -809,8 +811,8 @@ describe("the served shell runtime is 0.15.0's, not 0.14.16's: pinned, so what t
     legacy: hashOf(LEGACY_GLOBALS_RUNTIME),
   };
 
-  it("its bytes are 0.15.0's (a change here is a change every served document carries: say it)", () => {
-    expect(now).toEqual(RUNTIME_V0_15_0);
+  it("its bytes are 0.15.2's (a change here is a change every served document carries: say it)", () => {
+    expect(now).toEqual(RUNTIME_V0_15_2);
   });
 
   it("which are not 0.14.16's: the shell's, annotations' and find's differ (P142, P143)", () => {

@@ -4,6 +4,17 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## 0.15.2
+
+- **Marks ride the document's scroll** (P147, amends P104 and P132). A commented passage's
+  highlight and its marker were placed in the viewport and put right again from the scroll event:
+  in the frames a browser scrolls before its main thread runs that event, they trailed the text.
+  They are now placed down the document and moved by a scroll-driven animation
+  (`animation-timeline: scroll(root y)`), which the engine runs with the scroll itself. Where there
+  is no scroll timeline (Firefox today), in a scroller of the page's own, and sideways, a mark
+  follows from the scroll event as before. A mark on a `position: fixed` or stuck `sticky` element
+  now trails for those frames instead (accepted: P147, decision 6). Nothing for a host to change.
+
 ## 0.15.1
 
 After Ferryman's audit of 0.15.0 (P145, amends P143 and P144): no P0, no escape, no new egress,
