@@ -800,7 +800,7 @@ describe("without framedBy, the pages' scripts are 0.14.16's, byte for byte, and
 const RUNTIME_V0_15_3 = {
   // 0.15.0's was 'sha256-kafLnuVV2E6YUJtxXEooMNi8MNwbMJRdYi+0PTOe1RA=': 0.15.3's tells a nested
   // page's shell its real presses (P148), installed only under a nested page's plan.
-  shell: "'sha256-cGzFiyTgINUMxhLvNC3HVC6HkDXcqZ2qKXXsdWdw9Tw='",
+  shell: "'sha256-kWx9H3mLZTPs2MHT4fmpNuaZN9qIXLAVePeULjBsq/U='",
   // 0.15.0's was 'sha256-3PZMe4arifdWHJU1jS0laR49wiWc/uBWIFddGJPyf/w=': 0.15.2's marks ride the
   // document's scroll (P147). The other three are 0.15.0's.
   annotate: "'sha256-uQ77dZDXcY6pKRoTylHpGXY+ZhhCt4WZhB/qDTQJ6BE='",

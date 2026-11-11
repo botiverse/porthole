@@ -1192,9 +1192,11 @@ unposted words beside the frame and tell the page when.
   within 250 ms of the person's key, not within 500 ms of a stall of the shell. A press is the
   browser's own event alone (a mouse down; a finger or pen up, so a scroll is none; Enter or Space,
   not held, on a native control that isn't editable, by its tag and never its `role`; a click on
-  one, but not a form's own click for Enter in a field); nothing a page dispatches is one, and
+  one, but none while a key is down, nor a form's own for Enter in a field); nothing a page
+  dispatches is one, and
   nothing a page does gets it the port (`leak/served/nested-press.spec.ts`; negative controls
-  `press-untrusted`, `press-role`, `press-editable`, `press-repeat`, `press-submit`,
+  `press-untrusted`, `press-role`, `press-editable`, `press-repeat`, `press-key-click`,
+  `press-submit`,
   `press-touch-down`, `press-port-heard`, `press-port-forged`, `press-open-lock`,
   `press-still-here`, `press-host-input`). *What doesn't*: a key on a control that isn't native
   (a `div` with `role="button"`) tells nothing, so a move into the page by it within 5 s of the

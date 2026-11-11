@@ -1422,11 +1422,12 @@ export const SHELL_RUNTIME = String.raw`(() => {
   //   native control that isn't editable (a link takes Enter alone), by its tag and type, never
   //   its role, which is the content's word; a click on such a control (an assistive technology's
   //   activation is a click alone), but not the click a form gives its submit button when Enter is
-  //   pressed in another of its fields, which is typing, nor one a held key's repeat gives;
+  //   pressed in another of its fields, which is typing, nor any click while a key is down;
   // - what is told: nothing but that there was one. No place, no target, no time.
-  // After a press is told, what the page says to its host waits for the shell's word that it has
-  // the press (it tells the host before it answers), so a call made in the press's own handler
-  // never arrives ahead of it; a shell that doesn't answer in 250 ms holds nothing back.
+  // After a press is told, what the page's calls say to its host (send, below) waits for the
+  // shell's word that it has the press (it tells the host before it answers), so a call made in
+  // the press's own handler never arrives ahead of it; a shell that doesn't answer in 250 ms
+  // holds nothing back.
   // None of it is installed unless all of it can be (a built-in missing, or document.open, write
   // or writeln not fixed in place above): the page then tells no press, and the host has the
   // shell's activation alone, as before.
@@ -1479,7 +1480,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
         pressHeld = null;
         if (held !== null) {
           for (let i = 0; i < held.length; i += 1) {
-            window.parent.postMessage(held[i], "*");
+            post(held[i]);
           }
         }
       };
@@ -1571,13 +1572,18 @@ export const SHELL_RUNTIME = String.raw`(() => {
       };
       // The browser's own event: nothing a page dispatches is a press.
       const real = (event) => event.isTrusted === true;
-      // Whether the last key that went down was a repeat of one held.
-      let keyHeld = false;
+      // Whether a key is down: from the browser's own keydown to its keyup, or the next press of
+      // a pointer. No click in that time is a press. The key's own press was judged as it went
+      // down, where it went down: content that moves the focus to its button inside the keydown
+      // of an Enter typed in a text field gets that button a click of the browser's own, and a
+      // held key's repeats give a button one each. An assistive technology's click comes with no
+      // key down.
+      let keyDown = false;
       const pointed = (down) => (event) => {
         if (!real(event)) {
           return;
         }
-        keyHeld = false;
+        keyDown = false;
         try {
           if ((callOf(pointerTypeOf, event, []) === "mouse") === down) {
             tellPress();
@@ -1590,7 +1596,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
         "keyup",
         (event) => {
           if (real(event)) {
-            keyHeld = false;
+            keyDown = false;
           }
         },
         true,
@@ -1601,12 +1607,12 @@ export const SHELL_RUNTIME = String.raw`(() => {
           if (!real(event)) {
             return;
           }
+          keyDown = true;
           try {
             // A key held down goes on being the key it was when it went down, wherever the focus
-            // has moved since: its repeats are no press, nor are the clicks they give a button.
-            keyHeld = callOf(repeatOf, event, []) === true;
+            // has moved since: its repeats are no press.
             const key = callOf(keyOf, event, []);
-            if ((key !== "Enter" && key !== " ") || keyHeld || callOf(designModeOf, document, []) === "on") {
+            if ((key !== "Enter" && key !== " ") || callOf(repeatOf, event, []) === true || callOf(designModeOf, document, []) === "on") {
               return;
             }
             const kind = controlOf(callOf(eventTargetOf, event, []));
@@ -1625,7 +1631,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
           }
           try {
             const target = callOf(eventTargetOf, event, []);
-            if (keyHeld || controlOf(target) === "") {
+            if (keyDown || controlOf(target) === "") {
               return;
             }
             // A form's own click on its submit button, for Enter in another of its fields.
@@ -1857,19 +1863,19 @@ export const SHELL_RUNTIME = String.raw`(() => {
   };
   // Nothing secret is ever said from here, so any parent may hear it; what it hears is the
   // content's word, which the host gates before it acts on it. A hostless plan says nothing (P143).
-  // After a press was told to the shell (P148), what follows waits for the shell to have it.
   const post = (message) => {
     if (window.parent !== window && !hostless) {
-      const whole = Object.assign({ jsonrpc: "2.0" }, message);
-      if (pressHeld !== null) {
-        pressHeld[pressHeld.length] = whole;
-        return;
-      }
-      window.parent.postMessage(whole, "*");
+      window.parent.postMessage(Object.assign({ jsonrpc: "2.0" }, message), "*");
     }
   };
+  // After a press was told to the shell (P148), what the shell's protocol says next (a call, an
+  // answer) waits for the shell to have the press: posted by the release above, through post.
   const send = (message) => {
     if (plan.protocol === "shell") {
+      if (pressHeld !== null) {
+        pressHeld[pressHeld.length] = message;
+        return;
+      }
       post(message);
     }
   };

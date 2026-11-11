@@ -1,8 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
   PRESS_FORGED_PORT,
+  PRESS_KEY_FOCUS,
   PRESS_KEY_ORDER,
   PRESS_MADE_UP,
+  PRESS_OPEN_EARLY,
   PRESS_OPEN_LOCKED,
   PRESS_PORT_UNHEARD,
   PRESS_REPEAT,
@@ -305,6 +307,29 @@ test.describe("a nested page's real presses (P148)", () => {
     await page.keyboard.up("Enter");
   });
 
+  test(PRESS_KEY_FOCUS, async ({ page }) => {
+    // The page moves the focus to its button inside the keydown of an Enter typed in its text
+    // field: the browser then gives the button a click of its own, with the focus on it.
+    const shown = await show(
+      page,
+      `window.onGo = () => say("clicked");
+      field.addEventListener("keydown", (event) => { if (event.key === "Enter") document.getElementById("go").focus(); });`,
+    );
+    await spoken(page);
+    await page.mouse.click(field(shown).x, field(shown).y);
+    await expect.poll(() => hostActive(page)).toBe("IFRAME");
+    await settle(page);
+    const before = await presses(page);
+    await page.keyboard.type("words", { delay: 40 });
+    await page.keyboard.press("Enter");
+    await settle(page);
+    console.log(
+      "KEYFOCUS clicked:",
+      shown.said.some((each) => each.type === "clicked"),
+    );
+    expect(await presses(page), "probe: the Enter typed in the field told no press").toBe(before);
+  });
+
   test(PRESS_SUBMIT, async ({ page }) => {
     // Enter in a form's text field: the form gives its submit button a click of the browser's own.
     // The field is tied to the form by its form attribute, outside the form's element.
@@ -428,6 +453,51 @@ test.describe("a nested page's real presses (P148)", () => {
       "probe: content heard no port",
     ).toBe(false);
     expect(await presses(page), "probe: the shell heard no press").toBe(0);
+  });
+
+  test(PRESS_OPEN_EARLY, async ({ page }) => {
+    // The same, as soon as content can run anything of its own: before the shell's first port has
+    // come, so the listener content adds after open() would be the first to hear it. The page's
+    // words are heard here, whether or not the display loads: a page that did clear its window
+    // answers its host nothing, and what it said is the verdict, not that.
+    const said: Record<string, unknown>[] = [];
+    page.on("console", (message) => {
+      const text = message.text();
+      if (text.startsWith("__P ")) {
+        said.push(JSON.parse(text.slice(4)) as Record<string, unknown>);
+      }
+    });
+    const shown = await show(
+      page,
+      `setTimeout(() => {
+        let opened = true;
+        try {
+          document.open();
+          window.addEventListener("message", (again) => {
+            if (again.ports && again.ports.length > 0) {
+              say("port");
+              try { again.ports[0].postMessage(0); } catch (_) {}
+            }
+          }, true);
+          document.close();
+        } catch (_) {
+          opened = false;
+        }
+        say("reopened", { opened });
+      }, 0);`,
+    ).catch(() => null);
+    await expect.poll(() => said.some((each) => each.type === "reopened")).toBe(true);
+    await page.waitForTimeout(1_500);
+    expect(
+      said.find((each) => each.type === "reopened")?.opened,
+      "probe: the page couldn't open its document again",
+    ).toBe(false);
+    expect(
+      said.some((each) => each.type === "port"),
+      "probe: content heard no port",
+    ).toBe(false);
+    expect(await presses(page), "probe: the shell heard no press").toBeLessThan(1);
+    expect(shown, "the display loaded").not.toBeNull();
   });
 
   test(PRESS_SAME_DOCUMENT, async ({ page }) => {

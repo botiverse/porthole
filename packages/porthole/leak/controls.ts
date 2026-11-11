@@ -201,6 +201,8 @@ export const PRESS_MADE_UP =
 export const PRESS_ROLE =
   "typing is no press, whatever the content calls the field: a role of button, a custom element's, an editable button (P148)";
 export const PRESS_REPEAT = "a key held down is one press, however long it repeats (P148)";
+export const PRESS_KEY_FOCUS =
+  "Enter typed in a text field is no press, though the page moves the focus to its button as the key goes down (P148)";
 export const PRESS_SUBMIT =
   "Enter in a form's text field is no press, though the form clicks its submit button (P148)";
 export const PRESS_SCROLL = "a finger that scrolls the page is no press; a tap is (P148)";
@@ -210,6 +212,8 @@ export const PRESS_FORGED_PORT =
   "a port message content sends itself first is not taken, and takes no place: the person's press still reaches the shell (P148)";
 export const PRESS_OPEN_LOCKED =
   "a page can't open its document again to hear the port the shell sends at the next load (P148)";
+export const PRESS_OPEN_EARLY =
+  "nor as soon as it runs, to hear the first port in the runtime's place (P148)";
 export const PRESS_SAME_DOCUMENT =
   "a press after a link within the document is heard: the load WebKit fires for it leaves the first port the one (P148)";
 export const PRESS_STALL = "a press a shell tells after a stall is no one's (P148)";
@@ -871,8 +875,22 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   "press-editable": { specs: [NESTED_PRESS], fails: all(PRESS_ROLE) },
   // A held key's repeats are no press.
   "press-repeat": { specs: [NESTED_PRESS], fails: all(PRESS_REPEAT) },
-  // The click a form gives its submit button for Enter in another of its fields is typing.
-  "press-submit": { specs: [NESTED_PRESS], fails: all(PRESS_SUBMIT) },
+  // No click while a key is down is a press.
+  "press-key-click": { specs: [NESTED_PRESS], fails: all(PRESS_KEY_FOCUS, PRESS_REPEAT) },
+  // The click a form gives its submit button for Enter in another of its fields is typing. A key
+  // is down for the whole of that Enter, and no click counts then: the wall in front of this one.
+  "press-submit": {
+    specs: [NESTED_PRESS],
+    fails: NOTHING,
+    holds: {
+      why: "a key is down while a form clicks its submit button for an Enter, and no click is a press then: that rule refuses the click first",
+      by: "press-key-click,press-submit",
+    },
+  },
+  "press-key-click,press-submit": {
+    specs: [NESTED_PRESS],
+    fails: all(PRESS_KEY_FOCUS, PRESS_REPEAT, PRESS_SUBMIT),
+  },
   // A finger counts as it lifts, never as it lands: one that scrolls never lifts as a press.
   "press-touch-down": {
     specs: [NESTED_PRESS],
@@ -892,7 +910,10 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
     },
   },
   // document.open is fixed shut: no page clears the runtime's listener and loads again.
-  "press-open-lock": { specs: [NESTED_PRESS], fails: all(PRESS_OPEN_LOCKED) },
+  "press-open-lock": {
+    specs: [NESTED_PRESS],
+    fails: all(PRESS_OPEN_LOCKED, PRESS_OPEN_EARLY),
+  },
   // A load that left the document where it was: the runtime says so on the port it holds.
   "press-still-here": {
     specs: [NESTED_PRESS],

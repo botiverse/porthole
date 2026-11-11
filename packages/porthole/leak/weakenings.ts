@@ -787,12 +787,21 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "        return kind;",
     },
   ],
-  // A held key's repeats are presses, and so are the clicks they give a button.
+  // A held key's repeats are presses.
   "press-repeat": [
     {
       file: RUNTIME,
-      find: "            keyHeld = callOf(repeatOf, event, []) === true;",
-      replace: "            keyHeld = false;",
+      find: " || callOf(repeatOf, event, []) === true || callOf(designModeOf",
+      replace: " || callOf(designModeOf",
+    },
+  ],
+  // A click while a key is down is a press: the one a button gets for an Enter typed elsewhere,
+  // once the page has moved the focus onto it.
+  "press-key-click": [
+    {
+      file: RUNTIME,
+      find: '            if (keyDown || controlOf(target) === "") {',
+      replace: '            if (controlOf(target) === "") {',
     },
   ],
   // The click a form gives its submit button for Enter in one of its fields is a press.
@@ -1047,6 +1056,7 @@ const SERVED = [
   "press-role",
   "press-editable",
   "press-repeat",
+  "press-key-click",
   "press-submit",
   "press-touch-down",
   "press-port-heard",

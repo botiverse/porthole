@@ -9403,9 +9403,15 @@ for a `MessagePort` only the runtime holds, carrying an event only the browser m
      and P120's "typing is no press" would be the content's to decide. A custom element is never
      one, so the focus inside its shadow tree, open or closed, tells nothing;
    - a click on such a control (an assistive technology activates a button with a click alone),
-     but not the click a form gives its submit button for Enter in another of its controls (the
-     two forms read through each control's own `form`: a field tied by its `form` attribute is not
-     inside the form's element), nor one that a held key's repeat gives.
+     but none while a key is down (from the browser's own `keydown` to its `keyup`, or the next
+     press of a pointer): the key's own press was judged as it went down, where it went down.
+     Without that, content that moves the focus to its button inside the `keydown` of an Enter
+     typed in a text field gets the button a click of the browser's own, the focus on it
+     (Ferryman, on the code: measured on Chromium 153 and Firefox 155, and WebKit here); and a
+     held key's repeats give a button a click each. Behind it, not the click a form gives its
+     submit button for Enter in another of its controls (the two forms read through each
+     control's own `form`: a field tied by its `form` attribute is not inside the form's
+     element).
 5. **The host judges a press told exactly as an activation that turned on.** For a second
    (`SHELL_GESTURE_MS`), a move of focus into the frame, or a `comments.open`, is the person's,
    **with no trusted press or key on the host's page since** (the design page had this signal
@@ -9479,13 +9485,16 @@ own click, is allowed (not Firefox, where a page's own `focus()` puts no key on 
 page's `focus()` 700 ms after a second press, the person back in the host's composer, is taken
 back; every event a page can dispatch tells nothing; typing in a text field, one with
 `role="button"`, one in a custom element with that role, and an editable button tells nothing; a
-held key is one press; Enter in a form's field tells none though the form clicks its button; a
+held key is one press; Enter typed in a field tells none though the page moves the focus to its
+button as the key goes down, and none though a form clicks its button for it; a
 finger that scrolls tells none and a tap one (Chromium, the only engine a test can drag a finger
 on); content's first listener hears no port; a port message content sends itself first is not
-taken and takes no place (Firefox makes no such event); a page can't open its document again; a
-press after a link within the document is heard; the host's rule on a press told after a stall.
+taken and takes no place (Firefox makes no such event); a page can't open its document again,
+at a later moment or as soon as it runs; a press after a link within the document is heard; the
+host's rule on a press told after a stall.
 Negative controls, each failing its probe on every engine it names: `press-untrusted`,
-`press-role`, `press-editable`, `press-repeat`, `press-submit`, `press-touch-down` (Chromium),
+`press-role`, `press-editable`, `press-repeat`, `press-key-click`, `press-submit` (behind
+`press-key-click`: it fails its probe with both out), `press-touch-down` (Chromium),
 `press-port-heard`, `press-port-forged` (Chromium, WebKit), `press-open-lock`,
 `press-still-here` (WebKit), `press-host-input`, and `shell-stall` (now this rule's too). No
 control for item 7 (an order between two channels: with the hold out it is lost only sometimes),

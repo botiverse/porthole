@@ -16,7 +16,8 @@ P-numbers below.
   and the runtime takes before any content runs. The shell says when it heard the last
   (`porthole/shell/state`: `pressed`, `presses`), and the host takes it as it takes the
   activation turning on: for a second, with no press or key on the host's page since, and under
-  P120's and P122's rules. Nothing a page dispatches is a press, and no content holds the port;
+  P120's and P122's rules. Nothing a page dispatches is a press, no click while a key is down is
+  one, and no content holds the port;
   where the runtime can't install all of it, nothing is told and P111's rule stands alone.
   **For a host:** no API change. The nested shell's script and the shell runtime every served
   document inlines change (the nested shell's `script-src` hash with it; `nestedShellResponse`
