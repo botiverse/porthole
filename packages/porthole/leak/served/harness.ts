@@ -521,6 +521,16 @@ async function start(): Promise<Harness> {
       capabilities: { annotate: {}, comments: {}, copyText: {}, openLink: {} },
       layout: { kind: "fill" },
     }),
+    // A nested page that keeps its scope's storage (P149): the store, on the scope's own origin.
+    artifactNestedKept: presets.artifact({
+      isolation: "domain",
+      contentOrigins: [contentSource],
+      nested: true,
+      runtime: "1",
+      capabilities: { annotate: {}, comments: {}, copyText: {}, openLink: {} },
+      layout: { kind: "fill" },
+      storage: { scope: "this page, across its versions" },
+    }),
   };
   const porthole = createServer({
     content: { domain: "localhost", scheme: "http", port },

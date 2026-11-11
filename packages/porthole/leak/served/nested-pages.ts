@@ -72,6 +72,8 @@ interface Seen {
   anchored: string[];
   /** How many real presses the page's shell last said it had heard (P148); -1 before it spoke. */
   presses: number;
+  /** Each storage event's `kept` (P149): absent from a page that keeps none. */
+  kept: (boolean | undefined)[];
 }
 
 /** The host's own composer and button, above the display, and what the display tells it. */
@@ -88,7 +90,15 @@ export async function hostUi(page: Page): Promise<void> {
     const w = window as unknown as {
       seen: Seen;
     };
-    w.seen = { taken: [], errors: [], storage: [], activated: [], anchored: [], presses: -1 };
+    w.seen = {
+      taken: [],
+      errors: [],
+      storage: [],
+      activated: [],
+      anchored: [],
+      presses: -1,
+      kept: [],
+    };
     // The shell's own state as the host's page hears it (P148): how many presses it has heard.
     window.addEventListener("message", (event) => {
       const data = event.data as { method?: unknown; params?: { presses?: unknown } } | null;
@@ -116,7 +126,10 @@ export async function listen(page: Page): Promise<void> {
     display?.on("contentError", (detail: { message: string }) =>
       w.seen.errors.push(detail.message),
     );
-    display?.on("storage", (detail: { used: boolean }) => w.seen.storage.push(detail.used));
+    display?.on("storage", (detail: { used: boolean; kept?: boolean }) => {
+      w.seen.storage.push(detail.used);
+      w.seen.kept.push(detail.kept);
+    });
     display?.on(
       "annotation",
       (detail: { type: string; id?: string; results?: { id: string }[] }) => {
@@ -156,13 +169,15 @@ export async function show(
    * it names one (P114: the gap a fresh scope per case hid, porthole#56).
    */
   scope: string = unique("nest"),
+  /** Its config: a nested page's, or one that keeps storage too (`artifactNestedKept`, P149). */
+  preset: "artifactNested" | "artifactNestedKept" = "artifactNested",
 ): Promise<Shown> {
   const served = await harness();
   const id = unique("page");
   served.fileSets.set(`${id}@1`, storedFiles({ ...files, "index.html": pageOf(script) }));
   const instance: InstanceRef = {
     scope,
-    document: { kind: "artifact", id, version: "1", preset: "artifactNested" },
+    document: { kind: "artifact", id, version: "1", preset },
   };
   const location = await served.porthole.issue(instance, { viewer: "probe" });
   const said: Record<string, unknown>[] = [];
@@ -179,7 +194,7 @@ export async function show(
   const shown = await mount(
     page,
     served.hostOrigin,
-    served.configs.artifactNested as PortholeConfig,
+    served.configs[preset] as PortholeConfig,
     location,
     instance,
     {
