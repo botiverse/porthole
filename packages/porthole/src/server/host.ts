@@ -407,6 +407,12 @@ export interface ContentHost<V> {
   ): (request: Request) => Promise<Response>;
   /** Drops cached `authorize` answers (`authorizeTtlSeconds`): all, or a scope's, or a subject's. */
   forget(filter?: { readonly scope?: string; readonly subject?: string }): void;
+  /**
+   * A scope's forget address (`server.forgetStorage`, P149): for your page to load once, in a
+   * hidden frame, when what the scope stood for was deleted; the browser then drops what that
+   * scope's origin kept. Null where nothing is served on content origins.
+   */
+  forgetStorage(scope: string): Promise<string | null>;
   /** The app's authorize route for redirect entry (`entry.authorizeUrl`), as a fetch handler. */
   authorize(
     viewerOf: (request: Request) => Awaitable<V | null>,
@@ -1332,6 +1338,10 @@ export function createContentHost<V>(options: ContentHostOptions<V>): ContentHos
 
     forget(filter = {}) {
       server?.forget(filter);
+    },
+
+    async forgetStorage(scope) {
+      return server === null || !served() ? null : await server.forgetStorage(scope);
     },
 
     urlOf(scope, path = "/") {
