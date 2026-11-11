@@ -5,7 +5,7 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes Porthole 0.15.2 (2026-11-11). A review on 2026-10-19 found gaps, and every decision it led to
+**Status.** This describes Porthole 0.15.3 (2026-11-11). A review on 2026-10-19 found gaps, and every decision it led to
 has merged ([§8](#8-fixes-in-flight) lists them). P096 changed the negative-control runner and CI,
 and the shipped conformance probes' messages and timing, not what they check. P104 (0.9.0's
 annotation markers) had a review of its own, and P105, in 0.10.0, is what it led to. 0.11.0 was
@@ -82,6 +82,10 @@ shell's activation turning on (§7 "The keyboard"). It gives back what P111 acce
 press in the page within 5 s of the last gesture. It rests on the runtime's lock on
 `document.open` and on a nested page's frames being opaque, and is not installed where either
 fails. The nested shell's script and the served shell runtime change (their pins, P144 and P145).
+Also in 0.15.3, after the audit of 0.15.1: the four helpers a content Worker of a host's own calls
+with host origins (`statusPage`, `doorResponse`, `doorStatusResponse`, `nestedShellCsp`) check
+each one and throw on a bad one, as P145 said they did; the origins are the host's own
+configuration, never content's.
 
 ## 1. Two layers
 
