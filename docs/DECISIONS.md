@@ -9283,3 +9283,62 @@ group, five of these fail.
 gate take it); a release's full run fails on what the quick set could have shown more than now and
 then (move that suite or engine into the quick set); GitHub's runners queue a full run for long
 (the shard count, `MEASURED`); or the controls are redesigned to run less (the rejected `--grep`).
+
+## P147 · 2026-11-11 · Marks ride the document's scroll: a scroll timeline moves them, not the scroll event · Accepted
+
+Amends P104 (how a mark follows a scroll) and P132. From Raft (xxchan, 2026-11-10, a screen
+recording): scrolling a page with comments, the highlight on the commented words and the marker
+beside them trail the text and catch up a moment later.
+
+**Context.** The layer is fixed and covers the viewport (P104), and every box in it is placed in
+the viewport. A scroll moved the page and not the layer; the runtime heard the scroll event, drew
+again in that frame's animation callback, and the boxes were right again. That is as early as a
+script can be, and it is late: a browser scrolls on its compositor, and puts frames on the screen
+at the new scroll offset before the main thread has run the scroll event for it. In those frames
+the words have moved and the boxes have not. No ordering of the script fixes it; only something the
+compositor moves with the scroll does.
+
+**Decision.**
+1. **One box in the layer holds everything drawn** (marks, markers, the held selection, the
+   picking outline and its tag): `.ride`, a child of the layer's shadow root. The layer itself is
+   unchanged: fixed, the viewport's size, clipped, its inline style reset at each draw (P104), so
+   it still adds nothing to what the page can scroll and nothing of the page's sizes it.
+2. **Each box's top is its place in the document down the page**: its top in the viewport plus how
+   far the document is scrolled, both read in the one task that draws (`scrollTop` of
+   `document.scrollingElement`, through getters taken before content runs, P129). `.ride` is moved
+   up by the scroll by a scroll-driven animation: `animation-timeline: scroll(root y)`, one
+   keyframe at `translateY(-range)`, where the range (`scrollHeight - clientHeight`, set as
+   `--ride` at each draw) is what that timeline runs over. The engine runs it with the scroll, so
+   in every frame a box is where its words are.
+3. **The scroll event still draws**, as before. For a page scrolled down by its root, that draw
+   now writes the places the boxes already have. It is what still moves a mark in a scroller of
+   the page's own (an `overflow: auto` element), which no root timeline follows: there a mark
+   catches up from the event, as it did everywhere before.
+4. **Down the page only.** Sideways a box stays placed in the viewport and follows from the event:
+   a document scrolled sideways is rare, its scroll runs the other way where the text does (a
+   right-to-left page), and one axis keeps the arithmetic to one number.
+5. **Where there is no scroll timeline** (`CSS.supports("animation-timeline: scroll()")`, asked
+   once before content runs: Firefox today), and where the root does not scroll (the range is 0,
+   the timeline is inactive and moves nothing), every top is the viewport's and the event draws,
+   exactly as before this decision.
+6. **A mark on something the page keeps in place** (`position: fixed`, or `sticky` while stuck)
+   now does the opposite of what the others did: it rides with the document for the frames before
+   the event's draw puts it back. Accepted for now: comments on a fixed header are few beside
+   comments on the text, and telling them apart costs a computed style up the tree for every mark
+   at every draw. **Revisit** with a second, unridden box for such marks if a host reports it.
+
+**What a page can do with it.** Nothing it could not: the layer was always in the page's own
+document, where the page can cover it or move it with its ancestors (P104). The animation and its
+keyframes are in the closed shadow root's sheet; `--ride` is set on `.ride` there, where no page
+style reaches (a custom property inherits into a shadow tree from its host, and `.ride` sets its
+own). A page that changes how tall it is between two draws shifts the boxes by the difference
+times how far it is scrolled, until the next draw (a mutation, a resize or a scroll): the marks of
+its own content, drawn a little off, for a moment.
+
+**Threat.** None opened. No new message, no new reading: the scroll offset was already read for
+P132's reports (through the root's box; here through `scrollTop`, the number the timeline uses).
+
+**Revisit when** an engine ships scroll timelines without running them on the compositor (the ride
+would then be no better than the event, and no worse); a host needs marks in the page's own
+scrollers to ride too (a timeline per scroller, named from the mark's nearest one); or decision 6's
+case is reported.

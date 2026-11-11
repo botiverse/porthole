@@ -1885,6 +1885,42 @@ test("on touch, a marker takes a tap a few px off its bubble (44 by 44), after t
   }
 });
 
+test("a marker stays on its line as the document scrolls with no draw: the scroll itself moves it (P147)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    widthPx: 600,
+    heightPx: 400,
+    content: `<div style="padding: 300px 20px 1600px"><p id="p1" style="font-size: 18px; margin: 0">Costs <b>fell</b> by three percent.</p></div>${HEARING}`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#p1")).toBeAttached();
+  await display.annotate("show", [textMark("fell", "fell", 1)]);
+  await next(display, "anchored");
+  await expect
+    .poll(async () => (await markersOnLine(frame, "#p1")).runs.length, {
+      message: "probe: the marker is on its paragraph's line",
+    })
+    .toBe(1);
+  const rides = await frame.evaluate(() => CSS.supports("animation-timeline: scroll()"));
+  // No draw from here on: the page takes the frame clock the runtime draws on (content can), then
+  // scrolls. Only what the engine moves with the scroll keeps the marker with its words.
+  await frame.evaluate(() => {
+    window.requestAnimationFrame = () => 0;
+    window.scrollBy(0, 180);
+  });
+  await page.waitForTimeout(500);
+  const scrolled = await frame.evaluate(() => window.scrollY);
+  expect(scrolled, "probe: the document scrolled").toBe(180);
+  // With a scroll timeline the marker is still on its line. Without one (Firefox today) it is
+  // where it was drawn, off the line: the scroll event's draw, taken away here, is what moves it.
+  expect(
+    (await markersOnLine(frame, "#p1")).runs.length,
+    rides ? "the marker rode the scroll" : "no scroll timeline: only a draw moves it",
+  ).toBe(rides ? 1 : 0);
+});
+
 test("on touch, where two markers' 44 px boxes overlap, a tap is the nearest bubble's (P119)", async ({
   browser,
   browserName,
