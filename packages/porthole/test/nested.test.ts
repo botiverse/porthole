@@ -49,7 +49,7 @@ const nested = () =>
   });
 
 describe("config", () => {
-  test("only an artifact served on its own origin nests, and keeps nothing of that origin's", () => {
+  test("only an artifact served on its own origin nests, and shares no scope's storage", () => {
     expect(nested().nested).toBe(true);
     expect(() => presets.artifact({ nested: true })).toThrow(ConfigError);
     expect(() =>
@@ -59,14 +59,16 @@ describe("config", () => {
         nested: true,
       }),
     ).toThrow(ConfigError);
+    // Its scope's own storage it may keep (P149, test/nested-storage.test.ts); a scope several
+    // displays share it may not.
     expect(() =>
       presets.artifact({
         isolation: "domain",
         contentOrigins: ["https://*.example-usercontent.com"],
         nested: true,
-        storage: { scope: "this artifact" },
+        storage: { shared: "conversation" },
       }),
-    ).toThrow(/keeps no storage/u);
+    ).toThrow(/storage\.scope, not storage\.shared/u);
     expect(() =>
       presets.artifact({
         isolation: "domain",
