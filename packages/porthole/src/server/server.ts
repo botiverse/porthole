@@ -89,9 +89,10 @@ const FORGET_ROUTE = /^\/__porthole\/forget\/([A-Za-z0-9_-]{16,128})$/u;
 const FORGET_SECONDS = 300;
 /**
  * The id a forget address's ticket is kept under: not a document's ticket's (`ticketId`), so
- * neither kind can be taken, or spent, at the other's address.
+ * neither kind can be taken, or spent, at the other's address; and its label's, so one tried on
+ * another label names no record there and is still good on its own (Tenny, on the code).
  */
-const forgetId = (ticket: string): string => ticketId(`forget:${ticket}`);
+const forgetId = (label: string, ticket: string): string => ticketId(`forget:${label}:${ticket}`);
 const FILES_PREFIX = "/__porthole/f/";
 /** An asset's address (P089): `/_blob/` and 32 lowercase hex characters (`ASSET_ID`). */
 const ASSET_ROUTE = /^\/_blob\/([0-9a-f]{32})$/u;
@@ -1034,10 +1035,11 @@ export function createServer(options: ServerOptions): PortholeServer {
    */
   async function serveForget(request: Request, label: string, ticket: string): Promise<Response> {
     const method = request.method.toUpperCase();
-    // Under an id of its own (`forgetId`): a document's ticket brought here names no record, and
-    // is not spent by the asking.
+    // Under an id of its own and this label's (`forgetId`): a document's ticket brought here, or
+    // another label's forget ticket, names no record, and is not spent by the asking. The
+    // record's own scope is checked all the same, below.
     const record =
-      method === "GET" || method === "HEAD" ? await tickets.take(forgetId(ticket)) : null;
+      method === "GET" || method === "HEAD" ? await tickets.take(forgetId(label, ticket)) : null;
     let named: string | null = null;
     try {
       named = record === null ? null : nameOf(cleanInstance(record.instance).scope);
@@ -2395,7 +2397,7 @@ export function createServer(options: ServerOptions): PortholeServer {
         throw new TypeError("forgetStorage: a scope is 1 to 512 characters");
       }
       const ticket = newTicket();
-      await tickets.put(forgetId(ticket), {
+      await tickets.put(forgetId(nameOf(scope), ticket), {
         // No document: the ticket opens none (it is kept under another id than a document's
         // ticket, and `take` refuses its record besides), and names its scope alone.
         instance: { scope, document: { kind: "shell", preset: "forget" } },

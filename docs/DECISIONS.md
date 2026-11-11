@@ -9593,9 +9593,9 @@ handed to the page.
    that answer and no other: the origin is the whole scope's, so no status page may carry either
    (a version gone, a ticket ended, a file's 404, which content can cause), and the header never
    says `"cookies"` or `"*"`. It does not wait for the page's own address to be asked again, which
-   a deleted document's never is. Its ticket is kept under an id of its own, so a document's
-   ticket brought to the forget address is not spent there, and a forget ticket opens no
-   document. It reaches the copy of the storage kept under the host's page (browsers partition a
+   a deleted document's never is. Its ticket is kept under an id of its own and its label's, so a
+   document's ticket brought to the forget address is not spent there, a forget ticket opens no
+   document, and one tried on another label is still good on its own. It reaches the copy of the storage kept under the host's page (browsers partition a
    framed origin's storage by the top page): a copy made on a tab of the scope's own, or under
    another host, stays until the browser evicts it.
 8. **Opted into.** `nested: true` may now keep `storage.scope`; `storage.shared` it may not (a

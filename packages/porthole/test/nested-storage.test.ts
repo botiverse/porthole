@@ -422,17 +422,17 @@ describe("/server", () => {
     const scope = porthole.originFor("one");
     expect(address.startsWith(`${scope}/__porthole/forget/`)).toBe(true);
     expect(new URL(address).hostname.startsWith(nestedLabelOf("x").slice(0, 9))).toBe(false);
-    // Not on another scope's origin, and trying there spends nothing of it.
+    // Not on another scope's origin, and trying there does not spend it: the same address is
+    // still good on its own label after (its ticket is kept under that label's id).
     const elsewhere = await porthole.handle(
       ask(`${porthole.originFor("two")}${new URL(address).pathname}`),
     );
     expect(elsewhere?.status).toBe(404);
     expect(elsewhere?.headers.get("clear-site-data")).toBeNull();
-    const again = await porthole.forgetStorage("one");
-    const first = await porthole.handle(ask(again));
+    const first = await porthole.handle(ask(address));
     expect(first?.status).toBe(200);
     expect(first?.headers.get("clear-site-data")).toBe('"storage"');
-    const second = await porthole.handle(ask(again));
+    const second = await porthole.handle(ask(address));
     expect(second?.status).toBe(404);
     expect(second?.headers.get("clear-site-data")).toBeNull();
     // As a document's ticket it opens nothing, and is not spent by the try.
