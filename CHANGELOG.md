@@ -19,6 +19,8 @@ P-numbers below.
   P120's and P122's rules. Nothing a page dispatches is a press, no click while a key is down is
   one, and no content holds the port;
   where the runtime can't install all of it, nothing is told and P111's rule stands alone.
+  Only for nested pages (`nested: true`): a served page that isn't nested is as before, and in
+  full Chromium ADOPTING's advice for it stands (nest it).
   **For a host:** no API change. The nested shell's script and the shell runtime every served
   document inlines change (the nested shell's `script-src` hash with it; `nestedShellResponse`
   and `/server` compute it, as before). Both sides need 0.15.3 for the change to show: the host's

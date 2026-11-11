@@ -9348,17 +9348,22 @@ case is reported.
 Amends P111 (its "Rejected", and item 4 of its "Threat it re-opens"). From Raft (xxchan,
 2026-11-11): a page's own button that calls `comments.open`; the host answers with a dialog; the
 person cancels it and presses the button again, and nothing happens ("This needs a click"), nor at
-the next press; some seconds later it works. Designed on one page first, attacked by Ferryman
-before any code (his findings are items 2, 4 and 5 below), accepted by the CTO with the bounds of
-item 1.
+the next press; some seconds later it works. Raft's pages are served, not nested: in full Chromium
+the host's page sees no press in their frame, and a press there counts only once the host's page
+has had no gesture of its own for 5 s (P109). ADOPTING's answer is to nest such pages (P111). But a
+nested page had the same dead button, for the 5 s after any gesture (below), so nesting was no
+answer to this report until that was closed. This decision closes it; it changes nothing for a
+page that isn't nested. Designed on one page first, attacked by Ferryman before any code (his
+findings are items 2, 4 and 5 below), accepted by the CTO with the bounds of item 1.
 
 **Context.** P111 takes "the person is in this frame" from the shell's own transient activation
 turning on: within the last second, with no trusted press or key on the host's page since. An
 activation stays on for about 5 s, so a press in the page within 5 s of the last gesture turns
 nothing on, and a press in the page within 5 s of a press on the host's page can't be told from
 the page borrowing the host's. P111 accepted that. In use it is a button that does nothing:
-measured in full Chromium, a press one second after the host's dialog was cancelled is refused,
-and the one after it too.
+`leak/served/nested-press.spec.ts`'s first case, run against 0.15.2, has a press one second after
+a press on the host's page refused on full Chromium and on Firefox (the headless shell and WebKit
+show the host's page the press on the frame itself, and pass).
 
 P111 rejected "the page's runtime reporting its own gestures (the page's word, in the page's
 realm)": the runtime and the content share a document, and whatever the runtime posts to the
@@ -9480,7 +9485,7 @@ replaces the last and forgets its press; "still here" restores the port before; 
 only a nested page; `shellPress`, `shellSaw` and `personMoved` on a press told.
 `leak/served/nested-press.spec.ts`, real input only, on full Chromium, the headless shell, WebKit
 and Firefox: a second and a third press after presses on the host's page open `comments` (refused
-before this decision on full Chromium); Enter on the page's button, its call made in the key's
+before this decision on full Chromium and Firefox); Enter on the page's button, its call made in the key's
 own click, is allowed (not Firefox, where a page's own `focus()` puts no key on its button); a
 page's `focus()` 700 ms after a second press, the person back in the host's composer, is taken
 back; every event a page can dispatch tells nothing; typing in a text field, one with
