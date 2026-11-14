@@ -1,8 +1,6 @@
 <p align="center"><img src="docs/assets/porthole-logo.svg" width="128" alt="Porthole"></p>
 
-# Porthole
-
-[![Built with Raft](https://raw.githubusercontent.com/raft-builders/awesome-raft-build/main/badge/built-with-raft.svg)](https://raft.build)
+# Porthole [![Built with Raft](https://raw.githubusercontent.com/raft-builders/awesome-raft-build/main/badge/built-with-raft.svg)](https://raft.build)
 
 A host-side library for safely showing agent-made HTML inside an app, like the
 inline cards and standalone pages you see in ChatGPT and the Claude app.
