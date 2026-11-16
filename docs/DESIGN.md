@@ -1282,7 +1282,7 @@ or fake is [THREAT_MODEL.md § 7](THREAT_MODEL.md#7-the-display-layer-and-the-ap
   never a reason for one).
 - **Markers** (P104, P133). A mark with a `count` gets a bubble glyph and its number ("99+" above
   99; 0 the bubble alone), a real `<button>`, on an element's top right corner, or at the end of a
-  text anchor's paragraph, just past the last word of its last line. A draft's goes beside its
+  text anchor's paragraph, just past the last word of its last line, or where that doesn't fit, at the places a draft's takes. A draft's goes beside its
   own last line: in the line's gutter past the block's right edge, at the frame's right edge where
   the frame is too narrow, or just past the line's last word where something else is beside the
   block (P105, #36). Each place must be clear of that line's words and of anything of the
@@ -1295,8 +1295,10 @@ or fake is [THREAT_MODEL.md § 7](THREAT_MODEL.md#7-the-display-layer-and-the-ap
 - **The layer** is a closed shadow root, the document's last child, and takes no pointer but on
   markers. A press on a marker, and the pointer's moves over it, are stopped in the shell's first
   window listener, read through built-ins kept before content runs (P105); a trusted click or a
-  tap is reported `activated`. On touch (P119) each marker takes the pointer in a box of at least
-  44 by 44 px centred on its bubble, the nearest bubble's where two overlap; a mouse is
+  tap is reported `activated`. On touch (P119), while the last pointer down or moved was a finger
+  or a pen (before any, where `(any-pointer: coarse)` matches), each marker also takes the pointer
+  in a box of at least 44 by 44 px centred on its bubble (an invisible `::before` in the layer),
+  the nearest bubble's where two overlap; a mouse's move takes the boxes away, so a mouse is
   hit-tested on bubbles alone. Content that patches no built-in hears none of a press; content
   that patches others can reach the layer's nodes (P105); either way it can tell a press happened
   (`:active`, `relatedTarget`, user activation). A pointer's press moves no focus. Markers step
@@ -1355,7 +1357,8 @@ learns is [THREAT_MODEL.md § 7](THREAT_MODEL.md#7-the-display-layer-and-the-app
   content runs. It finds a query (`porthole/find.query`, a request) in annotations' text index
   (`TEXT_INDEX`, `src/shell/text.ts`, shared), case-insensitive and loose about spacing
   (`FIND_MATCH`), only matches that are drawn, at most 1,000; draws them in a layer of its own (a
-  closed shadow root, annotations' layer style), the current one apart, redrawn on scroll and
+  closed shadow root, annotations' layer style; never the CSS Custom Highlight API, which is the
+  content's to read and rewrite), the current one apart, redrawn on scroll and
   resize and found again as the content changes (`porthole/find.updated`, at most once a second);
   brings the current one into view through its scrolling ancestors and the window; and, while the
   host says it draws its own bar (`porthole/find.handled`), cancels the browser's find on Cmd+F or

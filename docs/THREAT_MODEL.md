@@ -764,7 +764,7 @@ its realm with the content, so:
 - *Boxes.* Every box a report carries (`selected`, `activated`, `anchored`) is the page's word,
   clamped to the frame's viewport before the host hears it (the part inside is kept, a box wholly
   outside becomes one of no size on the nearest edge; a platform `viewport()` that answers no size,
-  or throws, clamps every box to the frame's corner). So the page can't place the host's UI over
+  or throws, clamps every box to a box of no size at the frame's corner). So the page can't place the host's UI over
   the rest of the app, but chooses any point in its frame: a box is a positioning hint, never a
   fact. Boxes are in the frame's CSS px: a host that scales or transforms the frame maps them
   through that transform. Reading the frame's size for each report, before the rate, forces a
@@ -819,9 +819,9 @@ its realm with the content, so:
   100 ms; a page that forges a fresh word or takes the focus itself (then it has the keyboard
   anyway); a word moving the focus from the page's own field onto a marker. Between the host's
   close and the frame's move the focus is on the host's body, so a forged `activated` then finds no
-  frame focused: a view gated on "the frame had the focus" isn't gated by it, and must take no
-  focus and keep keys out until the focus reaches the frame, so the keys go to the page and nothing
-  is written.
+  frame focused: a view gated on "the frame had the focus" isn't gated by it. That is accepted
+  because such a view takes no focus and keeps keys out until the focus has reached the frame, so
+  the keys go to the page and nothing is written.
 - *Clearing the selection* (P115, P121). `clearSelection` goes host to frame only, and nothing
   comes back. It gives the page no power it lacks (it can clear or select its own text at any time,
   and select the words again right after a clear), but the page sees it, so it learns when the

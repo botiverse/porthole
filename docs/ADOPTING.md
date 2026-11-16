@@ -370,8 +370,8 @@ The keyboard:
   of marks as the keyboard way that holds (`annotations.focus(id)` brings one into view), and keep
   your view's guard (it takes no key for 500 ms, and no focus).
 - **Key or pointer** (P134). `activated` doesn't say which. In the listener,
-  `document.activeElement === container.querySelector("iframe")` is true when the focus is in the
-  frame, as for a key on a marker; a pointer's press moves no focus. It is a hint, not a proof: the
+  `document.activeElement === container.querySelector("iframe")` (a shadow root of yours: its
+  `activeElement`) is true when the focus is in the frame, as for a key on a marker; a pointer's press moves no focus. It is a hint, not a proof: the
   page can move the focus into its frame and forge `activated`. Moving the keyboard into your view
   on it is THREAT_MODEL §6's second exception: gate whatever posts from that view yourself, its
   key handlers and your page-wide shortcuts that write included (P137).
@@ -803,7 +803,7 @@ or `doorStatusResponse({ status, reason, code?, hostOrigins, framedBy })` (401 `
 are exported from `@botiverse/porthole/server`.
 
 **A host that signs its own tickets** (P126), whose Worker holds no Porthole ticket for the door,
-answers it with `await server.doorAnswer(instance, grant, request)` (on the object `createServer`
+answers it with `await server.doorAnswer(instance, grant, request)` (pass the request: `authorize.check` sees it; on the object `createServer`
 returns; `{ page }` as a fourth argument for a file set's page below its version). Its Worker first
 verifies its own ticket (signature, single use, bound to the label and the instance, a door's and
 never its content's) and recovers the grant. `doorAnswer` gives exactly what `/server`'s door route
@@ -895,6 +895,10 @@ the cookie) is no browser and goes on. An app whose sign-in posts back from anot
 that post either.
 
 ## 5. Cloudflare Workers
+
+Route the content domain's wildcard (`*.<content domain>/*`, with wildcard DNS and a certificate for
+every level served, `*.f.<domain>` included) and your own domain to the same Worker, or the content
+domain to a Worker of its own.
 
 ```js
 import { contentHostFor, d1TicketStore } from "@botiverse/porthole/server";
@@ -1078,5 +1082,15 @@ prints each reason at the end; so does `--reporter=json`.
 
 ## 9. Reference
 
-Every import path and what it exports: [the package README § Subpaths](https://github.com/botiverse/porthole/blob/main/packages/porthole/README.md#subpaths).
+| Import | What |
+| --- | --- |
+| `@botiverse/porthole` | `createHost`, `presets`, `defineDisplays`, `portholeClient`, `frameFallback`, `entryTarget`, `lintContent`, `admitContent`, `showTool`, `guideTool`, `checkTool`, `answerGuide`, `guideChanges`, `compile` |
+| `@botiverse/porthole` (the runtime) | `declareCapabilities`, `declarationProblems`, `checkDeclaration`, `dbAccess`, `atLeast`, `methodLevel`, `rosterOf`, `assetNameProblem`, `RUNTIME_CAPABILITIES`, `RUNTIME_TYPES`, `Refused` (`conflict`, `forbidden`, `too_large`); `types/runtime/v1/*.d.ts` |
+| `@botiverse/porthole/react` | `PortholeProvider`, `PortholeFrame`, `PortholeView`, `usePortholeLink`, `cssVariableTheme`, `useRunAgain` |
+| `@botiverse/porthole/server` | `createContentHost` (`routes`, `forget`), `contentHostFor`, `prefixedName`, `memoryTicketStore`, `d1TicketStore`, `upstreamHeaders`, `statusPage`, `conformancePage`, the callbacks' types |
+| `@botiverse/porthole/node` | `nodeServer`, `nodeHost`, `nodeListener`, `nodeProbe`, `toRequest`, `sendResponse` |
+| `@botiverse/porthole/check` | `checkPage`, `playwrightDriver`, `cdpDriver` (`CHECK_ORIGIN`, `CHECK_CONTENT_DOMAIN`: the names a driver of your own answers); `/check/page`, the check page's script (`checkPage` has it already) |
+| `@botiverse/porthole/mcp` | the MCP Apps adapter (views, the sandbox proxy) |
+| `@botiverse/porthole/conformance` | `defineHostConformance`, `conformanceProjects`, `onDemand`, `conformancePage`, `defineRuntimeConformance` (no browser); `/conformance/reporter`, skip reasons |
+
 The types' doc comments are the precise reference; DESIGN.md § "The host kit" is the long form.
