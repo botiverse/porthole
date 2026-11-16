@@ -94,90 +94,62 @@ export const displays = defineDisplays({
 A live widget shows your data, current, read as the person viewing it, with no network of its own
 ([P079](DECISIONS.md#p079--2026-10-15--live-widgets-no-network-of-their-own-portholes-libraries-on-their-origin-the-hosts-data-behind-the-viewers-consent-and-frames-that-never-navigate-away--accepted-amended-by-p084-p094-p103)).
 Its only way out is your host: `readData` (MCP `resources/read`) and `subscribeData` (MCP
-`resources/subscribe`, `resources/unsubscribe`, `notifications/resources/updated`). No option opens
-its network: `presets.liveWidget` refuses `egress`, and a capability's own `connect` or `resource`
-origins (a `ConfigError` naming the option, P103); a display that needs an origin is another kind.
+`resources/subscribe`, `resources/unsubscribe`, `notifications/resources/updated`).
+`presets.liveWidget` refuses `egress` and a capability's own `connect` or `resource` origins (a
+`ConfigError`, P103): a display that needs an origin is another kind. What it guarantees and what
+you must do: [THREAT_MODEL.md § S2](THREAT_MODEL.md#s2-live-widgets-content-that-reads-the-hosts-data).
 
 ```js
 import { defineDisplays, Refused } from "@botiverse/porthole";
 
 export const displays = defineDisplays({
-  // No egress option exists for it; served, it loads Porthole's Chart.js and D3 from its origin.
-  tile: { preset: "liveWidget", options: { capabilities: { openLink: {} } } },
+  tile: { preset: "liveWidget", options: { capabilities: { openLink: {} } } }, // served: Porthole's Chart.js and D3
 });
 
 createHost(displays.configFor(instance, contentSource), {
   locator,
   handlers: {
-    // As the viewer: your own access rules, never the author's. Return MCP's read result; refuse
-    // what you don't serve with a Refused, whose code and sentence the widget shows (P080).
+    // As the viewer, by your own access rules. Return MCP's read result; refuse with a Refused (P080).
     readData: async ({ uri }, { displayId }) => {
       if (!servedUri(uri)) throw new Refused("not_allowed", "This widget can read issues only.");
-      return {
-        contents: [{ uri, mimeType: "application/json", text: JSON.stringify(await load(uri)) }],
-      };
+      return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(await load(uri)) }] };
     },
-    // Call changed() when it changes (the content reads it again), or changed(result) to send it:
-    // the content's read of it then passes readData's gates, and counts against its rate (P094).
+    // changed(): the content reads it again. changed(result): sent, passing readData's gates (P094).
     subscribeData: ({ uri }, { changed, signal }) => {
       const stop = realtime.on(uri, () => changed());
       signal.addEventListener("abort", stop);
     },
   },
-  // Asked once per display, before its first data call: may this widget read this viewer's data?
-  // Remember the answer per viewer and widget; a no refuses every data call (`denied`).
+  // Once per display, before its first data call. Remember the answer per viewer and widget.
   consent: async ({ display }) => allowedBefore(display) ?? (await askTheViewer(display)),
-  // Optional: your last copy, shown at once (stale), then the fresh read.
-  cached: ({ uri }) => lastCopy(uri),
+  cached: ({ uri }) => lastCopy(uri), // optional: shown at once (stale), then the fresh read
 });
 ```
 
-- **Your handlers decide what a URI may name.** Answer only the resources you mean widgets to read
-  (a whitelist of URI shapes), with the viewer's rights. The content's URI is its word.
-- **Consent is your UI.** Without a `consent` function every data call is refused (fail closed).
-  React: `PortholeProvider` and `PortholeFrame` take `consent` and `cached`. A consent function
-  that throws a `Refused` gives that answer, kept like `false`; anything else it throws is no
-  answer yet (the next call asks again).
-- **A page where data must not run** (beside a frame that reaches the network, below): pass a
-  `Refused` as `consent` and no data handlers. Every data call is refused with it, nothing is asked,
-  and the widget shows your sentence:
-
-  ```js
-  createHost(displays.configFor(instance, contentSource), {
-    locator,
-    consent: new Refused("not_allowed", "Live data shows on the dashboard."),
-  });
-  ```
-
-  Any other capability you declare still needs its handler.
-- **Refusals tell the widget why** (P080). A refused call's JSON-RPC error carries
-  `data: { code, message }`; the shell's `readData` rejects (and `subscribeData`'s `onError` is
-  called) with an `Error` whose `code` and `message` are those. `code` is `consent_required` (no
-  answer yet), `denied` (the viewer said no), `rate_limited`, `not_allowed` (not here, or not this
-  URI) or `failed` (your handler threw); `message` is your `Refused`'s sentence, else Porthole's.
-  The manual tells the agent to draw the widget without the data, with that sentence. A handler's
-  other errors are `failed` in Porthole's words: their messages stay yours.
-- **Rates stay gates**: 120 reads and 60 subscriptions a minute per display by default; change them
-  with the capability's `gates` (keep `"consent"` in the list). Every read counts, a read your
-  `changed(result)` answers too (P094): a widget that follows a resource changing faster than
-  twice a second needs a higher read rate.
-- **Your page's CSP**: send `displays.embedderCsp(source, …)` (`frame-src` of your content origins
-  and the authorize route, nothing else). It keeps a frame from navigating to an outside site; the
-  shell keeps a served frame from navigating to another content origin (P079), and tells you:
-  `display.on("navigationBlocked", ({ url }) => …)` (React `onNavigationBlocked`) gets the address
-  whole, and `contentError` a sentence naming it without its query, for the agent (P080). Only
-  where the config declares `reportError`, and only served frames: an opaque frame's navigations
-  get no events (you hear `navigated` when one replaces its document).
-- **Keep live widgets off pages with frames that reach the network.** A frame can `postMessage` any
-  frame on its page, and nothing in it can stop that: a url-mode app (a dev server's preview) or an
-  `anyHttps` display beside a live widget could be handed what it read. Displays with closed egress
-  or `LIBRARY_CDNS` are fine beside it. The rule for any page: its egress is the union of its
-  frames' ([THREAT_MODEL.md § S7](THREAT_MODEL.md#s7-several-displays-on-one-page)).
-- **Opaque live widgets** (no content domain) work, without libraries: the manual tells the agent
-  to draw with SVG and CSS. An opaque frame's only wall against navigating itself away is your
-  page's `frame-src` (the shell's guard gets no events in an opaque origin), so show them on pages
-  that frame no content origins (`frame-src 'none'`), which is what `defineDisplays` gives a page
-  without a content domain.
+- **Your handlers decide what a URI may name**: answer only the URI shapes you mean widgets to
+  read, with the viewer's rights. The content's URI is its word.
+- **Consent is your UI.** Without a `consent` function every data call is refused; a no refuses
+  them all (`denied`). A consent function that throws a `Refused` gives that answer, kept like
+  `false`; anything else it throws is no answer yet. React: `PortholeProvider` and `PortholeFrame`
+  take `consent` and `cached`. On a page where data must not run, pass a `Refused` as `consent`
+  (`new Refused("not_allowed", "Live data shows on the dashboard.")`) and no data handlers: nothing
+  is asked, and the widget shows your sentence. Any other capability still needs its handler.
+- **Refusals tell the widget why** (P080): the call rejects with an `Error` whose `code` is
+  `consent_required`, `denied`, `rate_limited`, `not_allowed` or `failed` (your handler threw), and
+  whose `message` is your `Refused`'s sentence, else Porthole's (a handler's other errors stay
+  yours). The manual tells the agent to draw the widget without the data, with that sentence.
+- **Rates**: 120 reads and 60 subscriptions a minute per display. Change them with the capability's
+  `gates`, keeping `"consent"`. A read `changed(result)` answers counts too (P094): a widget that
+  follows a resource changing faster than twice a second needs a higher read rate.
+- **Your page's CSP**: send `displays.embedderCsp(source, …)`. The shell stops a served frame's
+  navigation to another content origin (P079) and, where the config declares `reportError`, tells
+  you: `display.on("navigationBlocked", ({ url }) => …)` (React `onNavigationBlocked`), and
+  `contentError` for the agent (P080). An opaque frame's navigations get no events.
+- **Keep live widgets off pages with frames that reach the network** (a url-mode app, an
+  `anyHttps` display): any frame can `postMessage` the widget's frame. Closed egress or
+  `LIBRARY_CDNS` displays are fine beside it ([THREAT_MODEL.md § S7](THREAT_MODEL.md#s7-several-displays-on-one-page)).
+- **Opaque live widgets** (no content domain) draw with SVG and CSS. Show them only on pages that
+  frame no content origins (`frame-src 'none'`, what `defineDisplays` gives a page without one).
 
 ## 3. Opaque displays: the page only
 
@@ -200,22 +172,23 @@ per display. The provider takes what every frame shares: `scheme`, `theme` (and 
 `cssVariableTheme(tokens)` reads the values from your page's CSS variables), `nonce` (`"auto"`
 reads the page's), `handlers`, `openLink` (default: a new tab), `notify` (your own toast for what
 a copy button copied), and `renderConfirm` (your own dialog, given `accept`, `decline` and
-`redirect`: Porthole keeps the queue, runs `accept` inside its click, and counts declines toward
+`redirect`). Porthole keeps the queue, runs `accept` inside its click, and counts declines toward
 muting the display; `redirect`, for "edit it first", answers the call `"redirected"` and neither
-counts nor resets the count). The request names the display (`request.display`: its `id`,
-`title`, and the `instance` you gave the frame, served or opaque), so the dialog can say what it
-is from your own records. It stays on your side: an opaque frame never gets the instance. `useRunAgain()` gives a "run again" button.
+counts nor resets the count. The request names the display (`request.display`: its `id`, `title`,
+and the `instance` you gave the frame), so the dialog can say what it is from your own records.
+The instance stays on your side: an opaque frame never gets it. `useRunAgain()` gives a "run
+again" button.
 
 ### Context for the agent (`setModelContext`)
 
 A widget or an MCP Apps view may tell the agent what the person is looking at
-(`ui/update-model-context`, the App SDK's `app.updateModelContext`). That is the content's text,
-in your model's next turn, so by default the person is shown every update first (the `show` gate,
-[P100](DECISIONS.md#p100--2026-10-19--what-content-tells-the-model-the-person-is-shown-first-the-show-gate-on-by-default-for-setmodelcontext--accepted)): pass `show`. It gets the whole update (`request.args`: text blocks and
-structured content, at most `MAX_CONTEXT_CHARS` together) and the display, before your handler,
-and draws it outside the frame: the latest per display, since each replaces the last. Without
-`show` every update is refused (fail closed). React: `PortholeProvider` draws `ContextNotice`
-unless you pass your own `show`.
+(`ui/update-model-context`, the App SDK's `app.updateModelContext`). That is the content's text in
+your model's next turn, so by default the person is shown every update first (the `show` gate,
+[P100](DECISIONS.md#p100--2026-10-19--what-content-tells-the-model-the-person-is-shown-first-the-show-gate-on-by-default-for-setmodelcontext--accepted)).
+Your `show` gets the whole update (`request.args`: text blocks and structured content, at most
+`MAX_CONTEXT_CHARS` together) and the display, before your handler, and draws it outside the
+frame (the latest per display). Without `show` every update is refused. React: `PortholeProvider`
+draws `ContextNotice` unless you pass your own `show`.
 
 ```js
 createHost(config, {
@@ -226,35 +199,35 @@ createHost(config, {
 ```
 
 - **Give it to the model as the content's words** ("the view “Signups” says: …"), never as the
-  person's message or as instructions. The manual tells the agent the same.
-- **Send it with the person's next message** (MCP Apps lets a host defer it), so they have seen it
-  before the model reads it. If your agent takes turns on its own, add `"confirm"` to the gates.
+  person's message or as instructions, and with the person's next message (MCP Apps lets a host
+  defer it), so they have seen it first. If your agent takes turns on its own, add `"confirm"` to
+  the gates.
+- **Your own `show` resolves only once that very update is visible**: if a later update of the
+  display replaces it before it is drawn, reject, and it doesn't go.
 - **Opting out**: `setModelContext: { gates: [{ rateLimit: { perMinute: 30 } }], withoutShow: true }`
-  names the gates without `show`, and says so on purpose. Do it only where your handler itself puts
-  the text in front of the person (or the content is your own): otherwise the content writes into
-  your model's turns unseen. Gates named without `show` and without `withoutShow` (a 0.7 config
-  that set its own rate) earn the warning `model-context-unshown`, which you see only if you read
-  it: Porthole logs nothing, anywhere. Read `host.compiled.warnings` (or `compile(config).warnings`,
-  `configWarnings(config)`) at startup, or pass `validateConfig(config, { onWarning })`, and log
-  or fail on what you find; otherwise nothing tells you.
+  names the gates without `show`, on purpose. Do it only where your handler itself puts the text in
+  front of the person (or the content is your own). Gates named without `show` and without
+  `withoutShow` earn the warning `model-context-unshown`. Porthole logs nothing: read
+  `host.compiled.warnings` (or `compile(config).warnings`, `configWarnings(config)`) at startup,
+  or pass `validateConfig(config, { onWarning })`, and log or fail on what you find.
 - **What can't be seen is refused**: an update with an invisible character (zero-width ones, bidi
   controls, variation selectors, tag or private-use characters, controls other than new lines and
   tabs), in its text or any string of its structured content, never reaches `show` or your
   handler. Real emoji pass (☀️, 👨‍👩‍👧, 👩🏽‍💻, 1️⃣): a selector right after a pictograph or in a
   keycap, a joiner between two pictographs. So do joiners that shape letters: U+200C or U+200D
   between two letters or marks of Arabic, Syriac, N'Ko, Mongolian, the Indic scripts, Sinhala or
-  Myanmar (Persian's می‌خواهم). Subdivision flags (tag characters) don't. Your own `show` resolves only once that very update is visible: if a later update of
-  the display replaces it before it is drawn, reject, and it doesn't go.
+  Myanmar (Persian's می‌خواهم). Subdivision flags (tag characters) don't.
 
 ### Annotations: comments on a display
 
-With `annotate` declared (`capabilities: { annotate: {} }`), a host lets people point at a
-display and keeps its comments beside it ([P053](DECISIONS.md), P104). Everything the frame
-reports is the page's word: a hint where to draw, never a permission. A mark's `count` puts a
-numbered marker, a button, at the end of its words' paragraph (P133); a click on one, or Enter or
-Space with the keyboard on it, is `activated`. A draft, a comment its author hasn't posted yet
-(`kind: "draft"`, P107), is drawn apart, beside its own words: a dashed line and a hollow marker
-with no number, which is clicked and followed as a posted one is.
+With `annotate` declared (`capabilities: { annotate: {} }`), a host lets people point at a display
+and keeps its comments beside it (P053, P104). A mark's `count` puts a numbered marker, a button,
+at the end of its words' paragraph (P133); a click on one, or Enter or Space on it, is
+`activated`. A draft (`kind: "draft"`, a comment not yet posted, P107) is drawn apart, with a
+hollow marker and no number, and is clicked and followed as a posted one is. Everything the frame
+reports is the page's word: a hint where to draw, never a permission. How it works:
+[DESIGN.md § Annotations](DESIGN.md#annotations). What a page learns and can fake:
+[THREAT_MODEL.md §7](THREAT_MODEL.md#7-the-display-layer-and-the-app-runtime).
 
 ```js
 display.annotations.show([
@@ -273,76 +246,40 @@ display.on("annotation", (report) => {
 composer.onClose(() => display.annotations.clearSelection());
 ```
 
-- **Clear the selection when the composer closes, every time** (`annotations.clearSelection()`,
-  P115): the page's text selection, and the highlight the browser leaves on it (gray while focus
-  is in your composer), stay until something clears them; the person's next click in the page
-  would, and this does it when your composer is done with it. The page sees the clear (the
-  message, and a `selectionchange` with no press of its own), so it learns when the person was
-  done with its words (P121): clear on every close, kept or dismissed, or as the composer opens
-  (which tells it nothing `selected` and its blur didn't), or leave it to their next click; never
-  only when a draft is added, which tells the page that a draft exists there, and when. Above all
-  for a page `mayPassOn` says to keep drafts from (below). No `unselected` follows it (you know), and nothing else
-  changes: your marks and drafts, the mode (`start`) and a followed mark stay. With nothing
-  selected it does nothing; it is never sent to a frame that runs later (a reload has no selection
-  to clear). Like `start` and `show`, only where the config declares `annotate`. The shell is your
-  content server's: an older one ignores it.
+**React** (P118): `PortholeFrame` and `PortholeView` take `annotating`, `annotations`,
+`focusedAnnotation`, `trackedAnnotation` (the mark to follow, by value; `null` stops),
+`trackedSelection` (below) and `onAnnotation` (every report). Give `trackedSelection` from the
+first render, `false` until then: it is read as the mode starts (P140). `clearSelection()` and
+`focusMark(id)` are on the `ref` (a `PortholeFrameHandle`, never the display); with no display
+running they do nothing. Errors the core's calls throw (an id no shown mark has, a config without
+`annotate`) reach `onHostError`, kind `"annotations"`.
 
-- **React** (P118): `PortholeFrame` and `PortholeView` take the same as props: `annotating`,
-  `annotations`, `focusedAnnotation` and `trackedAnnotation` (the mark to follow, by value; `null`
-  stops), `trackedSelection` (true while your composer is open: the selection is followed in the
-  mark's place, P138; give it from the first render, `false` until then, so the mode starts with
-  `keepSelection`, P140: it is read as the mode starts, and giving it later restarts nothing), every report through `onAnnotation` (`tracked` and `selectionTracked` too). The selection is cleared through a
-  ref, which holds `clearSelection()` only (a `PortholeFrameHandle`; never the display, whose life
-  is the binding's); with no display running it does nothing. Errors the core's calls throw (an id
-  no shown mark has, a config without `annotate`) reach `onHostError`, kind `"annotations"`.
+What the host must do (why: THREAT_MODEL.md §6 "What every host must do"):
 
-  ```tsx
-  const frame = useRef<PortholeFrameHandle>(null);
-  <PortholeView ref={frame} display="page" instance={instance} displayId={id} title={title}
-    annotating={commenting ? { elements: false, text: true } : null}
-    annotations={marks} trackedAnnotation={openCard?.markId ?? null}
-    onAnnotation={(report) => {
-      // The page moves its mark, and so the card, at will: armed again as it moves (§6, P121).
-      if (report.type === "tracked" && card.moveBeside(report.rect) > 4) cardGuard.placed();
-      if (report.type === "selected") composer.openBeside(report.rect, report.anchor);
-    }} />
-  // cardGuard = guardPresses(card.element) (below); moveBeside answers how far it moved, in px.
-  composer.onClose(() => frame.current?.clearSelection()); // every close, kept or dismissed
-  ```
-
+- **Clear the selection on every close of the composer**, kept or dismissed
+  (`annotations.clearSelection()`, P115), or as it opens, or leave it to the person's next click.
+  The page sees the clear (P121), so never clear only when a draft is added: that tells the page a
+  draft exists there, and when. Nothing else changes (marks, drafts, the mode, a followed mark).
+  A shell older than the call ignores it (the shell is your content server's).
 - **Ids say nothing, and a count only where the page may know it**: the content reads every
   `show`. Who wrote what stays in your view, outside the frame.
-- **Drafts only to their author's frame**: the page reads which marks are drafts (that its viewer
-  is writing a comment there), so send a person's drafts only to the frame that person is viewing,
-  never one shared with others. A draft's `count` is dropped before the frame (no number is
-  drawn), so give a draft's id at random like any other; a `kind` other than `"posted"` or
-  `"draft"` throws, as a bad anchor does (React: `onHostError`, kind `"annotations"`). The shell
-  is your content server's: upgrade its Porthole first, or an older shell draws a draft as a
-  posted mark without a marker. The view a draft's `activated` opens is guarded like any (below)
-  and puts no "Post", "Submit review" or "Discard" one click away: a page can say that click
-  itself, at a moment it picks (P107; no gesture is asked of it since 0.16.0, P149).
-- **No drafts to a page that can pass them on**, or accept that it does: a page with the runtime's
-  `db` writes and `user` can store who is drafting where (`user.get()` and the marks it is shown)
-  for its author and other viewers to read before the draft is posted, and tie the posted comment
-  to its author after; origins its config declares for egress (an MCP App's `connectDomains`, an
-  `egress` you opened) can carry the same out. Send
-  drafts only to pages without such a channel (annotations, `copyText`, `openLink` and the like),
-  or accept that the page's author and other viewers can learn of them (THREAT_MODEL §7). Ask
-  `host.mayPassOn(declaration)` (or `mayPassOn(config, declaration)`, P112): true for a page that
-  can reach `db`, `artifact`, `assets`, `openLink`, `sendPrompt`, `setModelContext`, `callTool`,
-  `readData` or `subscribeData` (or `reportError` with errors to the agent), or egress beyond the
-  library CDNs (whose paths only their operators read); show such a page no draft marks.
-- **The content chooses when your view opens and where** (it can post `activated` for a mark you
-  show on the person's own press in the content, under their pointer, P105), so a view that a
-  report opens or moves (a card that follows a `tracked` mark included, each time it moves more
-  than a few px: the page moves it at will, up to 60 times a second) takes no press of any kind
-  for 500 ms after it appears or moves (no
-  `pointerdown`, `pointerup`, `click` or key: menu triggers act on a press, and menu items click
-  themselves on a release), ignores a press that began before that, opens beside the frame rather
-  than over `rect` where the layout allows, takes no focus (unless it meets the conditions of
-  THREAT_MODEL §6's exceptions), and has nothing one click away that
-  posts, submits, resolves, deletes or discards. Making it `inert` while it arms does all of the
-  first:
+- **Drafts only to their author's frame**, never one shared with others: the page reads which marks
+  are drafts. A draft's `count` is dropped before the frame; give its id at random like any other.
+  A `kind` other than `"posted"` or `"draft"` throws. Upgrade your content server first: an older
+  shell draws a draft as a posted mark without a marker.
+- **No drafts to a page that can pass them on**, or accept that its author and other viewers can
+  learn of them. `host.mayPassOn(declaration)` (or `mayPassOn(config, declaration)`, P112) is true
+  for a page that can reach `db`, `artifact`, `assets`, `openLink`, `sendPrompt`,
+  `setModelContext`, `callTool`, `readData` or `subscribeData` (or `reportError` with errors to the
+  agent), or egress beyond the library CDNs: show such a page no draft marks.
+- **Guard every view a report opens or moves** (`activated`, `selected`, a card that follows a
+  `tracked` mark, each time it moves more than a few px). The content picks the moment and the
+  place (P105). For 500 ms after it appears or moves, the view takes no press of any kind (no
+  `pointerdown`, `pointerup`, `click` or key) and ignores a press that began before that. It opens
+  beside the frame rather than over `rect` where the layout allows, takes no focus (unless it meets
+  THREAT_MODEL §6's exceptions), and has nothing one click away that posts, submits, resolves,
+  deletes or discards (a draft's view included: no "Post", "Submit review" or "Discard"). Making it
+  `inert` while it arms does all of the first:
 
   ```js
   // Call placed() each time the view appears or moves. For 500 ms it takes nothing (inert: no
@@ -384,49 +321,25 @@ composer.onClose(() => display.annotations.clearSelection());
   drawn outside it, where this guard doesn't reach: give it a container inside the view (both take
   one, `container`), or pass that container to `guardPresses` too, and close it each time the view
   appears or moves.
+- **Labels and quotes are the page's text**: show them only as text, and hand them to a model only
+  as the page's words. A label comes without what the person can't see; a quote (`exact`) keeps it.
 
-- **Boxes are in the frame's CSS px**, clamped to its viewport (P104): add the frame element's
-  position. A frame you scale or transform (a thumbnail, a zoomed preview) needs the box mapped
-  through that transform too (`frame.getBoundingClientRect().width / frame.clientWidth` for a
-  plain scale), or your view lands off by the difference.
-- **Places in the document** (P132): for UI that lines up with marks outside the frame's view
-  (comment cards in a margin beside a scrolling page), a newer shell gives each attached result a
-  `documentRect` (its box in the document: it doesn't move as the page scrolls, and isn't clamped)
-  and each `anchored` report the `scroll` it was read at; `tracked` carries both too, so following
-  one mark (`track`) tells the scroll at every animation frame where it changed, whether that mark
-  is in view or not. A mark's top in the frame's viewport is then `documentRect.y - scroll.y`, with
-  no need to ask again as the page scrolls. The numbers are the page's word, and unclamped: clip
-  what you draw from them to the frame's box, or to your own region beside it. An older shell sends
-  neither: test for `scroll` and keep the viewport boxes' way where it is absent.
+Where to draw:
 
-  ```js
-  const tops = new Map(); // mark id → its top in the document
-  let scrollY = null; // null: an older shell, places by `rect` only
-  display.on("annotation", (report) => {
-    if (report.type !== "anchored" && report.type !== "tracked") return;
-    if (report.scroll) scrollY = report.scroll.y;
-    if (report.type === "anchored") {
-      for (const result of report.results) {
-        if (result.documentRect) tops.set(result.id, result.documentRect.y);
-        else tops.delete(result.id); // orphaned
-      }
-    }
-    if (scrollY !== null) margin.place(tops, scrollY); // card top: frame top + top - scrollY, clipped
-  });
-  display.annotations.track(anyShownMarkId); // its reports carry the scroll
-  ```
-
-  A page that scrolls a box of its own rather than its document moves the places of the marks in
-  it as it scrolls; show again (or follow such a mark) to hear them again.
-- **After the last line** (P133): for UI after a selection's or a mark's words rather than beside
-  their whole box (a composer's button, a card), a newer shell gives `selected`, each attached
-  result and `tracked` a `lastLineDocumentRect`: the last line with words on it, in the document's
-  coordinates (an element's whole box: it has no lines), unclamped as `documentRect` is. `selected`
-  carries the `scroll` it was read at too; an `anchored` report and `tracked` already do, and
-  `createHost` drops a report with a last line and no `scroll`, so where you have the line you have
-  the scroll (P137). A line's end in the frame's viewport is `x + width - scroll.x`, its bottom
-  `y + height - scroll.y`. Clip what you draw from it, as above, and keep `rect` where it is absent
-  (an older shell):
+- **Boxes** (`rect`) are in the frame's CSS px, clamped to its viewport (P104): add the frame
+  element's position, and map them through any transform you put on the frame
+  (`frame.getBoundingClientRect().width / frame.clientWidth` for a plain scale).
+- **Places in the document** (P132): each attached result of `anchored`, and `tracked`, carry a
+  `documentRect` (unclamped, and fixed as the page scrolls) with the report's `scroll`. A mark's top
+  in the frame's viewport is `documentRect.y - scroll.y`: margin cards beside a scrolling page need
+  no new ask. A page that scrolls a box of its own moves its marks' places: show again, or follow
+  such a mark, to hear them. Clip what you draw from these to the frame's box or your own region
+  beside it. An older shell sends neither: test for `scroll`, and place by `rect` without it.
+- **After the last line** (P133), for UI after a selection's or a mark's words (a composer's
+  button): `selected`, each attached result and `tracked` carry `lastLineDocumentRect`, the last
+  line with words on it (an element's whole box), unclamped. `createHost` drops a report with a
+  last line and no `scroll`, so where you have the line you have the scroll (P137). Clip it, and
+  keep `rect` where it is absent (an older shell):
 
   ```js
   display.on("annotation", (report) => {
@@ -438,229 +351,105 @@ composer.onClose(() => display.annotations.clearSelection());
     composer.openAt(frame, clipToFrame(at), report.anchor); // the frame's px: clip them, then add its position
   });
   ```
-- **A composer that stays beside what it is for** (P138, P140): `selected` comes once for a pick
-  (and for words again only once a scroll settles), and by default a pick's outline goes with it
-  and the frame keeps nothing of it. To follow it, start with `keepSelection: true`
-  (`annotations.start({ elements: true, keepSelection: true })`; React does it while you give
-  `trackedSelection`), so the frame keeps what is picked or selected, then follow the selection
-  while your composer is open, `annotations.track({ selection: true })` (React:
-  `trackedSelection`). The frame highlights it (a picked element in the picking outline) and
-  reports `selectionTracked` as `tracked` reports a mark: at most 60 a second, its `rect` clamped,
-  `documentRect`, `lastLineDocumentRect` and `scroll` as above, and `inView`, so you hide the
-  composer (and show your own marker at the frame's edge, from `documentRect` and `scroll`, clipped)
-  while it is out of view. `state: "orphaned"`: it isn't in the page now (a re-render took it out;
-  a reload); keep the person's words, it may be found again. Without `keepSelection`, a follow
-  asked after `selected` has nothing to follow and answers `orphaned`; one asked before the pick
-  follows each selection made while it lasts. It follows the latest `selected`, so a new pick or
-  selection moves it. One thing is followed at a time: it takes a followed mark's place, and
-  `track(null)`, a mark's id or `clear` ends it, the highlight with it. End it on every close
-  (posted, dismissed, Escape in your composer: the frame's own Escape doesn't end it), as you
-  clear the selection: the page reads when it starts and ends, so an end on every close says
-  nothing of what came of it. The composer moves at the page's word: guard it as below, armed
-  again each time it moves or shows again. An older shell sends nothing (and draws nothing): place
-  by `selected` until the first `selectionTracked`, which a newer one sends at its next animation
-  frame. Under `keepSelection` a newer shell keeps the picked element outlined from the pick on,
-  so there is no gap before the follow's highlight; ask for the follow before a `start` or `stop`
-  you send as the composer opens (React orders them so), or the stop ends that outline a moment
-  before the follow draws it again. Until the follow comes, the outline ends as a selection does
-  (the next pick, Escape, `clearSelection`, `start`, `stop`, `clear`). Without `keepSelection` the
-  outline goes with the pick, as before 0.14.15. While you follow the selection, `selected` isn't
-  re-sent after a scroll: read where it is from `selectionTracked`; and while you don't, a
-  `selectionTracked` from the page is dropped unread.
+- **A composer that follows the selection** (P138, P140): start with `keepSelection: true` (React:
+  while you give `trackedSelection`), and on `selected` call `annotations.track({ selection: true })`.
+  The frame highlights the selection and reports `selectionTracked` as `tracked` reports a mark (at
+  most 60 a second, the same boxes, and `inView`: hide the composer while it is false).
+  `state: "orphaned"` means it isn't in the page now: keep the person's words. One thing is followed
+  at a time: `track(null)`, a mark's id or `clear` ends it. End it on every close (the frame's own
+  Escape doesn't), as you clear the selection. Guard the composer as it moves. Ask for the follow
+  before a `start` or `stop` you send as the composer opens (React orders them so). Without
+  `keepSelection`, a follow asked after `selected` answers `orphaned`. An older shell sends no
+  `selectionTracked`: place by `selected` until the first one.
 
-  ```js
-  display.annotations.start({ elements: true, text: true, keepSelection: true });
-  display.on("annotation", (report) => {
-    if (report.type === "selected") {
-      composer.openBeside(frame, report.rect, report.anchor); // as before: an older shell stops here
-      display.annotations.track({ selection: true });
-    }
-    if (report.type !== "selectionTracked") return;
-    if (report.state === "orphaned") return composer.detach(); // keep its words
-    if (!report.inView) return composer.collapseToMarker(report.documentRect, report.scroll);
-    if (composer.moveBeside(frame, report.rect) > 4) composerGuard.placed();
-  });
-  composer.onClose(() => {
-    display.annotations.track(null); // or the open card's mark: track(cardId)
-    display.annotations.clearSelection();
-  });
-  ```
-- **The keyboard** (P133): each marker is a button in the frame's Tab order, after the page's own
-  stops, in reading order, named for what it is (`3 comments on "the words"`, from the `count` and
-  the anchor's words, without an element's tag, P134; in English, whatever your UI's language). The
-  `label` you store keeps its tag. Enter or Space on it is `activated`,
-  through the same path as a click: nothing to handle apart. It is the
-  page's focus order, which a page can steal from or hide a marker from, and it is one more
-  `activated` the content can time: keep your own list of marks as the way a keyboard can rely on,
-  with `annotations.focus(id)` to bring one into view, and leave your view's guard as it is (it
-  takes no key for 500 ms either, and takes no focus: Enter again on the marker is one more
-  `activated`).
-- **Key or pointer, and back to the marker** (P134). `activated` doesn't say what made it. Read
-  your own page as it arrives, in the listener: `document.activeElement === container.querySelector("iframe")`
-  (a shadow root of yours: its `activeElement`). True means the focus is in the frame, as it is
-  for a key on a marker; a pointer's press on a marker moves no focus, so a click from outside
-  reads false. The page can't change that reading, but it is a hint, not a proof: a click after the
-  person was already in the frame reads true, the page can put the focus in its frame itself, and it
-  can forge `activated` while the person really is there, which this doesn't stop. So moving the
-  keyboard into your view on it is your own step outside "takes no focus" above, and a page can
-  bring it about: gate whatever posts from that view (a Reply in a frame-opened card) yourself;
-  Porthole can't. That goes for keys too: with the focus in your view the person's next keys reach
-  your document, so the view's own key handlers and your page-wide shortcuts that write (an `r` that
-  resolves, Cmd+Enter that posts) need the same gate (P137). When the person's key closes your view
-  of that mark from inside it (Escape, or a
-  Tab past its first or last control), whether or not the keyboard got there through `activated`,
-  and only then, close it and call
-  `display.annotations.focusMark(id)` (React: `focusMark(id)` on the `ref`) to put the keyboard back
-  on the marker. It carries no content and reports nothing; an id with no marker, or a marker the
-  page has moved away, does nothing and throws nothing; the page can take the focus straight back.
-  Keep your own list of marks as the way that holds.
-  On a calm page that lands at once, from your `<body>`. While the frame is finding its marks (a
-  `show` just sent, which many hosts send as a card closes, or content that just changed) the word
-  waits, up to a second, and is then dropped unless the focus is in the frame by then. A word the
-  frame takes more than 100 ms after you sent it, because its page is busy, is held to the same
-  test. So a late word takes no keyboard from a person who moved on ([P135](DECISIONS.md),
-  [P137](DECISIONS.md)). As your card has just closed, the focus is on your `<body>`, so a word that
-  waited or came late is dropped, and nothing tells you: **call `focusMark` again after your own
-  move of the focus into the frame.** Call it as your close runs, not after other work: its age
-  starts when you call it, and where the browser runs the frame on your thread, what your task does
-  next counts too.
+The keyboard:
 
-  ```js
-  closeCard();
-  display.annotations.focusMark(id);
-  setTimeout(() => {
-    // Not on the marker, and the person hasn't moved on: the frame was busy.
-    if (document.activeElement === document.body) {
-      display.focus();
-      display.annotations.focusMark(id);
-    }
-  }, 200);
-  ```
-
-  Keep the check: on a button of yours, the person has moved on, and `display.focus()` would take the
-  keyboard from them. With React, whose `ref` has no `focus()`, call the frame's own `focus()` for
-  that step. An id with no marker then leaves the focus in the frame, with the keys going to the
-  page.
-
-  Without the second call, nothing changes on a calm page. On a busy one, a word that the frame
-  finishes with before your own move is lost where it used to land, so the person gets the frame and
-  not the marker. That is the cost of never pulling the keyboard into the page. Upgrade the host and
-  the content server together: a newer shell takes a word from an older `createHost`, which has no
-  stamp, as a late one (the second call still lands), and an older shell ignores the stamp.
-- **Labels and quotes are the page's text**: shown only as text. Porthole takes out of a label what
-  the person can't see; a quote (`exact`) keeps it, to be found again. Hand either to a model only
-  as the page's words.
+- **Markers are buttons** (P133, P134) in the frame's Tab order, after the page's own stops, named
+  for what they are (`3 comments on "the words"`, in English). Enter or Space is `activated`, the
+  same path as a click. It is the page's focus order, which it can steal from: keep your own list
+  of marks as the keyboard way that holds (`annotations.focus(id)` brings one into view), and keep
+  your view's guard (it takes no key for 500 ms, and no focus).
+- **Key or pointer** (P134). `activated` doesn't say which. In the listener,
+  `document.activeElement === container.querySelector("iframe")` (a shadow root of yours: its
+  `activeElement`) is true when the focus is in the frame, as for a key on a marker; a pointer's press moves no focus. It is a hint, not a proof: the
+  page can move the focus into its frame and forge `activated`. Moving the keyboard into your view
+  on it is THREAT_MODEL §6's second exception: gate whatever posts from that view yourself, its
+  key handlers and your page-wide shortcuts that write included (P137).
+- **Back to the marker** (P134, P135, P137). Only when the person's key closes your view of a mark
+  from inside it (Escape, or a Tab past its ends), close it and call
+  `display.annotations.focusMark(id)` at once. It carries no content and reports nothing; an id
+  with no marker does nothing. A call the frame must wait on, or takes more than 100 ms after you
+  sent it, lands only if the focus is in the frame by then, and after your card closes it is on
+  your `<body>`: such a call is dropped silently. So if, 200 ms later, `document.activeElement` is
+  still your `<body>`, call `display.focus()` (React: the frame element's own `focus()`), then
+  `focusMark(id)` again. Check first: on a button of yours, the person has moved on. Upgrade the
+  host and the content server together.
 
 ### Find in page: the host's find bar
 
-With `find` declared (`capabilities: { find: {} }`), your own find bar searches a display
-([P131](DECISIONS.md)): the shell finds the query in the page's text (case-insensitive by default,
-any spacing), highlights every match it can see and the current one apart, brings the current one
-into view (its scrolling box too), and answers where they stand. The page reads every query you
-send (the search runs in the page's document): declare `find` only where the page may learn what
-the person searches for (not a third-party app with egress, unless you accept that).
-
-Send a query when the person pauses (a debounce of a few hundred ms) or presses Enter, not at
-every key. Each query you send is posted into the page, so a bar that searches at every key shows
-the page each prefix of what the person types and the rhythm of their typing; one that waits for
-a pause shows it the words they settled on. It also spares a large page a search per key (the
-shell searches only the latest of a burst, below).
+With `find` declared (`capabilities: { find: {} }`), your own find bar searches a display (P131):
+the shell highlights the matches (case-insensitive by default, any spacing), brings the current one
+into view and answers the counts. How it works: [DESIGN.md § Find in page](DESIGN.md#find-in-page).
+The page reads every query: declare `find` only where it may learn what the person searches for
+(THREAT_MODEL §7). Send a query when the person pauses or presses Enter, never at every key, which
+would show the page each prefix they type and its rhythm.
 
 ```js
 display.find.takeShortcut(true); // Cmd+F / Ctrl+F in the frame opens your bar, not the browser's
 display.on("findRequested", () => bar.open()); // the page's word too: open the bar, nothing more
 // "unsupported", or `${active}/${total}` ("+" after the total where `capped`).
 bar.showResult = (result) => bar.show(result === "unsupported" ? "Not available here" : result);
-// Only the answer to the latest query is shown: an earlier one may come back "unsupported".
-let asked = 0;
+let asked = 0; // only the answer to the latest query is shown
 const ask = (query, options) => {
   const mine = ++asked;
   void display.find.query(query, options).then((result) => mine === asked && bar.showResult(result));
 };
-// A new query once the person pauses or presses Enter: the first match in view becomes current.
 let pause;
-bar.onInput((query) => {
-  clearTimeout(pause);
-  pause = setTimeout(() => ask(query), 300);
-});
+bar.onInput((query) => (clearTimeout(pause), (pause = setTimeout(() => ask(query), 300))));
 bar.onEnter((query) => (clearTimeout(pause), ask(query)));
 bar.onNext(() => ask(bar.query, { direction: "next" }));
 bar.onPrevious(() => ask(bar.query, { direction: "prev" }));
 display.on("findUpdated", bar.showResult); // the page changed: new numbers
 bar.onClose(() => display.find.clear()); // Escape in your bar: highlights gone
-// The display forgot the query: its content navigated away (it runs again). Reset your bar here,
-// and wherever you reload() it or give it other content.
-display.on("navigated", () => bar.reset());
+display.on("navigated", () => bar.reset()); // the query is forgotten; also on reload() or new content
 ```
 
-- **`"unsupported"`**: the config doesn't declare `find`, the frame's shell is older than your
-  host (it answers that it doesn't know the request: upgrade the content server first), or no
-  answer came within `FIND_LIMITS.timeoutMs` (3 s) of the frame running. Also for a query that a
-  later one superseded before it ran (the shell searches only the latest of a burst; queries asked
-  before the frame ran: the latest is sent), and for one waiting when the content it was asked of
-  went (below): show the answer to your latest query only. A query asked before the frame ran
-  waits for it. An empty query clears and answers `{ total: 0, active: 0 }`; one longer than
-  `FIND_LIMITS.query` (256) rejects with a `TypeError`.
-- **A query is for the content it was asked of.** A new run (`reload()`, a restart after the
-  content navigated its frame away, `navigated`) or other content (`setContent` with content that
-  doesn't continue what you gave: more of a streamed page keeps it) forgets the query: nothing is
-  highlighted or searched there until you call `find.query` again, so another page never sees the
-  last one's search. Clear your find bar's state (its query, "3/12") whenever the display shows
-  other content, then search again if the person asks. The shortcut (`takeShortcut`) is kept.
-- **The numbers are the page's word**: at most 1,000 matches (`capped: true`: there may be
-  more), the current one from 1. `rect` is the current match's box in the frame's CSS px, clamped
-  to its viewport: a display that grows with its content (not `layout: "fill"`) doesn't scroll
-  itself, so scroll your page to the frame's position plus `rect`.
-- **The shortcut** is yours only while you take it, and only where the page doesn't handle Cmd+F
-  or Ctrl+F itself. `findRequested` is taken only with the page's focus in the frame, so a page
-  can't open your bar while the person types in your composer. Your own page's Cmd+F (focus
-  outside every frame) is yours to handle as before. Escape and Cmd+G in the frame stay the page's:
-  close and move on from your bar.
-- **Not found**: words in open shadow roots, in a page's own frames (P128), in form fields, in
-  images or a canvas, and words split across cells with no space between them.
-- **React**: `onFindRequested` (given, the shortcut is yours) and `onFindUpdated` are props; the
-  handle holds `find(query, options)` and `clearFind()` beside `clearSelection()`. With no display
-  running, `find` answers `"unsupported"` and keeps the query for the content the frame shows: a
-  display made later for it (the frame nears the screen again) finds it again and tells
-  `onFindUpdated`. Other content forgets it: another `content` that doesn't continue it, a new
-  `generation`, `document`, `instance` (another artifact or version), `config`, `declaration` or
-  `viewer`. Reset your find bar when you change those. A refused query reaches `onHostError`,
-  kind `"find"`.
-
-  ```tsx
-  const frame = useRef<PortholeFrameHandle>(null);
-  <PortholeView ref={frame} display="page" instance={instance} displayId={id} title={title}
-    onFindRequested={() => setFinding(true)} onFindUpdated={setFound} />;
-  const result = await frame.current?.find(query, { direction: "next" });
-  ```
+- **`"unsupported"`**: no `find` in the config, a shell older than your host (upgrade the content
+  server first), no answer within `FIND_LIMITS.timeoutMs` (3 s) of the frame running, a query a
+  later one superseded (only the latest of a burst is searched), or one waiting when its content
+  went. A query asked before the frame runs waits for it. An empty query clears and answers
+  `{ total: 0, active: 0 }`; one longer than `FIND_LIMITS.query` (256) rejects with a `TypeError`.
+- **A query is for the content it was asked of**: a new run (`reload()`, `navigated`) or other
+  content (a `setContent` that doesn't continue the last) forgets it. Reset your bar then. The
+  shortcut stays taken.
+- **The numbers are the page's word**: at most 1,000 (`capped`), the current one from 1. `rect` is
+  its box in the frame's CSS px, clamped to the viewport: for a display that grows with its content,
+  scroll your page to the frame's position plus `rect`.
+- **The shortcut** is yours only while you take it, where the page doesn't handle Cmd+F itself, and
+  `findRequested` counts only with the focus in the frame. Escape and Cmd+G in the frame stay the
+  page's.
+- **Not found**: words in open shadow roots, a page's own frames (P128), form fields, images or a
+  canvas, and words split across cells with no space between them.
+- **React**: props `onFindRequested` (given, the shortcut is yours) and `onFindUpdated`; the `ref`'s
+  `find(query, options)` and `clearFind()`. With no display running, `find` answers `"unsupported"`
+  and keeps the query for a display made later for the same content. Other content forgets it
+  (a `content` that doesn't continue it, a new `generation`, `document`, `instance`, `config`,
+  `declaration` or `viewer`): reset your bar then. A refused query reaches `onHostError`, kind `"find"`.
 
 ### The keyboard: a display can take it
 
-Any display can move the keyboard into its frame (`element.focus()` in the page, with no gesture
-on Chromium and WebKit), and what the person goes on typing in your composer or chat box then goes
-to the page, until they see it and click back. Porthole doesn't stop that. From 0.13 to 0.15 a
-guard took such a move back when it judged the move to be the page's; it could only guess whose
-move it was (your page sees no press inside a cross-site frame), and a wrong guess refused a
-person's own click. 0.16.0 removed it ([P149](DECISIONS.md)): no `focusTaken` event, no
-`onFocusTaken`, and a display is never stopped for taking the keyboard.
+Any display can move the keyboard into its frame (`element.focus()`, with no gesture on Chromium
+and WebKit). What the person goes on typing in your composer then goes to the page until they click
+back. Porthole doesn't stop that, and never stops a display for it (P149; THREAT_MODEL §7 "The
+keyboard"). Where a field must never lose a key (a password, a payment field), show no display you
+don't trust beside it.
 
-```js
-// Moving focus into a display yourself (a "focus the page" shortcut):
-display.focus();
-// Moving it to a field of yours (opening your composer focused): Porthole's move, which lands on
-// every engine. Firefox ignores a plain focus() while a frame that takes focus back on its blur
-// holds it.
-import { focusField } from "@botiverse/porthole";
-focusField(composer.textarea);
-```
-
-- **Yours:** where a field must never lose a key to a page (a password, a payment field), don't
-  show a display you don't trust beside it. A view a display's report opens still takes no focus
-  and no press for its first 500 ms (THREAT_MODEL §6); that is your view's own guard, and it
-  doesn't depend on this.
-- **A platform of your own** (a native web view): `focus` on its surface is what `display.focus()`
-  calls; `focused`, if you give it, says whether the keyboard is in the display, which the find
-  shortcut reads (P131). `onFocusTaken` is no longer read.
+- Move focus into a display yourself with `display.focus()`, and to a field of yours with
+  `focusField(field)` (from `@botiverse/porthole`), not the field's own `focus()`: Firefox ignores
+  that while a frame that takes focus back on its blur holds it.
+- A platform of your own (a native web view): `focus` on its surface is what `display.focus()`
+  calls; `focused`, if you give it, says whether the keyboard is in the display (the find shortcut
+  reads it, P131). There is no `focusTaken` event, and `onFocusTaken` is not read.
 
 ## 4. Served pages: the host kit
 
@@ -716,86 +505,62 @@ nodeServer({ content, app: async (request) => (await routes(request)) ?? app(req
 - **`Response.redirect` needs an absolute URL** outside a browser (Node throws on `/login`).
 - **`reserved`** is only for labels your app itself serves on the content domain (previews of a
   dev server, `p-*`). Labels nothing serves need nothing: they are a 404 there.
-- **`framedBy`** (P141): where another app frames yours (a dashboard that embeds your app in an
-  iframe), its origins: `framedBy: ["https://dashboard.example.com"]`. `frame-ancestors` names every
-  ancestor, so without it each of your frames is blank inside that app. Each may then be an
-  ancestor of every frame Porthole serves, after `appOrigins`, and is never a host: no frame hears
-  or tells it, it isn't in `data-porthole-hosts`, and redirect entry and the handoff stay
-  `appOrigins`' alone. Exact https origins (`http://` on loopback), none an app origin. Your own
-  page between them is still the frame's parent, and its `frame-ancestors` is yours to set. A
-  content Worker of your own passes the same list to `statusPage`, `doorResponse` and
-  `doorStatusResponse` (`framedBy`). The outer page is then an ancestor of content: a content page can
-  `postMessage` it and every frame in its tree, and learn its origin, so the outer page's authors
-  must check `event.source` and `event.origin` in every message listener
-  ([THREAT_MODEL.md §6 "What every host must do"](THREAT_MODEL.md#what-every-host-must-do)).
-- **`embeds`** (P143): to let any site embed a public artifact page, set `embeds: true` and, from
-  one route of your own that decides the page is public (never your reader's issue endpoint),
-  issue it with `{ anonymous: true, embed: true }` (no `level`, no `user`; an artifact's page):
-  `host.server.issue(instance, { anonymous: true, embed: true })`. Never answer
-  `embed` from `access`: it answers your readers, and the kit refuses it there (409 from the issue
-  endpoint and a clean address's resolve, its 409 page at a clean address's tab; P145). That
-  session's answers say `frame-ancestors *`, and nothing else's do. It has no
-  host: frame it from an outer page of your own that listens to nothing (its `frame-src` the one
-  label), which any site may frame; the shell asks no host and says nothing to any parent, links out
-  of the page go nowhere (give the outer page your own "Open" link), and there is no door.
-  `authorize.check` gets `embed: true` for it, so your check can hold an embed subject to embed
-  sessions. A content Worker of your own answers its refusals before a session exists with
-  `statusPage({ embed: true, … })` or `doorStatusResponse({ embed: true, … })`. The page learns
-  where it is embedded: its request's `Referer` and `document.referrer` name your outer page, and
-  `location.ancestorOrigins` names every ancestor, the embedding site included (Chromium, Firefox
-  and WebKit), so a page with any egress can report where it is shown
-  ([THREAT_MODEL.md S4](THREAT_MODEL.md#s4-public-links-and-pages-that-are-apps)).
-- **No content domain** (self-hosted without one): still make the host, with `domain: null` (or
-  `""`). That is the supported setup: no secret is needed, `GET /porthole/meta` answers
-  `{ served: false }`, and pages show every kind opaque (a url kind, its fallback) instead of
-  waiting for a meta that never comes. Without a host, `portholeClient` stays pending.
 - **`secret`** is at least 32 random bytes (`npx porthole secret`), from the environment
   (`PORTHOLE_SECRET`). A missing or short one throws at `createContentHost`, saying so (with
   `health`, frames stay opaque and the meta says why).
-- **`nodeServer`** is the whole Node server: the content domain to Porthole, WebSockets included,
-  every other request to `app` (fetch-style: Hono's `app.fetch`) or `request` (a Node listener:
-  Express), the health gate started on listen and stopped on close. Behind a TLS edge, add
-  `scheme: "https"`. A host that needs the port first (`listen(0)`) can come later: `content:
-  () => host` (null until made); requests go to the app until it gives one. `nodeServer` starts
-  the host it is given: a host made in a `listen` callback starts right after it, and one made
-  later at the next request. `start()` runs once (a started host ignores it), so starting it
-  yourself as soon as you make it is fine too.
-- **`nodeHost(content, { request })`** is for an app that keeps its own `node:http` server (or a
-  framework that owns one): put its `request` and `upgrade` listeners on your server, call
-  `content.start()` once it listens and `content.close()` when it stops. A fetch-style app's
-  listener there is `nodeListener(app, { scheme })`, not `toRequest` and `sendResponse` by hand:
-  `toRequest` throws for a request fetch can't take (`TRACE`, a Host that is no URL), and a throw
-  in a listener ends a Node process. `nodeListener`, `nodeHost` and `nodeServer` answer those 405
-  and 400, and a handler or listener that fails 500 (P092). Pass `onError: (error, request) =>
-  log.error(…)` to any of them to hear your own failures (by default a process warning).
-- **Rate limit:** `rateLimit: { perMinute }` keys an anonymous viewer by the address the server
-  saw (the socket's peer on Node, `CF-Connecting-IP` on Workers), never by `X-Forwarded-For` a
-  client can write (P092). **Behind a proxy** (a TLS edge, a load balancer, a CDN), that address
-  is the proxy's: say how many proxies append to `X-Forwarded-For` (`trustedProxies: 1` for one
-  edge, `2` for a CDN in front of a balancer), or key it yourself (`key: (request, viewer) =>
-  …`). Without either, anonymous requests through the proxy share one allowance. An IPv6
-  address counts by its /64 (one client's network). Three cases to know:
-  - **No peer address:** the Node adapter leaves the socket's peer on the request it makes. Where
-    it is missing (Hono's own Node adapter, an app that rebuilds the request with
-    `new Request(req)`, Deno or Bun), every anonymous request shares one allowance: set
-    `rateLimit.key`.
-  - **`trustedProxies` only where the app can't be reached except through those proxies:** a
-    client that reaches it directly writes the very `X-Forwarded-For` entry that is counted.
-  - **Uploads after the answer:** once an answer is out, a request body no one read is dropped
-    for at most 1 MiB and 5 s, then the connection closes (P092). An app that answers early and
-    keeps reading the upload (a handler that returns its Response before it has read the
-    request's body) is cut off there.
+- **No content domain** (self-hosted without one): still make the host, with `domain: null` (or
+  `""`). That is the supported setup: no secret is needed, `GET /porthole/meta` answers
+  `{ served: false }`, and pages show every kind opaque (a url kind, its fallback). Without a host,
+  `portholeClient` stays pending.
+- **`framedBy`** (P141): where another app frames yours (a dashboard), its exact https origins
+  (`http://` on loopback), none an app origin: `framedBy: ["https://dashboard.example.com"]`.
+  Without it your frames are blank inside that app. They become ancestors of every frame Porthole
+  serves, never hosts (no frame hears or tells them; redirect entry and the handoff stay
+  `appOrigins`'). Your page between them stays the frame's parent and sets its own
+  `frame-ancestors`. A content Worker of your own passes the same list to `statusPage`,
+  `doorResponse` and `doorStatusResponse`. Content can `postMessage` the outer page, so its authors
+  must check `event.source` and `event.origin` in every message listener
+  ([THREAT_MODEL.md § What every host must do](THREAT_MODEL.md#what-every-host-must-do)).
+- **`embeds`** (P143): to let any site embed a public artifact page, set `embeds: true` and issue it
+  from one route of your own that decides the page is public (never your reader's issue endpoint):
+  `host.server.issue(instance, { anonymous: true, embed: true })` (no `level`, no `user`). Never
+  answer `embed` from `access`: the kit refuses it there with a 409 (P145). Only that session says
+  `frame-ancestors *`. It has no host and no door, and its links out go nowhere: frame it from an
+  outer page of your own that listens to nothing (its `frame-src` the one label), with your own
+  "Open" link. `authorize.check` gets `embed: true`. A content Worker of your own answers refusals
+  before a session with `statusPage({ embed: true, … })` or `doorStatusResponse({ embed: true, … })`.
+  The page learns where it is embedded ([THREAT_MODEL.md S4](THREAT_MODEL.md#s4-public-links-and-pages-that-are-apps)).
+- **`nodeServer`** is the whole Node server: the content domain to Porthole (WebSockets included),
+  everything else to `app` (fetch-style: Hono's `app.fetch`) or `request` (a Node listener:
+  Express), the health gate started on listen. Behind a TLS edge, add `scheme: "https"`. A host
+  that needs the port first (`listen(0)`) can come later: `content: () => host` (null until made).
+  `nodeServer` starts it; `start()` runs once, so starting it yourself is fine too.
+- **`nodeHost(content, { request })`** is for an app that keeps its own `node:http` server: put its
+  `request` and `upgrade` listeners on it, call `content.start()` once it listens and
+  `content.close()` when it stops. Wrap a fetch-style app with `nodeListener(app, { scheme })`, not
+  `toRequest` and `sendResponse` by hand: `toRequest` throws for a request fetch can't take, and a
+  throw in a listener ends a Node process (`nodeListener` answers 405, 400 or 500, P092). Pass
+  `onError: (error, request) => …` to any of them to hear your own failures.
+- **Rate limit:** `rateLimit: { perMinute }` keys an anonymous viewer by the address the server saw
+  (the socket's peer on Node, `CF-Connecting-IP` on Workers; IPv6 by its /64), never by a
+  client-written `X-Forwarded-For` (P092). Behind a proxy, set `trustedProxies` (how many proxies
+  append to `X-Forwarded-For`), and only where the app can't be reached except through them, or key
+  it yourself (`key: (request, viewer) => …`). Where the request has no peer address (Hono's own
+  Node adapter, `new Request(req)`, Deno, Bun), set `rateLimit.key`. Without these, anonymous
+  requests share one allowance. An unread request body is drained for at most 1 MiB and 5 s after
+  the answer, then the connection closes: an app that answers before reading an upload is cut off.
 - **Health:** `health: { probe: nodeProbe(), onServedChange: (served) => … }` checks the content
   domain over the real network and falls back to opaque frames while it doesn't answer.
 - **Behind an edge that rewrites headers** (a CDN, a proxy), pass Porthole's
-  `Content-Security-Policy` on as it is: a served page opened on a tab of its own (a link, a new
-  tab) has no frame, and the header's `sandbox allow-scripts allow-same-origin` is its sandbox
-  there (P099). The conformance runner's `served.domain.tab-*` cases fail if it is lost.
+  `Content-Security-Policy` on as it is: a served page opened on a tab of its own has no frame,
+  and the header's `sandbox allow-scripts allow-same-origin` is its sandbox there (P099). The
+  conformance runner's `served.domain.tab-*` cases fail if it is lost.
 
 ### Pages made of many files
 
 A stored version may be a set of files (a build's output, a report with its images; P081). The
-store answers a manifest and the bytes by path; `{ html }` stays one page:
+store answers a manifest and the bytes by path; `{ html }` stays one page. How they are served:
+DESIGN.md § "Isolation modes and served content".
 
 ```js
 import { checkFileSet, fileLimits, versionBase, versionedAddress } from "@botiverse/porthole/server";
@@ -820,25 +585,17 @@ entry: {
 },
 ```
 
-- **Each file is served from the manifest only**, typed by its extension (Porthole's table, never
-  the type it was published with), `nosniff`, with a CSP that opens the version's own path and
-  nothing else of the origin (P082). Files are immutable at a version's address; pages revalidate
-  (the host's check runs on every load). `read` returns the whole file (`Uint8Array` or a
-  stream); Porthole cuts ranges.
-- **A page never mixes versions.** The latest's address (`/`, `/style.css`) goes to the version's
-  own (`/v/3/`, `/v/3/style.css`) before the page loads anything, so a version published while it
-  loads never reaches it. Answer `entry.at` with the version's `base`, and `pinned: true` when that
-  base names one version only (its files are then immutable); a plain instance is served at a
-  frame's address instead. A base's segments are letters, digits and `. _ : ~ -`.
+- **Files are served from the manifest only**, typed by their extension, never by the type they
+  were published with (P082). `read` returns the whole file (`Uint8Array` or a stream); Porthole
+  cuts ranges.
+- **A page never mixes versions**: the latest's address (`/`, `/style.css`) goes to the version's
+  own (`/v/3/`, `/v/3/style.css`) first. Answer `entry.at` with the version's `base`, and
+  `pinned: true` when that base names one version only (its files are then immutable); a plain
+  instance is served at a frame's address instead. A base's segments are letters, digits and
+  `. _ : ~ -`.
 - **An artifact's versions share an origin**, so they are one trust domain (P082): give versions
-  that must stay apart scopes of their own.
-- **Each version is a directory of its origin** (`/v/<n>/`). `/_blob/` (`ASSET_LIBRARY_PATH`) is
-  the asset library's, across versions (0.7, below); `versionedAddress` names nothing there.
-- **In a frame**, the files' address carries the frame's access (WebKit keeps no cookie there,
-  P083): the frame's URL is `/__porthole/f/<sealed>/`, good for the session. A host's
-  `issue` and its locator don't change.
-- **Every page of the set is in the shell**, and a set's pages open each other in the frame (P084).
-  Service workers never register.
+  that must stay apart scopes of their own. `/_blob/` (`ASSET_LIBRARY_PATH`) is the asset
+  library's, across versions (below); `versionedAddress` names nothing there.
 - **The agent's side:** `lintFiles` and `admitFiles` before you take a version, `checkPage({ files
   })` to run it, and the manual's Files section where a kind serves files. Show a set served: an
   opaque frame has no origin to serve its files from.
@@ -846,30 +603,29 @@ entry: {
 ### A page's own nested frames (opt-in)
 
 By default the shell refuses every nested frame content makes: markup frames are removed, and a
-script that creates a frame-like element (`createElement("iframe")`, `object`, `embed`, …) gets a
-`NotSupportedError` at that line (P130), so tell your users' agents to build pages without them (the
-manual and the lint already do). Pasting or dropping formatted content into an editable element
-inserts its plain text only. `nestedFrames: "own"` (P128) on a
-kind's `options` lets a page keep an `<iframe>` of one of its version's own files (a relative
-`src`, served kinds) or with `srcdoc` (every kind), as Claude's Artifacts do; frames of other
-sites, `<object>` and `<embed>` stay out, and the manual and the lint say so:
+script that creates one (`createElement("iframe")`, `object`, `embed`, …) gets a
+`NotSupportedError` at that line (P130). The manual and the lint tell agents to build pages
+without them. Pasting or dropping formatted content into an editable element inserts its plain
+text only. `nestedFrames: "own"` (P128) on a kind's `options` lets a
+page keep an `<iframe>` of one of its version's own files (a relative `src`, served kinds) or with
+`srcdoc` (every kind), as Claude's Artifacts do. Frames of other sites, `<object>` and `<embed>`
+stay out. Not for url mode or live widgets (refused).
 
 ```ts
 artifact: { preset: "artifact", options: { layout: { kind: "fill" }, nestedFrames: "own" } },
 ```
 
-It is a weakening: a nested frame is a realm of its own where the shell's defenses never ran, so
-content there has WebRTC (a way out past `connect-src`) and can put text on the clipboard from a
-click, with no notice. The CSP still governs every frame's loads and navigations. Not for url mode
-or live widgets (refused). Turn it on only where your product accepts that.
+It is a weakening: content in a nested frame runs where the shell's defenses never ran, so it has
+WebRTC (a way out past `connect-src`) and can put text on the clipboard from a click, with no
+notice. The CSP still governs every frame's loads and navigations. Turn it on only where your
+product accepts that.
 
 ### The capability runtime: pages that are apps
 
-0.7 (P085–P090). A page reaches your services through one global, `porthole.use(name)`, for what
-it declared when it was published and what its viewer's level allows. Porthole carries, checks
-and gates the calls; you keep the services. It is an optional layer over the display: what it adds
-to your side (your API's checks, versions, revocation, each person's data) is in
-[THREAT_MODEL.md § The display layer and the app runtime](THREAT_MODEL.md#7-the-display-layer-and-the-app-runtime).
+A page reaches your services through one global, `porthole.use(name)`, for what it declared when it
+was published and what its viewer's level allows. Porthole carries, checks and gates the calls; you
+keep the services. It is an optional layer over the display. How it works: DESIGN.md § "The
+capability runtime". What it adds to your side: [THREAT_MODEL.md § The display layer and the app runtime](THREAT_MODEL.md#7-the-display-layer-and-the-app-runtime).
 
 ```js
 import { declareCapabilities, presets } from "@botiverse/porthole";
@@ -894,42 +650,32 @@ handlers: {
   db: (args, { viewer, declared, instance, changed, signal }) => myApi.db(instance, viewer, args, declared?.rules, { changed, signal }),
   artifact: (args, { viewer, instance }) => myApi.artifact(instance, viewer, args),   // Refused("conflict") when base moved
   assets: (args, { viewer, instance }) => myApi.assets(instance, viewer, args),
-  // true if it opened. Never over the person's own words or place; a page's draft (P108) shown whole,
-  // editable, as the page's suggestion, taking no focus, posted only on the person's Send (below)
-  // (inUse: the composer holds the person's own words, or a place they chose)
+  // true if it opened; never over the person's own words or place (inUse). A page's draft: below.
   comments: ({ anchor, draft }) =>
     composer.inUse() ? false : draft === undefined ? composer.open(anchor) : openPageDraft(composer, anchor, draft),
 },
-// 5. The mount: what this version declared, within what the artifact declares now; null for a
-//    page published before 0.7 (required under a runtime). Before rendering: a stored
-//    declaration that isn't one's shape is a problem to show, never a mount with null (0.6's
-//    surface) or with either declaration alone (P093).
+// 5. The mount: what this version declared, within what the artifact declares now; null for a page
+//    stored without a declaration (required under a runtime). A stored declaration that isn't one's
+//    shape is a problem to show, never a mount with null or with either declaration alone (P093).
 const shown = version.declaration ? tryIntersectDeclarations(version.declaration, artifact.declaration) : null;
 if (shown && !shown.ok) return <VersionError problems={shown.problems} />;   // "This version can't be shown"
 <PortholeView display="page" instance={instance} declaration={shown ? shown.declaration : null} />
 ```
 
-- **A page's draft in your composer** (P108): `comments.open` reaches your handler whenever the
-  page calls it, within its rate (30 a minute by default). No proof of a click is asked since
-  0.16.0 ([P149](DECISIONS.md)): the page picks the moment, and may call with no one pressing
-  anything. So the composer it fills is the person's to act on, and whether it opens at all is
-  yours to say (return false while the person is writing, or after they closed several unused):
+- **A page's draft in your composer** (P108): `comments.open` reaches your handler whenever the page
+  calls it (30 a minute by default), with no proof of a click (P149). Whether the composer opens is
+  yours to say (false while the person is writing, or after they closed several unused). A composer
+  the page filled is the person's to act on:
 
   ```js
-  // A composer the page filled: its words are the page's until the person acts in it.
   function openPageDraft(composer, anchor, draft) {
-    // Opens beside the frame, and takes no focus: keys stay where the person was typing, so what
-    // they type for the page never lands in a postable comment.
+    // Beside the frame, without focus: keys stay where the person was typing.
     composer.open(anchor, { text: draft, focus: false }); // where your composer focuses, focusField
-    // Armed as THREAT_MODEL §6 says: no press of any kind for 500 ms (guardPresses, § Annotations).
-    guardPresses(composer.element).placed();
-    // Said by you, outside the frame where the page can't draw, until they edit it: never shown as
-    // one of their own drafts.
+    guardPresses(composer.element).placed(); // no press for 500 ms (§ Annotations)
+    // Said by you, outside the frame, until they edit it: never shown as one of their own drafts.
     composer.setNote("Suggested by this page");
     composer.input.addEventListener("input", () => composer.setNote(null), { once: true });
-    // Enter sends only once the person has focused or edited the composer themselves (a press in
-    // it, a Tab into it, their typing); until then Send is a click. It opened without focus, and a
-    // page can't move focus into your page's fields, so its focus is theirs.
+    // Enter sends only once the person has focused or edited it themselves; until then Send is a click.
     let theirs = false;
     for (const type of ["pointerdown", "focus", "input"]) {
       composer.input.addEventListener(type, () => (theirs = true), { once: true });
@@ -941,60 +687,41 @@ if (shown && !shown.ok) return <VersionError problems={shown.problems} />;   // 
   }
   ```
 
-  - Never over the person's words: while the composer holds their text, or a place they chose,
-    answer `false`, or show the page's words as a separate suggestion that takes no focus; never
-    replace, append to or retarget what they wrote.
-  - Show the draft whole, as plain text (a comment that renders as markdown hides an HTML comment
-    or a link definition from readers but not from an agent: render a page-drafted comment as
-    plain text, or show before Send what readers will see); show the anchor's `label` and `quote`
-    as isolated text (`<bdi>`, `dir="auto"`). Porthole has already refused a draft with anything
-    invisible, a line separator or a run of blanks, and taken what can't be seen out of the label
-    and quote.
-  - Nothing one click away in it, or in a draft's view, posts, submits or discards; your own list
-    of a person's drafts (not the frame's markers, which a page can draw too) is how they find
-    theirs.
+  Never replace, append to or retarget what the person wrote. Show the draft whole, as plain text,
+  and the anchor's `label` and `quote` as isolated text (`<bdi>`, `dir="auto"`). Nothing one click
+  away posts, submits or discards. The full list: THREAT_MODEL.md §7 "The app runtime".
 - **Built-ins** (`clipboard`, `links`, `downloads`, `comments`) reach every page whose kind offers
-  them; everything else only a page that declared it. A page with no declaration (one published
-  before 0.7) gets the built-ins through `use` and 0.6's globals as before: give it a declaration
-  when it is next published.
+  them; everything else only a page that declared it. A page stored without a declaration takes the
+  legacy path (the built-ins through `use`, and the legacy globals): give it a declaration when it
+  is next published.
 - **Levels**: `view < interact < admin < owner`. Reads are `view`; `chat.send`, `data.call`,
   `context.set` and db writes `interact`; `artifact.publish` and asset removal `admin`; uploads
-  `admin` unless you set `assets: { levels: { upload: "interact" } }` (then scripts and styles from
-  the library never run: P089). Raise any method in its config's `levels`. Without a viewer the
+  `admin` unless `assets: { levels: { upload: "interact" } }` (then scripts and styles from the
+  library never run: P089). Raise any method in its config's `levels`. Without a viewer the
   runtime's own are refused.
-- **Your API is the wall.** The bridge refuses early, in your page; your handlers call your API as
-  the viewer, and it must check again, from its own session and its own stored declaration: never
-  trust `context.viewer` or `context.declared` for what your data allows (a page past the bridge
-  could forge them). `dbAccess(request, viewer, rules)` is the db rule set (another person's
-  `data/users/<id>` refused, `me` resolved), `atLeast(level, "admin")` for a publish. Hold every
-  write to an existing document to its `ifVersion` (updates and deletes too), apply a batch in
-  order against one state, and refuse a moved base or version with `new Refused("conflict")`;
-  check and admit the merged version as any (`checkFileSet`, `admitFiles`).
-- **Per version**: store each version's declaration with it (`declareCapabilities` at its publish)
-  and mount a version with `tryIntersectDeclarations(version's, current)` (`intersectDeclarations`
-  throws its problems as a `TypeError`); your API's rules for that version are the same
-  intersection's (whatever it allows, both declarations allow).
-- **Rules hold in any case**: `dbAccess` holds `Votes/a` to its exact name's rule (else `*`'s)
-  and to the rule for `votes` too (any rule naming it in another ASCII case), so a store that
-  folds case is safe with it; paths reach your handler as the page wrote them (Porthole never
-  lowercases them), and a publish that names a collection twice in different cases is refused.
-- **Objects without a prototype**: checked declarations (`checkDeclaration`, `declareCapabilities`,
-  the intersection) have none, so `.hasOwnProperty()` on one, or one in a template string,
-  throws: use `Object.hasOwn` and `JSON.stringify`.
-- **Who the page may know**: `Grant.user.id` is one path segment, never `me`; give
-  `pseudonymFor(secret, artifact, person)` where pages shouldn't link a person across artifacts.
+- **Your API is the wall.** Your handlers call your API as the viewer, and it checks again from its
+  own session and stored declaration, never from `context.viewer` or `context.declared` (a page past
+  the bridge could forge them). `dbAccess(request, viewer, rules)` is the db rule set,
+  `atLeast(level, "admin")` for a publish. Hold every write to an existing document to its
+  `ifVersion` (updates and deletes too), apply a batch in order against one state, refuse a moved
+  base or version with `new Refused("conflict")`, and check and admit a merged version as any.
+- **Per version**: store each version's declaration with it, and mount it with
+  `tryIntersectDeclarations(version's, current)` (`intersectDeclarations` throws its problems as a
+  `TypeError`); your API's rules for it are that intersection's.
+- **Details**: `dbAccess` holds `Votes/a` to its exact name's rule (else `*`'s) and to any rule
+  naming it in another ASCII case, so a store that folds case is safe with it; paths reach your
+  handler as the page wrote them, and a publish that names a collection twice in different cases
+  is refused. Checked declarations have no
+  prototype: use `Object.hasOwn` and `JSON.stringify`. `Grant.user.id` is one path segment, never
+  `me`; `pseudonymFor(secret, artifact, person)` keeps pages from linking a person across artifacts.
 - **Assets**: `createContentHost({ assets: (id, access) => myStore.asset(id, access) })` answers
-  `{ scope, artifact, name, size, sha256, trusted?, read }` for an id you made (32 random hex
-  characters, `ASSET_ID`); `/server` serves it at `/_blob/<id>` on that scope's origin only, to an
-  access for that artifact (a session, or a framed page's sealed address), after your check,
-  revalidated at each load. Store an upload's `trusted` (the bridge sets it: an admin's code where
-  uploaded code may run) and give it back: other code-typed assets are served as downloads. Pages
-  show assets with `assets.url(id)` (some engines' frames send no address a `/_blob/` load could
-  carry). `{ get, bearer: true }` serves by id alone, an explicit opt-in for public artifacts.
-  A trusted script goes out as one only while the config still lets uploaded code run, checked at
-  each load (P103): in bearer mode, with no access to name the page's config, every artifact
-  config your server has must (one where anyone who interacts uploads, or with no `assets`, turns
-  them all into downloads).
+  `{ scope, artifact, name, size, sha256, trusted?, read }` for an id you made (`ASSET_ID`: 32
+  random hex characters). `/server` serves it at `/_blob/<id>` on that scope's origin only, to an
+  access for that artifact, after your check, revalidated at each load. Store an upload's `trusted`
+  (set by the bridge) and give it back: other code-typed assets are downloads, and a trusted script
+  runs only while the config still lets uploaded code run (P103). Pages show assets with
+  `assets.url(id)`. `{ get, bearer: true }` serves by id alone, an opt-in for public artifacts; then
+  every artifact config your server has must let uploaded code run, or all code is a download.
   Refuse names that aren't assets (`assetNameProblem`).
 - **Run the conformance cases** against your handlers (no browser):
 
@@ -1005,14 +732,11 @@ if (shown && !shown.ok) return <VersionError problems={shown.problems} />;   // 
     // Your own API for the same artifact, signed in as `viewer` with that person's real session:
     // the cases past the bridge then forge the context, as a page past it could.
     api: (handlers, viewer) => apiAs(handlers, viewer),
-  })) {
-    test(each.name, () => each.run());
-  }
+  })) test(each.name, () => each.run());
   ```
-
 - **The agent** declares capabilities in your publish tool (`capabilities: { db: {} }`) and reads
-  topic `capabilities` of the manual: declaring, levels, errors, where state goes, each one's types
-  (`types/runtime/v1/*.d.ts`, also in the package for a page's own TypeScript).
+  topic `capabilities` of the manual, with each one's types (`types/runtime/v1/*.d.ts`, also in the
+  package).
 
 ### The page
 
@@ -1032,86 +756,65 @@ display.on("outcome", (outcome) => {
 openButton.onclick = () => porthole.openInTab(instance);           // the clean address
 ```
 
-A `blocked` outcome is the word of Porthole's own pages, never of the content (P124, P125): an
-opaque frame's frame status is never taken, nor one a frame says after its first word; the host
-hears those as a `hostError` of kind `"frame-status"` (log it, show nothing for it). Draw the
-fallback from `outcome` only. A url-mode app is the exception: it can say any outcome (THREAT_MODEL
-S6).
-
-**The door (P125).** A served display (a served shell, a page, a view through the
-sandbox proxy) is framed on its scope's origin, where the scope's other displays run content: its
-own frame can't be trusted for how loading went (a same-scope sibling could speak for it). So
-`createHost` first frames a **door** — a page of Porthole's on the display's origin, in a hidden
-opaque frame it can't reach — and takes the door's word (`FrameLocation.door`, which `issue` returns
-for those kinds). The content frame's own frame status is then never taken, and its silence is a
-`timeout`, never a fallback. You don't wire anything: `createHost` and `/server` do it. Two
-requirements:
-
-- **Deploy the server (or your content Worker) before the host.** The door is minted and served by
-  the server; a host given a served location with no door (from a server that doesn't
-  yet mint one) builds no frame for it: `blocked: locate`, and a `hostError` of kind `"door"`
-  naming the fix. Upgrade the server/Worker first, then the host. This is a hard requirement, not a
-  preference.
-- **A custom locator must pass `door` through, and issue anew for every run.** If you rebuild
-  `FrameLocation` yourself (a locator of your own rather than `httpLocator`), carry `door` from your
-  issue endpoint unchanged; `httpLocator` and the host kit's client already do. Dropping it refuses
-  every served display, as above. And `locate` is called again on every run (a reload,
-  a restart after the content navigated its frame away): answer each call with a fresh issue (a new
-  ticket, a new door ticket). A location reused from an earlier run carries tickets already taken,
-  so its door says `blocked: session` ("this link has been used"), and `createHost` tells you
-  with a `hostError` of kind `"locate"`. (A sibling of the scope could force that by reloading the
-  display.)
-- **A platform of your own makes the web's doors.** A `PlatformHost` that wraps
-  `webPlatform.createSurface` must also give `createDoor` (delegate to `webPlatform.createDoor`):
-  a platform without doors frames no served display (`blocked: locate`, a `door` host error).
-- **The door sits in the display's container while it decides**, a hidden 0×0 frame
-  (`data-porthole-door`), removed once it says its word. Code that grabs
-  `container.querySelector("iframe")` just after mounting may get the door: select
-  `iframe:not([data-porthole-door])`.
-- **A clean address is for a tab.** Never give `createHost` a clean address (`urlOf`, `link`) as a
-  frame's location: it has no door, so it is refused before any frame, as above, and the content
-  origin answers it in a frame with a page that has no script and goes nowhere. To frame what a
-  clean address names, resolve it through your issue endpoint first: `client.resolve(address)` (or
-  `<PortholeView address>`) posts `{ address }`, and the endpoint answers the location for what it
-  names (with its door; a file set's page below its version opens at that page), or the refusal its
-  tab would get. A refusal is the display's outcome with no frame built: 401 `blocked: sign-in`,
-  403 `blocked: denied` (with your reason code if your answer gives `error.reason`), 404 `blocked:
-  not-found`; any other failure is `blocked: locate` with a `locate` host error, and a backend that
-  never answers is a `timeout`. That mapping holds for every locate, an instance's too.
-
-A **content Worker of your own** (one that answers the content origins itself, instead of
-`/server`) serves the door too: `issue` mints the door ticket and returns `door: { url }`, and the
-Worker routes `DOOR_PATH + <key>` (`/__porthole/door/<key>`) on every label — take the door ticket
-(`TicketRecord.door === true`, bound to the label and key), run the same access, document and entry
-checks the content route runs for that grant, then answer `doorResponse({ hostOrigins, framedBy })` (open) or
-`doorStatusResponse({ status, reason, code?, hostOrigins, framedBy })` (401 `session` / 403 `denied` / 404
-`not-found` / 500 `error`). Refuse a door ticket at `/__porthole/d/`. `DOOR_PATH`, `doorResponse` and `doorStatusResponse` are exported from
-`@botiverse/porthole/server`.
-
-**A host that signs its own tickets** (P126) — its server mints its own ticket for a display and its
-content Worker verifies it, so the Worker holds no Porthole ticket when the door is asked — answers
-the door with **`server.doorAnswer(instance, grant, request?)`**, on the object `createServer`
-returns. Raft's shape: the Worker routes its door path (`/__porthole/door/_raft`, say), verifies
-its own ticket (signature, single use, bound to the label and the instance, and a door's, never its
-content's), admits the request and recovers the grant it was signed for, then returns `await
-server.doorAnswer(instance, grant, request)`. The answer is exactly what `/server`'s own door route
-gives once it has taken its ticket: the host's `authorize` check (`denied` with its code), the
-document and version, a file set's entry being a page (`not-found`), `doorResponse` or
-`doorStatusResponse` with the door's CSP and no cookie. It never takes a ticket and checks nothing
-about the request but its method: **you must have authenticated the request and established the
-grant yourself**, as before `issue`. Pass the request so `authorize.check` sees it, and `{ page }`
-as the fourth argument for a frame that opens at a file set's page below its version. It throws for
-an instance with no door (a url-mode app) and for an instance or grant `issue` would
-refuse. The content route still takes its own ticket and checks again (P050).
-
 `porthole.config(kind)` is the served config while frames are served, the opaque one while they
-aren't, and null until the meta is known, so a frame never starts opaque and then restarts
-served. The client's functions take no `this`: pass them bare
-(`useSyncExternalStore(porthole.subscribe, porthole.meta)`). A client module that fails to load shows nothing at all: catch its import and say so
-(`examples/app.mjs` does).
+aren't, and null until the meta is known, so a frame never starts opaque and then restarts served.
+The client's functions take no `this`: pass them bare
+(`useSyncExternalStore(porthole.subscribe, porthole.meta)`). A client module that fails to load
+shows nothing at all: catch its import and say so (`examples/app.mjs` does).
 
-**Without a bundler**, the page gets Porthole's browser modules from your server, in three parts
-(`examples/app.mjs` has all three):
+Draw the fallback from `outcome` only. A `blocked` outcome is the word of Porthole's own pages,
+never of the content (P124, P125). An opaque frame's frame status is never taken, nor one a frame
+says after its first word: you hear those as a `hostError` of kind `"frame-status"` (log it, show
+nothing for it). A url-mode app is the exception: it can say any outcome (THREAT_MODEL S6).
+
+**The door (P125).** A served display is framed on its scope's origin, where a same-scope sibling
+could speak for it. So `createHost` first frames a **door**, a page of Porthole's on that origin in
+a hidden opaque frame the content can't reach, and takes the door's word (`FrameLocation.door`,
+which `issue` returns). The content frame's own status is never taken, and its silence is a
+`timeout`. `createHost` and `/server` wire it; what is yours:
+
+- **Deploy the server (or your content Worker) before the host.** This is a hard requirement: a
+  host given a served location with no door builds no frame (`blocked: locate`, and a `hostError`
+  of kind `"door"` naming the fix).
+- **A custom locator passes `door` through unchanged, and issues anew for every run.** `locate` is
+  called again on every run (a reload, a restart after the content navigated away): answer each
+  with a fresh issue (a new ticket and door ticket). A reused location's door says
+  `blocked: session` ("this link has been used"), with a `hostError` of kind `"locate"`.
+  `httpLocator` and the host kit's client already do both.
+- **A platform of your own** that wraps `webPlatform.createSurface` must also give `createDoor`
+  (delegate to `webPlatform.createDoor`), or it frames no served display.
+- **The door sits in the display's container while it decides** (a hidden 0×0 frame,
+  `data-porthole-door`): select `iframe:not([data-porthole-door])`, not the first `iframe`.
+- **A clean address is for a tab.** Never give `createHost` a clean address (`urlOf`, `link`) as a
+  frame's location: it has no door, so it is refused. Resolve it through your issue endpoint first:
+  `client.resolve(address)` (or `<PortholeView address>`) answers the location for what it names
+  (a file set's page below its version opens at that page), or the refusal its tab would get.
+- **A locate's refusals** become the outcome, with no frame built: 401 `blocked: sign-in`, 403
+  `blocked: denied` (with your `error.reason`, if given), 404 `blocked: not-found`, any other
+  failure `blocked: locate` with a `locate` host error, and no answer a `timeout`.
+
+A **content Worker of your own** (one that answers the content origins instead of `/server`)
+serves the door too. `issue` mints the door ticket and returns `door: { url }`. The Worker routes
+`DOOR_PATH + <key>` (`/__porthole/door/<key>`) on every label: it takes the door ticket
+(`TicketRecord.door === true`, bound to the label and key), runs the access, document and entry
+checks the content route runs for that grant, then answers `doorResponse({ hostOrigins, framedBy })`
+or `doorStatusResponse({ status, reason, code?, hostOrigins, framedBy })` (401 `session`, 403
+`denied`, 404 `not-found`, 500 `error`). It refuses a door ticket at `/__porthole/d/`. All three
+are exported from `@botiverse/porthole/server`.
+
+**A host that signs its own tickets** (P126), whose Worker holds no Porthole ticket for the door,
+answers it with `await server.doorAnswer(instance, grant, request)` (pass the request: `authorize.check` sees it; on the object `createServer`
+returns; `{ page }` as a fourth argument for a file set's page below its version). Its Worker first
+verifies its own ticket (signature, single use, bound to the label and the instance, a door's and
+never its content's) and recovers the grant. `doorAnswer` gives exactly what `/server`'s door route
+gives after its ticket (the host's `authorize` check, the document and version, the entry, the
+door's CSP, no cookie), but takes no ticket and checks nothing about the request but its method:
+**you must have authenticated the request and established the grant yourself**, as for `issue`.
+It throws for an instance with no door (a url-mode app), or one `issue` would refuse. The content
+route still takes its own ticket and checks again (P050).
+
+**Without a bundler**, the page gets Porthole's browser modules from your server
+(`examples/app.mjs` does all three):
 
 1. Serve the package's `dist/` at a path of your app's (`/porthole-client/`, `.js` files only).
    On Workers it is the static assets directory (`assets.directory`, with `run_worker_first`).
@@ -1122,10 +825,10 @@ served. The client's functions take no `this`: pass them bare
    `` `import { defineDisplays } from "@botiverse/porthole";\nexport const displays = defineDisplays(${JSON.stringify(kinds)});` ``
    at `/porthole-client/displays.mjs`, imported from there.
 
-With a bundler, import `@botiverse/porthole` and your `displays.mjs` as usual.
-
-React: give the provider the client, and show a kind. Flipping the provider's `scheme`, or a new
-`themeKey`, re-themes running frames in place: they keep their state.
+React: give the provider the client, and show a kind. Flipping `scheme`, or a new `themeKey`,
+re-themes running frames in place. Rendered on a server, `PortholeView` draws what the client's
+meta says: give `portholeClient` the meta it starts with (`meta`, from your page's data), or it
+renders `pending`.
 
 ```jsx
 <PortholeProvider client={porthole} scheme={mode} theme={cssVariableTheme(TOKENS)} nonce="auto">
@@ -1134,10 +837,6 @@ React: give the provider the client, and show a kind. Flipping the provider's `s
 </PortholeProvider>
 // const { link, open, copy } = usePortholeLink(instance);   "Open in a new tab", "Copy link"
 ```
-
-Rendered on a server, `PortholeView` draws what the client's meta says: give `portholeClient` the
-meta it starts with (`meta`, from your page's data), and the server's HTML has the frame's
-placeholder or the fallback, which the page then hydrates. Without it, `pending`.
 
 ### The page's CSP
 
@@ -1158,8 +857,8 @@ placeholder or the fallback, which the page then hydrates. Without it, `pending`
 - Check `next` with `entryTarget(next, authorizeUrl, { app: true })` (in the page,
   `porthole.entryTarget(next, { app: true })`): the authorize route or any page on your app's
   origin, as an absolute URL, and null for anything else (another site, `//host`, `/\host`,
-  `javascript:`), so one check serves sign-ins that go back to a page and those that go back to
-  a frame's content. Without `{ app: true }` it takes only the authorize route.
+  `javascript:`). One check serves sign-ins that go back to a page and those that go back to a
+  frame's content. Without `{ app: true }` it takes only the authorize route.
 - **Warning: no `form-action 'self'` on a sign-in page that posts a form.** `form-action` holds
   every redirect of a submission, and redirect entry continues from your sign-in through the
   content origin, so the browser blocks the last hop and the person stays on your sign-in. Leave
@@ -1169,7 +868,7 @@ placeholder or the fallback, which the page then hydrates. Without it, `pending`
   `entry.handoff: { id: (viewer) => viewer.id, viewer: (id) => lookUp(id) }` on the server, and
   `portholeClient({ displays, headers: () => ({ authorization: `Bearer ${token()}` }), handoff: true })`
   on the page. It posts to `/porthole/handoff` with your own credential, on load and when the
-  page regains focus; Porthole answers with a cookie that holds a key it signs (the viewer's id
+  page regains focus. Porthole answers with a cookie that holds a key it signs (the viewer's id
   and ten minutes), `HttpOnly`, scoped to `/porthole`. That beats storing the app's token in a
   cookie: the key isn't a credential for your API, goes nowhere but Porthole's routes, can't be
   set from another site (the POST needs your credential, and is refused from another origin), and
@@ -1186,16 +885,20 @@ schemes included), and `nodeHost`'s `appSocket` (a WebSocket, Porthole's cookies
 
 What a url-mode app gets from another origin (P101): its cookie opens it for what its own origin
 asks (`Origin` its own, or `Sec-Fetch-Site` `same-origin` or `none`) and for a navigation that
-opens it (GET or HEAD: your frame, a link, the way back from sign-in); anything else another origin
-sends (a sibling app's fetch, form post, script tag or image, an opaque origin's `null`) is a 403
-that never reaches the app or your `authorize.check`. A WebSocket opens from the app's own origin
-only: `access(request)`, which `nodeHost` asks before `appSocket` and a Worker asks on its own
-upgrade path, is null for any other `Origin`. A client that sends neither header (curl with the
-cookie) is no browser and goes on. An app whose sign-in posts back from another site (OpenID's
-`form_post`) can't sign in through the preview; a tab's `Lax` cookie didn't go with that post
-before either.
+opens it (GET or HEAD: your frame, a link, the way back from sign-in). Anything else another
+origin sends (a sibling app's fetch, form post, script tag or image, an opaque origin's `null`) is
+a 403 that never reaches the app or your `authorize.check`. A WebSocket opens from the app's own
+origin only: `access(request)`, which `nodeHost` asks before `appSocket` and a Worker asks on its
+own upgrade path, is null for any other `Origin`. A client that sends neither header (curl with
+the cookie) is no browser and goes on. An app whose sign-in posts back from another site
+(OpenID's `form_post`) can't sign in through the preview; a tab's `Lax` cookie doesn't go with
+that post either.
 
 ## 5. Cloudflare Workers
+
+Route the content domain's wildcard (`*.<content domain>/*`, with wildcard DNS and a certificate for
+every level served, `*.f.<domain>` included) and your own domain to the same Worker, or the content
+domain to a Worker of its own.
 
 ```js
 import { contentHostFor, d1TicketStore } from "@botiverse/porthole/server";
@@ -1263,20 +966,11 @@ in the config also has the manual name them). The descriptions are the manual's 
 `checkPage` (`@botiverse/porthole/check`) runs the content in the real sandbox at the manual's
 phone and desktop widths, in light and dark, and answers a report whose `text` is a few lines for
 the agent: what it threw, what the sandbox blocked, what failed to load, `console.error`, overflow
-and a cut height, each problem once with where it happened (at most 8; the rest counted). Lines
-are the content's own, as the agent wrote it (a script's error and a lint finding name the same
-line).
-
-A served config is checked served: its content runs on an origin of its own under Porthole's
-server, with the served CSP, shell, storage and cookies, as people's browsers run it (both drivers
-answer a reserved content domain themselves; nothing goes to your server). An opaque config, or
-an MCP Apps view, runs opaque.
-
-The host functions the config declares are answered as a host that declines would: a person
-asked to confirm says no, and a handler answers no (no prompt sent, a tool call refused). Each
-call is in the report (`run.calls`): one hosts refuse whatever the person says (no click, bad
-arguments) is a problem; one a person may decline is a note, so the agent makes sure the page
-still works then.
+and a cut height, each problem once with its line (at most 8). A served config is checked served,
+on an origin of its own (the driver answers a reserved content domain itself; nothing goes to your
+server). The host functions the config declares are answered as a host that declines would: a call
+hosts refuse whatever the person says is a problem, one a person may decline is a note. How it
+works: DESIGN.md § "The agent's side: lint, check, tools".
 
 ```js
 import { checkPage, playwrightDriver } from "@botiverse/porthole/check";
@@ -1284,14 +978,13 @@ const report = await checkPage({ config, content: html, driver: playwrightDriver
 report.ok; report.text;
 ```
 
-It needs a browser somewhere: Chromium is best (WebKit mutes a thrown error's message in an
-opaque frame, so the agent reads only "Script error.", and names no line in a served one). Where:
+It needs a browser somewhere. Chromium is best: WebKit mutes a thrown error's message in an opaque
+frame (the agent reads only "Script error."), and names no line in a served one.
 
 - **A server with Chromium** (Node): `playwrightDriver(await chromium.launch())`.
-- **An agent on a person's machine, maybe without Chromium** (Ferry's daemon): run
-  `lintContent` there (no browser needed), and send `check_page` to your server, which runs
-  `checkPage`; or use Playwright where it is installed (`examples/mcp/server.mjs` falls back to
-  the lint, saying so).
+- **An agent on a person's machine, maybe without Chromium** (Ferry's daemon): run `lintContent`
+  there (no browser needed), and send `check_page` to your server, which runs `checkPage`; or use
+  Playwright where it is installed (`examples/mcp/server.mjs` falls back to the lint, saying so).
 - **Cloudflare Workers:** Browser Rendering, through a CDP session:
 
   ```js
@@ -1303,12 +996,9 @@ opaque frame, so the agent reads only "Script error.", and names no line in a se
   await browser.close();
   ```
 
-**Bundling:** every entry point bundles whole (a Worker, a single executable): `/check` imports
-its check page's script as a module, and `/conformance` its harness, so nothing is looked up
-beside a module at run time. Each release is bundled with rolldown and esbuild and checked for
-that before it is published (`test:bundle`). `/conformance`, which runs under Playwright, still
-looks for the optional MCP Apps App SDK where it runs; without it, the App SDK probes say so and
-don't run.
+**Bundling:** every entry point bundles whole (a Worker, a single executable): nothing is looked up
+beside a module at run time. `/conformance` still looks for the optional MCP Apps App SDK where it
+runs; without it, the App SDK probes say so and don't run.
 
 ## 7. Conformance: prove your integration
 
@@ -1395,7 +1085,7 @@ prints each reason at the end; so does `--reporter=json`.
 | Import | What |
 | --- | --- |
 | `@botiverse/porthole` | `createHost`, `presets`, `defineDisplays`, `portholeClient`, `frameFallback`, `entryTarget`, `lintContent`, `admitContent`, `showTool`, `guideTool`, `checkTool`, `answerGuide`, `guideChanges`, `compile` |
-| `@botiverse/porthole` (the runtime, 0.7) | `declareCapabilities`, `declarationProblems`, `checkDeclaration`, `dbAccess`, `atLeast`, `methodLevel`, `rosterOf`, `assetNameProblem`, `RUNTIME_CAPABILITIES`, `RUNTIME_TYPES`, `Refused` (`conflict`, `forbidden`, `too_large`); `types/runtime/v1/*.d.ts` |
+| `@botiverse/porthole` (the runtime) | `declareCapabilities`, `declarationProblems`, `checkDeclaration`, `dbAccess`, `atLeast`, `methodLevel`, `rosterOf`, `assetNameProblem`, `RUNTIME_CAPABILITIES`, `RUNTIME_TYPES`, `Refused` (`conflict`, `forbidden`, `too_large`); `types/runtime/v1/*.d.ts` |
 | `@botiverse/porthole/react` | `PortholeProvider`, `PortholeFrame`, `PortholeView`, `usePortholeLink`, `cssVariableTheme`, `useRunAgain` |
 | `@botiverse/porthole/server` | `createContentHost` (`routes`, `forget`), `contentHostFor`, `prefixedName`, `memoryTicketStore`, `d1TicketStore`, `upstreamHeaders`, `statusPage`, `conformancePage`, the callbacks' types |
 | `@botiverse/porthole/node` | `nodeServer`, `nodeHost`, `nodeListener`, `nodeProbe`, `toRequest`, `sendResponse` |
