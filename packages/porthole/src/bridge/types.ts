@@ -11,7 +11,7 @@ import type { ViewerInfo } from "../runtime/levels.ts";
 import type { RefusalReason } from "./refusal.ts";
 
 /**
- * The host-function bridge (ARCHITECTURE § Framework layer): carries a capability call from the
+ * The host-function bridge (DESIGN.md § Framework layer): carries a capability call from the
  * frame to the host's handler and its result back, checking at the boundary that the capability
  * is declared, that its arguments are well formed, and that every gate passes, in that order.
  * Adapters decode protocol messages into calls; the bridge alone decides whether they run.

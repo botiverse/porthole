@@ -5,100 +5,8 @@ What Porthole protects, from whom, and where that protection ends. For each way 
 guaranteed. [ADOPTING.md](ADOPTING.md) says how to set each one up, and
 [DESIGN.md](DESIGN.md) lists every defense with the test that proves it.
 
-**Status.** This describes Porthole 0.16.0 (2026-11-11). A review on 2026-10-19 found gaps, and every decision it led to
-has merged ([§8](#8-fixes-in-flight) lists them). P096 changed the negative-control runner and CI,
-and the shipped conformance probes' messages and timing, not what they check. P104 (0.9.0's
-annotation markers) had a review of its own, and P105, in 0.10.0, is what it led to. 0.11.0 was
-never published (its release stopped at the CI gate), and 0.12.0 carries all of it: draft marks
-(P107, §7 "Drafts": what a page learns from them and who may receive them), an advisory lint
-(P106, no change to isolation), and `comments.open` with a draft (P108, §7: the host's duties
-around it). The review of 0.12.0's drafts led to P109, in 0.13.0: a display can take the keyboard, which
-`createHost` now gives back (§6, §7 "The keyboard"); `comments.open` needs the person in the
-calling frame; a page's draft text is stricter, and the composer it fills is the person's to act
-on (§7). 0.13.0 also makes P106's lint fail soft and read only what it may (P110, no change to
-isolation). 0.14.0 adds a nested page (P111, `nested: true`, S3): the framed address is Porthole's
-shell alone and the page its opaque child, so a realm the page can't reach tells the host when the
-person, not the page, pressed in it (§7 "The keyboard", `comments`); and P112's annotation
-additions for a host's comment modes (hints, as every report is, §7). 0.14.1: P114
-(porthole#56) serves a nested page's shell on a label of its own, on which nothing but nested
-pages' shells, their pages, those pages' files and status pages is ever served, so no other
-display of the scope is same-origin with the shell (S3). 0.14.8: P128 lets a host opt a config
-into a page's own nested frames (`nestedFrames: "own"`, off by default): its `srcdoc` frames and
-frames of its own files load and run, in realms the shell's hardening never reaches (WebRTC, the
-clipboard's guards: S1, S3); frames of other sites stay out. 0.14.9: P131 adds find
-in page (`find`, off unless a config declares it): the host's find bar sends the person's query
-into the frame, where the content can read it, and takes counts, a box and the find shortcut back
-as the content's word (§6, §7 "Find in page"); no wall moves. 0.14.10: P132 adds a mark's place in
-the document and the document's scroll to annotation reports, unclamped, so a host must clip what it
-draws from them to its own region (§6, §7); `rect` stays clamped and no wall moves. 0.14.11: P133
-makes markers buttons in the frame's Tab order, reversing P104's "no tab stop": the page shares that
-order, so it can steer or spoil the focus, and a host keeps its own list of marks (§7). A press only
-reports `activated`, which the page could already fake; `lastLineDocumentRect` is unclamped, for a
-host to clip as P132's are; no wall moves. 0.14.12: P134 adds `annotations.focusMark(id)`, the host's
-word to put the keyboard back on a marker, and a second exception to "takes no focus" whose conditions
-are the host's own (§6, §7); no wall moves. 0.14.13: P135 drops a `focusMark` that had to wait unless the focus is
-in the frame's document by then; a call on a calm page is unchanged. 0.14.14: P136 brings `display.focus()`
-through a nested page's shell with a new host-to-shell word no page can say; P137 applies P135's check to a
-word 100 ms old or more; no wall moves. 0.14.15: P138 lets the host follow the current selection
-(`selectionTracked`, the same boxes as `tracked`, on its budget, only while asked) and keeps what was
-picked lit; no wall moves. 0.14.16: P139 has a shell on a tab of its own ask no host; P140 narrows P138: a pick stays lit, and a
-selection is kept in the frame, only for a host that follows the selection (`keepSelection`), and a
-host that follows none drops `selectionTracked` unread (§7). 0.14.17: P141 lets a host name the
-origins of an outer page that frames its app (`framedBy`): each may be an ancestor of every frame,
-above the host's own page, so it is in every `frame-ancestors`, and nowhere else; it is never a
-host a frame hears or tells, and a page's `*` fallback is held to a parent named as a host origin
-(§6 "What every host must do", S3). 0.14.18: P142 keeps a set's pages and links within a page from
-starting the display again where there is no Navigation API, and where WebKit fires a frame's load
-for a link within its document: the arriving page's notice is sent without the API, and a page
-says it stayed; no wall moves, and the limit without the API is P079's, unchanged. 0.15.0: P143
-lets a host that opts in (`embeds`) mint an embed grant: a public artifact page's answers say
-`frame-ancestors *` for that session alone, and the page has no host: it hears no one, tells no
-parent anything, and no capability, runtime host function or door is there (S4, §8). P144, after
-Ferryman's audit of 0.14.17 and 0.14.18 (no P0, no new egress), amends P141: without `framedBy`
-every header (every `frame-ancestors` and `script-src` hash) and the status, entry and door pages'
-scripts and the nested page's shell are 0.14.16's again, byte for byte (0.14.17 had changed their
-hashes, not what they do); the shell runtime every served document inlines is not (P142's
-changes, and P143's `hostless` branches, inert where a plan names a host; no hash covers it: P145);
-in the nesting P141 is for (the outer page, then the app's page, then content), content can message
-the outer page and every frame in its tree and learn its origin, so the outer page must check every
-message it takes, and S7's egress rule covers its frames (§6 "What every host must do", S7); and
-`framedBy` is compared with the host origins as browsers serialize origins (`https://a.example:443`
-is `https://a.example`).
-0.15.1: P145, after Ferryman's audit of 0.15.0 (no P0, no escape, no new egress), amends P143 and
-P144: their "byte for byte" is said as it holds (above); the host kit refuses an `access` answer
-with `embed`, so a reader's issue endpoint never mints an embed session (S4); an embed page learns
-where it is embedded (S4); and a host origin's or `framedBy`'s port is 1 to 65535, without a
-leading zero, and its host as the URL parser gives it. No wall moves.
-0.15.2: P147, annotations' marks ride the document's scroll: the boxes of the shell's layer are
-placed down the document and moved by a scroll-driven animation in the layer's closed shadow root,
-so they no longer trail the text for the frames before the scroll event is heard. No message and
-no reading is added (the scroll offset was read already, P132), and the layer still adds nothing to
-what a page can scroll. No wall moves.
-0.15.3: P148, a nested page's real presses: the page's runtime tells its shell each press the
-browser itself made (a mouse down, a finger up, Enter or Space on a native control, a click on
-one), over a `MessagePort` the shell sends at each load and the runtime takes before any content
-runs; the shell tells the host when it heard the last, and the host takes it as it takes the
-shell's activation turning on (§7 "The keyboard"). It gives back what P111 accepted as a loss: a
-press in the page within 5 s of the last gesture. It rests on the runtime's lock on
-`document.open` and on a nested page's frames being opaque, and is not installed where either
-fails. The nested shell's script and the served shell runtime change (their pins, P144 and P145).
-Also in 0.15.3, after the audit of 0.15.1: the four helpers a content Worker of a host's own calls
-with host origins (`statusPage`, `doorResponse`, `doorStatusResponse`, `nestedShellCsp`) check
-each one and throw on a bad one, as P145 said they did; the origins are the host's own
-configuration, never content's.
-0.16.0: P149 takes out what guessed at the person's intent, and what was built to make the
-guess better. Gone: nested pages (`nested: true`, P111 and all that followed it: the shell on a
-label of its own, its word on the person's press, P114, P120 to P122, P136, P148); the focus
-guard (P109: a display that takes the keyboard keeps it until the person clicks back, the
-accepted risk of §5, now without a guard in front of it); the proof of a click asked of
-`sendPrompt`, `openLink`, `downloadFile`, `comments.open`, `artifact.publish`, `assets.delete`
-and a marker's `activated` (P105's second point). Kept: `copyText`'s click (the clipboard is the
-person's, and nothing else stands between a page and it), every confirmation, every rate (the
-three that had none get 30 a minute), the mute, and every isolation wall: no origin, sandbox,
-CSP or message check changes. What a page gains is the power to ask at a moment it picks: a
-confirmation the person didn't prompt, a composer or a comment view opening unasked. Each is a
-nuisance a host bounds (it may refuse, back off, or name the `user-activation` gate again), and
-none carries anything out or writes anything by itself (§5, §7).
+**Status.** This describes the latest release. What changed in each release is in
+[CHANGELOG.md](../CHANGELOG.md); why, in [DECISIONS.md](DECISIONS.md).
 
 ## 1. Two layers
 
@@ -1208,36 +1116,9 @@ section.
   minute); reading it is the person's. A page opens the composer at a moment it chooses, with a
   press of the person's or with none (P149): the composer's duties above are the bound.
 
-## 8. Fixes in flight
+## 8. Not covered yet
 
-The decisions below come from the 2026-10-19 review, and all of them have merged. Each row says
-what was wrong, what holds now, and the limit its decision accepts, if any. Later reviews' decisions
-are in the status line and in DECISIONS.md: P105 (after the review of P104), P109 (after the review
-of 0.12.0's drafts), P111 (a nested page; in 0.14.0, removed in 0.16.0), P114 (a nested page's
-shell on a label of its own, after porthole#56; in 0.14.1, removed in 0.16.0), P124 (a frame
-status is the word of Porthole's pages, after the audit raft-security-audit#16; in 0.14.5: §4,
-§6, §7, S6), P125 (a served display takes its word from a door no same-scope content can reach,
-after the audit of 2026-10-30 found P124 held only for a display alone in its scope; in 0.14.6:
-§4, §6, §7, S7), P149 (what guessed at the person's intent is taken out: nested pages, the focus
-guard, the proof of a click but `copyText`'s; in 0.16.0: the status line, §5, §6, §7).
-
-| Decision | State | What it closes | Sections |
-| --- | --- | --- | --- |
-| P092 | Merged | A request with a method `fetch` refuses (`TRACE`) could end a Node process through the Node adapter; the issue endpoint read a JSON body without a byte limit; its rate limit keyed anonymous requests on headers a client sets. Now no request ends the process, a body is read to 64 KiB at most, and the key is an address the client can't set. | §5, S4 |
-| P093 | Merged | `intersectDeclarations` compared rules name by name, so a current wildcard didn't narrow a version's named rule, and a collection named `__proto__` was lost. Now the result allows exactly what both sides allow. | §7 |
-| P094 | Merged | Without a viewer, a page's declared `data` names weren't held; a pushed result answered a read past `readData`'s gates; `db.batch` and `db.watch` skipped their inner methods' `methodGates`. Now each holds. | §4, S2, S4, §7 |
-| P095 | Merged | What content sent was read before its gate: a log or error report was serialized whole first; waiting confirmations had no cap. Now the bridge reads it after the gate into bounded text, nothing a page sends throws out of an adapter, and at most 10 confirmations wait per display. | §5, S1, S5 |
-| P096 | Merged | The negative-control runner counts a control that didn't run as passed, and CI runs the runtime's controls only. | §4 |
-| P097 | Merged | A release waits for the same commit's CI. No guarantee here depends on it. | |
-| P098 | Merged | A set's page whose notice came late was taken for a navigation away (red on Chromium since 0.6.0), and tests that waited a fixed time. Accepted: a files display may hold a frame that did navigate away for up to 2 s before starting it again, delivering nothing while it waits. | S1 |
-| P099 | Merged | A served page in a tab had no sandbox: `window.open` sent input out, it could navigate its opener, open a picture-in-picture window, and ask for the camera, location or full screen. Now its headers carry its frame's sandbox and deny what its frame's `allow` doesn't grant, and the shell closes those on a tab too; the served suite probes self-navigation in frames and tabs. A browser without the Navigation API is an accepted limit. | S4 |
-| P100 | Merged | `setModelContext` was rate-limited only, unseen by the person. Now it needs the host's `show` by default. Accepted: shown isn't read, and characters that draw as blanks pass, bounded by the length. | S1, S5 |
-| P101 | Merged | Under https Porthole read unprefixed `porthole-*` cookies a sibling label can plant; the entered mark carried no label; url mode checked neither `Origin` nor `Sec-Fetch-Site`. Now only `__Host-` names are read, the mark names its label, and a url-mode app answers its own origin and navigations. | S3, S6 |
-| P102 | Merged | This document. | |
-| P103 | Merged | A live widget's capabilities could add origins; bearer-mode assets skipped the code re-check; `callTool` had no rate. Now the preset refuses them and its config is frozen, every load asks the current config (its ETag says which answer), and `callTool` has 30 a minute. | S2, S5, §7 |
-| P143 | Merged (0.15.0) | Embeds: a public grant's documents framed by any page (`frame-ancestors *`) only for a session the host minted with `embed`, never a reader's. Such a frame has no host: it hears no one, Porthole tells no parent anything, no capability or runtime host function runs, no door. Accepted: the embedding site sees the page load and hears what the page itself posts to its parent or top. The host must keep its embed entry from widening grants, and blank takedowns within its stated bound. | S4 |
-
-Open with no decision yet; until then they are the host's to cover:
+These have no decision yet; until they do, they are the host's to cover:
 
 - a check, at mount or in development, that the page sends its `frame-src` (S1: run
   `defineHostConformance`);

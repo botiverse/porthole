@@ -50,7 +50,7 @@ Pre-1.0: only the latest release is supported; what each changed is in the [CHAN
 
 - [Adopting](docs/ADOPTING.md): putting it in an app, [choosing egress](docs/ADOPTING.md#choosing-egress) and [local development](docs/ADOPTING.md#local-development).
 - [Threat model](docs/THREAT_MODEL.md): what each use is protected from, and what is left to you.
-- [Principles](docs/PRINCIPLES.md), [objectives](docs/OBJECTIVES.md), [architecture](docs/ARCHITECTURE.md), [design](docs/DESIGN.md) and [decisions](docs/DECISIONS.md).
+- [Design](docs/DESIGN.md): how it works, and every defense with its test. [Principles](docs/PRINCIPLES.md): the rules decisions are made by, and what Porthole is for. [Decisions](docs/DECISIONS.md): the log of why.
 - [AGENTS.md](AGENTS.md): working in this repo.
 
 ## Security and license
