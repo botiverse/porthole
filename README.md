@@ -42,7 +42,7 @@ Workers, and every entry point: [package README](packages/porthole/README.md).
 - **An optional app runtime.** `porthole.use(name)` lets a page reach the host's services
   (`user`, `comments`, `db`, …), each call declared and gated.
 
-Used by Raft (workspace Artifacts and HTML previews). Pre-1.0: only the latest
+Used by [Raft](https://docs.raft.build/features/collaboration/artifacts/) (workspace Artifacts and HTML previews). Pre-1.0: only the latest
 release is supported; what each changed is in the [CHANGELOG](CHANGELOG.md).
 
 ## Docs
