@@ -9,46 +9,15 @@ Read these first:
 
 | Doc | What it tells you |
 | --- | --- |
-| [docs/PRINCIPLES.md](docs/PRINCIPLES.md) | The rules decisions are made by. |
-| [docs/OBJECTIVES.md](docs/OBJECTIVES.md) | What Porthole is for; success criteria; non-goals. |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layers, contracts, flows, trust boundaries, extension points. Stays stable while APIs change. |
-| [docs/DESIGN.md](docs/DESIGN.md) | The concrete phase-1 design. |
-| [docs/DECISIONS.md](docs/DECISIONS.md) | Why things are the way they are, and when to revisit. **Add an entry (P0xx) when you make or change a decision.** |
+| [docs/PRINCIPLES.md](docs/PRINCIPLES.md) | The rules decisions are made by; what Porthole is for, and its non-goals. |
+| [docs/DESIGN.md](docs/DESIGN.md) | How it works: the architecture, every mechanism, and every defense with the test that proves it. |
+| [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | What each use is protected from, what the host must do, what isn't covered. |
+| [docs/ADOPTING.md](docs/ADOPTING.md) | How an app adopts it. Keep it working with the README. |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | A log of why things are the way they are. Not required reading: cite it, and **add an entry (Pxxx) when you make or change a decision.** |
 
-## Status
-
-Phase 1's core milestones (DESIGN.md § Milestones), M1–M5, are in: the config,
-compiler and presets; the isolation core (`createHost`, the web platform, the shell
-runtime, the shell adapter, the gated bridge); streaming, sizing and theming; the
-React binding with its default dialog; the leak suite with its oracles and negative
-controls, gating on Chromium, WebKit and Firefox.
-`/server` runs on Node and Cloudflare Workers (D1 tickets), with a host's own
-names, anonymous public links and the host's per-request check (0.1.2).
-Content never writes the clipboard (copy buttons call `copyText`, which the host
-performs and shows), and a host can let people annotate content (0.1.3).
-Hosts' friction from adopting it is fixed in 0.1.4: content and host errors apart,
-strict nonce CSPs, fill mode, reserved label prefixes, by-value React props.
-The host kit (0.2.0, P066, P068): `createContentHost` is the whole host side around
-served content (routing, issue endpoint, health gate, clean addresses through redirect
-entry), with a Node adapter (`/node`), a conformance runner an app points at its real page
-(`defineHostConformance`), a reference app (`leak/kit/`), and a prod-shape profile.
-0.3 (P072, P073): `defineDisplays`, `content.routes` under `/porthole`, the client
-(`portholeClient`, `PortholeView`), the viewer handoff, the url-mode relay kit, and the
-agent's side: `lintContent`, `admitContent`, `checkPage` (`/check`), tool definitions.
-0.5 (P079): live widgets: `presets.liveWidget` (no network of its own), Porthole's vendored
-libraries on content origins (`egress.libraries`, `scripts/vendor-libraries.ts`), the `consent`
-gate, `subscribeData` (MCP resource subscriptions), the host's cache, and the shell's guard against
-a served frame navigating itself away. 0.5.1 (P080): the host hears a navigation the guard stopped
-(`navigationBlocked`), a `Refused` as `consent` refuses all data without handlers, and refusals
-tell content why (`data: { code, message }`). 0.6 (P081–P084): a served page may be many files
-(`StoredFiles`), each served from its version's manifest under that version's own address, its CSP
-opening that path only; `checkFileSet`, `lintFiles`, `checkPage({ files })`. 0.7 (P085–P090): the
-capability runtime: `config.runtime`, one global `porthole.use(name)` (a frozen namespace or null),
-a page's declaration (`declareCapabilities`, built-ins vs declared), viewer levels from the host's
-access (`Grant.level`), `porthole/call` through the bridge, the runtime's own host functions
-(`user`, `comments`, `artifact`, `assets`, `db`), `/_blob/` assets, versioned `.d.ts`
-(`types/runtime/v1`), 0.6's globals as the legacy path (`shell/legacy.ts`), and
-`defineRuntimeConformance` with the in-memory reference (`leak/runtime/memory.ts`).
+**Docs describe the current state.** What changed in which release goes in CHANGELOG.md, and why
+in DECISIONS.md; never a version narrative in the other docs. A release edits CHANGELOG.md and
+package.json only.
 
 ## Setup
 

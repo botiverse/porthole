@@ -3,7 +3,7 @@ import type { FrameSource } from "../isolation/types.ts";
 import type { Transport } from "../transport/types.ts";
 
 /**
- * The platform-host seam (ARCHITECTURE § Platform hosts): what owns the isolation primitive and
+ * The platform-host seam (DESIGN.md § Platform hosts): what owns the isolation primitive and
  * the transport. The web's is an `<iframe>` with `postMessage`; a native web view is another
  * implementation of the same interface, not a fork.
  */

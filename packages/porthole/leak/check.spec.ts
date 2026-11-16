@@ -11,7 +11,7 @@ import {
 
 /**
  * The agent's pre-show check (P073) in real browsers: the manual's own examples pass it under
- * every preset, at the manual's widths, in light and dark (OBJECTIVES criterion 5); a page that
+ * every preset, at the manual's widths, in light and dark (PRINCIPLES.md, objective 5); a page that
  * breaks is told so, briefly; the CDP driver (Cloudflare Browser Rendering's way) works too.
  */
 

@@ -1,5 +1,8 @@
 # Decision log
 
+A log, not required reading: the other docs describe how things are now, and cite entries here
+by number (Pxxx) for why. P063 and P113 were never assigned.
+
 Append-only. Each entry records the decision, why, what we rejected, and **when to
 revisit**. To change a decision, add a new entry that supersedes the old one and
 mark the old one `Superseded by Pxxx`. The "revisit when" line is the most
