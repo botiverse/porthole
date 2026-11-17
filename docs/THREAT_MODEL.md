@@ -150,9 +150,10 @@ Whatever the use (how to wire each: [ADOPTING.md](ADOPTING.md)):
   errors and show nothing for them. What each outcome's word is worth: §7 "The host's fallback".
 - **Annotations and find in page** (§7). Take reports as UI hints (where to draw, what to open),
   never as permissions, and put nothing in a mark the page may not know. A mark's place in the
-  document (`documentRect`, with the report's `scroll`, P132) and its last line's
-  (`lastLineDocumentRect`, P133) aren't clamped to the frame: clip what you draw from them to the
-  frame's box, or to your own region beside it. The page reads every query your find bar sends
+  document (`documentRect`, with the report's `scroll`, P132), its last line's
+  (`lastLineDocumentRect`, P133) and the point an element was picked at (`pointDocument`, P150)
+  aren't clamped to the frame: clip what you draw from them to the frame's box, or to your own
+  region beside it. The page reads every query your find bar sends
   (P131): declare `find` only for displays whose pages may learn what the person searches for (not a
   third-party app with egress, S5, unless you accept that). Take its counts as the bar's numbers,
   and open your bar on `findRequested`, nothing more.
@@ -693,11 +694,12 @@ content's realm.
   px; a host that scales or transforms the frame maps them through that transform. Reading the
   frame's size per report, before the rate, forces a layout of the host's page per message, as a
   repeated `ui/initialize` already does (accepted, P105).
-- *Places in the document* (P132, P133, P137). `documentRect` and `lastLineDocumentRect`, with the
-  report's `scroll`, are checked (finite, within `ANNOTATION_LIMITS.coordinate`, sizes not negative;
-  a malformed one, or a last line without `scroll`, drops the report) but not clamped (a clamp would
-  erase their purpose): the page chooses where the host's UI goes, outside the frame too (accepted;
-  the host clips, §6). They reveal nothing else.
+- *Places in the document* (P132, P133, P137, P150). `documentRect`, `lastLineDocumentRect` and an
+  element pick's `pointDocument`, with the report's `scroll`, are checked (finite, within
+  `ANNOTATION_LIMITS.coordinate`, sizes not negative; a malformed one, a last line or a point without
+  `scroll`, or a point on a text selection, drops the report) but not clamped (a clamp would erase
+  their purpose): the page chooses where the host's UI goes, outside the frame too (accepted; the
+  host clips, §6). They reveal nothing else.
 - *A followed selection* (P138, P140). `selectionTracked` boxes are checked and clamped likewise,
   taken only while the host follows the selection (otherwise dropped unread, without a refusal),
   within `tracked`'s 60 a second, and carry none of the page's words; `inView` is false unless the

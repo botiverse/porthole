@@ -119,6 +119,14 @@ export function parseRect(value: unknown): AnnotationRect | null {
  * may be negative: an engine's overscroll); null for anything else.
  */
 export function parseScroll(value: unknown): AnnotationScroll | null {
+  return parsePoint(value);
+}
+
+/**
+ * A point (a pick's `pointDocument`, P150): two finite numbers within the coordinate limit, as a
+ * scroll is; null for anything else.
+ */
+function parsePoint(value: unknown): { x: number; y: number } | null {
   if (!isRecord(value) || !coordinate(value.x) || !coordinate(value.y)) {
     return null;
   }
@@ -236,11 +244,24 @@ export function parseReport(value: unknown): AnnotationReport | null {
           ? undefined
           : parseRect(value.lastLineDocumentRect);
       const scroll = value.scroll === undefined ? undefined : parseScroll(value.scroll);
-      if (anchor === null || rect === null || lastLineDocumentRect === null || scroll === null) {
+      // Where an element was picked (P150), in the document as the last line is.
+      const pointDocument =
+        value.pointDocument === undefined ? undefined : parsePoint(value.pointDocument);
+      if (
+        anchor === null ||
+        rect === null ||
+        lastLineDocumentRect === null ||
+        scroll === null ||
+        pointDocument === null
+      ) {
         return null;
       }
       // A pair, here (P137): a selection has never had one without the other.
       if ((lastLineDocumentRect === undefined) !== (scroll === undefined)) {
+        return null;
+      }
+      // A point only for an element, and with its scroll (P150, as P137): text has no point.
+      if (pointDocument !== undefined && (anchor.kind !== "element" || scroll === undefined)) {
         return null;
       }
       return {
@@ -249,6 +270,7 @@ export function parseReport(value: unknown): AnnotationReport | null {
         rect,
         ...(lastLineDocumentRect === undefined ? {} : { lastLineDocumentRect }),
         ...(scroll === undefined ? {} : { scroll }),
+        ...(pointDocument === undefined ? {} : { pointDocument }),
       };
     }
     case "unselected":

@@ -9632,3 +9632,57 @@ as abuse its own handler can't bound; or a host needs an opaque page inside a sh
 (`leak/served/*.spec.ts`, 142 more on full Chromium), not `leak/late-word.spec.ts` alone: with
 the nested cases gone the project had seven tests left, and a served display out of process is
 the setting the removed guesses failed in. No served case needed a change to pass there.
+
+## P150 · 2026-11-17 · An element pick says where it was picked (`pointDocument`) · Accepted
+
+Amends P133 (what `selected` carries). From Raft (#proj-workspace:#315): a person picks an element
+that fills most of the frame (a long section, a whole card list) to comment on a part of it, and the
+host's comment card opens at the element's box, far from where they pointed.
+
+**Context.** For an element pick the host knows the element's box (`rect`, clamped to the frame,
+P104) and its whole box in the document (`lastLineDocumentRect`, P133). Where that box is most of the
+frame, every place derived from it (its corner, its end, its middle) can be a screen away from what
+the person clicked. The shell knows the point: the element is found under it.
+
+**Decision.**
+1. **`pointDocument`** on `selected`, for an element picked by a pointer only: `{ x, y }`, the point
+   the element was picked at in the frame's viewport (a click's or a tap's, the point the element is
+   found under; a held finger's press, P112), plus the `scroll` the report already carries, in the
+   coordinates of `documentRect` (P132). Read from the event's `clientX`/`clientY` and `placeOf`'s
+   one scroll, so it and the last line agree. A pick from the keyboard (a click with no `detail`)
+   has none, nor does a text selection.
+2. **The host checks it** as it checks a `scroll`: two finite numbers within
+   `ANNOTATION_LIMITS.coordinate`. A malformed one drops the whole report (a refusal, as a malformed
+   box). One without `scroll` drops the report, as a last line without it does (P137): its place in
+   the frame's viewport is it less the scroll. One on a text selection drops the report too: a shell
+   never sends it there, and a report is dropped, never repaired (P053).
+3. **Unclamped**, as `documentRect` and `lastLineDocumentRect` are: the host clips what it draws from
+   it to the frame's box (THREAT_MODEL §6). `rect` stays clamped.
+
+**Compatibility.** Optional and only added. An older shell sends none, and a host places by `rect`
+or the last line as before; an older host drops it (each report is rebuilt from known fields).
+
+**Threat.** None opened, and no isolation change: no wall, gate, rate or method moves. It is the
+page's word, as every box is: a page can say any point, which places the host's own UI somewhere in
+the page's own document, and the host clips that to the frame, so it reaches no further than
+`documentRect` already does (P132). It grants nothing and is never a fact about the person's press:
+a page can send it for a pick that wasn't, within the checks a `selected` already has (taken only
+while the host asked for elements). The page learns nothing new (it goes from the frame to the host).
+
+**Tested.** `test/annotate.test.ts` "the point picked (P150)": kept on an element pick, rebuilt from
+known fields, unclamped; malformed ones (`NaN`, `Infinity`, a string, no `y`, past the limit, an
+array) drop the report; none without `scroll`, none on a text selection; through `createHost`,
+`rect` clamped and the point as the shell said. `leak/annotate.spec.ts` "an element pick says where
+it was clicked…" (three engines; written here and not run, test runs being paused where it was
+written: CI runs it): a click on a block taller than the frame, the page scrolled, reports the
+click's point plus the scroll; a pick from the keyboard reports none.
+
+**Rejected.**
+- The press (`pointerdown`) rather than the click's point: a press dragged past an element picks the
+  one under the release, and a card at the press would sit beside the wrong element.
+- The point in the frame's viewport, clamped, like `rect`: it would move with every scroll, and a
+  host following the pick (P138) places from document coordinates already.
+- A point on text selections: the selection's last line places a composer already (P133).
+
+**Revisit when** a host wants the point followed as the element moves (P138's `selectionTracked`
+carries boxes only), or a pick from the keyboard should say a point (the focused element's own).

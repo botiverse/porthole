@@ -3699,6 +3699,56 @@ the third one ends here</p>
   ).toEqual(far);
 });
 
+test("an element pick says where it was clicked, in the document's coordinates with the scroll; a pick from the keyboard says no point (P150)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    widthPx: 480,
+    heightPx: 300,
+    content: `<!doctype html><html><head><title>Tall</title></head><body style="margin: 0">
+<div style="height: 200px">spacer</div>
+<div id="tall" style="height: 1600px">A block taller than the frame</div>
+<button id="key">Key</button>
+<div style="height: 400px">spacer</div>
+</body></html>`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#tall")).toBeAttached();
+  // Scrolled into the block: it fills the frame, and its box says nothing of where the click was.
+  await frame.evaluate(() => window.scrollTo(0, 700));
+  await display.annotate("start", { elements: true, text: false });
+  const frameBox = await (await frame.frameElement()).boundingBox();
+  const at = { x: 50, y: 120 };
+  await page.mouse.click((frameBox?.x ?? 0) + at.x, (frameBox?.y ?? 0) + at.y);
+  const picked = await next(display, "selected");
+  expect(picked.anchor.selectors[0], "the block is picked").toEqual({
+    type: "CssSelector",
+    value: "#tall",
+  });
+  expect(picked.scroll, "probe: the scroll it was read at").toEqual({ x: 0, y: 700 });
+  const point = picked.pointDocument;
+  expect(point, "probe: an element pick by a click has its point").toBeDefined();
+  expect(
+    Math.abs((point?.x ?? 0) - at.x) <= 1 && Math.abs((point?.y ?? 0) - (at.y + 700)) <= 1,
+    `probe: the click's point in the document (${JSON.stringify(point)})`,
+  ).toBe(true);
+  expect(picked.rect.y, "its box, clamped, starts at the frame's top").toBe(0);
+
+  // From the keyboard: the click the platform makes has no point, and none is said.
+  const count = (await reports(display)).length;
+  await display.annotate("start", { elements: true, text: false });
+  await frame.locator("#key").focus();
+  await page.keyboard.press("Enter");
+  const keyed = await next(display, "selected", count);
+  expect(keyed.anchor.selectors[0], "the button is picked").toEqual({
+    type: "CssSelector",
+    value: "#key",
+  });
+  expect(keyed.scroll, "a keyboard pick still has its scroll").toBeDefined();
+  expect(keyed.pointDocument, "probe: a pick from the keyboard has no point").toBeUndefined();
+});
+
 test("an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second", async ({
   page,
 }) => {

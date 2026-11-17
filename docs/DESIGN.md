@@ -1043,7 +1043,7 @@ can learn or fake: [THREAT_MODEL.md § 7](THREAT_MODEL.md#7-the-display-layer-an
 | host → frame | `porthole/annotate.clearSelection` | —: the page's text selection is taken away (the DOM's own `removeAllRanges`, taken before content runs) with what the shell held of it; nothing is reported back; marks, drafts and the mode stay (P115) |
 | host → frame | `porthole/annotate.focusMark` | `{ id, at }`, `at` the host's `Date.now()` as it sent it: the DOM focus goes to that mark's marker once the marks of a `show` are found. Dropped if it had to wait and the focus isn't in the frame's document as it lands (the DOM's own `hasFocus`, P135), if the frame takes it 100 ms or more after `at` by its own clock (the DOM's own `Date.now`), or with no `at` (P137); the built-ins are taken before content runs. Nothing is reported back; with no such marker, or while elements are picked, nothing happens. For after the keyboard closed the host's view: Escape, or a Tab past its ends (P134) |
 | host → frame | `porthole/annotate.track` | `{ id }` or `{ id: null }`: follow one shown mark, or none (P112); `{ id: null, selection: true }`: follow the selection last reported as `selected`, highlighted while followed (P138; an older shell reads it as none) |
-| frame → host | `porthole/annotate.selected` | `{ anchor, rect, lastLineDocumentRect?, scroll? }` (the last two only as a pair, P133, P137); after a scroll, sent again only if its box moved more than 0.5 px, on the follow-ups' clock (P105), and not while the host follows the selection (P138) |
+| frame → host | `porthole/annotate.selected` | `{ anchor, rect, lastLineDocumentRect?, scroll?, pointDocument? }` (`lastLineDocumentRect` and `scroll` only as a pair, P133, P137; `pointDocument` only on an element pick, and with `scroll`, P150); after a scroll, sent again only if its box moved more than 0.5 px, on the follow-ups' clock (P105), and not while the host follows the selection (P138) |
 | frame → host | `porthole/annotate.unselected` | — (the text selection went away) |
 | frame → host | `porthole/annotate.cancelled` | — (Escape) |
 | frame → host | `porthole/annotate.anchored` | `{ results: [{ id, state: "attached" \| "orphaned", rect?, documentRect?, lastLineDocumentRect?, order? }], scroll? }`: every mark after `show`, the one after `focus`, every mark when the content changed a state; while any mark has a marker, once a scroll, a resize or a run of content changes has settled (150 ms quiet), only the marks that moved more than 0.5 px since the host was last told, at most one a second together with the selection's (P104, P105) |
@@ -1070,8 +1070,12 @@ can learn or fake: [THREAT_MODEL.md § 7](THREAT_MODEL.md#7-the-display-layer-an
   a width of the words' client rects (an element's whole box), same coordinates, for a host's UI
   after a selection or mark. `createHost` checks these as boxes (finite, within the coordinate
   limit, sizes not negative; a malformed one drops the report) and clamps neither: the host clips
-  what it draws. A page scrolling a box of its own rather than its document moves its marks' places
-  with it, as `rect`.
+  what it draws. `pointDocument` (P150), on an element picked by a pointer, is the point it was
+  picked at (the click's or tap's, a held finger's press), plus `scroll`, as these are: for a host's
+  UI where the element is larger than most of the frame. Checked as `scroll` is (two finite numbers
+  within the limit), unclamped; one on a text selection, or without `scroll`, drops the report; a
+  pick from the keyboard has none. A page scrolling a box of its own rather than its document moves
+  its marks' places with it, as `rect`.
 - **The selection followed** (P138, P140). For a host that follows the selection, or said at `start`
   it will (`keepSelection`), the shell keeps what each `selected` reported (the element picked, or a
   copy of the range via the DOM's own `cloneRange`), updated through the page's changes and kept

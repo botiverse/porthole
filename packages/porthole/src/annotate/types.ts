@@ -53,7 +53,8 @@ export interface AnnotationAnchor {
  * outside is a box of no size on the nearest edge. A positioning hint only. It is in the frame's
  * own layout px: a host that scales or transforms the frame maps it through that transform too
  * (P105). A result's `documentRect` (P132) and a report's `lastLineDocumentRect` (P133) are the
- * same shape in the document's coordinates, and aren't clamped.
+ * same shape in the document's coordinates, and aren't clamped; nor is a pick's `pointDocument`
+ * (P150), a point there.
  */
 export interface AnnotationRect {
   readonly x: number;
@@ -180,6 +181,16 @@ export type AnnotationReport =
       readonly rect: AnnotationRect;
       readonly lastLineDocumentRect?: AnnotationRect;
       readonly scroll?: AnnotationScroll;
+      /**
+       * Where the person picked the element (P150): the point a click, a tap or a held finger
+       * picked it at, in the coordinates of `documentRect` (the point in the frame's viewport plus
+       * `scroll`), unclamped. For a host's UI by what was pointed at, where the element is larger
+       * than most of the frame: its place in the frame's viewport is this less `scroll`, which a
+       * host clips to the frame's box. Element picks only (a text selection that carries one is
+       * dropped), never without `scroll` (P137), and absent from a pick from the keyboard and from
+       * an older shell. The page's word: where to put the host's own UI, nothing more.
+       */
+      readonly pointDocument?: { readonly x: number; readonly y: number };
     }
   /** The text selection went away. */
   | { readonly type: "unselected" }

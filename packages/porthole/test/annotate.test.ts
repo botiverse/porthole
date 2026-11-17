@@ -911,6 +911,56 @@ describe("places in the document (P132): a result's documentRect and the report'
     });
   });
 
+  describe("the point picked (P150): an element pick's pointDocument, with the scroll", () => {
+    const lastLineDocumentRect = { x: 0, y: 900, width: 600, height: 2_400 };
+    const pointDocument = { x: 240.5, y: 1_730 };
+    const pick = { type: "selected", anchor: element, rect, lastLineDocumentRect, scroll };
+
+    test("an element pick keeps it, rebuilt from known fields, unclamped; one without it as before", () => {
+      expect(parseReport({ ...pick, pointDocument: { ...pointDocument, z: 1 } })).toStrictEqual({
+        ...pick,
+        pointDocument,
+      });
+      const far = { x: -40, y: ANNOTATION_LIMITS.coordinate };
+      expect(parseReport({ ...pick, pointDocument: far })).toStrictEqual({
+        ...pick,
+        pointDocument: far,
+      });
+      expect(parseReport(pick)).toStrictEqual(pick);
+    });
+
+    test("a malformed one drops the whole report, as a malformed box does", () => {
+      for (const bad of [
+        { x: 240, y: Number.NaN },
+        { x: Infinity, y: 1_730 },
+        { x: "240", y: 1_730 },
+        { x: 240 },
+        { x: 240, y: ANNOTATION_LIMITS.coordinate + 1 },
+        { x: -1e9, y: 1_730 },
+        [240, 1_730],
+        "240,1730",
+        null,
+      ]) {
+        expect(parseReport({ ...pick, pointDocument: bad }), JSON.stringify(bad)).toBeNull();
+      }
+    });
+
+    test("never without its scroll (as P137), and never on a text selection", () => {
+      expect(parseReport({ type: "selected", anchor: element, rect, pointDocument })).toBeNull();
+      expect(
+        parseReport({
+          type: "selected",
+          anchor: text,
+          rect,
+          lastLineDocumentRect,
+          scroll,
+          pointDocument,
+        }),
+      ).toBeNull();
+      expect(parseReport({ type: "selected", anchor: text, rect, pointDocument })).toBeNull();
+    });
+  });
+
   describe("on createHost over a stand-in platform", () => {
     const mounted: DisplayHandle[] = [];
     afterEach(() => {
@@ -981,6 +1031,28 @@ describe("places in the document (P132): a result's documentRect and the report'
           rect: { x: 8, y: 400, width: 300, height: 0 },
           lastLineDocumentRect: { x: 8, y: 3_044, width: 120, height: 22 },
           scroll: { x: 0, y: 900 },
+        },
+      ]);
+    });
+
+    test("an element pick's box is clamped; the point it was picked at isn't, and is the host's to clip (P150)", async () => {
+      const t = mount();
+      t.display.annotations.start({ elements: true, text: false });
+      await t.say("selected", {
+        anchor: element,
+        rect: { x: 0, y: -900, width: 600, height: 3_000 },
+        lastLineDocumentRect: { x: 0, y: 0, width: 600, height: 3_000 },
+        scroll: { x: 0, y: 900 },
+        pointDocument: { x: 320, y: 4_200 },
+      });
+      expect(t.reports).toEqual([
+        {
+          type: "selected",
+          anchor: element,
+          rect: { x: 0, y: 0, width: 600, height: 400 },
+          lastLineDocumentRect: { x: 0, y: 0, width: 600, height: 3_000 },
+          scroll: { x: 0, y: 900 },
+          pointDocument: { x: 320, y: 4_200 },
         },
       ]);
     });
