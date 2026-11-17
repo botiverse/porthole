@@ -3733,7 +3733,7 @@ test("an element pick says where it was clicked, in the document's coordinates w
     Math.abs((point?.x ?? 0) - at.x) <= 1 && Math.abs((point?.y ?? 0) - (at.y + 700)) <= 1,
     `probe: the click's point in the document (${JSON.stringify(point)})`,
   ).toBe(true);
-  expect(picked.rect.y, "its box, clamped, starts at the frame's top").toBe(0);
+  expect(picked.rect.y, "probe: its box, clamped, starts at the frame's top").toBe(0);
 
   // From the keyboard: the click the platform makes has no point, and none is said.
   const count = (await reports(display)).length;
