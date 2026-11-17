@@ -427,6 +427,7 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "following: once a scroll settles, one report with only the marks that moved",
       "every attached mark's place in the document comes with the scroll it was read at, offscreen ones too, and the followed mark's as the document scrolls (P132)",
       "a selection's and a mark's last line come in the document's coordinates with the scroll, offscreen ones too; rect stays clamped (P133)",
+      "an element pick says where it was clicked, in the document's coordinates with the scroll; a pick from the keyboard says no point (P150)",
     ),
   },
   // Served content (leak/served/).
