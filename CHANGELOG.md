@@ -4,6 +4,18 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## 0.16.1
+
+- **An element pick says where it was picked** (P150, amends P133). An element pick's
+  `selected` report carries an optional `pointDocument`: the click, tap or hold point, in
+  `documentRect`'s document coordinates, sent only beside `scroll`; a keyboard pick carries none,
+  and nor does a text selection. A host may place its own UI there, for an element larger than
+  most of the frame, clipping it to the frame as it does `documentRect`. It is the page's word and
+  grants nothing; no isolation wall changes. A report whose point is malformed, has no `scroll`,
+  or sits on a text selection is dropped (`annotate:invalid`).
+  **For a host:** nothing to change; read `pointDocument` if you place UI on a pick. The
+  annotation script every served page carries changed with it (its pinned hash, P145).
+
 ## 0.16.0
 
 **Breaking.** What guessed at the person's intent is taken out (P149; supersedes P111, P114,
