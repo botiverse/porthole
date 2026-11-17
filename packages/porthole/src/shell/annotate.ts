@@ -108,6 +108,9 @@ export const WORD_LATE = String.raw`(at, now) => {
  *   them placed as the document scrolls, from one report and the followed mark's scroll;
  * - the last line (P133): where a selection or a mark's words end, in the document's coordinates
  *   too (`lastLineDocumentRect`), so a host places its UI after them;
+ * - the point picked (P150): where a pointer picked an element (the click's or tap's point, a held
+ *   finger's), in the document's coordinates too (`pointDocument`), so a host places its UI by what
+ *   the person pointed at in an element larger than the frame;
  * - the selection followed (P138): what the last `selected` reported (the element picked, or the
  *   words selected) is kept while the host follows the selection (`track` with `selection`) or said
  *   at `start` that it will (`keepSelection`, P140), and nothing is kept otherwise; while followed
@@ -389,11 +392,15 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         return rect === null ? null : inDocument(box(rect), scroll);
       };
       // What a selection's report adds to its box (P133): its last line, with the scroll it was
-      // read at; neither where nothing of it is drawn.
-      const placeOf = (found) => {
+      // read at; neither where nothing of it is drawn. An element's pick by a pointer adds where it
+      // was picked (P150): that point in the viewport, in the document by the same scroll.
+      const placeOf = (found, point) => {
         const scroll = scrollOf();
         const lastLineDocumentRect = lastLineOf(found, scroll);
-        return lastLineDocumentRect === null ? {} : { lastLineDocumentRect, scroll };
+        if (lastLineDocumentRect === null) {
+          return {};
+        }
+        return point ? { lastLineDocumentRect, scroll, pointDocument: { x: point.x + scroll.x, y: point.y + scroll.y } } : { lastLineDocumentRect, scroll };
       };
 
       // The shell's own layer, over the content: marks, the outline of what would be picked.
@@ -1713,7 +1720,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             holdSelected(anchor, { element });
             picked = keeping && !followingSelection ? element : null;
             redraw();
-            tell(M.selected, Object.assign({ anchor, rect: box(elementRect.call(element)) }, placeOf({ element })));
+            tell(M.selected, Object.assign({ anchor, rect: box(elementRect.call(element)) }, placeOf({ element }, { x, y })));
           }, HOLD_MS),
         };
       }, true);
@@ -1765,7 +1772,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         // only for a host that will follow it (P140): for any other it goes with the pick.
         picked = keeping && !followingSelection ? element : null;
         draw();
-        tell(M.selected, Object.assign({ anchor, rect: box(elementRect.call(element)) }, placeOf({ element })));
+        // Where it was clicked or tapped (P150), the point the element was found under; a click
+        // from the keyboard (no detail) has no point.
+        const point = event.detail === 0 ? null : { x: event.clientX, y: event.clientY };
+        tell(M.selected, Object.assign({ anchor, rect: box(elementRect.call(element)) }, placeOf({ element }, point)));
       }, true);
       window.addEventListener("keydown", (event) => {
         if (event.key !== "Escape") {

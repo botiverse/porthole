@@ -279,6 +279,11 @@ display.on("annotation", (report) => {
 });
 ```
 
+**Where an element was picked** (P150): an element pick by a click or tap also carries `pointDocument`
+(with `scroll`), the point it was picked at in the same coordinates. Where the element fills most of
+the frame, place your UI at `pointDocument.x - scroll.x`, `pointDocument.y - scroll.y`, clipped. A
+pick from the keyboard, a text selection and an older shell send none.
+
 The keyboard:
 
 | Case | What to do |

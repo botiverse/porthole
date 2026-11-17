@@ -383,7 +383,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
        * Every box a report carries, clamped to the frame's viewport as it is now (P104): the page
        * places the host's own UI nowhere outside its frame. A mark's `documentRect` and the
        * document's `scroll` (P132) pass as they were checked: where a mark is in the document,
-       * offscreen too, which a clamp would erase; the host clips what it draws from them.
+       * offscreen too, which a clamp would erase; the host clips what it draws from them. So does a
+       * pick's `pointDocument` (P150).
        */
       const withinFrame = (report: AnnotationReport): AnnotationReport => {
         const viewport = frameViewport();
