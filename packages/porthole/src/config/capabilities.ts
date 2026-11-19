@@ -34,6 +34,7 @@ export const CAPABILITY_NAMES = [
   "copyText",
   "annotate",
   "find",
+  "linkLabels",
   // The capability runtime's own (P085, `config.runtime`): reached through `porthole.use`.
   "user",
   "comments",
@@ -88,7 +89,7 @@ export interface CapabilitySpec {
   /**
    * How content reaches it without the shell's global: the MCP Apps request (or Porthole's own,
    * `porthole/…`, where the standard has none), and the official App SDK's method for it, if any.
-   * Absent for what the shell does by itself (sizes, errors, annotations, find).
+   * Absent for what the shell does by itself (sizes, errors, annotations, find, link labels).
    */
   readonly request?: { readonly method: string; readonly sdk?: string };
 }
@@ -179,6 +180,15 @@ export const CAPABILITIES = {
    * which can read it; what the frame says back is the content's word: a find bar's numbers.
    */
   find: { defaultGates: [rate(120)], served: "event" },
+  /**
+   * Link labels (P151): the host has a link whose text is its own address show the title of the
+   * page it opens, as the person viewing may see it (another of the host's artifacts), from the
+   * host's own list; the page never reports its links. The labels go into the content's realm,
+   * which can read, rewrite or fake them: a label is never a trust signal. The frame says nothing
+   * of them; its rate bounds how often a later document of a run (another page of the set, P084)
+   * is given the labels again.
+   */
+  linkLabels: { defaultGates: [rate(60)], served: "event" },
   /** Who is viewing (P087): answered from the viewer the host gave the display. */
   user: { defaultGates: [rate(60)], served: "viewer", request: { method: "porthole/call" } },
   /** Opens the host's comment composer at the page's anchor (P090): write-only. */
@@ -226,6 +236,8 @@ export interface CapabilityArgs {
   readonly annotate: AnnotationReport;
   /** What the frame said unasked, once checked (`FindReport`): the shortcut, a changed count. */
   readonly find: FindReport;
+  /** A later document of the run said it is ready (P151): nothing more. */
+  readonly linkLabels: Readonly<Record<string, never>>;
   readonly user: Readonly<Record<string, never>>;
   readonly comments: CommentRequest;
   readonly artifact: ArtifactRequest;
@@ -253,6 +265,7 @@ export interface CapabilityResults {
   readonly copyText: boolean;
   readonly annotate: undefined;
   readonly find: undefined;
+  readonly linkLabels: undefined;
   readonly user: UserInfo;
   /** Whether the composer opened. Never a thread: content doesn't read comments (P090). */
   readonly comments: boolean;

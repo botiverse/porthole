@@ -743,6 +743,23 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       "a hostile page says the find shortcut was pressed while the person types in the host's composer: the host's find bar stays shut (P131)",
     ),
   },
+  // Link labels (P151): a label is text. Written as markup, its tags make elements; and the shell
+  // no longer finds its own words in the link (a new text node took them), so a new set gives
+  // that link nothing back.
+  "link-label-text": {
+    specs: ["leak/link-labels.spec.ts"],
+    fails: all(
+      "link labels: a label is text, never markup: its tags stay words and make no element (P151)",
+      "link labels: a new label set gives the links it no longer labels their own words back, and none gives all of them back (P151)",
+    ),
+  },
+  // Link labels (P151) are forgotten on a new run.
+  "link-label-forget": {
+    specs: ["leak/link-labels.spec.ts"],
+    fails: all(
+      "link labels: a new run forgets them: the page shows its links' addresses again until the host labels anew (P151)",
+    ),
+  },
 };
 
 // ---------------------------------------------------------------------------------------------

@@ -157,6 +157,11 @@ Whatever the use (how to wire each: [ADOPTING.md](ADOPTING.md)):
   (P131): declare `find` only for displays whose pages may learn what the person searches for (not a
   third-party app with egress, S5, unless you accept that). Take its counts as the bar's numbers,
   and open your bar on `findRequested`, nothing more.
+- **Link labels** (§7, P151). Send only titles the person viewing may see and the page may learn:
+  the page reads every label, and one with a way out can send them to its author. Label from your
+  own list of what the page links to, for the document shown (a new run or other content forgets
+  them; label each page again), never from anything the page says. Never treat a label, or
+  `data-porthole-label`, as a trust signal: the page can rewrite, hide or fake one.
 - **Guard a view a frame's report opens or moves** (`activated`, `anchored`, `selected`, `tracked`,
   `selectionTracked`): a comment's bubble, a composer, a card following its mark, a composer
   following the selection (P138). The page picks when and where it appears, moves it up to 60 times
@@ -613,7 +618,7 @@ prompt with a link out): that is the door's wall (P125).
 ### The display layer
 
 What it is: the presets, the isolation, the egress walls, the shell, the bridge for the display's
-host functions (S1's table, annotations, find in page) and the generated manual.
+host functions (S1's table, annotations, find in page, link labels) and the generated manual.
 
 **Porthole guarantees** the two lines of [§4](#4-two-lines-of-defense) for each display except url
 mode (S6), with S1–S5's open items. One config generates the CSP, the sandbox, the shell's wiring
@@ -790,6 +795,31 @@ page).
   most 1,000 matches kept and 10,000 looked at; queries of 256 characters; found again at most once
   a second while the content changes; of a burst, only the latest searched). In an opaque frame in
   the host's process that is the host's time too ([§5](#5-out-of-scope)).
+
+**Link labels** (`linkLabels`, P151). The host gives a display titles for links to its own pages
+(an artifact's links to other artifacts), as the person viewing may see them; the shell shows a
+title in place of a bare link's address, as text, and tags every link to it (how: [DESIGN.md](DESIGN.md)
+§ Link labels). The host labels from its own list; the page reports no links, and the frame says
+nothing back.
+
+- *What content learns.* Every label the host sends: each address and its title as this viewer may
+  see it (another artifact's name, which the page's author may not know), and the tag. Page scripts
+  read them as they read a find query: from the links' text, or from the message itself, which
+  reaches the page's own listeners in the window the shell shares. A page with a way out (egress, a carrier such as `db`,
+  `mayPassOn`) can send them to its author. So `linkLabels` is declared, in no preset by default,
+  and the host sends only titles the viewer may see and the page may learn. Labels are forgotten on
+  a new run or other content, so another page never learns the last one's.
+- *What content can do.* Read, alter, hide or remove a label; give a link the label's words or
+  another title itself; draw a lookalike link with any words; set or strip `data-porthole-label`; or
+  write its own words over a label (the shell then leaves them). A label is a reader's convenience,
+  never a trust signal: it says nothing about where a link goes, and the host never acts on one.
+  The shell writes a label as text only (never markup), with its bidirectional controls taken out
+  (by the host and the shell), so a title can neither add elements nor reorder what is drawn after
+  it; a page that wants markup there has it anyway, in its own realm.
+- *What content can always do.* Make the labelling dear: the shell looks at every link each time
+  the document's changes settle (at most once a second while they go on), at most 500 labels; a page
+  that says it is ready again and again is given the labels again at most 60 times a minute. In an
+  opaque frame in the host's process that is the host's time too ([§5](#5-out-of-scope)).
 
 **The keyboard** (P109, P123, P149; the accepted risk in §5, the host's side in §6). Content can
 move focus into its frame (`element.focus()` and the like) while the person types in the host's

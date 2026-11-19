@@ -213,7 +213,7 @@ Attackers, out of scope, and several displays on one page: [THREAT_MODEL.md](THR
    frame says about itself (size, errors, an annotation's anchor and place, find's match count) is
    the content's word even when the shell says it, since they share a realm: the host bounds it and
    uses it as a UI hint, never a permission (P053, P131). What the host sends in (a mark, a find
-   query) the content can read.
+   query, a link label) the content can read.
 5. **Host's decision ↔ content domain.** Authentication and authorization *policy* are the host's;
    carrying its decision onto the content domain is Porthole's *mechanism*. The host decides who may
    open an instance before it calls `issue` (a viewer, or a public link), and may decide again per
@@ -234,7 +234,8 @@ Attackers, out of scope, and several displays on one page: [THREAT_MODEL.md](THR
   version, namespaces of methods over host functions with a versioned `.d.ts`); annotations
   (`annotate`, P053: the host drives a select mode, stores W3C Web Annotation anchors with its
   comments, and answers a marker's click with its own UI outside the frame); find in page (`find`:
-  the host's find bar, the shell's highlights).
+  the host's find bar, the shell's highlights); link labels (`linkLabels`: the host's titles for
+  bare links, P151).
 - **Served content.** A host plugs into `/server`: who may see what (`authorize`), where tickets
   live (`TicketStore`: memory, D1), how origins are named (`content.name`, other servers' `reserved`
   namespaces), where apps and versions come from (`upstream`, `artifacts`: a page, or a manifest of
@@ -296,6 +297,7 @@ type Gate = "user-activation" | "confirm" | "consent" | "show" | { rateLimit: { 
 | `resize` | none | event | (automatic) | `ui/notifications/size-changed` |
 | `copyText` | user-activation, 30/min | handler | `copyText(text)` | `porthole/copy-text` (none in the standard) |
 | `annotate` | 120/min (the frame's reports) | event | — | `porthole/annotate.*` (the host drives it, P053) |
+| `linkLabels` | 60/min (a later document given the labels again) | event | — | `porthole/links.label` (host → frame only, P151) |
 | `user` (runtime) | 60/min | viewer (the host's `ViewerInfo`) | `porthole.use("user")` | `porthole/call` (P087) |
 | `comments` (runtime) | 30/min (P149) | handler (answers a boolean) | `porthole.use("comments")` | `porthole/call` (P090) |
 | `artifact` (runtime, artifact mode) | 10/min | handler (`op: get \| publish`) | `porthole.use("artifact")` | `porthole/call` (P088) |
@@ -769,6 +771,7 @@ again.
     onInitialized onOutcome
     fill?                            // fill the box and scroll inside, not grow with the content
     annotating? annotations? focusedAnnotation? trackedAnnotation? trackedSelection? onAnnotation?   // where annotate is declared
+    linkLabels?                      // titles for bare links, where linkLabels is declared (P151)
     ref?                             // a PortholeFrameHandle: clearSelection() (P118)
     aliases? themeKey? renderPlaceholder? eager? confirm? document? instance?
     className? style? />
@@ -803,6 +806,8 @@ again.
   gets the frame's reports, `tracked` and `selectionTracked` boxes too. A remounted frame gets them
   all. The `ref` (`PortholeFrameHandle`) holds `clearSelection()`, `find`, `clearFind`,
   `focusMark(id)`, each a no-op while no display runs.
+- **Link labels** (P151) follow `linkLabels`, by value: sent when it changes, and again to each new
+  document the display loads (a new run, other `content`), which the core gave none.
 - **Errors** (P055): `onContentError` gets the content's faults (what it threw, what the sandbox
   blocked, a stopped navigation, that it kept navigating away): the agent's to hear.
   `onNavigationBlocked` gets a stopped navigation's whole address (P080). `onHostError` gets the
@@ -1192,6 +1197,45 @@ A host's own find bar over a display (P131), where the config declares `find`. W
   page's own find keeping it, and a hostile page's `requested` while the person types in the host's
   composer dropped (`find-requested-focus`).
 
+## Link labels
+
+The host's titles for bare links (P151), where the config declares `linkLabels`: a page links to
+another of the host's pages (an artifact to another artifact), the host knows that page's title as
+the person viewing may see it, and a link whose text is its own address shows the title instead.
+The host decides what to label from its own list; the page never reports its links, and the frame
+says nothing back. Wiring: [ADOPTING.md § Link labels](ADOPTING.md#link-labels-titles-for-bare-links).
+What the page learns: [THREAT_MODEL.md § 7](THREAT_MODEL.md#7-the-display-layer-and-the-app-runtime).
+
+| Direction | Message | Params |
+|-----------|---------|--------|
+| host → frame | `porthole/links.label` | `{ labels: [{ href, text, tag? }] }`, a notification (nothing answers it): the labels for the document shown, replacing the last (an empty list gives every link its own words back); at most 500, `href` an absolute http(s) URL as the platform writes it (≤ 2,048), `text` ≤ 300 without bidirectional controls, `tag` `[a-z0-9-]{1,32}` |
+
+- **Shell.** `LINKS_RUNTIME` (`src/shell/links.ts`) is spliced in find's place, after it, where
+  declared (the runtime's own bytes, pinned by P145, are unchanged). It holds the message to the
+  host's bounds again (`LINK_LABELS_OF`: own fields, at most 500, bidirectional controls out). For
+  each HTML `a` and `area` whose `href`, resolved against the document's base by the platform's own
+  URL parser, is a label's exactly: a bare link (`LINK_BARE`: its only child a text node whose words,
+  trimmed of ASCII white space, are its `href` as written or as resolved) has that node's words
+  replaced by the label's text, through the kept `nodeValue` setter (text, never markup; it inserts
+  no node), its own words kept and given back when a later set no longer labels it (if the node
+  still holds the label's words); every link to it gets `data-porthole-label="<tag>"`. Applied again
+  once the document's changes settle (150 ms quiet, at most a second late, as find's search), its
+  own changes' records taken. Like find (P129), it calls only built-ins captured before content
+  runs, through `callOf`.
+- **Host API.** `display.links.label(labels)`: checked (`checkLinkLabels`; a malformed label dropped,
+  the rest kept; anything but a list a `TypeError`), held for the content shown and sent once the
+  frame finished its handshake; the same set again sends nothing. A new run or other content forgets
+  them, as it does a find query (other content also sends an empty set). Each later document of a
+  run that says it is ready (another page of the set, P084) is given them again through the
+  bridge's gates (`linkLabels`, 60 a minute by default). React: `linkLabels`.
+- **Trust and tests.** The page reads every label; a label is its to rewrite or fake, never a trust
+  signal. `test/links.test.ts`: the bare rule, the shell's reading and the host's checks with their
+  limits, the splice and its built-ins, `createHost`'s sending, forgetting and the later page's
+  rate, the bridge. `leak/link-labels.spec.ts` on three engines: a bare link labelled, a worded one
+  kept and tagged, another address left alone, malformed labels dropped, bidirectional controls out,
+  a link added later labelled, a new set restoring, a label kept as text (`link-label-text`), a new
+  run forgetting (`link-label-forget`).
+
 ## The shell runtime
 
 The runtime (`src/shell/runtime.ts`, plain ES2020, no build) runs first in every frame it serves.
@@ -1430,3 +1474,5 @@ and every control the tables above name to the registry.
 | `blob-script,blob-trusted` | `served/runtime.spec.ts` | `a script asset runs as code only if an admin uploaded it where uploads are the admins'`, `scripts load from /_blob/ only where uploads are the admins' (a tab, its session)` | — | — |
 | `blob-inert` | `served/runtime.spec.ts` | `an asset opened on its own runs nothing, on a tab with the artifact's session` | — | — |
 | `find-requested-focus` | `find.spec.ts` | `a hostile page says the find shortcut was pressed while the person types in the host's composer: the host's find bar stays shut (P131)` | — | — |
+| `link-label-text` | `link-labels.spec.ts` | `link labels: a label is text, never markup: its tags stay words and make no element (P151)`, `link labels: a new label set gives the links it no longer labels their own words back, and none gives all of them back (P151)` | — | — |
+| `link-label-forget` | `link-labels.spec.ts` | `link labels: a new run forgets them: the page shows its links' addresses again until the host labels anew (P151)` | — | — |

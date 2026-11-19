@@ -446,6 +446,8 @@ const ENTRIES: { readonly [N in CapabilityName]: (c: Context, gates: readonly Ga
       `- Comments: the person may point at parts of the ${c.noun} to comment on them. Give headings and the parts that matter stable ids (id="revenue"), so comments stay on them when the ${c.noun} is written again.`,
     find: (c) =>
       `- Find: the person may search the ${c.noun}'s words with the app's own find bar (Cmd+F or Ctrl+F), which highlights them where they are. Keep the words they would look for as text (not in images or a canvas). A ${c.noun} that handles Cmd+F or Ctrl+F itself (preventDefault) keeps the key.`,
+    linkLabels: (c) =>
+      `- Link labels: a link in the ${c.noun} whose text is its own address (<a href="https://…">https://…</a>) may show the title of the page it opens instead, as the app knows it, and a link to such a page may carry a data-porthole-label attribute. Give a link words of your own where you have them (they are kept); don't rely on a link's text staying its address.`,
     reportError: (c) =>
       `- ${manualLimits(c.config, "").find((limit) => limit.id === "errors")?.text ?? ""}`,
     resize: () => "",
@@ -458,7 +460,13 @@ const ENTRIES: { readonly [N in CapabilityName]: (c: Context, gates: readonly Ga
   };
 
 /** The shell's own capabilities, which content never calls by name: taught as they are. */
-const SHELL_OWN: readonly CapabilityName[] = ["annotate", "find", "reportError", "resize"];
+const SHELL_OWN: readonly CapabilityName[] = [
+  "annotate",
+  "find",
+  "linkLabels",
+  "reportError",
+  "resize",
+];
 
 function interactive(c: Context): string {
   const { config, noun } = c;

@@ -103,6 +103,11 @@ It inserts nothing into the content's own trees: no element wraps or splits the 
 the matches are ranges, read for their boxes only. Its inline styles are set through CSSOM
 (`cssText`), and it doesn't use the CSS Custom Highlight API.
 
+Link labels (P151), where a config declares `linkLabels`, add no layer and no entry point, and
+insert no node: a bare link's existing text node takes the label's words through the platform's own
+`nodeValue` setter (text, never parsed), and a link gets `data-porthole-label` through the guarded
+`setAttribute` taken after step 3 (removed through `removeAttribute`).
+
 ## Under `nestedFrames: "own"`
 
 The configuration that keeps a page's own iframes (P128) keeps creation open: an `iframe` can be

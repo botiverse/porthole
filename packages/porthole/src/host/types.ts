@@ -5,6 +5,7 @@ import type {
   AnnotationTrackTarget,
 } from "../annotate/types.ts";
 import type { FindOptions, FindResult } from "../find/types.ts";
+import type { LinkLabel } from "../links/types.ts";
 import type { Refused } from "../bridge/refusal.ts";
 import type {
   Confirm,
@@ -134,6 +135,8 @@ export type HostErrorKind =
   | "annotations"
   /** A find call was refused (a query too long, options that aren't these: P131). */
   | "find"
+  /** A link-label call was refused (labels that aren't a list: P151). */
+  | "links"
   /**
    * A frame status (`porthole/notifications/frame-status`) the host didn't take, since it came
    * from the frame's content, not from a page of Porthole's server (P124): never shown, never an
@@ -288,6 +291,33 @@ export interface FindControls {
 }
 
 /**
+ * Link labels on a display whose config declares `linkLabels` (P151): a bare link (its only child
+ * a text node whose words are its address) to an address the host labels shows the label's text
+ * instead, and every link to it gets the label's tag. The labels hold only for the content they
+ * were given for, as a find query does: a new run (`reload()`, a restart after the content
+ * navigated away, a new location) or other content (`setContent` with content that doesn't
+ * continue what was given) forgets them (other content gives the frame's links their own words
+ * back), and nothing is labelled until the host labels again. Another page of the content's own set
+ * (P084) is the same content: it is given them again as it loads, within the capability's rate.
+ * Where the config doesn't declare `linkLabels`, nothing is sent.
+ */
+export interface LinkLabelControls {
+  /**
+   * The labels for the content shown, replacing any before; an empty list gives every link its
+   * own words back. Each is checked (`checkLinkLabels`): an absolute http(s) `href`, compared as
+   * the platform parses it; `text` at most `LINK_LABEL_LIMITS.text` characters, its bidirectional
+   * controls removed; a `tag` of `LINK_LABEL_TAG`, else left out. A malformed label is dropped, the
+   * rest kept, at most `LINK_LABEL_LIMITS.labels`. Throws a `TypeError` for anything but a list.
+   *
+   * The page reads every label sent (it shares the realm with the shell): send only titles the
+   * person viewing may see and the page may learn. A label is the page's to rewrite, hide or fake,
+   * never a trust signal. Sent to the frame running now once it finished its handshake (else when
+   * it does); the same labels given again send nothing.
+   */
+  label(labels: readonly LinkLabel[]): void;
+}
+
+/**
  * Annotations on a display whose config declares `annotate` (P053). The host's state is kept and
  * given to every frame the display runs (a reload, a navigation recovered from).
  */
@@ -374,6 +404,8 @@ export interface DisplayControls {
   readonly annotations: AnnotationControls;
   /** Find in page (`find`, P131): `"unsupported"` where the config doesn't declare it. */
   readonly find: FindControls;
+  /** Link labels (`linkLabels`, P151): nothing is sent where the config doesn't declare it. */
+  readonly links: LinkLabelControls;
   /** Runs the content again from the start, in a new frame. */
   reload(): void;
   /** Moves focus into the display's frame. */

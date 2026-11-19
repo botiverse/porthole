@@ -623,6 +623,25 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
       replace: "          if (!takesShortcut) {",
     },
   ],
+  // Link labels (P151): a label's text written as markup (the link's innerHTML), so a title that
+  // holds tags makes elements in the page, and its handlers run.
+  "link-label-text": [
+    {
+      file: "src/shell/links.ts",
+      find: "      const writeLabel = (link, child, text) => {\n        setText(child, text);\n",
+      replace:
+        "      const writeLabel = (link, child, text) => {\n        link.innerHTML = text;\n",
+    },
+  ],
+  // Link labels (P151) kept across runs: a new run's frame (a reload, a restart, maybe other
+  // content) is given the last run's labels without the host labelling it.
+  "link-label-forget": [
+    {
+      file: "src/host/create-host.ts",
+      find: "        linksGiven = NO_LABELS;\n        forgetLinks(false);\n",
+      replace: "        linksGiven = NO_LABELS;\n",
+    },
+  ],
   // The host's clearSelection (P115) through the page's own Selection, and the shell keeps the
   // selection it told: a page that patched the way out keeps its selection, and the clear is told
   // back as an `unselected`.

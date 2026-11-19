@@ -87,6 +87,8 @@ export type BridgeEvent =
   | { readonly type: "annotation"; readonly report: AnnotationReport }
   /** What the frame said of find in page unasked (P131), checked. */
   | { readonly type: "find"; readonly report: FindReport }
+  /** A later document of the run is ready for the link labels again (P151), within their rate. */
+  | { readonly type: "linkLabels" }
   | { readonly type: "refused"; readonly capability: CapabilityName; readonly refusal: Refusal }
   | { readonly type: "muted" };
 
@@ -313,6 +315,8 @@ const VALIDATORS: { readonly [N in CapabilityName]: Validator<N> } = {
   },
   annotate: (args) => parseReport(args),
   find: (args) => parseFindReport(args),
+  // Nothing of the frame's is read (P151): the host gives the labels again, or doesn't.
+  linkLabels: (args) => (args === undefined || isRecord(args) ? {} : null),
   // The runtime's own (P088-P090): their shapes and limits, before any gate.
   user: (args) => (args === undefined || isRecord(args) ? {} : null),
   comments: (args) => parseCommentRequest(args),
@@ -810,6 +814,8 @@ export function createBridge(options: BridgeOptions): DisplayBridge {
           onEvent({ type: "annotation", report: args as CapabilityArgs["annotate"] });
         } else if (capability === "find") {
           onEvent({ type: "find", report: args as CapabilityArgs["find"] });
+        } else if (capability === "linkLabels") {
+          onEvent({ type: "linkLabels" });
         } else {
           const report = args as CapabilityArgs["reportError"];
           if (report.navigationBlocked !== undefined) {

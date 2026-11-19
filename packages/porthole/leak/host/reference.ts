@@ -5,6 +5,7 @@ import {
   type AnnotationTrackTarget,
   type FindOptions,
   type FindResult,
+  type LinkLabel,
 } from "../../src/index.ts";
 import type { CapabilityHandlers, ConfirmRequest } from "../../src/bridge/types.ts";
 import type { LaunchSpec, RecordedCall, RecordedEvent } from "../../src/conformance/index.ts";
@@ -218,6 +219,23 @@ const reference = {
     } catch (error) {
       return error instanceof Error ? error.message : String(error);
     }
+  },
+  /** Gives a display's links their labels (`linkLabels`, P151); what it throws comes back as a string. */
+  links(id: number, labels: readonly LinkLabel[]): string | null {
+    const controls = displays.get(id)?.handle.links;
+    if (controls === undefined) {
+      return "no display";
+    }
+    try {
+      controls.label(labels);
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  },
+  /** Runs a display's content again from the start, in a new frame (`DisplayControls.reload`). */
+  reload(id: number) {
+    displays.get(id)?.handle.reload();
   },
   destroy(id: number) {
     displays.get(id)?.handle.destroy();
