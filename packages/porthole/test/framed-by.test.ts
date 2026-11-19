@@ -625,7 +625,7 @@ const RUNTIME_V0_16_0 = {
   // 0.16.1's, where an element pick says where it was picked (P150), was
   // 'sha256-mEENXVKL++jLcp/UWE5v13gg234n9psEOCsXkq9eu9E=': since, an anchor says where it is in the
   // page (P152), for the next release's CHANGELOG to say. The other three are 0.15.0's.
-  annotate: "'sha256-jxE4LCFEf87vnGArTlFqYLagX7aqDUqSeBfJ4v9TskQ='",
+  annotate: "'sha256-yz31SX8KdgOpDylMsmeHkO0AM3pJ0ox6P3kb7BKROBM='",
   find: "'sha256-invvWJWqsN6Zv0kMLG2eeofMX6XmKNSqsvYydiElDGc='",
   use: "'sha256-TJx7YF/WvrHHkz8iTPfUfH6GNUEgES6O+0+igLRmyPQ='",
   legacy: "'sha256-ZEVJsezqV7n+Ho0m7Y92NYxAZqf8ynKq/rDdXrJUKp0='",

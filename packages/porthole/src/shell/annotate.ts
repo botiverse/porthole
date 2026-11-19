@@ -448,7 +448,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         // Its context is where it starts: the heading a selection begins under.
         let first = range.startContainer;
         if (first.nodeType !== 1) {
-          first = first.parentElement;
+          first = readOf(parentElementOf, first, "parentElement");
         }
         return withContext({ kind: "text", selectors, label: squash(exact).slice(0, LIMIT.label) }, first);
       };
