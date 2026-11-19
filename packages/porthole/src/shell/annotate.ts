@@ -81,14 +81,20 @@ export const WORD_LATE = String.raw`(at, now) => {
  * - `headings`: the outline down to it, h1 to h6 and `role=heading` (`aria-level`, else the tag's
  *   number, else 2): walking back from it, each rendered heading of a lower level than the last one
  *   kept; a heading it is in, or is, comes last. One that isn't rendered (no box, `hidden`,
- *   `aria-hidden`, `inert`, `visibility: hidden`: a hidden tab panel's) is never named.
+ *   `aria-hidden`, `inert`, `visibility: hidden`: a hidden tab panel's) is never named. Where it
+ *   holds rendered headings and exactly one of them has the lowest level (a card's header and its
+ *   h3), the outline goes down to that one, as if it were picked; several at that level (a list of
+ *   cards) leave the outline the one around it (P153). Where the page has exactly one rendered
+ *   level-1 heading and the outline starts with it above deeper ones, it is left out: it is the
+ *   page's title, which the reader knows (P153).
  * - `region`: the name of the nearest container around it that has one: a tab panel, a region or a
  *   dialog by `aria-labelledby` or `aria-label`, a `section`, `article`, `aside`, `nav`, `form` or
  *   `dialog` likewise, a `figure` by its `figcaption` too.
  * Each text squashed, without bidi controls and zero-width characters, at most 80 characters
  * (longer ones cut, with an ellipsis); at most 6 headings. Null where it has neither, or where
  * reading the page throws. Bounded: the headings found by halving, at most 1,000 looked back at,
- * 64 containers up, 1,000 characters of any one text read.
+ * 1,000 inside it (a target holding more has none of its own), 1,000 counted for the page's h1s
+ * (a page with more keeps its h1), 64 containers up, 1,000 characters of any one text read.
  */
 export const ANCHOR_CONTEXT = String.raw`(dom) => {
         const HEADING = 80;
@@ -133,9 +139,27 @@ export const ANCHOR_CONTEXT = String.raw`(dom) => {
           }
           return native || 2;
         };
+        // Whether the page has exactly one rendered level-1 heading: at most 1,000 headings looked
+        // at, and a page with more is not known to have one (P153).
+        const onlyTop = (all) => {
+          let found = 0;
+          for (let i = 0; i < all.length; i += 1) {
+            if (i >= 1000) {
+              return false;
+            }
+            if (levelOf(all[i]) === 1 && dom.shown(all[i])) {
+              found += 1;
+              if (found > 1) {
+                return false;
+              }
+            }
+          }
+          return found === 1;
+        };
         const headingsOf = (target) => {
           const all = dom.headings();
-          // In document order, those before the target (or holding it, or it) come first.
+          // In document order, those before the target (or holding it, or it) come first, then
+          // those inside it.
           let low = 0;
           let high = all.length;
           while (low < high) {
@@ -146,10 +170,30 @@ export const ANCHOR_CONTEXT = String.raw`(dom) => {
               high = middle;
             }
           }
+          // A target holding headings (a card's header and its h3, a section with its h3 and h4s):
+          // its one rendered heading of the lowest level is its own, and the outline goes down to
+          // it, as if it were picked. Several at that level (a list of cards) are no one's, nor
+          // are those of a target holding more than 1,000: the outline is the one around the
+          // target (P153).
+          let top = HEADINGS + 1;
+          let own = -1;
+          let i = low;
+          for (; i < all.length && i - low < 1000 && dom.inside(all[i], target); i += 1) {
+            const level = levelOf(all[i]);
+            if (level === 0 || level > top || !dom.shown(all[i])) {
+              continue;
+            }
+            own = level < top ? i : -1;
+            top = level;
+          }
+          if (own !== -1 && !(i - low >= 1000 && i < all.length && dom.inside(all[i], target))) {
+            low = own + 1;
+          }
           const kept = [];
+          let first = 0;
           let floor = HEADINGS + 1;
-          for (let i = low - 1, steps = 0; i >= 0 && steps < 1000 && floor > 1; i -= 1, steps += 1) {
-            const heading = all[i];
+          for (let j = low - 1, steps = 0; j >= 0 && steps < 1000 && floor > 1; j -= 1, steps += 1) {
+            const heading = all[j];
             const level = levelOf(heading);
             if (level === 0 || level >= floor || !dom.shown(heading)) {
               continue;
@@ -159,7 +203,13 @@ export const ANCHOR_CONTEXT = String.raw`(dom) => {
             const words = cap(nameOf(heading), HEADING);
             if (words !== "") {
               kept.unshift(words);
+              first = level;
             }
+          }
+          // The page's only h1 is its title, which the reader knows: left out above deeper
+          // headings, kept where it is the only one (P153).
+          if (kept.length > 1 && first === 1 && onlyTop(all)) {
+            kept.shift();
           }
           return kept;
         };
@@ -395,6 +445,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const contextOf = (${ANCHOR_CONTEXT})({
         headings: () => callOf(headingsIn, document, ["h1, h2, h3, h4, h5, h6, [role~=heading]"]),
         before: (node, target) => node === target || (callOf(comparePosition, target, [node]) & 2) !== 0,
+        inside: (node, target) => (callOf(comparePosition, target, [node]) & 16) !== 0,
         name: (element) => String(textNameOf === null ? element.localName : callOf(textNameOf, element, [])),
         attr: (element, name) => callOf(getAttribute, element, [name]),
         text: (element) => readOf(textContentOf, element, "textContent"),

@@ -4,6 +4,21 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **An anchor's headings: an element's own heading, and not the page's only h1** (P153, amends
+  P152). An element picked that holds rendered headings, exactly one of them at the lowest level
+  (a card's header and its h3, a section with its h3 and h4s), is placed under that one, last, not
+  under the section before it; one holding several at that level (a list of cards) keeps the
+  headings before and around it. The page's only rendered level-1 heading (an h1, or `role=heading`
+  with `aria-level=1`), its title, is left out of a chain that goes deeper; kept where it is the
+  only heading, and a page with two or more keeps them. Bounded: 1,000 headings looked at inside
+  the element (one holding more has none of its own) and 1,000 counted for the h1s (a page with
+  more keeps its h1). No field, limit or check changes, and no isolation wall.
+  **For a host:** nothing to change; new anchors' `context` is shorter or names the right section,
+  stored ones keep theirs. The annotation script every served page carries changed with it (its
+  pinned hash, P145).
+
 ## 0.17.0
 
 - **Link labels** (P151). A new declared capability, `linkLabels`, in no preset by default: the

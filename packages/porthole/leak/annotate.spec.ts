@@ -3749,7 +3749,7 @@ test("an element pick says where it was clicked, in the document's coordinates w
   expect(keyed.pointDocument, "probe: a pick from the keyboard has no point").toBeUndefined();
 });
 
-test("an anchor says where it is in the page: the headings above it, never a hidden tab's, and the tab panel it is in; a page with neither says nothing (P152)", async ({
+test("an anchor says where it is in the page: the headings above it, never a hidden tab's, and the tab panel it is in; a page with neither says nothing (P152); an element's own heading, the page's only h1 left out (P153)", async ({
   page,
 }) => {
   const display = await referenceHost.launch(page, {
@@ -3767,6 +3767,10 @@ test("an anchor says where it is in the page: the headings above it, never a hid
 <section role="tabpanel" aria-labelledby="tab-revenue"><p id="grew">Revenue grew 12% in the north.</p></section>
 <h3 id="outlook">Outlook</h3>
 <p id="next">Next quarter looks flat.</p>
+<div id="feed">
+  <div id="f-row-1"><header><h3>私信</h3></header><p>Hi</p></div>
+  <div id="f-row-2"><header style="padding: 12px"><h3>频道，@ 了你</h3><span>2 new</span></header><p>@you</p></div>
+</div>
 </body></html>`,
   });
   const frame = await display.frame();
@@ -3775,8 +3779,11 @@ test("an anchor says where it is in the page: the headings above it, never a hid
   await display.annotate("start", { elements: true, text: false });
   await frame.locator("#grew").click();
   const grew = await next(display, "selected");
-  expect(grew.anchor.context, "the hidden tabs' headings left out, the shown tab named").toEqual({
-    headings: ["Quarterly report", "Results"],
+  expect(
+    grew.anchor.context,
+    "the hidden tabs' headings left out, the shown tab named; the page's only h1 left out (P153)",
+  ).toEqual({
+    headings: ["Results"],
     region: "Revenue",
   });
 
@@ -3785,7 +3792,7 @@ test("an anchor says where it is in the page: the headings above it, never a hid
   await frame.locator("#outlook").click();
   const heading = await next(display, "selected", count);
   expect(heading.anchor.context, "a heading picked is the last").toEqual({
-    headings: ["Quarterly report", "Results", "Outlook"],
+    headings: ["Results", "Outlook"],
   });
 
   count = (await reports(display)).length;
@@ -3794,7 +3801,17 @@ test("an anchor says where it is in the page: the headings above it, never a hid
   const words = await next(display, "selected", count);
   expect(words.anchor.kind).toBe("text");
   expect(words.anchor.context, "a text selection's too").toEqual({
-    headings: ["Quarterly report", "Results", "Outlook"],
+    headings: ["Results", "Outlook"],
+  });
+
+  // A card's header picked (in its padding, not on its h3): its own h3, not the card before's (P153).
+  count = (await reports(display)).length;
+  await display.annotate("start", { elements: true, text: false });
+  await frame.locator("#f-row-2 > header").click({ position: { x: 4, y: 4 } });
+  const header = await next(display, "selected", count);
+  expect(header.anchor.selectors[0]).toEqual({ type: "CssSelector", value: "#f-row-2 > header" });
+  expect(header.anchor.context, "an element's own heading is the last").toEqual({
+    headings: ["Results", "频道，@ 了你"],
   });
 
   // No heading, no named region: no context at all.

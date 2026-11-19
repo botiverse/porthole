@@ -1959,7 +1959,8 @@ describe("where an anchor is in the page (P152): its context, the headings above
   type Context = { headings?: string[]; region?: string } | null;
   /**
    * `ANCHOR_CONTEXT` over a stand-in DOM, its reads as the runtime wires them: the headings in
-   * document order (`h1`–`h6`, `[role~=heading]`), a node before another or holding it, and an
+   * document order (`h1`–`h6`, `[role~=heading]`), a node before another or holding it, a node
+   * inside another (P153), and an
    * element not rendered where it or one around it is `hidden` (what the runtime's `closest`
    * check, or an empty `getClientRects`, sees of a hidden tab panel).
    */
@@ -1986,6 +1987,14 @@ describe("where an anchor is in the page (P152): its context, the headings above
             /^h[1-6]$/u.test(node.tag) || (node.attrs.role ?? "").split(/\s+/u).includes("heading"),
         ),
       before: (node: Stand, target: Stand) => order.indexOf(node) <= order.indexOf(target),
+      inside: (node: Stand, target: Stand) => {
+        for (let at = node.parent; at !== null; at = at.parent) {
+          if (at === target) {
+            return true;
+          }
+        }
+        return false;
+      },
       name: (node: Stand) => node.tag,
       attr: (node: Stand, name: string) => node.attrs[name] ?? null,
       text: textOf,
@@ -2024,18 +2033,19 @@ describe("where an anchor is in the page (P152): its context, the headings above
       h("h2", {}, "Costs"),
     );
     const contextOf = contextIn(page);
+    // The page's only h1, its title, is left out above deeper headings (P153).
     expect(contextOf(target)).toEqual({
-      headings: ["Quarterly report", "Revenue grew", "By region"],
+      headings: ["Revenue grew", "By region"],
     });
     expect(contextOf(picked), "a heading picked is the last").toEqual({
-      headings: ["Quarterly report", "Revenue grew", "By region"],
+      headings: ["Revenue grew", "By region"],
     });
     expect(contextOf(inHeading), "inside a heading: that heading is the last").toEqual({
-      headings: ["Quarterly report", "Revenue grew"],
+      headings: ["Revenue grew"],
     });
-    // A section picked: the headings before it, not the ones inside it.
+    // A section picked: the headings before it, down to its own one inside it (P153).
     expect(contextOf(section)).toEqual({
-      headings: ["Quarterly report", "Revenue grew", "By region"],
+      headings: ["Revenue grew", "By region", "Inside"],
     });
     // Spliced as it is, its built-ins taken before content runs.
     expect(ANNOTATE_RUNTIME).toContain(`const contextOf = (${ANCHOR_CONTEXT})({`);
@@ -2071,6 +2081,8 @@ describe("where an anchor is in the page (P152): its context, the headings above
       h("div", { role: "heading" }, "Level two by default"),
       h("h2", { "aria-level": "5" }, "Five by aria-level"),
       target,
+      // A second level-1 heading: the first isn't the page's only one, and stays (P153).
+      h("h1", {}, "Appendix"),
     );
     expect(contextIn(page)(target)).toEqual({
       headings: ["Dashboard", "Level two by default", "Five by aria-level"],
@@ -2102,8 +2114,9 @@ describe("where an anchor is in the page (P152): its context, the headings above
       ),
       h("section", { role: "tabpanel", "aria-labelledby": "tab-revenue" }, target),
     );
+    // The page's only h1 left out (P153).
     expect(contextIn(page)(target)).toEqual({
-      headings: ["Report", "Results"],
+      headings: ["Results"],
       region: "Revenue",
     });
   });
@@ -2169,6 +2182,8 @@ describe("where an anchor is in the page (P152): its context, the headings above
       h("h6", {}, "Six"),
       h("div", { role: "heading", "aria-level": "9" }, "Nine, read as six"),
       h("section", { "aria-label": `\u202Eevil\u202C\u200B ${"y".repeat(200)}` }, target),
+      // Not the page's only h1: the first stays (P153).
+      h("h1", {}, "Appendix"),
     );
     const context = contextIn(page)(target);
     expect(context?.headings).toEqual([
@@ -2190,6 +2205,190 @@ describe("where an anchor is in the page (P152): its context, the headings above
     expect(ANCHOR_CONTEXT).toContain(`const HEADING = ${ANNOTATION_LIMITS.heading};`);
     expect(ANCHOR_CONTEXT).toContain(`const HEADINGS = ${ANNOTATION_LIMITS.headings};`);
     expect(ANCHOR_CONTEXT).toContain(`const REGION = ${ANNOTATION_LIMITS.region};`);
+  });
+
+  test("an element holding its own heading: the outline goes down to it, not to the section before (P153)", () => {
+    // A card's header picked: its own h3, not the card before's.
+    const ownHeader = h("header", {}, h("h3", {}, "频道，@ 了你"), h("span", {}, "2 new"));
+    const feed = h(
+      "body",
+      {},
+      h("h1", {}, "Inbox"),
+      h("h2", {}, "Notifications"),
+      h("div", { id: "f-row-1" }, h("header", {}, h("h3", {}, "私信")), h("p", {}, "Hi")),
+      h("div", { id: "f-row-2" }, ownHeader, h("p", {}, "@you")),
+    );
+    expect(contextIn(feed)(ownHeader)).toEqual({ headings: ["Notifications", "频道，@ 了你"] });
+
+    // A section with an h3 and h4s picked: its h3, the top one, whatever comes before it inside.
+    const section = h(
+      "section",
+      {},
+      h("h5", {}, "Kicker"),
+      h("h3", {}, "Costs"),
+      h("h4", {}, "Fixed"),
+      h("p", {}, "Rent."),
+      h("h4", {}, "Variable"),
+    );
+    const report = h(
+      "body",
+      {},
+      h("h1", {}, "Report"),
+      h("h2", {}, "Results"),
+      h("section", {}, h("h3", {}, "Revenue"), h("p", {}, "Up.")),
+      section,
+    );
+    expect(contextIn(report)(section)).toEqual({ headings: ["Results", "Costs"] });
+
+    // What is inside the target, read through the compareDocumentPosition taken before content runs.
+    expect(ANNOTATE_RUNTIME).toContain(
+      "inside: (node, target) => (callOf(comparePosition, target, [node]) & 16) !== 0,",
+    );
+  });
+
+  test("an element holding several headings at its top level (a list of cards) gets the outline from before it; hidden ones aren't counted (P153)", () => {
+    const card = (title: string, attrs: Record<string, string> = {}) =>
+      h("article", attrs, h("h3", {}, title), h("h4", {}, `${title}, details`));
+    const cards = h("div", {}, card("A"), card("B"), card("C"));
+    const page = h("body", {}, h("h1", {}, "Report"), h("h2", {}, "Feed"), cards);
+    expect(contextIn(page)(cards), "no one card's heading").toEqual({ headings: ["Feed"] });
+    // One card of them picked: its own.
+    const one = cards.kids[1] as Stand;
+    expect(contextIn(page)(one)).toEqual({ headings: ["Feed", "B"] });
+
+    // Two of the three cards hidden (a filtered list): the one rendered h3 is the list's own.
+    const filtered = h(
+      "div",
+      {},
+      card("A", { hidden: "" }),
+      card("B"),
+      h("div", { hidden: "" }, card("C")),
+    );
+    const shown = h("body", {}, h("h1", {}, "Report"), h("h2", {}, "Feed"), filtered);
+    expect(contextIn(shown)(filtered)).toEqual({ headings: ["Feed", "B"] });
+    // Its only heading hidden: none of its own.
+    const empty = h("div", {}, h("h3", { hidden: "" }, "Gone"));
+    const withEmpty = h("body", {}, h("h1", {}, "Report"), h("h2", {}, "Feed"), empty);
+    expect(contextIn(withEmpty)(empty)).toEqual({ headings: ["Feed"] });
+  });
+
+  test("the page's only h1 is left out above deeper headings, kept alone; two h1s stay; role=heading with aria-level=1 is an h1; a hidden h1 isn't counted (P153)", () => {
+    const target = () => h("p", {}, "Words");
+    const deeper = target();
+    expect(
+      contextIn(h("body", {}, h("h1", {}, "Title"), h("h2", {}, "Section"), deeper))(deeper),
+      "dropped above deeper headings",
+    ).toEqual({ headings: ["Section"] });
+
+    const alone = target();
+    const title = h("h1", {}, "Title");
+    const lone = contextIn(h("body", {}, title, alone, h("h2", {}, "Later")));
+    expect(lone(alone), "kept where it is the only heading").toEqual({ headings: ["Title"] });
+    expect(lone(title), "the h1 picked, alone").toEqual({ headings: ["Title"] });
+
+    const second = target();
+    expect(
+      contextIn(
+        h(
+          "body",
+          {},
+          h("h1", {}, "Part one"),
+          h("h2", {}, "Intro"),
+          h("h1", {}, "Part two"),
+          h("h2", {}, "Details"),
+          second,
+        ),
+      )(second),
+      "two h1s: kept",
+    ).toEqual({ headings: ["Part two", "Details"] });
+
+    const byRole = target();
+    expect(
+      contextIn(
+        h(
+          "body",
+          {},
+          h("div", { role: "heading", "aria-level": "1" }, "Dashboard"),
+          h("h2", {}, "Revenue"),
+          byRole,
+        ),
+      )(byRole),
+      "role=heading aria-level=1: the only h1, left out",
+    ).toEqual({ headings: ["Revenue"] });
+    const both = target();
+    expect(
+      contextIn(
+        h(
+          "body",
+          {},
+          h("h1", {}, "Title"),
+          h("div", { role: "heading", "aria-level": "1" }, "Dashboard"),
+          h("h2", {}, "Revenue"),
+          both,
+        ),
+      )(both),
+      "an h1 and a role=heading aria-level=1: two, kept",
+    ).toEqual({ headings: ["Dashboard", "Revenue"] });
+    const demoted = target();
+    expect(
+      contextIn(
+        h(
+          "body",
+          {},
+          h("h1", {}, "Title"),
+          h("h1", { "aria-level": "2" }, "Read as two"),
+          h("h3", {}, "Three"),
+          demoted,
+        ),
+      )(demoted),
+      "an h1 with aria-level=2 isn't one",
+    ).toEqual({ headings: ["Read as two", "Three"] });
+
+    const hidden = target();
+    expect(
+      contextIn(
+        h(
+          "body",
+          {},
+          h("h1", {}, "Title"),
+          h("div", { hidden: "" }, h("h1", {}, "Another tab's title")),
+          h("h2", {}, "Section"),
+          hidden,
+        ),
+      )(hidden),
+      "a hidden h1 isn't counted",
+    ).toEqual({ headings: ["Section"] });
+  });
+
+  test("bounded (P153): a target holding more than 1,000 headings has none of its own; a page with more than 1,000 keeps its h1", () => {
+    const many = (count: number, tag: string) =>
+      Array.from({ length: count }, (_, k) => h(tag, {}, `${tag} ${k}`));
+    const holding = (count: number) => h("section", {}, h("h2", {}, "Own"), ...many(count, "h3"));
+    const within = holding(999);
+    expect(
+      contextIn(h("body", {}, h("h2", {}, "Before"), within))(within),
+      "1,000 inside: its own",
+    ).toEqual({ headings: ["Own"] });
+    const past = holding(1000);
+    expect(
+      contextIn(h("body", {}, h("h2", {}, "Before"), past))(past),
+      "1,001 inside: none of its own",
+    ).toEqual({ headings: ["Before"] });
+
+    const short = h("p", {}, "Words");
+    expect(
+      contextIn(
+        h("body", {}, h("h1", {}, "Title"), h("h2", {}, "Section"), short, ...many(998, "h6")),
+      )(short),
+      "1,000 headings: its only h1 counted, and left out",
+    ).toEqual({ headings: ["Section"] });
+    const long = h("p", {}, "Words");
+    expect(
+      contextIn(
+        h("body", {}, h("h1", {}, "Title"), h("h2", {}, "Section"), long, ...many(999, "h6")),
+      )(long),
+      "1,001 headings: not known to have one h1, kept",
+    ).toEqual({ headings: ["Title", "Section"] });
   });
 
   describe("the host's check", () => {
