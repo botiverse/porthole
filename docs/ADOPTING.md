@@ -329,6 +329,32 @@ display.on("navigated", () => bar.reset()); // the query is forgotten; also on r
 | **Not found** | Words in open shadow roots, a page's own frames (P128), form fields, images or a canvas, and words split across cells with no space between them. |
 | **React** | Props `onFindRequested` (given, the shortcut is yours) and `onFindUpdated`; the `ref`'s `find(query, options)` and `clearFind()`. With no display running, `find` answers `"unsupported"` and keeps the query for a display made later for the same content. Other content forgets it (a `content` that doesn't continue it, a new `generation`, `document`, `instance`, `config`, `declaration` or `viewer`). A refused query reaches `onHostError`, kind `"find"`. |
 
+### Link labels: titles for bare links
+
+With `linkLabels` declared (`capabilities: { linkLabels: {} }`), you can have a display's bare links
+(a link whose text is its own address) show the title of the page they open, as the person viewing
+may see it: an artifact that links to other artifacts of yours shows their names (P151). Label from
+your own list of what the page links to (your server knows each linked page and what this viewer may
+see of it); the page reports nothing. How it works: [DESIGN.md § Link labels](DESIGN.md#link-labels).
+The page reads every label: send only titles this viewer may see and the page may learn
+(THREAT_MODEL §6, §7).
+
+```js
+// After each document loads (and whenever your list changes): this viewer's titles for its links.
+display.on("initialized", () => display.links.label(labelsFor(artifact, viewer)));
+// [{ href: "https://app.example/a/123", text: "Q3 plan", tag: "artifact" }, ...]
+```
+
+| Case | What happens |
+| --- | --- |
+| **Bare or not** | A link whose only child is a text node whose words (white space around them aside) are its `href` as written or as resolved shows `text`; one with words of its own, or markup inside, keeps them. Every link to the address gets `data-porthole-label="<tag>"` where you give a `tag` (`[a-z0-9-]{1,32}`). |
+| **Which address** | The link's `href` resolved against the page's base, by the platform's own parser, equals the label's `href` as the platform writes it: give absolute http(s) URLs (`https://app.example` and `https://app.example/` are one; `/a/123` is another address, on the content's own origin). No other normalising (a trailing slash on a path, a query, a fragment all count). |
+| **Malformed** | Dropped, the rest applied: not an absolute http(s) URL, over 2,048 characters, `text` over 300 or blank. Bidirectional controls are taken out of `text`; past 500 labels the rest are dropped. Anything but a list throws a `TypeError` (React: `onHostError`, kind `"links"`). |
+| **Changes** | A new set replaces the last; `label([])` gives every link its own words back. Links the page adds or changes later are labelled once its changes settle. Words the page writes over a label stay its own. |
+| **New content** | A new run (`reload()`, `navigated`) or other content (a `setContent` that doesn't continue the last) forgets the labels: label again (on `initialized`, as above). Another page of the set (P084) is the same content: it is given them again as it loads, at most 60 a minute by default (the capability's rate; a page over it is `refused`, `rate_limited`). |
+| **Not labelled** | Links in open shadow roots, a page's own frames (P128), SVG links, image-map areas' text (they have none; they are tagged). |
+| **React** | `linkLabels` on `PortholeFrame` (and `PortholeView`), compared by value: sent when it changes and again to each new document. |
+
 ### The keyboard: a display can take it
 
 Any display can move the keyboard into its frame (`element.focus()`, with no gesture on Chromium and

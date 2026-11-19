@@ -11,6 +11,8 @@ import {
 } from "../annotate/validate.ts";
 import { FIND_LIMITS, FIND_METHODS, type FindReport, type FindResult } from "../find/types.ts";
 import { blankQuery, checkFindQuery, parseFindReport, parseFindResult } from "../find/validate.ts";
+import { LINK_LABEL_METHODS, type LinkLabel } from "../links/types.ts";
+import { checkLinkLabels } from "../links/validate.ts";
 import {
   createBridge,
   onceConsent,
@@ -35,6 +37,7 @@ import { webPlatform } from "../platform/web.ts";
 import type { DoorSurface, Surface } from "../platform/types.ts";
 import type { AdapterConnection, ProtocolAdapter, ShellConnection } from "../protocol/adapter.ts";
 import {
+  MCP_APPS_METHODS,
   MCP_APPS_STYLE_VARIABLES,
   PORTHOLE_STYLES,
   type HostContext,
@@ -47,6 +50,7 @@ import type {
   AnnotationControls,
   FindControls,
   HostErrorKind,
+  LinkLabelControls,
   DisplayEvents,
   DisplayHandle,
   HostOptions,
@@ -94,6 +98,9 @@ const FIND_REPORTS: Readonly<Record<string, FindReport["type"]>> = {
   [FIND_METHODS.requested]: "requested",
   [FIND_METHODS.updated]: "updated",
 };
+
+/** A label set with no labels, by value: what a new frame's document has (P151). */
+const NO_LABELS = "[]";
 
 /** The most `tracked` reports a second the host takes (P112): one per animation frame at 60 Hz. */
 export const TRACKED_PER_SECOND = 60;
@@ -252,6 +259,14 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           timer: ReturnType<typeof setTimeout>;
         }
       >();
+      // Link labels (P151): the labels held for the content shown (forgotten with it, as a find
+      // query is), by value what the frame's document was last given, and how many documents the
+      // run's frame said are ready (another page of the set says so again, P084).
+      const labelsLinks = config.capabilities.linkLabels !== undefined;
+      let linkLabels: readonly LinkLabel[] = [];
+      let linkLabelsKey = NO_LABELS;
+      let linksGiven = NO_LABELS;
+      let documentsReady = 0;
       let handshaken = false;
       let storageTold = false;
       const toFrame = (method: string, params: Record<string, unknown>) => {
@@ -339,6 +354,39 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         if (clearFrame && had) {
           toFrame(FIND_METHODS.clear, {});
         }
+      };
+      /** The labels held, to the frame's document once it finished its handshake, unless it has them. */
+      const giveLinks = () => {
+        if (labelsLinks && handshaken && surface !== null && linksGiven !== linkLabelsKey) {
+          linksGiven = linkLabelsKey;
+          toFrame(LINK_LABEL_METHODS.label, { labels: linkLabels });
+        }
+      };
+      /**
+       * The content the labels were given for is gone (P151): a new run or other content. They are
+       * forgotten, and a new page is never given the last one's labels unless the host labels it
+       * again; `clearFrame` also gives the frame running now none (its links their own words back).
+       */
+      const forgetLinks = (clearFrame: boolean) => {
+        if (!labelsLinks) {
+          return;
+        }
+        linkLabels = [];
+        linkLabelsKey = NO_LABELS;
+        if (clearFrame) {
+          giveLinks();
+        }
+      };
+      const links: LinkLabelControls = {
+        label(given) {
+          const checked = checkLinkLabels(given);
+          if (!labelsLinks) {
+            return;
+          }
+          linkLabels = checked;
+          linkLabelsKey = JSON.stringify(checked);
+          giveLinks();
+        },
       };
       const giveAnnotations = () => {
         if (marks.length > 0) {
@@ -797,6 +845,11 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
               emit("findUpdated", result);
             }
             return;
+          case "linkLabels":
+            // A later document of the run (P151): it has no labels until given them.
+            linksGiven = NO_LABELS;
+            giveLinks();
+            return;
         }
       };
 
@@ -817,6 +870,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         bridge?.close();
         bridge = null;
         handshaken = false;
+        documentsReady = 0;
         // The next run's frame tells its own size, the same as this one's or not.
         if (sizeFrame !== null) {
           view?.cancelAnimationFrame(sizeFrame);
@@ -967,6 +1021,23 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         if (finds) {
           created.transport.listen((raw) => onFind(raw, opening, () => created.focused?.()));
         }
+        // Link labels (P151): each document after the run's first that says it is ready (another
+        // page of the set, P084) is given the labels again, through the bridge's gates (their rate).
+        if (labelsLinks) {
+          created.transport.listen((raw) => {
+            if (
+              isRecord(raw) &&
+              raw.jsonrpc === "2.0" &&
+              raw.method === MCP_APPS_METHODS.initialized &&
+              !("id" in raw)
+            ) {
+              documentsReady += 1;
+              if (documentsReady > 1 && linkLabelsKey !== NO_LABELS) {
+                void opening.call("linkLabels", {});
+              }
+            }
+          });
+        }
         // Whether the page used storage (P111): once per run, the page's word (a count, no more).
         created.transport.listen((raw) => {
           if (
@@ -1000,6 +1071,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
                 handshaken = true;
                 giveAnnotations();
                 giveFind();
+                giveLinks();
               }
               emit("initialized", undefined);
             }
@@ -1014,8 +1086,11 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
 
       const run = () => {
         stop();
-        // Each run is a new frame, maybe of other content: it starts with no query (P131).
+        // Each run is a new frame, maybe of other content: it starts with no query (P131), and
+        // with no link labels (P151): its frame has none, and is given none until the host labels.
         forgetFind(false);
+        linksGiven = NO_LABELS;
+        forgetLinks(false);
         if (destroyed) {
           return;
         }
@@ -1105,6 +1180,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         displayId: mount.displayId,
         annotations,
         find,
+        links,
         setTheme(next: ColorScheme) {
           if (themeless) {
             return;
@@ -1163,6 +1239,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
               // Other content (not the content so far, continued): the query was the last one's.
               if (key === "setContent" && !continues(replay.get(key)?.[0], args[0])) {
                 forgetFind(true);
+                forgetLinks(true);
               }
               replay.delete(key);
               replay.set(key, args);

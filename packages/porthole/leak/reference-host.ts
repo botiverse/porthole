@@ -2,6 +2,7 @@ import { expect, type Frame, type Page } from "@playwright/test";
 import { embedderCsp } from "../src/index.ts";
 import type { ConfirmRequest } from "../src/bridge/types.ts";
 import type { FindOptions, FindResult } from "../src/find/types.ts";
+import type { LinkLabel } from "../src/links/types.ts";
 import type {
   ConformanceHost,
   LaunchedDisplay,
@@ -29,6 +30,8 @@ interface Reference {
     argument?: string | boolean,
     options?: FindOptions,
   ): Promise<FindResult | string | null>;
+  links(id: number, labels: readonly LinkLabel[]): string | null;
+  reload(id: number): void;
   destroy(id: number): void;
 }
 
@@ -82,6 +85,10 @@ export interface ReferenceDisplay extends LaunchedDisplay {
     argument?: string | boolean,
     options?: FindOptions,
   ): Promise<FindResult | string | null>;
+  /** Gives the display's links their labels (`links.label`, P151); resolves with what it threw, or null. */
+  links(labels: readonly LinkLabel[]): Promise<string | null>;
+  /** Runs the content again from the start, in a new frame (`DisplayControls.reload`). */
+  reload(): Promise<void>;
 }
 
 type WithReference = Window & { reference: Reference };
@@ -234,6 +241,13 @@ export function referenceHostWith(setup: {
               (window as unknown as WithReference).reference.find(each, what, given, how),
             [id, operation, argument, options] as const,
           ),
+        links: (labels) =>
+          page.evaluate(
+            ([each, given]) => (window as unknown as WithReference).reference.links(each, given),
+            [id, labels] as const,
+          ),
+        reload: () =>
+          page.evaluate((each) => (window as unknown as WithReference).reference.reload(each), id),
       };
     },
   };

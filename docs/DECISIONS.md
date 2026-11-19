@@ -9686,3 +9686,89 @@ click's point plus the scroll; a pick from the keyboard reports none.
 
 **Revisit when** a host wants the point followed as the element moves (P138's `selectionTracked`
 carries boxes only), or a pick from the keyboard should say a point (the focused element's own).
+
+## P151 · 2026-11-19 · Link labels: the host's titles for bare links (`linkLabels`) · Accepted
+
+From Raft: an Artifact page links to other Artifacts, and a link written as its own address shows
+the raw URL. The host knows each linked Artifact's title as this viewer may see it; the page doesn't
+(and mustn't be trusted to say which links it has).
+
+**Context.** The host can't read or change a display's DOM across origins; the shell can, in the
+content's realm. Find in page (P131) set the pattern for a host feature drawn by the shell: Porthole's
+own messages, built-ins taken before content runs (P129), the host's word scoped to the content it
+was given for.
+
+**Decision.**
+1. **A declared capability, `linkLabels`**, served as an event, in no preset by default. A config
+   that doesn't declare it gets no runtime (spliced in find's place, after it, so the shell
+   runtime's own bytes, pinned by P145, don't change), and a host that doesn't declare it sends
+   nothing; a shell without it ignores the message (an unknown notification).
+2. **Host → frame only.** `porthole/links.label { labels: [{ href, text, tag? }] }`, a notification;
+   the frame answers nothing and reports nothing. The host labels from its own list of what the page
+   links to; the page never reports its links.
+3. **Bounded and checked on both sides.** At most 500 labels; `href` an absolute http(s) URL of at
+   most 2,048 characters, as the platform's parser writes it; `text` at most 300, its bidirectional
+   controls (U+202A–U+202E, U+2066–U+2069, U+200E, U+200F) taken out, not blank; `tag`
+   `[a-z0-9-]{1,32}`, else left out. A malformed label is dropped, the rest applied (P053's rule for
+   reports, for the host's own words here); anything but a list is the host's `TypeError`. The shell
+   holds the message to the same bounds by comparisons only.
+4. **Which links.** Each HTML `a` and `area` whose `href`, resolved against the document's base by
+   the platform's own URL parser, equals a label's `href` exactly. No other normalising: the WHATWG
+   parse already settles case and an empty path's slash, and the shell has no rule for a path's
+   trailing slash, so none is invented here.
+5. **Bare only, text only.** A bare link (its only child a text node whose words, trimmed of ASCII
+   white space, are its `href` as written, also trimmed, or as resolved) has that node's words
+   replaced by the label's, through the kept `nodeValue` setter: never markup, no node inserted. A
+   link with words or markup of its own keeps them. Every link to the address, bare or not, gets
+   `data-porthole-label="<tag>"`. The words a link had are kept and given back when a later set (or
+   an empty one) no longer labels it, if its node still holds the label's words; words the page
+   wrote since are its own.
+6. **Again as the document changes**, once its changes settle (150 ms quiet, at most a second late,
+   as find), its own changes' records taken so they set off nothing.
+7. **Scoped like a find query.** The labels hold for the content they were given for: a new run or
+   other content forgets them (other content also gets an empty set); the host labels each document
+   again. Another page of the content's own set (P084) is the same content: each later document of
+   a run that says it is ready is given them again, through the bridge's gates, `linkLabels`'s rate
+   (60 a minute by default) bounding how often. The React prop `linkLabels` is sent when it changes
+   and again to each new document.
+
+**Compatibility.** Only added. A host that doesn't declare `linkLabels` is unchanged, and so is every
+document whose config doesn't declare it, byte for byte. A newer host with an older shell sends a
+notification nobody hears: nothing is labelled.
+
+**Threat.** No wall, gate or method of an existing capability moves. What it opens: the labels'
+text goes into the content's realm (object titles as this viewer may see them, which the page's
+author may not know), and a page with a way out can send them on, as with find's queries (P131).
+Bounded by the host: declared per config, and the host sends only titles the viewer may see and the
+page may learn (THREAT_MODEL §6). The page can read, rewrite, hide or fake a label, or draw a
+lookalike: a label is never a trust signal and the host never acts on one. Text only and no bidi
+controls, so a title neither adds elements nor reorders what is drawn after it. The cost a page can
+put on the shell: one pass over its links per settled change, at most 500 labels; on the host: a
+re-send per later document, rate-limited.
+
+**Tested.** `test/links.test.ts` (the bare rule, the shell's reading of a label set, the host's
+checks and limits, the splice after find's and its built-ins, `createHost` sending, de-duplicating,
+forgetting on a reload and on other content, a later page given them again within the rate, the
+bridge's event). `leak/link-labels.spec.ts` on three engines: a bare link labelled, a worded link
+untouched but tagged, another address untouched, malformed and oversized labels dropped, bidi
+controls out, a link added later labelled, a page's own message labelling nothing, a new set and an
+empty one restoring, markup kept as text, a new run forgetting. Negative controls: `link-label-text`
+(a label written as the link's `innerHTML`: the markup probe fails, and so does the restore probe,
+the label's node being gone) and `link-label-forget` (labels kept across runs: the new-run probe
+fails). Written without running either suite (test runs are paused where it was written): CI's full
+set runs them.
+
+**Rejected.**
+- The page reports its links and the host answers titles: the page would choose what the host looks
+  up, and learn which addresses the host knows, from its answers.
+- Labelling every link to the address, worded or not: a page's own words are its author's choice,
+  and replacing them changes what the page says.
+- `innerHTML` or a styled element for a title (an icon, a chip): markup in the content's tree from
+  the host's text; the tag gives a style hook instead.
+- Keeping labels across runs or content: another page would learn the last one's titles.
+- Normalising further (a trailing slash, a query's order, `http` and `https` alike): each rule is a
+  way for one label to cover an address the host didn't name.
+
+**Revisit when** a host wants links inside open shadow roots or a page's own frames labelled, labels
+for relative addresses on the content's own origin, or a title shown beside a worded link (a
+tooltip) rather than only in place of a bare one.

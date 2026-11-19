@@ -318,6 +318,7 @@ export {
 export type {
   AnnotationControls,
   FindControls,
+  LinkLabelControls,
   DisplayControls,
   DisplayEvents,
   FrameBlock,
@@ -359,3 +360,13 @@ export {
   type FindResult,
 } from "./find/types.ts";
 export { parseFindReport, parseFindResult } from "./find/validate.ts";
+
+// Link labels (P151): titles the host gives bare links, and its checks on them.
+export {
+  BIDI_CONTROLS,
+  LINK_LABEL_LIMITS,
+  LINK_LABEL_METHODS,
+  LINK_LABEL_TAG,
+  type LinkLabel,
+} from "./links/types.ts";
+export { checkLinkLabel, checkLinkLabels } from "./links/validate.ts";

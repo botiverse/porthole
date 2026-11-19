@@ -21,6 +21,7 @@ import {
 import type { AnnotateMode, AnnotationMark, AnnotationReport } from "../annotate/types.ts";
 import type { FindOptions, FindResult } from "../find/types.ts";
 import { blankQuery, checkFindQuery } from "../find/validate.ts";
+import type { LinkLabel } from "../links/types.ts";
 import type {
   CallContext,
   CapabilityHandler,
@@ -740,6 +741,17 @@ export interface PortholeFrameProps {
    * content changed, or a display made later found the handle's query again.
    */
   readonly onFindUpdated?: (result: FindResult) => void;
+  /**
+   * Titles for the content's bare links (`links.label`, P151), where the config declares
+   * `linkLabels`: a link whose only child is its own address as text, to an address labelled
+   * here, shows the label's `text` instead; every link to it gets `data-porthole-label` with the
+   * label's `tag`. Compared by value; sent when it changes, and again to each new document the
+   * display loads (a reload, a restart, other `content`: the core forgets them there, as it does a
+   * find query). Give the labels for the content shown, from your own list (the page never reports
+   * its links), with only titles the person viewing may see: the page reads them. Labels that
+   * aren't a list: `onHostError`, kind `"links"`; a malformed label is dropped, the rest kept.
+   */
+  readonly linkLabels?: readonly LinkLabel[];
   /** Draws the placeholder instead of the default one. */
   readonly renderPlaceholder?: (props: PlaceholderProps) => ReactNode;
   readonly className?: string;
@@ -1023,6 +1035,11 @@ function Mount({
       switch (event) {
         case "initialized":
           setReady(true);
+          // A new run's document has no labels (P151): the props' again (the core sends nothing
+          // where they are already there).
+          if (handle.current !== null) {
+            labelLinks(handle.current, frame);
+          }
           frame.onInitialized?.();
           return;
         case "resize": {
@@ -1239,6 +1256,10 @@ function Mount({
     if (first.content !== undefined) {
       display.setContent(first.content, { partial: first.partial === true });
     }
+    // Link labels (P151): held by the core until the frame is ready.
+    if (first.linkLabels !== undefined) {
+      labelLinks(display, first);
+    }
     return () => {
       display.destroy();
       handle.current = null;
@@ -1277,7 +1298,22 @@ function Mount({
     // Other content: the handle's query was the last one's, forgotten (the display forgot it too,
     // P131).
     findFor(findScopeOf(latest()));
+    // Other content's labels are the props' (the display forgot the last ones, P151).
+    if (handle.current !== null && latest().linkLabels !== undefined) {
+      labelLinks(handle.current, latest());
+    }
   }, [content, partial, findFor]);
+  // Link labels follow their prop, by value (P151); a new display gets them when it is made.
+  const linkLabels = useByValue(frame.linkLabels);
+  const labelsGiven = useRef(false);
+  useEffect(() => {
+    const display = handle.current;
+    if (display === null || (linkLabels === undefined && !labelsGiven.current)) {
+      return;
+    }
+    labelsGiven.current = true;
+    labelLinks(display, latest());
+  }, [linkLabels]);
   // Annotations follow their props (a new display gets them all when it is made, above).
   const annotates = config.capabilities.annotate !== undefined;
   const { annotating } = frame;
@@ -1438,6 +1474,15 @@ function attempt(run: () => void, frame: PortholeFrameProps): void {
     run();
   } catch (error) {
     hostFailed(frame, error, "annotations");
+  }
+}
+
+/** The props' link labels to a display (none: an empty set), telling the props what it threw. */
+function labelLinks(display: DisplayHandle, frame: PortholeFrameProps): void {
+  try {
+    display.links.label(frame.linkLabels ?? []);
+  } catch (error) {
+    hostFailed(frame, error, "links");
   }
 }
 

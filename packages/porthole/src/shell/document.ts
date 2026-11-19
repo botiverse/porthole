@@ -2,6 +2,7 @@ import { hostOriginProblem } from "../isolation/served.ts";
 import { ANNOTATE_RUNTIME } from "./annotate.ts";
 import { FIND_RUNTIME } from "./find.ts";
 import { LEGACY_GLOBALS_RUNTIME } from "./legacy.ts";
+import { LINKS_RUNTIME } from "./links.ts";
 import { SHELL_RUNTIME } from "./runtime.ts";
 import { USE_RUNTIME } from "./use.ts";
 import type { ShellPlan } from "./plan.ts";
@@ -134,15 +135,22 @@ body {
  * A given `document` travels in the runtime's plan, as data.
  */
 /**
- * The shell's runtime for a plan, before its plan goes in: annotations and find in page (P131)
- * where declared, 0.6's globals (the legacy path, P085) for what the config declares, and the
- * capability runtime where the config has one.
+ * The shell's runtime for a plan, before its plan goes in: annotations, find in page (P131) and
+ * link labels (P151) where declared, 0.6's globals (the legacy path, P085) for what the config
+ * declares, and the capability runtime where the config has one. Link labels go in find's place,
+ * after it: the runtime's own bytes, pinned (P145), stay as they were, and so does every document
+ * whose config doesn't declare them.
  */
 export function composedRuntime(plan: ShellPlan): string {
   return SHELL_RUNTIME.replace("__ANNOTATE__", () =>
     plan.capabilities.annotate === undefined ? "" : ANNOTATE_RUNTIME,
   )
-    .replace("__FIND__", () => (plan.capabilities.find === undefined ? "" : FIND_RUNTIME))
+    .replace(
+      "__FIND__",
+      () =>
+        (plan.capabilities.find === undefined ? "" : FIND_RUNTIME) +
+        (plan.capabilities.linkLabels === undefined ? "" : `\n\n  ${LINKS_RUNTIME}`),
+    )
     .replace("__LEGACY__", () => LEGACY_GLOBALS_RUNTIME)
     .replace("__RUNTIME__", () => (plan.runtime === undefined ? "" : USE_RUNTIME));
 }

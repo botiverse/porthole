@@ -88,6 +88,10 @@ const CASES: Record<string, PortholeConfig> = {
   "artifact page with comments and find": presets.artifact({
     capabilities: { annotate: {}, find: {} },
   }),
+  // Link labels (P151): the host's titles for bare links, beside find.
+  "artifact page with find and link labels": presets.artifact({
+    capabilities: { find: {}, linkLabels: {} },
+  }),
   "a whole-page viewer (P065)": presets.artifact({
     isolation: "domain",
     contentOrigins: ["https://*.example-usercontent.com"],
@@ -174,7 +178,14 @@ const CASES: Record<string, PortholeConfig> = {
     contentOrigins: ["https://*.example-usercontent.com"],
     egress: LIBRARY_CDNS,
     runtime: "1",
-    capabilities: { annotate: {}, comments: {}, copyText: {}, find: {}, openLink: {} },
+    capabilities: {
+      annotate: {},
+      comments: {},
+      copyText: {},
+      find: {},
+      linkLabels: {},
+      openLink: {},
+    },
     layout: { kind: "fill" },
     errors: "host",
     storage: { scope: "this artifact, across its versions" },
@@ -234,6 +245,7 @@ const ENTRY_PREFIXES: {
   copyText: ["- copyText(", "- Copying:"],
   annotate: ["- Comments:"],
   find: ["- Find:"],
+  linkLabels: ["- Link labels:"],
 };
 
 const GLOBALS = [
@@ -313,9 +325,9 @@ describe.each(Object.entries(CASES))("%s", (_name, config) => {
         prefixesOf(config, name).some((prefix) => line.startsWith(prefix)),
       );
       expect(entry, `the manual has no entry for ${name}`).toBeDefined();
-      if (name === "annotate" || name === "find") {
-        // The person comments or finds; the content calls nothing: its gates bound the frame's
-        // reports.
+      if (name === "annotate" || name === "find" || name === "linkLabels") {
+        // The person comments or finds, the host labels; the content calls nothing: its gates
+        // bound the frame's reports (and how often a later document is given the labels, P151).
         continue;
       }
       // A host function's gates, and under the runtime its methods' own (after the review).
