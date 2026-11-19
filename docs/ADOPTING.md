@@ -284,10 +284,11 @@ display.on("annotation", (report) => {
 the frame, place your UI at `pointDocument.x - scroll.x`, `pointDocument.y - scroll.y`, clipped. A
 pick from the keyboard, a text selection and an older shell send none.
 
-**Where it is in the page** (P152): an anchor (`selected`'s, of either kind) may carry `context`,
-`{ headings?: string[], region?: string }`, from what the page tells a screen reader: the headings
-from the top of the page down to its section, outermost first (a heading picked last; a hidden
-tab's never), and the name of the named container around it (a tab panel's tab, a labelled
+**Where it is in the page** (P152, P153): an anchor (`selected`'s, of either kind) may carry
+`context`, `{ headings?: string[], region?: string }`, from what the page tells a screen reader: the
+headings from the top of the page down to its section, outermost first (a heading picked, or an
+element's own, last; a hidden tab's never; the page's only h1, its title, left out unless it is the
+only one), and the name of the named container around it (a tab panel's tab, a labelled
 `section`, a figure's caption). At most 6 headings, 80 characters each and for the region. Store it
 with the anchor and show it with the comment ("Results › Revenue tab") so readers, people and
 agents, know which part it is on; it is absent where the page has neither, and from an older shell.

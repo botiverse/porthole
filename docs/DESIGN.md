@@ -1061,21 +1061,26 @@ can learn or fake: [THREAT_MODEL.md § 7](THREAT_MODEL.md#7-the-display-layer-an
   context each side), `TextPositionSelector` (offsets into the body's text, without scripts, styles
   and templates). An element anchor has its selector and first 300 characters of text; a text anchor
   its words (at most 4,000), position and nearest element.
-- **Where it is in the page** (P152). Either kind may carry `context`, read from what the page tells a
-  screen reader (`ANCHOR_CONTEXT`, through the DOM's own functions and getters, taken before content
-  runs), for a reader of the comment to know which part it is on where the CSS path names no id:
-  `headings`, the outline down to it (h1 to h6 and `role=heading`, by `aria-level`, else the tag's
-  number, else 2: walking back from the element picked, or the element a selection starts in, each
-  rendered heading of a lower level than the last kept; one it is, or is in, last; never one with no
-  client rects, inside `[hidden]`, `[aria-hidden=true]` or `[inert]`, or `visibility: hidden`, so a
-  hidden tab's heading is never named), and `region`, the name of the nearest named container
-  around it (a tab panel, region or dialog by `aria-labelledby` or `aria-label`; a `section`,
-  `article`, `aside`, `nav`, `form` or `dialog` likewise; a `figure` by its `figcaption` too). Each
-  text squashed, without bidi controls or zero-width characters, at most 80 characters (cut with an
-  ellipsis); at most 6 headings. Absent where the page has neither, or reading it throws. Bounded:
-  the headings found by halving the document's list, at most 1,000 looked back at, 64 containers
-  up. The host keeps it on what it reports and `parseAnchor` returns, and leaves it off the marks
-  `show` sends into the frame (`checkMarks`), which finds a mark by its selectors.
+- **Where it is in the page** (P152, P153). Either kind may carry `context`, read from what the page
+  tells a screen reader (`ANCHOR_CONTEXT`, through the DOM's own functions and getters, taken before
+  content runs), for a reader of the comment to know which part it is on where the CSS path names no
+  id: `headings`, the outline down to it (h1 to h6 and `role=heading`, by `aria-level`, else the
+  tag's number, else 2: walking back from the element picked, or the element a selection starts in,
+  each rendered heading of a lower level than the last kept; one it is, or is in, last; where it
+  holds rendered headings and exactly one has the lowest level among them (a card's header and its
+  h3), that one, as if picked, while several at that level (a list of cards) leave the outline the
+  one around it; the page's only rendered level-1 heading, its title, left out above deeper ones and
+  kept alone; never one with no client rects, inside `[hidden]`, `[aria-hidden=true]` or `[inert]`,
+  or `visibility: hidden`, so a hidden tab's heading is never named, nor counted for either rule),
+  and `region`, the name of the nearest named container around it (a tab panel, region or dialog by
+  `aria-labelledby` or `aria-label`; a `section`, `article`, `aside`, `nav`, `form` or `dialog`
+  likewise; a `figure` by its `figcaption` too). Each text squashed, without bidi controls or
+  zero-width characters, at most 80 characters (cut with an ellipsis); at most 6 headings. Absent
+  where the page has neither, or reading it throws. Bounded: the headings found by halving the
+  document's list, at most 1,000 looked back at, 1,000 inside it (a target holding more has none of
+  its own), 1,000 counted for the h1s (a page with more keeps its h1), 64 containers up. The host
+  keeps it on what it reports and `parseAnchor` returns, and leaves it off the marks `show` sends
+  into the frame (`checkMarks`), which finds a mark by its selectors.
 - **Found again**, best-effort. A text anchor: where it was, else its words anywhere (the occurrence
   whose context matches best), else its words with any spacing. An element anchor: its selector if
   its text still starts with its words (or the selector is an id, or it has no words), else the
@@ -1175,10 +1180,10 @@ shown, focused, orphaned and found again on a revised page; follow-ups only for 
 budget; markers clear of words, reported by click, tap and key, heard by none of the content, also
 against patched built-ins; `focusMark` landing only when it should; drafts drawn apart; the
 selection followed; `clearSelection` against a patched `removeAllRanges`; an anchor's `context` (the
-headings above it without a hidden tab's, the tab panel it is in, none on a page with neither); a
-hostile page faking every report; and ADOPTING.md's `guardPresses`, as written there, taking no press within 500 ms of
-its view opening and the person's own press or key after. Negative controls: § The negative
-controls.
+headings above it without a hidden tab's or the page's only h1, a card's header under its own h3,
+the tab panel it is in, none on a page with neither); a hostile page faking every report; and
+ADOPTING.md's `guardPresses`, as written there, taking no press within 500 ms of its view opening
+and the person's own press or key after. Negative controls: § The negative controls.
 
 ## Find in page
 

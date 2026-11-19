@@ -9784,7 +9784,7 @@ set.
 for relative addresses on the content's own origin, or a title shown beside a worded link (a
 tooltip) rather than only in place of a bare one.
 
-## P152 · 2026-11-19 · An anchor says where it is in the page (`context`: its headings and region) · Accepted
+## P152 · 2026-11-19 · An anchor says where it is in the page (`context`: its headings and region) · Accepted; amended by P153
 
 Amends P053 (what an anchor carries). A comment's readers, people and agents, often can't tell
 which part of the page it is on: the anchor's CSS selector starts at the nearest id, so it names a
@@ -9868,3 +9868,78 @@ last; a text selection carries the same; a page with neither carries no `context
 
 **Revisit when** readers want more of the outline (a list item's number, a table's row and column
 headers), or a host wants the context recomputed when a mark is found again after the page changed.
+
+## P153 · 2026-11-19 · An anchor's headings: an element's own heading, and not the page's only h1 · Accepted
+
+Amends P152 (how `context.headings` is chosen). From P152 tried on real comments, two ways the
+outline read wrong; both fixes agreed with the owner of the text agents read (Sage).
+
+**Context.**
+- *An element holding its own heading was put under the section before it.* P152 counts only the
+  headings before the target or around it. A card's `<header>` picked (`#f-row-2 > header`, holding
+  `<h3>频道，@ 了你</h3>`) came out under the card before's h3: the nearest heading before the header
+  is the previous card's, and the header's own is after its start. The same for a section picked
+  with its h3 inside it.
+- *Every comment repeated the page's title.* Most pages have one h1, the title, and the reader
+  knows which page a comment is on: "Quarterly report › Results › Revenue" says nothing in its first
+  part that the page doesn't, and takes a sixth of the chain.
+
+**Decision.**
+1. **An element's own heading.** Where the target holds rendered headings, the one of the lowest
+   level among them, if there is exactly one, is the target's own: the chain is the one it would
+   have if that heading were picked (so it is last, and those above it inside the target, of a
+   higher level, are passed over). Where several share the lowest level (a list of cards, each with
+   its h3), none is the target's: the chain is P152's, the headings before and around it. The
+   headings inside the target are the run of the document's list right after the halving's
+   position (each inside it by `compareDocumentPosition`'s "contained by", a new read through the
+   function taken before content runs); at most 1,000 are looked at, and a target holding more has
+   none of its own.
+2. **Not the page's only h1.** Where the chain has more than one heading and starts with a level-1
+   heading (by the level P152 reads, so `role=heading` with `aria-level=1` is one, and an h1 with
+   `aria-level=2` isn't), and the document has exactly one rendered level-1 heading, that one is
+   left out. A chain that is the h1 alone keeps it (or the comment says no section at all); a page
+   with two or more level-1 headings keeps them, as it has parts with titles of their own. The count
+   stops at the second one found and looks at most at 1,000 of the document's headings; a page with
+   more is not known to have only one, and keeps its h1. A heading that isn't rendered counts for
+   neither rule, as for P152.
+
+**Compatibility.** No field, limit or check changes: an anchor's `context` is shorter (no repeated
+title) or names the right section, within P152's shape. Stored anchors keep the context they were
+taken with. The annotation runtime every served page carries changes (its pinned hash, P145).
+
+**Threat.** None opened, and no isolation change: no wall, gate, rate or method moves. The same
+page text P152 reads, from the same rendered headings, through the DOM's own functions taken before
+content runs (`compareDocumentPosition`, already taken for P152's order). Bounded as P152 is: the
+extra reads are at most 1,000 headings inside the target and 1,000 counted for the h1s, each a level
+read and, for the ones that could matter, a rendered check.
+
+**Tested.** `test/annotate.test.ts` "where an anchor is in the page (P152)", over the stand-in DOM:
+a card's header picked gets its own h3, not the card before's; a section with a h5, an h3 and h4s
+picked gets its h3; a container of three cards, each an h3 with an h4, gets the chain from before
+it, and one card of them its own; with two of the three hidden, the one shown is the container's
+own, and a container whose only heading is hidden has none; the page's only h1 left out above
+deeper headings, kept alone and when picked; two h1s kept; `role=heading` with `aria-level=1` an
+h1, alone (left out) and beside a native one (both kept); an h1 with `aria-level=2` not one; a
+hidden h1 not counted; the bounds (1,000 inside a target, 1,000 counted for the h1s, each just
+within and just past); the runtime's `inside` read through the `compareDocumentPosition` taken
+before content runs. P152's tests now expect the only h1 left out, or have a second h1 where they
+test something else. `test/framed-by.test.ts`: the annotation runtime's new pin.
+`leak/annotate.spec.ts` "an anchor says where it is in the page…" (three engines; written here and
+not run here: CI runs it): the page's only h1 left out, and a card's header picked (in its padding,
+so the header and not its h3) gets its own h3.
+
+**Rejected.**
+- *The first heading inside the target*: a kicker or a card's small label (an h5 before the h3)
+  would name it.
+- *One of several top-level headings inside (the first)*: a list of cards picked is the list, not
+  its first card; the section around it says where it is.
+- *Leaving out every h1, or the first heading whatever its level*: a page in parts with an h1 each
+  says which part by it, and a page whose top heading is an h2 has no title to leave out.
+- *Leaving out the h1 when it is the only heading*: the comment would say no section, though the
+  page has one.
+- *The page's `<title>` compared with the h1*: they often differ in a word, and the reader knows
+  the page either way.
+
+**Revisit when** a host shows the page's title beside comments elsewhere and wants the chain to
+carry it, or a page's own heading should come from a container's `aria-labelledby` (a card
+labelled by its h3) rather than its headings.
