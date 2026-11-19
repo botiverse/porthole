@@ -4,8 +4,25 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.17.0
 
+- **Link labels** (P151). A new declared capability, `linkLabels`, in no preset by default: the
+  host gives a display titles for the pages it links to (`display.links.label([{ href, text,
+  tag? }])`, React's `linkLabels` prop), and a bare link (its only child a text node whose words
+  are its own address) to a labelled address shows the title instead, as text; every link to it
+  gets `data-porthole-label="<tag>"`. Host to frame only (`porthole/links.label`): the page never
+  reports its links and the frame says nothing back. At most 500 labels; an absolute http(s)
+  `href` of at most 2,048 characters, compared exactly once parsed; `text` at most 300, without
+  bidirectional controls; a malformed label is dropped, the rest applied. Labels are forgotten on
+  a new run or other content, as a find query; another page of the set is given them again,
+  within the capability's rate (60 a minute). The page reads every label: send only titles the
+  viewer may see and the page may learn, and never take a label as a trust signal (THREAT_MODEL
+  §6, §7). No existing wall, gate or method changes; two new negative controls
+  (`link-label-text`, `link-label-forget`).
+  **For a host:** nothing to change unless you want labels: declare `linkLabels`, upgrade the
+  content server with the host (an older shell ignores the message), and label each document from
+  your own list. A config that doesn't declare it serves every document as 0.16.1 did but for the annotation
+  script (P152 below); the shell runtime's pinned bytes (P145) are unchanged.
 - **An anchor says where it is in the page** (P152, amends P053). Element and text anchors carry an
   optional `context`, `{ headings?, region? }`, from what the page tells a screen reader: the
   headings from the top of the page down to its section (h1 to h6 and `role=heading`, rendered ones

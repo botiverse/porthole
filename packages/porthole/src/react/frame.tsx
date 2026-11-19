@@ -748,8 +748,11 @@ export interface PortholeFrameProps {
    * label's `tag`. Compared by value; sent when it changes, and again to each new document the
    * display loads (a reload, a restart, other `content`: the core forgets them there, as it does a
    * find query). Give the labels for the content shown, from your own list (the page never reports
-   * its links), with only titles the person viewing may see: the page reads them. Labels that
-   * aren't a list: `onHostError`, kind `"links"`; a malformed label is dropped, the rest kept.
+   * its links), with only titles the person viewing may see: the page reads them. Give the labels
+   * in the same render as the `content` they belong to: on other `content` the prop is sent to the
+   * new document right away, so labels still held from the last content would reach this one.
+   * Until the new content's labels are in hand, pass `[]`. Labels that aren't a list:
+   * `onHostError`, kind `"links"`; a malformed label is dropped, the rest kept.
    */
   readonly linkLabels?: readonly LinkLabel[];
   /** Draws the placeholder instead of the default one. */

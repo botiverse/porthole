@@ -346,7 +346,10 @@ may see it: an artifact that links to other artifacts of yours shows their names
 your own list of what the page links to (your server knows each linked page and what this viewer may
 see of it); the page reports nothing. How it works: [DESIGN.md § Link labels](DESIGN.md#link-labels).
 The page reads every label: send only titles this viewer may see and the page may learn
-(THREAT_MODEL §6, §7).
+(THREAT_MODEL §6, §7). With React, give `linkLabels` in the same render as the `content` they are
+for, and `[]` until the new content's titles are in hand (fetched per content, never carried over):
+the prop is sent to each new document as soon as it loads, so labels kept from the last content
+would be read by this one.
 
 ```js
 // After each document loads (and whenever your list changes): this viewer's titles for its links.
