@@ -9755,8 +9755,19 @@ controls out, a link added later labelled, a page's own message labelling nothin
 empty one restoring, markup kept as text, a new run forgetting. Negative controls: `link-label-text`
 (a label written as the link's `innerHTML`: the markup probe fails, and so does the restore probe,
 the label's node being gone) and `link-label-forget` (labels kept across runs: the new-run probe
-fails). Written without running either suite (test runs are paused where it was written): CI's full
-set runs them.
+fails). Run where it was written: the browser spec on Chromium (all pass) and, under each negative
+control, exactly its registered tests failing; the unit tests and the other two engines: CI's full
+set.
+
+**Known limits.**
+- *A label changes the words a comment anchors to.* Anchors that quote the page's text (annotate)
+  are found again by that text. Words selected while a link showed its label won't be found by a
+  viewer who isn't given that label (it may see "no access" or the address), nor after the title
+  changes; such an anchor is handled as any anchor whose text is gone (the host's lost-anchor case).
+  Words around the link, and a selection of the address while it showed the address, are unaffected.
+- *Labels are the host's for one content.* The React prop is sent to each new document right away,
+  so a host that changes `content` before its labels must pass `[]` until the new ones are in hand
+  (ADOPTING § Link labels), or the last content's titles reach the new page.
 
 **Rejected.**
 - The page reports its links and the host answers titles: the page would choose what the host looks
