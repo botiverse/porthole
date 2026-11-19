@@ -45,6 +45,32 @@ export interface AnnotationAnchor {
   readonly selectors: readonly AnnotationSelector[];
   /** A short description for the host to show ("h2#revenue Revenue grew 12%"); the content's. */
   readonly label: string;
+  /**
+   * Where it is in the page (P152), by what the page tells a screen reader, for a reader of the
+   * comment (a person or an agent) to know which part it is on. Absent where the page gives neither
+   * part, and from an older shell. The page's text, as the label is: shown as text, never a fact.
+   */
+  readonly context?: AnnotationAnchorContext;
+}
+
+/**
+ * The page's own outline around an anchor (P152). Each text squashed and without what a person
+ * can't see, at most `ANNOTATION_LIMITS.heading` (or `.region`) characters.
+ */
+export interface AnnotationAnchorContext {
+  /**
+   * The headings from the top of the page down to the anchor's section (h1 to h6 and
+   * `role=heading`, rendered ones only: never a hidden tab's), outermost first, at most
+   * `ANNOTATION_LIMITS.headings`; a heading picked, or one the selection starts in, is the last.
+   * Absent where there is none.
+   */
+  readonly headings?: readonly string[];
+  /**
+   * The name of the nearest named container around it: a tab panel (its tab's words), a named
+   * `section`, `article`, `aside`, `nav`, `form`, dialog or region, a figure's caption. Absent
+   * where there is none.
+   */
+  readonly region?: string;
 }
 
 /**
@@ -312,7 +338,13 @@ export const ANNOTATION_LIMITS = {
   label: 120,
   cssSelector: 1_000,
   exact: 4_000,
+  /** A quote's `prefix` and `suffix` each (not an anchor's `context`, P152: the three below). */
   context: 64,
+  /** Each of an anchor's `context.headings` (P152), and how many. */
+  heading: 80,
+  headings: 6,
+  /** An anchor's `context.region` (P152). */
+  region: 80,
   /** The most marks one `show` carries, and results one report. */
   marks: 500,
   id: 128,

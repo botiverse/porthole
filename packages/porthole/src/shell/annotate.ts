@@ -75,6 +75,141 @@ export const WORD_LATE = String.raw`(at, now) => {
 }`;
 
 /**
+ * Where an anchor is in the page, by what the page tells a screen reader (P152), spliced into the
+ * runtime: given the DOM's reads (`dom`, each through a built-in taken before content runs), a
+ * function from the element picked (or a selection's first element) to its `context`, or null.
+ * - `headings`: the outline down to it, h1 to h6 and `role=heading` (`aria-level`, else the tag's
+ *   number, else 2): walking back from it, each rendered heading of a lower level than the last one
+ *   kept; a heading it is in, or is, comes last. One that isn't rendered (no box, `hidden`,
+ *   `aria-hidden`, `inert`, `visibility: hidden`: a hidden tab panel's) is never named.
+ * - `region`: the name of the nearest container around it that has one: a tab panel, a region or a
+ *   dialog by `aria-labelledby` or `aria-label`, a `section`, `article`, `aside`, `nav`, `form` or
+ *   `dialog` likewise, a `figure` by its `figcaption` too.
+ * Each text squashed, without bidi controls and zero-width characters, at most 80 characters
+ * (longer ones cut, with an ellipsis); at most 6 headings. Null where it has neither, or where
+ * reading the page throws. Bounded: the headings found by halving, at most 1,000 looked back at,
+ * 64 containers up, 1,000 characters of any one text read.
+ */
+export const ANCHOR_CONTEXT = String.raw`(dom) => {
+        const HEADING = 80;
+        const HEADINGS = 6;
+        const REGION = 80;
+        const UNSEEN = /[\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF]/g;
+        const squash = (text) => String(text).slice(0, 1000).replace(UNSEEN, "").replace(/\s+/g, " ").trim();
+        const cap = (text, max) => (text.length > max ? text.slice(0, max - 1).trim() + "\u2026" : text);
+        const roleOf = (element) => {
+          const role = dom.attr(element, "role");
+          return role === null ? "" : squash(role).toLowerCase().split(" ")[0];
+        };
+        const nameOf = (element) => {
+          const label = squash(dom.attr(element, "aria-label") || "");
+          return label !== "" ? label : squash(dom.text(element) || "");
+        };
+        const labelledBy = (element) => {
+          const ids = squash(dom.attr(element, "aria-labelledby") || "");
+          let words = "";
+          if (ids !== "") {
+            const each = ids.split(" ").slice(0, 4);
+            for (let i = 0; i < each.length; i += 1) {
+              const by = dom.byId(each[i]);
+              if (by !== null && by !== undefined) {
+                words = squash(words + " " + nameOf(by));
+              }
+            }
+          }
+          return words !== "" ? words : squash(dom.attr(element, "aria-label") || "");
+        };
+        // A heading's level, or 0 for what isn't one (a tag whose role says otherwise).
+        const levelOf = (element) => {
+          const tag = dom.name(element);
+          const native = /^h[1-6]$/.test(tag) ? Number(tag.charAt(1)) : 0;
+          const role = roleOf(element);
+          if (role !== "heading" && (native === 0 || role !== "")) {
+            return 0;
+          }
+          const level = squash(dom.attr(element, "aria-level") || "");
+          if (/^[0-9]{1,3}$/.test(level) && Number(level) >= 1) {
+            return Math.min(Number(level), HEADINGS);
+          }
+          return native || 2;
+        };
+        const headingsOf = (target) => {
+          const all = dom.headings();
+          // In document order, those before the target (or holding it, or it) come first.
+          let low = 0;
+          let high = all.length;
+          while (low < high) {
+            const middle = Math.floor((low + high) / 2);
+            if (dom.before(all[middle], target)) {
+              low = middle + 1;
+            } else {
+              high = middle;
+            }
+          }
+          const kept = [];
+          let floor = HEADINGS + 1;
+          for (let i = low - 1, steps = 0; i >= 0 && steps < 1000 && floor > 1; i -= 1, steps += 1) {
+            const heading = all[i];
+            const level = levelOf(heading);
+            if (level === 0 || level >= floor || !dom.shown(heading)) {
+              continue;
+            }
+            // A heading without words still starts its section: those above it are its outline.
+            floor = level;
+            const words = cap(nameOf(heading), HEADING);
+            if (words !== "") {
+              kept.unshift(words);
+            }
+          }
+          return kept;
+        };
+        const regionOf = (target) => {
+          for (let node = target, steps = 0; node !== null && node !== undefined && steps < 64; node = dom.parent(node), steps += 1) {
+            const role = roleOf(node);
+            const tag = dom.name(node);
+            let name = "";
+            if (role === "tabpanel" || role === "region" || role === "dialog" || role === "alertdialog" || (role === "" && " section article aside nav form dialog ".indexOf(" " + tag + " ") !== -1)) {
+              name = labelledBy(node);
+            } else if (role === "" && tag === "figure") {
+              name = labelledBy(node);
+              const children = dom.children(node);
+              for (let i = 0; name === "" && i < children.length && i < 64; i += 1) {
+                if (dom.name(children[i]) === "figcaption") {
+                  name = squash(dom.text(children[i]) || "");
+                }
+              }
+            }
+            if (name !== "") {
+              return cap(name, REGION);
+            }
+          }
+          return "";
+        };
+        return (target) => {
+          if (target === null || target === undefined) {
+            return null;
+          }
+          try {
+            const headings = headingsOf(target);
+            const region = regionOf(target);
+            if (headings.length === 0 && region === "") {
+              return null;
+            }
+            const context = {};
+            if (headings.length > 0) {
+              context.headings = headings;
+            }
+            if (region !== "") {
+              context.region = region;
+            }
+            return context;
+          } catch (_) {
+            return null;
+          }
+        };
+      }`;
+
+/**
  * The shell's annotation runtime (P053), spliced into the shell's runtime (`__ANNOTATE__`) when
  * the config declares `annotate`, so it runs before any content does, with the DOM's own
  * functions as they were. Plain ES2020 like the rest of the shell; no template literals (it sits
@@ -111,6 +246,9 @@ export const WORD_LATE = String.raw`(at, now) => {
  * - the point picked (P150): where a pointer picked an element (the click's or tap's point, a held
  *   finger's), in the document's coordinates too (`pointDocument`), so a host places its UI by what
  *   the person pointed at in an element larger than the frame;
+ * - where it is in the page (P152): an anchor's `context`, the headings above it and the named
+ *   region around it, as the page tells a screen reader (`ANCHOR_CONTEXT`), so a reader of the
+ *   comment knows which part of the page it is on;
  * - the selection followed (P138): what the last `selected` reported (the element picked, or the
  *   words selected) is kept while the host follows the selection (`track` with `selection`) or said
  *   at `start` that it will (`keepSelection`, P140), and nothing is kept otherwise; while followed
@@ -162,6 +300,15 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const compareBoundaryPoints = Range.prototype.compareBoundaryPoints;
       const attachShadow = Element.prototype.attachShadow;
       const getAttribute = Element.prototype.getAttribute;
+      const headingsIn = Document.prototype.querySelectorAll;
+      const elementById = Document.prototype.getElementById;
+      const comparePosition = Node.prototype.compareDocumentPosition;
+      const closestOf = Element.prototype.closest;
+      const elementRects = Element.prototype.getClientRects;
+      const styleOf = window.getComputedStyle;
+      const textContentOf = getterOf(Node.prototype, "textContent");
+      const parentElementOf = getterOf(Node.prototype, "parentElement");
+      const childrenOf = getterOf(Element.prototype, "children");
       const listenOn = EventTarget.prototype.addEventListener;
       const post = window.parent.postMessage.bind(window.parent);
       // Read once: content can replace window.parent (it is [Replaceable]), never what was read. A
@@ -242,6 +389,33 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
         return quote;
       };
+      // Where an anchor is, by the page's headings and named regions (P152), read through the DOM's
+      // own functions and getters, taken before content runs.
+      const readOf = (getter, node, name) => (getter === null ? node[name] : callOf(getter, node, []));
+      const contextOf = (${ANCHOR_CONTEXT})({
+        headings: () => callOf(headingsIn, document, ["h1, h2, h3, h4, h5, h6, [role~=heading]"]),
+        before: (node, target) => node === target || (callOf(comparePosition, target, [node]) & 2) !== 0,
+        name: (element) => String(textNameOf === null ? element.localName : callOf(textNameOf, element, [])),
+        attr: (element, name) => callOf(getAttribute, element, [name]),
+        text: (element) => readOf(textContentOf, element, "textContent"),
+        parent: (element) => readOf(parentElementOf, element, "parentElement"),
+        children: (element) => readOf(childrenOf, element, "children"),
+        byId: (id) => callOf(elementById, document, [id]),
+        shown: (element) => {
+          if (callOf(elementRects, element, []).length === 0 || callOf(closestOf, element, ["[hidden], [aria-hidden=true], [inert]"]) !== null) {
+            return false;
+          }
+          const visibility = callOf(styleOf, window, [element]).visibility;
+          return visibility !== "hidden" && visibility !== "collapse";
+        },
+      });
+      const withContext = (anchor, element) => {
+        const context = contextOf(element);
+        if (context !== null) {
+          anchor.context = context;
+        }
+        return anchor;
+      };
       const elementAnchor = (element, index) => {
         const selectors = [];
         const css = cssPath(element);
@@ -253,7 +427,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         if (index.text.slice(span[0], end).trim() !== "") {
           selectors.push(quoteOf(index, span[0], end), { type: "TextPositionSelector", start: span[0], end });
         }
-        return selectors.length === 0 ? null : { kind: "element", selectors, label: describe(element) };
+        return selectors.length === 0 ? null : withContext({ kind: "element", selectors, label: describe(element) }, element);
       };
       const textAnchor = (range, index) => {
         const start = offsetOf(index, range.startContainer, range.startOffset);
@@ -271,7 +445,12 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         if (css !== null) {
           selectors.push({ type: "CssSelector", value: css });
         }
-        return { kind: "text", selectors, label: squash(exact).slice(0, LIMIT.label) };
+        // Its context is where it starts: the heading a selection begins under.
+        let first = range.startContainer;
+        if (first.nodeType !== 1) {
+          first = readOf(parentElementOf, first, "parentElement");
+        }
+        return withContext({ kind: "text", selectors, label: squash(exact).slice(0, LIMIT.label) }, first);
       };
 
       // Finding an anchor again, best-effort: where it was, its words anywhere (the occurrence

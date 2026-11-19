@@ -1061,6 +1061,21 @@ can learn or fake: [THREAT_MODEL.md § 7](THREAT_MODEL.md#7-the-display-layer-an
   context each side), `TextPositionSelector` (offsets into the body's text, without scripts, styles
   and templates). An element anchor has its selector and first 300 characters of text; a text anchor
   its words (at most 4,000), position and nearest element.
+- **Where it is in the page** (P152). Either kind may carry `context`, read from what the page tells a
+  screen reader (`ANCHOR_CONTEXT`, through the DOM's own functions and getters, taken before content
+  runs), for a reader of the comment to know which part it is on where the CSS path names no id:
+  `headings`, the outline down to it (h1 to h6 and `role=heading`, by `aria-level`, else the tag's
+  number, else 2: walking back from the element picked, or the element a selection starts in, each
+  rendered heading of a lower level than the last kept; one it is, or is in, last; never one with no
+  client rects, inside `[hidden]`, `[aria-hidden=true]` or `[inert]`, or `visibility: hidden`, so a
+  hidden tab's heading is never named), and `region`, the name of the nearest named container
+  around it (a tab panel, region or dialog by `aria-labelledby` or `aria-label`; a `section`,
+  `article`, `aside`, `nav`, `form` or `dialog` likewise; a `figure` by its `figcaption` too). Each
+  text squashed, without bidi controls or zero-width characters, at most 80 characters (cut with an
+  ellipsis); at most 6 headings. Absent where the page has neither, or reading it throws. Bounded:
+  the headings found by halving the document's list, at most 1,000 looked back at, 64 containers
+  up. The host keeps it on what it reports and `parseAnchor` returns, and leaves it off the marks
+  `show` sends into the frame (`checkMarks`), which finds a mark by its selectors.
 - **Found again**, best-effort. A text anchor: where it was, else its words anywhere (the occurrence
   whose context matches best), else its words with any spacing. An element anchor: its selector if
   its text still starts with its words (or the selector is an id, or it has no words), else the
@@ -1144,7 +1159,9 @@ can learn or fake: [THREAT_MODEL.md § 7](THREAT_MODEL.md#7-the-display-layer-an
 - **What the host takes** (THREAT_MODEL.md § 7 says what a page can fake). A selection only while it
   asked for that kind, a cancel only while picking, results only for its own marks, a marker's click
   only for a mark it shows with a marker, gesture or not (P149); each rebuilt from known fields
-  within `ANNOTATION_LIMITS` (a label stripped of what the person can't see, P105), the rest
+  within `ANNOTATION_LIMITS` (a label stripped of what the person can't see, P105; an anchor's
+  `context` too, its spaces squashed and an emptied heading left out, and an anchor whose `context`
+  is malformed or past `heading`, `headings` or `region` dropped with its report, P152), the rest
   dropped, at the bridge's rate. A report places a comment, never decides who may see or do
   anything.
 - **Host API.** `display.annotations.start(mode?)`, `stop()`, `show(marks)`, `focus(id)`,
@@ -1157,8 +1174,9 @@ which full Chromium runs too; all three engines): picking and selecting unseen b
 shown, focused, orphaned and found again on a revised page; follow-ups only for what moved, within
 budget; markers clear of words, reported by click, tap and key, heard by none of the content, also
 against patched built-ins; `focusMark` landing only when it should; drafts drawn apart; the
-selection followed; `clearSelection` against a patched `removeAllRanges`; a hostile page faking
-every report; and ADOPTING.md's `guardPresses`, as written there, taking no press within 500 ms of
+selection followed; `clearSelection` against a patched `removeAllRanges`; an anchor's `context` (the
+headings above it without a hidden tab's, the tab panel it is in, none on a page with neither); a
+hostile page faking every report; and ADOPTING.md's `guardPresses`, as written there, taking no press within 500 ms of
 its view opening and the person's own press or key after. Negative controls: § The negative
 controls.
 

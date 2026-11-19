@@ -4,6 +4,22 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **An anchor says where it is in the page** (P152, amends P053). Element and text anchors carry an
+  optional `context`, `{ headings?, region? }`, from what the page tells a screen reader: the
+  headings from the top of the page down to its section (h1 to h6 and `role=heading`, rendered ones
+  only, so never a hidden tab's; a heading picked last) and the name of the nearest named container
+  around it (a tab panel's tab, a labelled `section`, `article`, `nav` or dialog, a figure's
+  caption). At most 6 headings, 80 characters each and for the region; absent where the page has
+  neither. The host checks it in `parseAnchor` (cleaned as a label is; a malformed or oversized one
+  drops the report, `annotate:invalid`) and leaves it off the marks `show` sends into the frame.
+  It is the page's text and grants nothing; no isolation wall changes. New export:
+  `AnnotationAnchorContext`; `ANNOTATION_LIMITS` gains `heading`, `headings` and `region`.
+  **For a host:** nothing to change; store `context` with the anchor and show it with the comment
+  so readers know which part it is on. The annotation script every served page carries changed with
+  it (its pinned hash, P145).
+
 ## 0.16.1
 
 - **An element pick says where it was picked** (P150, amends P133). An element pick's

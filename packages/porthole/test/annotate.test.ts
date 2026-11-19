@@ -23,7 +23,13 @@ import {
   type DisplayHandle,
   type PlatformHost,
 } from "../src/index.ts";
-import { ANNOTATE_RUNTIME, MARKER_HIT, MARKER_NAME, WORD_LATE } from "../src/shell/annotate.ts";
+import {
+  ANCHOR_CONTEXT,
+  ANNOTATE_RUNTIME,
+  MARKER_HIT,
+  MARKER_NAME,
+  WORD_LATE,
+} from "../src/shell/annotate.ts";
 import { SHELL_RUNTIME } from "../src/shell/runtime.ts";
 
 /** Annotations (P053): what the host takes from a frame, and what the shell is given. */
@@ -1057,6 +1063,26 @@ describe("places in the document (P132): a result's documentRect and the report'
       ]);
     });
 
+    test("an anchor's context comes as the host checked it: cleaned, and a malformed one drops the report (P152)", async () => {
+      const t = mount();
+      t.display.annotations.start({ elements: true, text: true });
+      await t.say("selected", {
+        anchor: { ...text, context: { headings: ["Report", "\u202ERevenue\u202C"], region: "Q3" } },
+        rect,
+      });
+      await t.say("selected", {
+        anchor: { ...element, context: { headings: ["x".repeat(ANNOTATION_LIMITS.heading + 1)] } },
+        rect,
+      });
+      expect(t.reports).toEqual([
+        {
+          type: "selected",
+          anchor: { ...text, context: { headings: ["Report", "Revenue"], region: "Q3" } },
+          rect,
+        },
+      ]);
+    });
+
     test("each box in the viewport is clamped to it (P104); the document's are not, and the scroll is kept", async () => {
       const t = mount();
       t.display.annotations.show([
@@ -1909,6 +1935,338 @@ describe("the followed selection (P138): track({ selection: true }) and selectio
       expect(drawn).toContain("outlines.push(each);");
       expect(drawn).not.toMatch(/tabIndex|button|aria-label|focus/u);
       expect(ANNOTATE_RUNTIME).toContain('boxes.hover.setAttribute("aria-hidden", "true");');
+    });
+  });
+});
+
+describe("where an anchor is in the page (P152): its context, the headings above it and the region around it", () => {
+  /** A stand-in element: its tag, attributes and children (a string is a text node's words). */
+  interface Stand {
+    readonly tag: string;
+    readonly attrs: Readonly<Record<string, string>>;
+    readonly kids: readonly (Stand | string)[];
+    parent: Stand | null;
+  }
+  const h = (tag: string, attrs: Record<string, string> = {}, ...kids: (Stand | string)[]) => {
+    const made: Stand = { tag, attrs, kids, parent: null };
+    for (const kid of kids) {
+      if (typeof kid !== "string") {
+        kid.parent = made;
+      }
+    }
+    return made;
+  };
+  type Context = { headings?: string[]; region?: string } | null;
+  /**
+   * `ANCHOR_CONTEXT` over a stand-in DOM, its reads as the runtime wires them: the headings in
+   * document order (`h1`–`h6`, `[role~=heading]`), a node before another or holding it, and an
+   * element not rendered where it or one around it is `hidden` (what the runtime's `closest`
+   * check, or an empty `getClientRects`, sees of a hidden tab panel).
+   */
+  const contextIn = (body: Stand) => {
+    const order: Stand[] = [];
+    const walk = (node: Stand) => {
+      order.push(node);
+      for (const kid of node.kids) {
+        if (typeof kid !== "string") {
+          walk(kid);
+        }
+      }
+    };
+    walk(body);
+    const textOf = (node: Stand): string =>
+      node.kids.map((kid) => (typeof kid === "string" ? kid : textOf(kid))).join("");
+    const factory = runInNewContext(ANCHOR_CONTEXT) as (
+      dom: Record<string, unknown>,
+    ) => (target: Stand | null) => unknown;
+    const contextOf = factory({
+      headings: () =>
+        order.filter(
+          (node) =>
+            /^h[1-6]$/u.test(node.tag) || (node.attrs.role ?? "").split(/\s+/u).includes("heading"),
+        ),
+      before: (node: Stand, target: Stand) => order.indexOf(node) <= order.indexOf(target),
+      name: (node: Stand) => node.tag,
+      attr: (node: Stand, name: string) => node.attrs[name] ?? null,
+      text: textOf,
+      parent: (node: Stand) => node.parent,
+      children: (node: Stand) => node.kids.filter((kid) => typeof kid !== "string"),
+      byId: (id: string) => order.find((node) => node.attrs.id === id) ?? null,
+      shown: (node: Stand) => {
+        for (let at: Stand | null = node; at !== null; at = at.parent) {
+          if (at.attrs.hidden !== undefined) {
+            return false;
+          }
+        }
+        return true;
+      },
+    });
+    // Out of the other realm as plain JSON, as it goes to the host.
+    return (target: Stand | null): Context => JSON.parse(JSON.stringify(contextOf(target)));
+  };
+
+  test("the outline down to it: h1 > h2 > h3, earlier sections passed over, a heading picked last", () => {
+    const target = h("p", {}, "Revenue grew 12% in the north.");
+    const picked = h("h3", {}, "By ", h("em", {}, "region"));
+    const inHeading = h("span", {}, "Revenue");
+    const section = h("section", {}, h("h4", {}, "Inside"), h("p", {}, "Words"));
+    const page = h(
+      "body",
+      {},
+      h("h1", {}, "  Quarterly\n report "),
+      h("h2", {}, "Intro"),
+      h("h3", {}, "Background"),
+      h("h2", {}, inHeading, " grew"),
+      h("p", {}, "Up."),
+      picked,
+      target,
+      section,
+      h("h2", {}, "Costs"),
+    );
+    const contextOf = contextIn(page);
+    expect(contextOf(target)).toEqual({
+      headings: ["Quarterly report", "Revenue grew", "By region"],
+    });
+    expect(contextOf(picked), "a heading picked is the last").toEqual({
+      headings: ["Quarterly report", "Revenue grew", "By region"],
+    });
+    expect(contextOf(inHeading), "inside a heading: that heading is the last").toEqual({
+      headings: ["Quarterly report", "Revenue grew"],
+    });
+    // A section picked: the headings before it, not the ones inside it.
+    expect(contextOf(section)).toEqual({
+      headings: ["Quarterly report", "Revenue grew", "By region"],
+    });
+    // Spliced as it is, its built-ins taken before content runs.
+    expect(ANNOTATE_RUNTIME).toContain(`const contextOf = (${ANCHOR_CONTEXT})({`);
+    const taken = ANNOTATE_RUNTIME.indexOf(
+      "const headingsIn = Document.prototype.querySelectorAll;",
+    );
+    expect(taken).toBeGreaterThan(-1);
+    expect(ANNOTATE_RUNTIME.indexOf("window.addEventListener")).toBeGreaterThan(taken);
+    for (const each of [
+      "const elementById = Document.prototype.getElementById;",
+      "const comparePosition = Node.prototype.compareDocumentPosition;",
+      "const closestOf = Element.prototype.closest;",
+      "const elementRects = Element.prototype.getClientRects;",
+      "const styleOf = window.getComputedStyle;",
+    ]) {
+      expect(ANNOTATE_RUNTIME.indexOf(each), each).toBeGreaterThan(-1);
+      expect(ANNOTATE_RUNTIME.indexOf(each), each).toBeLessThan(
+        ANNOTATE_RUNTIME.indexOf("window.addEventListener"),
+      );
+    }
+    // Both kinds of anchor carry it.
+    expect(ANNOTATE_RUNTIME.split("withContext({ kind: ")).toHaveLength(3);
+  });
+
+  test("levels as a screen reader reads them: role=heading with aria-level, a role that unmakes a heading, a skipped level", () => {
+    const target = h("p", {}, "Words");
+    const page = h(
+      "body",
+      {},
+      h("div", { role: "heading", "aria-level": "1" }, "Dashboard"),
+      h("h2", { role: "presentation" }, "Not a heading"),
+      h("h4", {}, "Skipped to four"),
+      h("div", { role: "heading" }, "Level two by default"),
+      h("h2", { "aria-level": "5" }, "Five by aria-level"),
+      target,
+    );
+    expect(contextIn(page)(target)).toEqual({
+      headings: ["Dashboard", "Level two by default", "Five by aria-level"],
+    });
+    // An aria-label names a heading over its words.
+    const labelled = h("p", {}, "Words");
+    const icons = h("body", {}, h("h1", { "aria-label": "Settings" }, "\u2699"), labelled);
+    expect(contextIn(icons)(labelled)).toEqual({ headings: ["Settings"] });
+  });
+
+  test("a hidden tab's heading is never named; the tab panel it is in is, by its tab", () => {
+    const target = h("p", {}, "Revenue grew 12%.");
+    const page = h(
+      "body",
+      {},
+      h("h1", {}, "Report"),
+      h("h2", {}, "Results"),
+      h(
+        "div",
+        { role: "tablist" },
+        h("button", { role: "tab", id: "tab-costs" }, "Costs"),
+        h("button", { role: "tab", id: "tab-revenue" }, "Revenue"),
+      ),
+      h(
+        "section",
+        { role: "tabpanel", "aria-labelledby": "tab-costs", hidden: "" },
+        h("h3", {}, "Costs in detail"),
+        h("p", {}, "Costs fell."),
+      ),
+      h("section", { role: "tabpanel", "aria-labelledby": "tab-revenue" }, target),
+    );
+    expect(contextIn(page)(target)).toEqual({
+      headings: ["Report", "Results"],
+      region: "Revenue",
+    });
+  });
+
+  test("the region: the nearest named container around it, by aria-labelledby, aria-label or a figure's caption", () => {
+    const inPanel = h("p", {}, "a");
+    const inSection = h("p", {}, "b");
+    const inFigure = h("span", {}, "c");
+    const inNav = h("a", {}, "d");
+    const unnamed = h("p", {}, "e");
+    const page = h(
+      "body",
+      {},
+      h("span", { id: "first" }, "Q3"),
+      h("span", { id: "second" }, " numbers "),
+      h("div", { role: "tabpanel", "aria-labelledby": "first second missing" }, inPanel),
+      h(
+        "article",
+        { "aria-label": "Outer story" },
+        h("section", {}, h("div", {}, inSection)),
+        h("section", { role: "presentation", "aria-label": "Not a region" }, unnamed),
+      ),
+      h("figure", {}, h("div", {}, inFigure), h("figcaption", {}, "Revenue by month")),
+      h("nav", { "aria-label": "Table of contents" }, inNav),
+    );
+    const contextOf = contextIn(page);
+    expect(contextOf(inPanel)).toEqual({ region: "Q3 numbers" });
+    expect(contextOf(inSection), "an unnamed section: the named article around it").toEqual({
+      region: "Outer story",
+    });
+    expect(contextOf(unnamed), "a role that unmakes a section").toEqual({ region: "Outer story" });
+    expect(contextOf(inFigure)).toEqual({ region: "Revenue by month" });
+    expect(contextOf(inNav)).toEqual({ region: "Table of contents" });
+  });
+
+  test("a page with no headings and no named region gives no context; nor does one whose only heading is hidden", () => {
+    const target = h("p", {}, "Words");
+    expect(contextIn(h("body", {}, h("div", {}, target)))(target)).toBeNull();
+    const hidden = h("p", {}, "Words");
+    const page = h("body", {}, h("div", { hidden: "" }, h("h2", {}, "Secret tab")), hidden);
+    expect(contextIn(page)(hidden)).toBeNull();
+    expect(contextIn(page)(null)).toBeNull();
+    // Reading the page throws (a page that broke its own DOM): no context, and the pick goes on.
+    const broken = (runInNewContext(ANCHOR_CONTEXT) as (dom: unknown) => (t: unknown) => unknown)({
+      headings: () => {
+        throw new Error("patched");
+      },
+    });
+    expect(broken({})).toBeNull();
+  });
+
+  test("capped: 80 characters each with an ellipsis, at most 6 headings (aria-level past 6 is 6), bidi controls and zero-width characters out", () => {
+    const target = h("p", {}, "Words");
+    const long = "x".repeat(200);
+    const page = h(
+      "body",
+      {},
+      h("h1", {}, long),
+      h("h2", {}, "Two"),
+      h("h3", {}, "Three"),
+      h("h4", {}, "Four"),
+      h("h5", {}, "Five"),
+      h("h6", {}, "Six"),
+      h("div", { role: "heading", "aria-level": "9" }, "Nine, read as six"),
+      h("section", { "aria-label": `\u202Eevil\u202C\u200B ${"y".repeat(200)}` }, target),
+    );
+    const context = contextIn(page)(target);
+    expect(context?.headings).toEqual([
+      `${"x".repeat(79)}\u2026`,
+      "Two",
+      "Three",
+      "Four",
+      "Five",
+      "Nine, read as six",
+    ]);
+    expect(context?.headings).toHaveLength(ANNOTATION_LIMITS.headings);
+    expect(context?.region).toBe(`evil ${"y".repeat(74)}\u2026`);
+    expect(context?.region).toHaveLength(ANNOTATION_LIMITS.region);
+    for (const each of [...(context?.headings ?? []), context?.region ?? ""]) {
+      expect(each.length).toBeLessThanOrEqual(ANNOTATION_LIMITS.heading);
+      expect(unseen(each)).toBe(false);
+    }
+    // The shell's caps are the host's.
+    expect(ANCHOR_CONTEXT).toContain(`const HEADING = ${ANNOTATION_LIMITS.heading};`);
+    expect(ANCHOR_CONTEXT).toContain(`const HEADINGS = ${ANNOTATION_LIMITS.headings};`);
+    expect(ANCHOR_CONTEXT).toContain(`const REGION = ${ANNOTATION_LIMITS.region};`);
+  });
+
+  describe("the host's check", () => {
+    const context = { headings: ["Quarterly report", "Revenue"], region: "Revenue tab" };
+    const rect = { x: 10, y: 20, width: 30, height: 18 };
+
+    test("kept on either kind of anchor, rebuilt from known fields; an anchor without one as before", () => {
+      expect(parseAnchor({ ...element, context })).toStrictEqual({ ...element, context });
+      expect(parseAnchor({ ...text, context: { ...context, extra: "<b>" } })).toStrictEqual({
+        ...text,
+        context,
+      });
+      expect(parseAnchor({ ...text, context: { region: "Revenue tab" } })).toStrictEqual({
+        ...text,
+        context: { region: "Revenue tab" },
+      });
+      expect(parseAnchor(element)).toStrictEqual(element);
+      expect(parseAnchor(element)).not.toHaveProperty("context");
+    });
+
+    test("shown text: what a person can't see taken out, spaces squashed, an empty heading or region left out", () => {
+      expect(
+        parseAnchor({
+          ...element,
+          context: { headings: ["\u202Eevil\u202C", "a\n\n b", "\u200B", " "], region: "\u2066" },
+        }),
+      ).toStrictEqual({ ...element, context: { headings: ["evil", "a b"] } });
+      expect(parseAnchor({ ...element, context: { headings: [], region: "" } })).toStrictEqual(
+        element,
+      );
+      expect(parseAnchor({ ...element, context: {} })).toStrictEqual(element);
+    });
+
+    test("malformed or too large: the anchor is dropped, and the report with it", () => {
+      const heading = "x".repeat(ANNOTATION_LIMITS.heading);
+      const region = "y".repeat(ANNOTATION_LIMITS.region);
+      expect(
+        parseAnchor({
+          ...element,
+          context: {
+            headings: Array.from({ length: ANNOTATION_LIMITS.headings }, () => heading),
+            region,
+          },
+        }),
+        "at the limits",
+      ).not.toBeNull();
+      for (const bad of [
+        null,
+        "Revenue",
+        ["Revenue"],
+        { headings: "Revenue" },
+        { headings: [1] },
+        { headings: [null] },
+        { headings: [`${heading}x`] },
+        { headings: Array.from({ length: ANNOTATION_LIMITS.headings + 1 }, () => "a") },
+        { region: 1 },
+        { region: `${region}y` },
+        { headings: { 0: "a", length: 1 } },
+      ]) {
+        expect(parseAnchor({ ...element, context: bad }), JSON.stringify(bad)).toBeNull();
+        expect(
+          parseReport({ type: "selected", anchor: { ...text, context: bad }, rect }),
+          JSON.stringify(bad),
+        ).toBeNull();
+      }
+    });
+
+    test("a selected report carries it; a mark sent to the frame doesn't (the frame finds it by its selectors)", () => {
+      expect(
+        parseReport({ type: "selected", anchor: { ...element, context }, rect }),
+      ).toStrictEqual({ type: "selected", anchor: { ...element, context }, rect });
+      const [posted, draft] = checkMarks([
+        { id: "m1", anchor: { ...element, context }, count: 2 },
+        { id: "m2", anchor: { ...text, context }, kind: "draft" },
+      ]);
+      expect(posted).toStrictEqual({ id: "m1", anchor: element, count: 2 });
+      expect(draft).toStrictEqual({ id: "m2", anchor: text, kind: "draft" });
     });
   });
 });

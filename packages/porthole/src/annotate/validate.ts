@@ -3,6 +3,7 @@ import {
   type AnchorResult,
   type AnnotateMode,
   type AnnotationAnchor,
+  type AnnotationAnchorContext,
   type AnnotationMark,
   type AnnotationRect,
   type AnnotationReport,
@@ -63,11 +64,56 @@ function selector(value: unknown): AnnotationSelector | null {
   }
 }
 
+/** Text Porthole only shows (P105, P152): without what a person can't see, spaces squashed. */
+const shown = (value: string): string => withoutUnseen(value).replace(/\s+/gu, " ").trim();
+
+/**
+ * An anchor's `context` (P152), rebuilt: `undefined` where there is none, or nothing is left of it
+ * once cleaned; null where it is malformed or too large (the anchor goes with it). Headings and
+ * region are shown text, as the label is: cleaned, and a heading cleaned to nothing left out.
+ */
+function anchorContext(value: unknown): AnnotationAnchorContext | undefined | null {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { headings, region } = value;
+  if (
+    headings !== undefined &&
+    !(
+      Array.isArray(headings) &&
+      headings.length <= LIMITS.headings &&
+      headings.every((each) => text(each, LIMITS.heading))
+    )
+  ) {
+    return null;
+  }
+  if (region !== undefined && !text(region, LIMITS.region)) {
+    return null;
+  }
+  const listed: readonly unknown[] = Array.isArray(headings) ? headings : [];
+  const kept = listed.flatMap((each) => {
+    const words = typeof each === "string" ? shown(each) : "";
+    return words === "" ? [] : [words];
+  });
+  const named = region === undefined ? "" : shown(region);
+  if (kept.length === 0 && named === "") {
+    return undefined;
+  }
+  return {
+    ...(kept.length === 0 ? {} : { headings: kept }),
+    ...(named === "" ? {} : { region: named }),
+  };
+}
+
 /**
  * An anchor, rebuilt from its known fields; null if any part is malformed or too large. Its label
  * is text for the person, so what they couldn't see is taken out of it (P105: a wordless element's
  * `alt`, `aria-label` or `title`, which the page never shows, can carry bidi controls or zero-width
- * characters); its selectors' words are kept as they are, to be found again.
+ * characters), as it is out of its `context` (P152); its selectors' words are kept as they are, to
+ * be found again.
  */
 export function parseAnchor(value: unknown): AnnotationAnchor | null {
   if (!isRecord(value) || (value.kind !== "element" && value.kind !== "text")) {
@@ -93,7 +139,16 @@ export function parseAnchor(value: unknown): AnnotationAnchor | null {
   if (value.kind === "text" ? !quote : !css && !quote) {
     return null;
   }
-  return { kind: value.kind, selectors, label: withoutUnseen(value.label) };
+  const context = anchorContext(value.context);
+  if (context === null) {
+    return null;
+  }
+  return {
+    kind: value.kind,
+    selectors,
+    label: withoutUnseen(value.label),
+    ...(context === undefined ? {} : { context }),
+  };
 }
 
 const coordinate = (value: unknown): value is number =>
@@ -399,7 +454,7 @@ export const hasMarker = (mark: AnnotationMark): boolean =>
  * `ANNOTATION_LIMITS.count` isn't bad: it is clamped to it, P116). Each is
  * rebuilt as the frame gets it: a posted mark as 0.10.0 sent it (no `kind`), a draft with
  * `kind: "draft"` and without its count (P107: a draft's marker shows no number, so the page isn't
- * told one).
+ * told one), each anchor without its `context` (P152: the frame doesn't need it).
  */
 export function checkMarks(marks: readonly AnnotationMark[]): AnnotationMark[] {
   if (!Array.isArray(marks) || marks.length > LIMITS.marks) {
@@ -407,8 +462,8 @@ export function checkMarks(marks: readonly AnnotationMark[]): AnnotationMark[] {
   }
   const seen = new Set<string>();
   return marks.map((mark, index) => {
-    const anchor = parseAnchor(mark?.anchor);
-    if (!markId(mark?.id) || seen.has(mark.id) || anchor === null) {
+    const parsed = parseAnchor(mark?.anchor);
+    if (!markId(mark?.id) || seen.has(mark.id) || parsed === null) {
       throw new TypeError(
         `annotations.show: mark ${index} needs a unique id (1 to ${LIMITS.id} characters) and a valid anchor`,
       );
@@ -423,6 +478,11 @@ export function checkMarks(marks: readonly AnnotationMark[]): AnnotationMark[] {
       throw new TypeError(`annotations.show: mark ${index}'s kind is "posted" or "draft"`);
     }
     seen.add(mark.id);
+    // The frame finds a mark by its selectors: an anchor's context (P152) stays with the host.
+    const anchor: AnnotationAnchor =
+      parsed.context === undefined
+        ? parsed
+        : { kind: parsed.kind, selectors: parsed.selectors, label: parsed.label };
     if (kind === "draft") {
       return { id: mark.id, anchor, kind };
     }

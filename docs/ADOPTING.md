@@ -204,7 +204,7 @@ What the host must do (why: THREAT_MODEL.md §6 "What every host must do"):
 | **Ids say nothing; counts only where the page may know them** | The content reads every `show`; who wrote what stays outside the frame. |
 | **Drafts only in their author's frame** | Never a shared one: the page reads which marks are drafts. A draft's `count` is dropped before the frame; give its id at random like any other. A `kind` other than `"posted"` or `"draft"` throws. Upgrade the content server first: an older shell draws a draft as a posted mark without a marker. |
 | **No drafts to a page that can pass them on** | Or accept that its author and other viewers can learn of them. `host.mayPassOn(declaration)` (or `mayPassOn(config, declaration)`, P112) is true for a page that can reach `db`, `artifact`, `assets`, `openLink`, `sendPrompt`, `setModelContext`, `callTool`, `readData` or `subscribeData` (or `reportError` with errors to the agent), or egress beyond the library CDNs. |
-| **Labels and quotes are the page's text** | Show them as text, and give them to a model only as the page's words. A label omits what the person can't see; a quote (`exact`) keeps it. |
+| **Labels, quotes and context are the page's text** | Show them as text, and give them to a model only as the page's words. A label and an anchor's `context` (P152) omit what the person can't see; a quote (`exact`) keeps it. |
 
 - **Guard every view a report opens or moves** (`activated`, `selected`, a card following a `tracked`
   mark each time it moves more than a few px): the content picks the moment and the place (P105).
@@ -283,6 +283,15 @@ display.on("annotation", (report) => {
 (with `scroll`), the point it was picked at in the same coordinates. Where the element fills most of
 the frame, place your UI at `pointDocument.x - scroll.x`, `pointDocument.y - scroll.y`, clipped. A
 pick from the keyboard, a text selection and an older shell send none.
+
+**Where it is in the page** (P152): an anchor (`selected`'s, of either kind) may carry `context`,
+`{ headings?: string[], region?: string }`, from what the page tells a screen reader: the headings
+from the top of the page down to its section, outermost first (a heading picked last; a hidden
+tab's never), and the name of the named container around it (a tab panel's tab, a labelled
+`section`, a figure's caption). At most 6 headings, 80 characters each and for the region. Store it
+with the anchor and show it with the comment ("Results › Revenue tab") so readers, people and
+agents, know which part it is on; it is absent where the page has neither, and from an older shell.
+`parseAnchor` keeps it; `show` leaves it out of what goes to the frame.
 
 The keyboard:
 

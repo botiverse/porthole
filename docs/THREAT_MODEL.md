@@ -689,8 +689,14 @@ content's realm.
   `aria-label`, `title`). The host strips from every label what a person can't see: format, bidi and
   zero-width characters, default-ignorable code points, variation selectors, tags, private-use
   characters and controls (P105, without P100's exceptions for emoji and shaped letters). A text
-  anchor's quote (`exact`) keeps them, to be found again. A quote or label handed to a model is the
-  page's words, never instructions.
+  anchor's quote (`exact`) keeps them, to be found again. An anchor's `context` (P152: the headings
+  above it, the name of the region around it) is the page's text of the same kind, read from its
+  headings, `aria-label`s and tab names: nothing the host doesn't already take from the page as a
+  quote or a label, and a page can put any words there, as it can in a heading. The host strips it
+  as it strips a label, within `ANNOTATION_LIMITS` (6 headings, 80 characters each and for the
+  region), and doesn't send it back into the frame. A quote, label or context handed to a model is
+  the page's words, never instructions: a heading saying "Approved by legal" says only that the page
+  says so.
 - *Boxes* (`selected`, `activated`, `anchored`) are the page's word, clamped to the frame's viewport
   before the host hears them: the part inside is kept; a box wholly outside becomes one of no size
   on the nearest edge; a platform `viewport()` that answers no size, or throws, clamps every box to
