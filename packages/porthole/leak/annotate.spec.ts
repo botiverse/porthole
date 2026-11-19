@@ -3749,6 +3749,64 @@ test("an element pick says where it was clicked, in the document's coordinates w
   expect(keyed.pointDocument, "probe: a pick from the keyboard has no point").toBeUndefined();
 });
 
+test("an anchor says where it is in the page: the headings above it, never a hidden tab's, and the tab panel it is in; a page with neither says nothing (P152)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    content: `<!doctype html><html><head><title>Report</title></head><body>
+<h1>Quarterly <em>report</em></h1>
+<h2>Results</h2>
+<div role="tablist">
+  <button role="tab" id="tab-costs">Costs</button>
+  <button role="tab" id="tab-margins">Margins</button>
+  <button role="tab" id="tab-revenue" aria-selected="true">Revenue</button>
+</div>
+<section role="tabpanel" aria-labelledby="tab-costs" hidden><h3>Costs in detail</h3><p>Costs fell.</p></section>
+<section role="tabpanel" aria-labelledby="tab-margins" style="display: none"><h3>Margins in detail</h3></section>
+<section role="tabpanel" aria-labelledby="tab-revenue"><p id="grew">Revenue grew 12% in the north.</p></section>
+<h3 id="outlook">Outlook</h3>
+<p id="next">Next quarter looks flat.</p>
+</body></html>`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#next")).toBeVisible();
+
+  await display.annotate("start", { elements: true, text: false });
+  await frame.locator("#grew").click();
+  const grew = await next(display, "selected");
+  expect(grew.anchor.context, "the hidden tabs' headings left out, the shown tab named").toEqual({
+    headings: ["Quarterly report", "Results"],
+    region: "Revenue",
+  });
+
+  let count = (await reports(display)).length;
+  await display.annotate("start", { elements: true, text: false });
+  await frame.locator("#outlook").click();
+  const heading = await next(display, "selected", count);
+  expect(heading.anchor.context, "a heading picked is the last").toEqual({
+    headings: ["Quarterly report", "Results", "Outlook"],
+  });
+
+  count = (await reports(display)).length;
+  await display.annotate("start", { elements: false, text: true });
+  expect(await select(frame, "#next", "looks flat")).toBe(true);
+  const words = await next(display, "selected", count);
+  expect(words.anchor.kind).toBe("text");
+  expect(words.anchor.context, "a text selection's too").toEqual({
+    headings: ["Quarterly report", "Results", "Outlook"],
+  });
+
+  // No heading, no named region: no context at all.
+  const plain = await referenceHost.launch(page, { config: annotated(), content: WORDLESS });
+  const plainFrame = await plain.frame();
+  await plain.annotate("start", { elements: true, text: false });
+  await plainFrame.locator("#chart").click();
+  const chart = await next(plain, "selected");
+  expect(chart.anchor.label).toContain("Revenue by month");
+  expect(chart.anchor).not.toHaveProperty("context");
+});
+
 test("an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second", async ({
   page,
 }) => {

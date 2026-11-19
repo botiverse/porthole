@@ -608,7 +608,8 @@ describe("without framedBy, the pages' scripts are 0.14.16's, byte for byte (P14
  * header, not for this (Ferryman's audit of 0.15.0, P145). No hash covers it (`script-src` is
  * `'unsafe-inline'` for these documents), so it is pinned here: a change to its bytes fails this
  * test, and is said in the CHANGELOG, not assumed away (0.15.2: annotations', P147; 0.15.3: the
- * shell's, P148; 0.16.0: the shell's again, P149; after 0.16.0: annotations', P150). From
+ * shell's, P148; 0.16.0: the shell's again, P149; 0.16.1: annotations', P150; after 0.16.1:
+ * annotations' again, P152). From
  * `git show v0.15.0:…/src/shell/*.ts` and `git show v0.14.16:…` (`SHELL_RUNTIME`,
  * `ANNOTATE_RUNTIME`, `FIND_RUNTIME`, `USE_RUNTIME`, `LEGACY_GLOBALS_RUNTIME`).
  */
@@ -621,9 +622,10 @@ const RUNTIME_V0_16_0 = {
   shell: "'sha256-RWgbBR8osnoAwlATYK0bglHOOpBB8KVrDa1OM6+gWRQ='",
   // 0.15.0's was 'sha256-3PZMe4arifdWHJU1jS0laR49wiWc/uBWIFddGJPyf/w=': 0.15.2's marks ride the
   // document's scroll (P147). 0.16.0's was 'sha256-uQ77dZDXcY6pKRoTylHpGXY+ZhhCt4WZhB/qDTQJ6BE=':
-  // since, an element pick says where it was picked (P150), for the next release's CHANGELOG to
-  // say. The other three are 0.15.0's.
-  annotate: "'sha256-mEENXVKL++jLcp/UWE5v13gg234n9psEOCsXkq9eu9E='",
+  // 0.16.1's, where an element pick says where it was picked (P150), was
+  // 'sha256-mEENXVKL++jLcp/UWE5v13gg234n9psEOCsXkq9eu9E=': since, an anchor says where it is in the
+  // page (P152), for the next release's CHANGELOG to say. The other three are 0.15.0's.
+  annotate: "'sha256-jxE4LCFEf87vnGArTlFqYLagX7aqDUqSeBfJ4v9TskQ='",
   find: "'sha256-invvWJWqsN6Zv0kMLG2eeofMX6XmKNSqsvYydiElDGc='",
   use: "'sha256-TJx7YF/WvrHHkz8iTPfUfH6GNUEgES6O+0+igLRmyPQ='",
   legacy: "'sha256-ZEVJsezqV7n+Ho0m7Y92NYxAZqf8ynKq/rDdXrJUKp0='",
@@ -636,7 +638,7 @@ const RUNTIME_V0_14_16 = {
   legacy: "'sha256-ZEVJsezqV7n+Ho0m7Y92NYxAZqf8ynKq/rDdXrJUKp0='",
 };
 
-describe("the served shell runtime is 0.16.0's (0.15.2's, less a nested page's files hook, P149), but for annotations' (P150), not 0.14.16's: pinned, so what the CHANGELOG says of it is checked (P145)", () => {
+describe("the served shell runtime is 0.16.0's (0.15.2's, less a nested page's files hook, P149), but for annotations' (P150, P152), not 0.14.16's: pinned, so what the CHANGELOG says of it is checked (P145)", () => {
   const now = {
     shell: hashOf(SHELL_RUNTIME),
     annotate: hashOf(ANNOTATE_RUNTIME),

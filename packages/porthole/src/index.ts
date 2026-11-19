@@ -337,6 +337,7 @@ export {
   type AnchorState,
   type AnnotateMode,
   type AnnotationAnchor,
+  type AnnotationAnchorContext,
   type AnnotationMark,
   type AnnotationMarkKind,
   type AnnotationRect,

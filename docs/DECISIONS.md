@@ -9772,3 +9772,88 @@ set runs them.
 **Revisit when** a host wants links inside open shadow roots or a page's own frames labelled, labels
 for relative addresses on the content's own origin, or a title shown beside a worded link (a
 tooltip) rather than only in place of a bare one.
+
+## P152 · 2026-11-19 · An anchor says where it is in the page (`context`: its headings and region) · Accepted
+
+Amends P053 (what an anchor carries). A comment's readers, people and agents, often can't tell
+which part of the page it is on: the anchor's CSS selector starts at the nearest id, so it names a
+section only where the page gave its sections ids, and its label and quote say what was picked, not
+where.
+
+**Context.** A page already says how it is laid out to whoever can't see it: its headings and their
+levels, the names of its tab panels, labelled sections and figures. That is the outline a reader
+would give ("under Results, in the Revenue tab"). The shell can read it at the pick, as it reads
+the label, with the DOM's own functions taken before content runs.
+
+**Decision.**
+1. **`anchor.context`**, optional, on element and text anchors: `{ headings?, region? }`, built in
+   the shell (`ANCHOR_CONTEXT`, `src/shell/annotate.ts`) from the element picked, or the element a
+   selection starts in.
+   - `headings`: the outline down to it, outermost first. The candidates are h1 to h6 and
+     `[role~=heading]` (a tag whose role says otherwise is none); a level is `aria-level` (1 or
+     more, past 6 read as 6), else the tag's number, else 2. Walking back from it in document
+     order, a heading is kept when its level is lower than the lowest kept so far; one it is, or
+     is inside, is the last. A heading that isn't rendered (no client rects, inside `[hidden]`,
+     `[aria-hidden=true]` or `[inert]`, or `visibility: hidden`) is skipped, so a hidden tab
+     panel's heading is never named; a rendered one with no words still ends the walk at its
+     level, unnamed. Each is its `aria-label`, else its text.
+   - `region`: the name of the nearest container around it that has one: `role=tabpanel`, `region`,
+     `dialog` or `alertdialog`, and a `section`, `article`, `aside`, `nav`, `form` or `dialog`
+     with no other role, by `aria-labelledby` (each id's words) or `aria-label`; a `figure` by
+     those or its `figcaption`.
+   - Each text squashed, bidi controls and zero-width characters out, at most 80 characters (a
+     longer one cut, with an ellipsis); at most 6 headings. Absent where both are empty, and where
+     reading the page throws (the pick goes on without it).
+   - Bounded at each pick: the document's headings found by halving its list, at most 1,000 looked
+     back at, 64 containers up, 1,000 characters of any one text read.
+2. **The host checks it** in `parseAnchor`, so on every report and every stored anchor:
+   `ANNOTATION_LIMITS.headings` (6) headings of `heading` (80) characters each, a `region` of
+   `region` (80). A `context` that isn't an object, headings that aren't an array of strings, or
+   anything past a limit drops the anchor (and its report: a report is dropped, never repaired,
+   P053). What is kept is shown text, cleaned as a label is (P105's `withoutUnseen`), its spaces
+   squashed; a heading cleaned to nothing is left out, and a `context` left empty is omitted.
+3. **Not sent back.** `checkMarks` leaves `context` off the anchors `show` sends into the frame: the
+   shell finds a mark by its selectors, and needs none of it.
+
+**Compatibility.** Optional and only added. An anchor without `context` (every stored one, an older
+shell's) is valid as before; an older host drops the field (anchors are rebuilt from known fields).
+The annotation runtime every served page carries changes (its pinned hash, P145).
+
+**Threat.** None opened, and no isolation change: no wall, gate, rate or method moves. It is the
+page's text, of the kind the host already takes as a label (which can be a never-shown
+`aria-label`, P105) or a quote, so it tells the host nothing new about the page, and the page learns
+nothing (it goes from the frame to the host, and not back). A page can put any words there, as it
+can in its headings: a reader or a model takes it as what the page says, never as a fact or an
+instruction (THREAT_MODEL §7). Its size is bounded by the host's limits, whatever the shell sends.
+
+**Tested.** `test/annotate.test.ts` "where an anchor is in the page (P152)": `ANCHOR_CONTEXT` over a
+stand-in DOM: the chain h1 > h2 > h3 with an earlier section passed over, a heading picked (and an
+element inside one) last, a section picked named by the headings before it; `role=heading` with and
+without `aria-level`, a role that unmakes a heading; a hidden tab's heading skipped and the shown
+tab panel named by its tab; regions by `aria-labelledby`, `aria-label` and `figcaption`, an
+unnamed section passed to the named one around it; no headings and no region (and only a hidden
+heading) give none, nor does a page whose DOM throws; 80-character caps with an ellipsis, 6
+headings, bidi controls out, the shell's caps the host's; spliced with its built-ins taken before
+content runs, on both kinds of anchor. The host's check: kept and rebuilt, cleaned and squashed,
+emptied parts left out, malformed or oversized ones drop the anchor and the report, left off what
+`checkMarks` sends; through `createHost`, a cleaned one reported and a malformed one's report
+dropped. `test/framed-by.test.ts`: the annotation runtime's new pin. `leak/annotate.spec.ts` "an
+anchor says where it is in the page…" (three engines; written here and not run, test runs being
+paused where it was written: CI runs it): a pick in the shown tab panel names the headings above
+it but neither hidden tab's (`hidden`, `display: none`) and the panel's tab; a heading picked is
+last; a text selection carries the same; a page with neither carries no `context`.
+
+**Rejected.**
+- *A path of ids or classes instead*: the page's names for itself (`div.col-2`) say nothing to a
+  reader; the outline is what the page says to people.
+- *The nearest heading only*: "Revenue" under "Costs" and under "Results" reads alike; the chain
+  says which.
+- *Every preceding heading, hidden or not*: a hidden tab's heading names a part the person never
+  saw, and points the reader at the wrong one.
+- *Repairing an oversized `context` on the host (cutting it)*: the shell never sends one; a page
+  that does is lying, and its report is dropped as any malformed report is.
+- *Sending `context` back into the frame with marks*: the shell doesn't need it, and the less of
+  the host's stored anchor the frame reads, the better.
+
+**Revisit when** readers want more of the outline (a list item's number, a table's row and column
+headers), or a host wants the context recomputed when a mark is found again after the page changed.
