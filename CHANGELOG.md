@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.17.1
 
 - **An anchor's headings: an element's own heading, and not the page's only h1** (P153, amends
   P152). An element picked that holds rendered headings, exactly one of them at the lowest level
