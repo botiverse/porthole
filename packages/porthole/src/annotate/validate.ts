@@ -462,8 +462,8 @@ export function checkMarks(marks: readonly AnnotationMark[]): AnnotationMark[] {
   }
   const seen = new Set<string>();
   return marks.map((mark, index) => {
-    const anchor = parseAnchor(mark?.anchor);
-    if (!markId(mark?.id) || seen.has(mark.id) || anchor === null) {
+    const parsed = parseAnchor(mark?.anchor);
+    if (!markId(mark?.id) || seen.has(mark.id) || parsed === null) {
       throw new TypeError(
         `annotations.show: mark ${index} needs a unique id (1 to ${LIMITS.id} characters) and a valid anchor`,
       );
@@ -479,16 +479,16 @@ export function checkMarks(marks: readonly AnnotationMark[]): AnnotationMark[] {
     }
     seen.add(mark.id);
     // The frame finds a mark by its selectors: an anchor's context (P152) stays with the host.
-    const sent: AnnotationAnchor =
-      anchor.context === undefined
-        ? anchor
-        : { kind: anchor.kind, selectors: anchor.selectors, label: anchor.label };
+    const anchor: AnnotationAnchor =
+      parsed.context === undefined
+        ? parsed
+        : { kind: parsed.kind, selectors: parsed.selectors, label: parsed.label };
     if (kind === "draft") {
-      return { id: mark.id, anchor: sent, kind };
+      return { id: mark.id, anchor, kind };
     }
     return {
       id: mark.id,
-      anchor: sent,
+      anchor,
       ...(mark.count === undefined ? {} : { count: Math.min(mark.count, LIMITS.count) }),
     };
   });
