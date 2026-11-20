@@ -10,6 +10,7 @@ import {
   type AnnotationScroll,
   type AnnotationSelector,
   type AnnotationTrackTarget,
+  type PagePlace,
 } from "./types.ts";
 import { withoutUnseen } from "../bridge/unseen.ts";
 
@@ -189,6 +190,40 @@ function parsePoint(value: unknown): { x: number; y: number } | null {
 }
 
 /**
+ * A place's page and hash (P155): printable ASCII, as an address's path and fragment serialize
+ * (non-ASCII and spaces percent-encoded); a page under the files' own `./` without a query or
+ * fragment, a hash that is a `#` and something.
+ */
+const PLACE_PAGE = /^\.\/[!$-;=@-_a-~]*$/u;
+const PLACE_HASH = /^#[!#-;=?-_a-~]+$/u;
+
+/**
+ * Where the reader is in the page (P155), rebuilt from its known fields: its `scroll` (as P132's),
+ * a `page` and a `hash` where present, each in its shape and within `ANNOTATION_LIMITS`; null for
+ * anything else. The page's word: the shell tells a hash only where it names an element, which
+ * the host can't check.
+ */
+export function parsePlace(value: unknown): PagePlace | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const scroll = parseScroll(value.scroll);
+  const { page, hash } = value;
+  if (
+    scroll === null ||
+    (page !== undefined && !(text(page, LIMITS.page) && PLACE_PAGE.test(page))) ||
+    (hash !== undefined && !(text(hash, LIMITS.hash) && PLACE_HASH.test(hash)))
+  ) {
+    return null;
+  }
+  return {
+    ...(page === undefined ? {} : { page }),
+    ...(hash === undefined ? {} : { hash }),
+    scroll,
+  };
+}
+
+/**
  * A box the frame reported, clamped to the frame's viewport (`width` by `height`, CSS px, P104):
  * each side is held within it, so what overlaps the viewport keeps the part inside, and what lies
  * wholly outside becomes a box of no size on the nearest edge. Where the viewport isn't known, a
@@ -302,12 +337,15 @@ export function parseReport(value: unknown): AnnotationReport | null {
       // Where an element was picked (P150), in the document as the last line is.
       const pointDocument =
         value.pointDocument === undefined ? undefined : parsePoint(value.pointDocument);
+      // Where the reader was in the page (P155).
+      const place = value.place === undefined ? undefined : parsePlace(value.place);
       if (
         anchor === null ||
         rect === null ||
         lastLineDocumentRect === null ||
         scroll === null ||
-        pointDocument === null
+        pointDocument === null ||
+        place === null
       ) {
         return null;
       }
@@ -326,6 +364,7 @@ export function parseReport(value: unknown): AnnotationReport | null {
         ...(lastLineDocumentRect === undefined ? {} : { lastLineDocumentRect }),
         ...(scroll === undefined ? {} : { scroll }),
         ...(pointDocument === undefined ? {} : { pointDocument }),
+        ...(place === undefined ? {} : { place }),
       };
     }
     case "unselected":

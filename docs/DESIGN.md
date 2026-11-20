@@ -805,7 +805,8 @@ again.
   `trackedSelection` (true: the selection followed in place and highlighted, P138). `onAnnotation`
   gets the frame's reports, `tracked` and `selectionTracked` boxes too. A remounted frame gets them
   all. The `ref` (`PortholeFrameHandle`) holds `clearSelection()`, `find`, `clearFind`,
-  `focusMark(id)`, each a no-op while no display runs.
+  `focusMark(id)` and `place()` (P155), each a no-op while no display runs (`find` and `place`
+  answer `"unsupported"`).
 - **Link labels** (P151) follow `linkLabels`, by value: sent when it changes, and again to each new
   document the display loads (a new run, other `content`), which the core gave none.
 - **Errors** (P055): `onContentError` gets the content's faults (what it threw, what the sandbox
@@ -1048,7 +1049,8 @@ can learn or fake: [THREAT_MODEL.md § 7](THREAT_MODEL.md#7-the-display-layer-an
 | host → frame | `porthole/annotate.clearSelection` | —: the page's text selection is taken away (the DOM's own `removeAllRanges`, taken before content runs) with what the shell held of it; nothing is reported back; marks, drafts and the mode stay (P115) |
 | host → frame | `porthole/annotate.focusMark` | `{ id, at }`, `at` the host's `Date.now()` as it sent it: the DOM focus goes to that mark's marker once the marks of a `show` are found. Dropped if it had to wait and the focus isn't in the frame's document as it lands (the DOM's own `hasFocus`, P135), if the frame takes it 100 ms or more after `at` by its own clock (the DOM's own `Date.now`), or with no `at` (P137); the built-ins are taken before content runs. Nothing is reported back; with no such marker, or while elements are picked, nothing happens. For after the keyboard closed the host's view: Escape, or a Tab past its ends (P134) |
 | host → frame | `porthole/annotate.track` | `{ id }` or `{ id: null }`: follow one shown mark, or none (P112); `{ id: null, selection: true }`: follow the selection last reported as `selected`, highlighted while followed (P138; an older shell reads it as none) |
-| frame → host | `porthole/annotate.selected` | `{ anchor, rect, lastLineDocumentRect?, scroll?, pointDocument? }` (`lastLineDocumentRect` and `scroll` only as a pair, P133, P137; `pointDocument` only on an element pick, and with `scroll`, P150); after a scroll, sent again only if its box moved more than 0.5 px, on the follow-ups' clock (P105), and not while the host follows the selection (P138) |
+| host → frame | `porthole/annotate.place` | a request, `{}`: answered at once by the annotation runtime with a `PagePlace` (P155, below), nothing else told or changed; the shell's own listener leaves it to that runtime (`ownRequests`); an older shell answers an error |
+| frame → host | `porthole/annotate.selected` | `{ anchor, rect, lastLineDocumentRect?, scroll?, pointDocument?, place? }` (`lastLineDocumentRect` and `scroll` only as a pair, P133, P137; `pointDocument` only on an element pick, and with `scroll`, P150; `place`, where the reader is, at the same scroll, P155); after a scroll, sent again only if its box moved more than 0.5 px, on the follow-ups' clock (P105), and not while the host follows the selection (P138) |
 | frame → host | `porthole/annotate.unselected` | — (the text selection went away) |
 | frame → host | `porthole/annotate.cancelled` | — (Escape) |
 | frame → host | `porthole/annotate.anchored` | `{ results: [{ id, state: "attached" \| "orphaned", rect?, documentRect?, lastLineDocumentRect?, order? }], scroll? }`: every mark after `show`, the one after `focus`, every mark when the content changed a state; while any mark has a marker, once a scroll, a resize or a run of content changes has settled (150 ms quiet), only the marks that moved more than 0.5 px since the host was last told, at most one a second together with the selection's (P104, P105) |
@@ -1081,6 +1083,21 @@ can learn or fake: [THREAT_MODEL.md § 7](THREAT_MODEL.md#7-the-display-layer-an
   its own), 1,000 counted for the h1s (a page with more keeps its h1), 64 containers up. The host
   keeps it on what it reports and `parseAnchor` returns, and leaves it off the marks `show` sends
   into the frame (`checkMarks`), which finds a mark by its selectors.
+- **Where the reader is** (P155). A `PagePlace`, `{ page?, hash?, scroll }`, on every `selected`
+  and as the answer to `place`. `page`: which of the content's own pages (P084) the document is,
+  as the shell names one (`./` and its path): its address as it loaded, read once before content
+  runs, without query or fragment, its files' address as `./`; none for content without files.
+  `hash`: the address's fragment as `location.hash` says it, read when asked, only where it names
+  an element by HTML's rule for the indicated part (an element whose id it is, else an `<a>` whose
+  `name` it is, at most 64 such looked at; as written, then percent-decoded; `PAGE_HASH`): a
+  route, a token or state in the fragment is never told, nor `#top` with nothing so named. Both
+  printable ASCII (an address's serialization), at most 2,048 and 256 characters. `scroll`: P132's.
+  Read through the DOM's own `getElementById`, `getElementsByName`, `localName`,
+  `decodeURIComponent` and the `location` object's own `hash` getter, taken before content runs,
+  and built as literals. `createHost` checks it (`parsePlace`: `page` under `./` with no `?` or
+  `#`, `hash` a `#` and more, neither with a space, quote, angle bracket or backtick, within
+  `ANNOTATION_LIMITS.page` and `.hash`); a malformed one drops its `selected`, or makes the answer
+  `"unsupported"`.
 - **Found again**, best-effort. A text anchor: where it was, else its words anywhere (the occurrence
   whose context matches best), else its words with any spacing. An element anchor: its selector if
   its text still starts with its words (or the selector is an id, or it has no words), else the
@@ -1170,9 +1187,12 @@ can learn or fake: [THREAT_MODEL.md § 7](THREAT_MODEL.md#7-the-display-layer-an
   dropped, at the bridge's rate. A report places a comment, never decides who may see or do
   anything.
 - **Host API.** `display.annotations.start(mode?)`, `stop()`, `show(marks)`, `focus(id)`,
-  `track(id)`, `clear()`, `clearSelection()`, `focusMark(id)`, and the `annotation` event
-  (`AnnotationReport`). The state goes to every frame the display runs (not `clearSelection` or
-  `focusMark`). `parseAnchor` checks an anchor a host stores.
+  `track(id)`, `clear()`, `clearSelection()`, `focusMark(id)`, `place()` (P155: a promise of the
+  frame's `PagePlace`, or `"unsupported"` with no frame ready, an older shell's error, a malformed
+  answer, none within `ANNOTATION_LIMITS.placeTimeoutMs`, or a new run or the display's end while
+  it waits), and the `annotation` event (`AnnotationReport`). The state goes to every frame the
+  display runs (not `clearSelection`, `focusMark` or `place`). `parseAnchor` checks an anchor a
+  host stores, `parsePlace` a place.
 
 Tests (`leak/annotate.spec.ts`, and `leak/late-word.spec.ts` for a word a busy page takes late,
 which full Chromium runs too; all three engines): picking and selecting unseen by the content; marks
@@ -1181,7 +1201,9 @@ budget; markers clear of words, reported by click, tap and key, heard by none of
 against patched built-ins; `focusMark` landing only when it should; drafts drawn apart; the
 selection followed; `clearSelection` against a patched `removeAllRanges`; an anchor's `context` (the
 headings above it without a hidden tab's or the page's only h1, a card's header under its own h3,
-the tab panel it is in, none on a page with neither); a hostile page faking every report; and
+the tab panel it is in, none on a page with neither); where the reader is (P155: a fragment told
+only where it names an element, never a token, a route or state; a set's other page by its path,
+in `served/files.spec.ts`); a hostile page faking every report; and
 ADOPTING.md's `guardPresses`, as written there, taking no press within 500 ms of its view opening
 and the person's own press or key after. Negative controls: § The negative controls.
 

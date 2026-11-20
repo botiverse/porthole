@@ -837,6 +837,46 @@ setTimeout(() => Promise.reject(new Error("at " + location.href)), 50);
     ).toBe(true);
   });
 
+  test("where the reader is: another page of the set, by its path alone, never the sealed access, a query or a fragment that names nothing (P155)", async ({
+    page,
+  }) => {
+    const id = unique("place");
+    await publish(id, "1", {
+      "index.html": `<!doctype html><title>Index</title><main id="index">the index</main>
+<a id="next" href="docs/report.html?viewer=secret-1#access_token=secret-2">the report</a>`,
+      "docs/report.html": `<!doctype html><title>Report</title><body style="margin: 0">
+<div style="height: 900px">Intro</div><section id="pricing" style="height: 900px"><h2>Pricing</h2></section></body>`,
+    });
+    const { frame, shown } = await showFiles(page, id, "1", "artifactAnnotate");
+    const placeNow = async () => {
+      const answer = await shown.place();
+      expect(typeof answer, `an answer, not an error: ${JSON.stringify(answer)}`).toBe("object");
+      return answer as Exclude<typeof answer, string>;
+    };
+    expect(await placeNow(), "probe: the entry, as ./").toEqual({
+      page: "./",
+      scroll: { x: 0, y: 0 },
+    });
+    await clickIn(frame, "#next", "the link to the report was there to follow");
+    const report = await shown.frame();
+    await expect(report.locator("#pricing")).toBeAttached();
+    expect(report.url(), "the report's address has the viewer's data").toContain("secret-1");
+    await expect
+      .poll(() => shown.place(), { message: "probe: the report, by its path alone" })
+      .toEqual({ page: "./docs/report.html", scroll: { x: 0, y: 0 } });
+    await report.evaluate(() => void (location.hash = "#pricing"));
+    const pricing = await placeNow();
+    expect(pricing.page).toBe("./docs/report.html");
+    expect(pricing.hash, "probe: a fragment that names an element").toBe("#pricing");
+    expect(pricing.scroll.y).toBeGreaterThan(800);
+    // A route the page's scripts give its address is no page of the set.
+    await report.evaluate(() => history.pushState(null, "", "orders/8812#pricing"));
+    expect((await placeNow()).page, "probe: the page it loaded as").toBe("./docs/report.html");
+    const said = JSON.stringify([await placeNow(), await shown.read()]);
+    expect(said, "probe: nothing names the sealed access").not.toContain("/__porthole/f/");
+    expect(said, "probe: nor the query or the fragment's data").not.toContain("secret-");
+  });
+
   test("the shell renews its sealed address before it ends, in place; the page goes on loading its files", async ({
     page,
     context,

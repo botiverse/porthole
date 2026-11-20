@@ -10013,3 +10013,138 @@ control follows the new text.
 **Revisit when** a host draws into a window it didn't open (a window opened by another of its
 windows, a frame of a popup), or the platform gives a message the window of the target's realm.
 
+## P155 · 2026-11-20 · Where the reader is in the page: its page, the fragment that names an element, the scroll (`place`) · Accepted
+
+Amends P053 (what `selected` carries, and the host's annotation calls). From Raft: every comment on
+an Artifact page should record where in the page the reader was, so its `Where:` line can say
+`report.html#pricing` and a reader can jump there; element and text comments (anchors from a pick)
+and whole-page comments alike (written in Raft's own UI, with no pick). A later use: a desktop
+"open in main window" that opens the page again at the same place.
+
+**Context.** The host doesn't know where in its content a frame is. A set's other pages open in the
+frame (P084), and the host is told only enough to take the next load as the same content (P098:
+`pagesOfSet` keeps the notice to itself); an in-page section is the address's fragment, which only
+the frame can read; and the document's scroll comes only with a mark's report (P132). An address's
+query and fragment are where a viewer's data would be (P080: a blocked navigation's sentence names
+the address without them): a single-page app keeps its route and state there, a sign-in its token.
+So the fragment can't be told as it is: only where it plainly names a section of the page.
+
+**Decision.**
+1. **`PagePlace`**: `{ page?, hash?, scroll }`, read in the shell.
+   - `page`: which of the content's own pages (P084) it is, named as the shell names one, `./` and
+     its path (`"./report.html"`, `"./"` for an entry at the files' root): the document's address
+     as it loaded, read once at the shell's start, before content runs, without its query or
+     fragment, its files' address as `./` (so never the sealed access, P083). An address the page's
+     scripts give it later (`history.pushState`, a single-page app's routes) isn't followed: the
+     page is the one the server served. Absent for content without files of its own (a fragment, a
+     document of its own, an opaque display), and for an address that isn't printable ASCII under
+     `./` within 2,048 characters.
+   - `hash`: the address's fragment as `location.hash` says it (`"#pricing"`, percent-encoded),
+     **only where it names an element in the page**, by HTML's rule for the indicated part: an
+     element whose id is the fragment, else an `<a>` whose `name` is (the HTML elements named so,
+     at most 64 looked at), first as written, then percent-decoded (`PAGE_HASH`,
+     `src/shell/annotate.ts`). `#top` with nothing so named is the top of the page, not an element:
+     not told. Any other fragment (a route, `#access_token=…`, state) is never told. Printable
+     ASCII, at most 256 characters with its `#` (a longer one isn't cut: a cut one names nothing).
+     Read now, when asked: the fragment the page is at.
+   - `scroll`: the document's scroll (P132's `scroll`, the same reading).
+   Each read through the DOM's own functions and getters, taken before content runs
+   (`getElementById`, `getElementsByName`, `localName`, `decodeURIComponent`, the `location`
+   object's own `hash` getter); built as object literals, so nothing content puts on
+   `Object.prototype` reaches it; reading the page throwing tells no `hash`.
+2. **On every `selected`**, as `place`, at the report's own scroll: an element or text comment gets
+   it with its anchor, nothing to ask.
+3. **`annotations.place()`**, for a comment on the whole page: a request, `porthole/annotate.place`
+   (`{}`, with an id), answered at once by the annotation runtime with the `PagePlace`; the host
+   resolves with it, rebuilt, or with `"unsupported"` (no frame has finished its handshake, an older
+   shell's "isn't offered here", a malformed answer, none within
+   `ANNOTATION_LIMITS.placeTimeoutMs`, 3 s, or a new run or the display's end while it waits). It is
+   asked of the page the frame shows now, another page of the set too. Rejects with a `TypeError`
+   where the config doesn't declare `annotate`, as the other annotation calls throw. Kept for no
+   later frame. React: `place()` on the `ref` (`PortholeFrameHandle`), `"unsupported"` with no
+   display, an error to `onHostError` (kind `"annotations"`).
+4. **The shell's own listener leaves a spliced runtime's own requests to it** (`ownRequests`, a
+   lookup with no prototype that the annotation runtime fills): it answers `annotate.place` with no
+   error beside the answer, and the shell names nothing of annotations' (a config without
+   `annotate` has nothing of it).
+5. **The host checks it** (`parsePlace`, exported): `scroll` as P132's; `page` a string of at most
+   `ANNOTATION_LIMITS.page` (2,048) printable ASCII characters under `./` with no `?`, `#`, quote,
+   angle bracket or backtick; `hash` at most `ANNOTATION_LIMITS.hash` (256), a `#` and printable
+   ASCII with no quote, angle bracket or backtick (an address's own serialization: a space and
+   non-ASCII percent-encoded). Rebuilt from those fields. A malformed `place` on `selected` drops the
+   report (P053: dropped, never repaired); a malformed answer is `"unsupported"`.
+
+**Compatibility.** Only added. An older shell sends no `place` and answers the request with an
+error (`"unsupported"`); an older host drops the field (reports are rebuilt from known fields) and
+never asks. The shell runtime every served document carries changes (`ownRequests`), and so does the
+annotation runtime (their pinned hashes, P145); find's, `use` and `legacy` are unchanged.
+
+**Threat.** No wall, gate, rate or method of an existing capability moves; nothing goes into the
+frame but a request with no parameters, which tells the page only that the host asked (as a find
+query tells it more). What it opens, and its bound:
+- *A viewer's data in the address.* The query is never read; the fragment is told only where an
+  element of the page has it for its id or name. A page could still name an element after data it
+  put in its own address (an id `token-…`, then `location.hash` to it): that is the page saying it,
+  as it can in a label or a heading (P152). The rule keeps an honest page's routes and tokens out of
+  comments; a dishonest page can say anything in any report, and a `place` is its word.
+- *The path.* The page's path is the file the content server answered with, under the version's own
+  address, read before content runs: as P080 and P084 already name a page to the host (a blocked
+  navigation, `porthole/navigating`), without query or fragment. A single-page app's route reached
+  by a navigation is in that path (the server answers it with the entry, P081); one its scripts gave
+  it is not.
+- *The sealed access* (P083) is never in it: the files' address is `./`.
+- *What the page learns*: that the host asked, when; nothing of the host's.
+- *Cost*: an answer per ask, at most 64 named elements looked at and two lookups by id; asks are the
+  host's own.
+Every `place` is the page's word: where to open it, never a fact (THREAT_MODEL §7); a host that
+opens a page at a stored place opens it at the content's own address with that path and fragment,
+and the page decides what it shows there.
+
+**Tested.** `test/annotate.test.ts` "where the reader is in the page (P155)": `parsePlace` (kept and
+rebuilt; every ASCII character in a page and a hash, the shell's shapes and the host's alike; at and
+past the limits; a page that isn't under `./`, has a query or fragment, or isn't an address's
+serialization; malformed ones drop a `selected`); `PAGE_HASH` over a stand-in document (an id, an
+`<a name>`, percent-decoded, told as written; a route, a token, state, a name that isn't an `<a>`'s,
+`#top`, a case that differs, malformed escapes, not told; 256 characters and 64 named elements at
+and past the bound; a DOM that throws or lies about its list tells none); the annotation runtime
+itself, run over a stand-in window with the shell's own definitions (a set's page by its path with
+the sealed access as `./` and no query; a token's or a route's fragment not told; no page without
+files; the page as it loaded, the fragment as it is now; only the host's request, from its window
+and origins, with an id, answered); the wiring (built-ins taken before content runs, every
+`selected` through it, the request answered with nothing else, the shell's listener leaving it and
+naming nothing of annotations'); `createHost` (asked once the handshake is done, answers rebuilt, an
+answer to another id or a second one ignored, an older shell's error, a malformed answer and none in
+time `"unsupported"`, a new run and the display's end too, not kept for a later frame, a `TypeError`
+without `annotate`, a `selected`'s `place` kept and a malformed one dropping it).
+`test/framed-by.test.ts`: the shell's and annotations' new pins. `test/react-ssr.test.ts`: the
+handle's `place`. Run through a Vitest-free shim where they were written (test runs being paused
+there): `annotate.test.ts`, `framed-by.test.ts`, `shell.test.ts`, `find.test.ts`, `links.test.ts`,
+`react-ssr.test.ts`, `agreement.test.ts`, `weakenings.test.ts`, `controls.test.ts` pass; the new
+tests fail with `PAGE_HASH` telling every fragment. Written and not run there (CI runs them):
+`leak/annotate.spec.ts` "where the reader is in the page…" (three engines: a token, a route, state
+and `#top` in the frame's address not told; `#pricing`, a percent-encoded id and an `<a name>` told
+with the scroll it went to; a pick's `place`; nothing the host heard names the data) and
+`leak/served/files.spec.ts` "where the reader is: another page of the set…" (the entry as `./`;
+another page by its path, its query and fragment data left out; a fragment that names its section;
+a `pushState` route not followed; nothing names the sealed access). No negative control: nothing
+here is a defense of the isolation; the fragment rule is held by the probes above.
+
+**Rejected.**
+- *The fragment as it is, or with a deny-list of data-looking ones* (`=`, `/`, long ones): a
+  route or token can look like anything; naming an element is the one test that says it is a
+  section.
+- *An event at each `hashchange` and scroll (throttled)*: a stream the host must follow for a value
+  it needs only when a comment is written; P132 chose the same against a scroll stream.
+- *The page's path as it is when asked*: a single-page app's route, given by its scripts, is its
+  state, as its fragment is.
+- *`place` on the anchor (stored with it, P152's way)*: the anchor says how to find its target
+  again; where the reader was is the report's, as `scroll` and `pointDocument` are, and a whole-page
+  comment has no anchor. The host stores it beside the anchor.
+- *A capability of its own*: it is for comments, and a host that comments declares `annotate`.
+
+**Known limits.** A page that scrolls a box of its own rather than its document has `scroll` 0 (as
+P132's). A page that names no section by id has no `hash` to tell; the anchor's `context` (P152)
+still says where a pick was.
+
+**Revisit when** a host wants the place without `annotate` (a link to a section, a viewer's own
+bookmark), a page's own scrolling box, or the place told as it changes.

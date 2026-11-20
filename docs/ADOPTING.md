@@ -201,8 +201,8 @@ composer.onClose(() => display.annotations.clearSelection()); // however it clos
 **React** (P118): `PortholeFrame` and `PortholeView` take `annotating`, `annotations`,
 `focusedAnnotation`, `trackedAnnotation` (the mark to follow, by value; `null` stops),
 `trackedSelection` (from the first render, `false` until then: it is read as the mode starts, P140)
-and `onAnnotation`. `clearSelection()` and `focusMark(id)` are on the `ref` (a `PortholeFrameHandle`,
-not the display) and do nothing with no display running. Errors the core's calls throw (an id no
+and `onAnnotation`. `clearSelection()`, `focusMark(id)` and `place()` are on the `ref` (a
+`PortholeFrameHandle`, not the display) and do nothing with no display running. Errors the core's calls throw (an id no
 shown mark has, a config without `annotate`) reach `onHostError`, kind `"annotations"`.
 
 What the host must do (why: THREAT_MODEL.md §6 "What every host must do"):
@@ -213,7 +213,7 @@ What the host must do (why: THREAT_MODEL.md §6 "What every host must do"):
 | **Ids say nothing; counts only where the page may know them** | The content reads every `show`; who wrote what stays outside the frame. |
 | **Drafts only in their author's frame** | Never a shared one: the page reads which marks are drafts. A draft's `count` is dropped before the frame; give its id at random like any other. A `kind` other than `"posted"` or `"draft"` throws. Upgrade the content server first: an older shell draws a draft as a posted mark without a marker. |
 | **No drafts to a page that can pass them on** | Or accept that its author and other viewers can learn of them. `host.mayPassOn(declaration)` (or `mayPassOn(config, declaration)`, P112) is true for a page that can reach `db`, `artifact`, `assets`, `openLink`, `sendPrompt`, `setModelContext`, `callTool`, `readData` or `subscribeData` (or `reportError` with errors to the agent), or egress beyond the library CDNs. |
-| **Labels, quotes and context are the page's text** | Show them as text, and give them to a model only as the page's words. A label and an anchor's `context` (P152) omit what the person can't see; a quote (`exact`) keeps it. |
+| **Labels, quotes and context are the page's text** | Show them as text, and give them to a model only as the page's words. A label and an anchor's `context` (P152) omit what the person can't see; a quote (`exact`) keeps it. A place's `page` and `hash` (P155) are the page's word too: where to open it, in its own frame or tab only. |
 
 - **Guard every view a report opens or moves** (`activated`, `selected`, a card following a `tracked`
   mark each time it moves more than a few px): the content picks the moment and the place (P105).
@@ -302,6 +302,30 @@ only one), and the name of the named container around it (a tab panel's tab, a l
 with the anchor and show it with the comment ("Results › Revenue tab") so readers, people and
 agents, know which part it is on; it is absent where the page has neither, and from an older shell.
 `parseAnchor` keeps it; `show` leaves it out of what goes to the frame.
+
+**Where the reader is** (P155): each `selected` also carries `place`, a `PagePlace`
+`{ page?, hash?, scroll }`, and `display.annotations.place()` asks for it when a comment has no pick
+(one on the whole page). `page` is which of the content's own pages it is (`"./report.html"`, `"./"`
+for an entry at the files' root; absent for content without files); `hash` is the address's fragment
+(`"#pricing"`, percent-encoded) only where it names an element in the page, never a route or a
+token; `scroll` is P132's. Store it beside the anchor and show it as the comment's place
+(`report.html#pricing`); to open the page there, resolve `page` against the content's own address
+and add `hash`. Both are the page's word: show them as text and never open them anywhere but the
+content's own frame or tab.
+
+```js
+display.on("annotation", (report) => {
+  if (report.type === "selected") composer.open({ anchor: report.anchor, place: report.place });
+});
+wholePageButton.onclick = async () => {
+  const place = await display.annotations.place(); // "unsupported": an older shell, no answer in 3 s
+  composer.open({ place: place === "unsupported" ? undefined : place });
+};
+```
+
+React: `place()` on the `ref` (`"unsupported"` with no display running; a config without `annotate`
+reaches `onHostError`). An older shell sends no `place` and answers `"unsupported"`: upgrade the
+content server with the host.
 
 The keyboard:
 

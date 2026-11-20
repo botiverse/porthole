@@ -1,5 +1,5 @@
 import { expect, type Frame, type Page } from "@playwright/test";
-import type { PortholeConfig } from "../../src/index.ts";
+import type { PagePlace, PortholeConfig } from "../../src/index.ts";
 import type { FrameOutcome } from "../../src/host/types.ts";
 import type { FrameLocation, InstanceRef } from "../../src/isolation/types.ts";
 
@@ -27,6 +27,7 @@ interface PortholeHostPage {
     instance: InstanceRef,
     options?: MountExtras,
   ): number;
+  place(index: number): Promise<PagePlace | string>;
 }
 
 /**
@@ -77,6 +78,8 @@ export interface Mounted {
   readonly read: () => Promise<DisplayRecord>;
   /** The frame's current document. */
   readonly frame: () => Promise<Frame>;
+  /** Where the reader is in the display's page (`annotations.place`, P155), or what it threw. */
+  readonly place: () => Promise<PagePlace | string>;
 }
 
 export async function mount(
@@ -114,6 +117,12 @@ export async function mount(
           (window as unknown as { portholeHost: PortholeHostPage }).portholeHost.records[
             each
           ] as DisplayRecord,
+        index,
+      ),
+    place: () =>
+      page.evaluate(
+        (each) =>
+          (window as unknown as { portholeHost: PortholeHostPage }).portholeHost.place(each),
         index,
       ),
     async frame() {

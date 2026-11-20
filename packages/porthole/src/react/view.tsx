@@ -254,6 +254,7 @@ function InstanceView(props: PortholeViewProps): ReactElement | null {
     (): PortholeFrameHandle => ({
       clearSelection: () => shown.current?.clearSelection(),
       focusMark: (id) => shown.current?.focusMark(id),
+      place: () => shown.current?.place() ?? Promise.resolve("unsupported"),
       find: (query, options) =>
         shown.current?.find(query, options) ?? Promise.resolve("unsupported"),
       clearFind: () => shown.current?.clearFind(),

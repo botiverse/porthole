@@ -75,6 +75,55 @@ export const WORD_LATE = String.raw`(at, now) => {
 }`;
 
 /**
+ * Which fragment of the page's address is told (P155), spliced into the runtime: given the DOM's
+ * reads (`dom`, each through a built-in taken before content runs), a function from the address's
+ * fragment as `location.hash` says it to that same text, or null. Told only where it names an
+ * element in the page, by HTML's rule for the indicated part: an element whose id is the fragment
+ * (`byId`), else an `<a>` whose `name` is (`named`, the HTML elements named so, at most 64 looked
+ * at), first as written and then percent-decoded (`decode`; one that won't decode is tried as
+ * written only). `#top` with nothing so named is the top of the page, no element: not told. Any
+ * other fragment (a single-page app's route, data, a token) is never told. Printable ASCII only, as
+ * an address serializes one (a space, `"`, `<`, `>` and a backtick percent-encoded), at most 256
+ * characters, `#` included: a longer one isn't cut (a cut one names nothing). Reading the page
+ * throwing tells none.
+ */
+export const PAGE_HASH = String.raw`(dom) => (hash) => {
+        const MOST = 256;
+        const NAMED = 64;
+        if (typeof hash !== "string" || hash.length < 2 || hash.length > MOST || !/^#[!#-;=?-_a-~]+$/.test(hash)) {
+          return null;
+        }
+        const names = (fragment) => {
+          if (dom.byId(fragment) !== null) {
+            return true;
+          }
+          const named = dom.named(fragment);
+          const count = named.length < NAMED ? named.length : NAMED;
+          for (let i = 0; i < count; i += 1) {
+            if (dom.name(named[i]) === "a") {
+              return true;
+            }
+          }
+          return false;
+        };
+        try {
+          const written = hash.slice(1);
+          if (names(written)) {
+            return hash;
+          }
+          let decoded = null;
+          try {
+            decoded = dom.decode(written);
+          } catch (_) {
+            decoded = null;
+          }
+          return typeof decoded === "string" && decoded !== "" && decoded !== written && names(decoded) ? hash : null;
+        } catch (_) {
+          return null;
+        }
+      }`;
+
+/**
  * Where an anchor is in the page, by what the page tells a screen reader (P152), spliced into the
  * runtime: given the DOM's reads (`dom`, each through a built-in taken before content runs), a
  * function from the element picked (or a selection's first element) to its `context`, or null.
@@ -299,6 +348,10 @@ export const ANCHOR_CONTEXT = String.raw`(dom) => {
  * - where it is in the page (P152): an anchor's `context`, the headings above it and the named
  *   region around it, as the page tells a screen reader (`ANCHOR_CONTEXT`), so a reader of the
  *   comment knows which part of the page it is on;
+ * - where the reader is in the page (P155): on each `selected`, and as the answer to the host's
+ *   `place` request, the page of the content's own files this document is (its address as it
+ *   loaded, without query or fragment), the address's fragment only where it names an element
+ *   (`PAGE_HASH`), and the document's scroll;
  * - the selection followed (P138): what the last `selected` reported (the element picked, or the
  *   words selected) is kept while the host follows the selection (`track` with `selection`) or said
  *   at `start` that it will (`keepSelection`, P140), and nothing is kept otherwise; while followed
@@ -328,7 +381,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         selectionTracked: "porthole/annotate.selectionTracked",
         clearSelection: "porthole/annotate.clearSelection",
         focusMark: "porthole/annotate.focusMark",
+        place: "porthole/annotate.place",
       };
+      // Answered here (P155): the shell's own listener leaves it.
+      ownRequests[M.place] = true;
       // The DOM's own functions, taken before content runs.
       const elementFromPoint = Document.prototype.elementFromPoint;
       const querySelector = Document.prototype.querySelector;
@@ -352,6 +408,9 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const getAttribute = Element.prototype.getAttribute;
       const headingsIn = Document.prototype.querySelectorAll;
       const elementById = Document.prototype.getElementById;
+      const elementsByName = Document.prototype.getElementsByName;
+      const decodeFragment = decodeURIComponent;
+      const hashOf = getterOf(location, "hash");
       const comparePosition = Node.prototype.compareDocumentPosition;
       const closestOf = Element.prototype.closest;
       const elementRects = Element.prototype.getClientRects;
@@ -367,6 +426,12 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const tell = (method, params) => {
         if (framed) {
           post({ jsonrpc: "2.0", method, params }, "*");
+        }
+      };
+      // An answer to the host's request (P155): a literal's own properties only.
+      const answer = (id, result) => {
+        if (framed) {
+          post({ jsonrpc: "2.0", id, result }, "*");
         }
       };
       const squash = (text) => String(text).replace(/\s+/g, " ").trim();
@@ -621,16 +686,53 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         const rect = found.range ? lastBox(rangeRects.call(found.range)) : elementRect.call(found.element);
         return rect === null ? null : inDocument(box(rect), scroll);
       };
+      // The page this document is (P155): its address as it loaded, read now, before content runs
+      // (so never one its scripts gave it later, a single-page app's route), without its query or
+      // fragment, where a viewer's data would be (P080), its files' address as "./" (never the
+      // sealed access, P083). None for content without files of its own (P084), nor for an
+      // address that isn't printable ASCII under "./" within 2,048 characters.
+      const pageHere = (() => {
+        if (filesBase === null) {
+          return null;
+        }
+        const page = ownAddresses(before(before(NativeString(location.href), "#"), "?"));
+        return page.length <= 2048 && /^\.\/[!$-;=@-_a-~]*$/.test(page) ? page : null;
+      })();
+      // The address's fragment, only where it names an element in the page (P155: PAGE_HASH), by
+      // the DOM's own functions and getters, taken before content runs.
+      const hashNamed = (${PAGE_HASH})({
+        byId: (id) => callOf(elementById, document, [id]),
+        named: (name) => callOf(elementsByName, document, [name]),
+        name: (element) => String(textNameOf === null ? element.localName : callOf(textNameOf, element, [])),
+        decode: (text) => decodeFragment(text),
+      });
+      // Where the reader is in the page (P155), at the scroll given: its page, the fragment that
+      // names an element, the scroll. Built as literals: their own properties, whatever content put
+      // on Object.prototype.
+      const placeHere = (scroll) => {
+        let hash = null;
+        try {
+          hash = hashNamed(hashOf === null ? location.hash : callOf(hashOf, location, []));
+        } catch (_) {
+          hash = null;
+        }
+        if (pageHere === null) {
+          return hash === null ? { scroll } : { hash, scroll };
+        }
+        return hash === null ? { page: pageHere, scroll } : { page: pageHere, hash, scroll };
+      };
       // What a selection's report adds to its box (P133): its last line, with the scroll it was
       // read at; neither where nothing of it is drawn. An element's pick by a pointer adds where it
-      // was picked (P150): that point in the viewport, in the document by the same scroll.
+      // was picked (P150): that point in the viewport, in the document by the same scroll. Every
+      // one says where the reader is in the page (P155), at the same scroll.
       const placeOf = (found, point) => {
         const scroll = scrollOf();
+        const place = placeHere(scroll);
         const lastLineDocumentRect = lastLineOf(found, scroll);
         if (lastLineDocumentRect === null) {
-          return {};
+          return { place };
         }
-        return point ? { lastLineDocumentRect, scroll, pointDocument: { x: point.x + scroll.x, y: point.y + scroll.y } } : { lastLineDocumentRect, scroll };
+        return point ? { lastLineDocumentRect, scroll, pointDocument: { x: point.x + scroll.x, y: point.y + scroll.y }, place } : { lastLineDocumentRect, scroll, place };
       };
 
       // The shell's own layer, over the content: marks, the outline of what would be picked.
@@ -2162,6 +2264,13 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           }
           case M.focusMark:
             focusMark(String(params.id), wordLate(params.at, callOf(wallClock, undefined, [])));
+            break;
+          case M.place:
+            // A request (P155): answered at once, with where the reader is now, and nothing else
+            // changes. The shell's own listener leaves it to this one.
+            if (typeof data.id === "string" || typeof data.id === "number") {
+              answer(data.id, placeHere(scrollOf()));
+            }
             break;
           case M.clear:
             track(null);

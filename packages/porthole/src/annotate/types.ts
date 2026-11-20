@@ -100,6 +100,35 @@ export interface AnnotationScroll {
   readonly y: number;
 }
 
+/**
+ * Where the reader is in the page (P155), for a comment to say where it was written and to open
+ * the page there again: which of the content's own pages it is, the section the address names, and
+ * how far the document is scrolled. On each `selected` from a newer shell, and the answer to
+ * `annotations.place()` (a comment on the whole page). The page's word, as every report is: where
+ * to open it, never a fact about it.
+ */
+export interface PagePlace {
+  /**
+   * Which of the content's own pages (P084) it is, as the shell names one (`"./report.html"`, and
+   * `"./"` for an entry at the files' root): its address as it loaded, read before the page's
+   * scripts ran, without its query or fragment, where a viewer's data would be (P080). An address
+   * the page's scripts gave it later (`history.pushState`, a single-page app's routes) isn't
+   * followed. Printable ASCII, at most `ANNOTATION_LIMITS.page` characters. Absent for content
+   * that came without files (a fragment, a document of its own, an opaque display).
+   */
+  readonly page?: string;
+  /**
+   * The address's fragment (`"#pricing"`, as `location.hash` says it, so percent-encoded) only
+   * where it names an element in the page: one whose id is the fragment, or an `<a name>` of it,
+   * as written or percent-decoded (HTML's indicated part). Any other fragment (a single-page app's
+   * route, data, a token) is never told. Printable ASCII, at most `ANNOTATION_LIMITS.hash`
+   * characters. Absent where the address has none, or one that names nothing.
+   */
+  readonly hash?: string;
+  /** How far the document is scrolled (P132), as a report's `scroll` is. */
+  readonly scroll: AnnotationScroll;
+}
+
 /** What the person may point at while the host is asking. */
 export interface AnnotateMode {
   /**
@@ -217,6 +246,11 @@ export type AnnotationReport =
        * an older shell. The page's word: where to put the host's own UI, nothing more.
        */
       readonly pointDocument?: { readonly x: number; readonly y: number };
+      /**
+       * Where the reader was in the page as they picked it (P155): its page, the section its
+       * address names, and the scroll (the same reading as `scroll`). Absent from an older shell.
+       */
+      readonly place?: PagePlace;
     }
   /** The text selection went away. */
   | { readonly type: "unselected" }
@@ -331,6 +365,11 @@ export const ANNOTATE_METHODS = {
    * that waited for the marks is dropped unless the focus is in the frame's document by then (P135).
    */
   focusMark: "porthole/annotate.focusMark",
+  /**
+   * Host → frame, a request (P155): `{}`, answered with the page's `PagePlace` now. An older shell
+   * answers an error (it isn't offered there).
+   */
+  place: "porthole/annotate.place",
 } as const;
 
 /** The most of each part of an anchor or report the host takes. */
@@ -352,4 +391,9 @@ export const ANNOTATION_LIMITS = {
   coordinate: 10_000_000,
   /** The largest `count` a mark's marker takes (P104). */
   count: 999,
+  /** A place's `page` and `hash` (P155), `#` included. */
+  page: 2_048,
+  hash: 256,
+  /** How long the host waits for the frame to answer `place` (P155) before it is unsupported, ms. */
+  placeTimeoutMs: 3_000,
 } as const;

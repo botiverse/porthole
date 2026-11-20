@@ -1,4 +1,10 @@
-import { ANNOTATE_METHODS, type AnnotationMark, type AnnotationReport } from "../annotate/types.ts";
+import {
+  ANNOTATE_METHODS,
+  ANNOTATION_LIMITS,
+  type AnnotationMark,
+  type AnnotationReport,
+  type PagePlace,
+} from "../annotate/types.ts";
 import {
   annotateMode,
   checkMarks,
@@ -6,6 +12,7 @@ import {
   followsSelection,
   hasMarker,
   inViewport,
+  parsePlace,
   parseReport,
   type StartedMode,
 } from "../annotate/validate.ts";
@@ -244,6 +251,46 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       let tracking: string | null = null;
       let trackingSelection = false;
       const trackedTimes: number[] = [];
+      // Where the reader is in the page (P155): the places asked of the frame and not yet answered.
+      let nextPlace = 1;
+      const placesAsked = new Map<
+        string,
+        {
+          readonly resolve: (place: PagePlace | "unsupported") => void;
+          readonly timer: ReturnType<typeof setTimeout>;
+        }
+      >();
+      /** Answers a place asked, once; a later answer for it is dropped. */
+      const settlePlace = (id: string, place: PagePlace | "unsupported") => {
+        const asked = placesAsked.get(id);
+        if (asked !== undefined) {
+          placesAsked.delete(id);
+          clearTimeout(asked.timer);
+          asked.resolve(place);
+        }
+      };
+      /** The page asked is gone (a new run, the display destroyed): what waits is unsupported. */
+      const forgetPlaces = () => {
+        for (const id of placesAsked.keys()) {
+          settlePlace(id, "unsupported");
+        }
+      };
+      /**
+       * The frame's answer to a place asked (P155): its own id only, checked; an error (an older
+       * shell's "isn't offered here") or a malformed answer is unsupported. An answer to the host's
+       * own question, so not through the bridge's gates, as find's answers aren't.
+       */
+      const onPlace = (raw: unknown) => {
+        if (!isRecord(raw) || raw.jsonrpc !== "2.0" || "method" in raw) {
+          return;
+        }
+        const id = raw.id;
+        if (typeof id !== "string" || !placesAsked.has(id)) {
+          return;
+        }
+        const place = "error" in raw || !("result" in raw) ? null : parsePlace(raw.result);
+        settlePlace(id, place ?? "unsupported");
+      };
       // Find in page (P131): the query shown (for the content it was asked of only: a new run or
       // other content forgets it), whether the host takes the shortcut (kept for every frame the
       // display runs), and the queries asked and not yet answered.
@@ -752,6 +799,34 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             toFrame(ANNOTATE_METHODS.focusMark, { id, at: Date.now() });
           }
         },
+        place() {
+          // A question for the frame running now (P155), kept for no later frame.
+          if (!annotates) {
+            return Promise.reject(
+              new TypeError("annotations.place: the config doesn't declare annotate"),
+            );
+          }
+          if (!handshaken || surface === null) {
+            return Promise.resolve("unsupported");
+          }
+          const frame = surface;
+          return new Promise((resolve) => {
+            const id = `porthole-place-${nextPlace++}`;
+            placesAsked.set(id, {
+              resolve,
+              timer: setTimeout(
+                () => settlePlace(id, "unsupported"),
+                ANNOTATION_LIMITS.placeTimeoutMs,
+              ),
+            });
+            frame.transport.send({
+              jsonrpc: "2.0",
+              id,
+              method: ANNOTATE_METHODS.place,
+              params: {},
+            });
+          });
+        },
       };
 
       const hostContext = (): HostContext => {
@@ -1017,6 +1092,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         });
         if (annotates) {
           created.transport.listen((raw) => onAnnotation(raw, opening));
+          created.transport.listen(onPlace);
         }
         if (finds) {
           created.transport.listen((raw) => onFind(raw, opening, () => created.focused?.()));
@@ -1089,6 +1165,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         // Each run is a new frame, maybe of other content: it starts with no query (P131), and
         // with no link labels (P151): its frame has none, and is given none until the host labels.
         forgetFind(false);
+        forgetPlaces();
         linksGiven = NO_LABELS;
         forgetLinks(false);
         if (destroyed) {
@@ -1227,6 +1304,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           for (const id of findsAsked.keys()) {
             settleFind(id, "unsupported");
           }
+          forgetPlaces();
         },
       };
 

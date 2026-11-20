@@ -3,6 +3,7 @@ import type {
   AnnotationMark,
   AnnotationReport,
   AnnotationTrackTarget,
+  PagePlace,
 } from "../annotate/types.ts";
 import type { FindOptions, FindResult } from "../find/types.ts";
 import type { LinkLabel } from "../links/types.ts";
@@ -385,6 +386,18 @@ export interface AnnotationControls {
    * `focusMark(id)` again.
    */
   focusMark(id: string): void;
+  /**
+   * Where the reader is in the page now (P155): which of the content's own pages it is, the
+   * section its address names (only a fragment that names an element in the page), and how far
+   * the document is scrolled. For a comment on the whole page (no pick), and to open the page
+   * there again; a `selected` carries the same as `place`. Asked of the page the frame shows now,
+   * another page of its set (P084) too, and answered at once. `"unsupported"`: no frame has
+   * finished its handshake, an older shell, no answer within `ANNOTATION_LIMITS.placeTimeoutMs`,
+   * a malformed one, or the frame was run again or the display destroyed while it waited. Rejects
+   * with a `TypeError` where the config doesn't declare `annotate`. The page's word: where to open
+   * it, never a fact about it.
+   */
+  place(): Promise<PagePlace | "unsupported">;
 }
 
 export interface DisplayControls {
