@@ -12,7 +12,8 @@ import { MCP_APPS_METHODS } from "../protocol/mcp-apps.ts";
  * the window's listeners, so nothing of the proxy is left once the view runs, and the view talks
  * to its host directly: the relay the spec describes is the identity here (P026).
  *
- * The proxy takes the HTML only from its parent, only from the host origins, and only once. It
+ * The proxy takes the HTML only from its parent (or that parent's opener, P154), only from the
+ * host origins, and only once. It
  * ignores the message's `csp`, `sandbox` and `permissions`: the policy is the one its headers set
  * from the config and the view's declared egress when the host's backend issued it, and the
  * frame's sandbox and `allow` are the host's, from the same config.
@@ -23,9 +24,18 @@ export const SANDBOX_PROXY_RUNTIME = String.raw`(() => {
   if (window.parent === window) {
     return;
   }
+  // Its host is its parent, or that parent's opener where the host draws into a window it opened
+  // (P154): a message's source is the window whose code sent it. A null opener matches nothing.
+  const hostWindow = window.parent;
+  let hostOpener = null;
+  try {
+    const opener = hostWindow.opener;
+    hostOpener = opener === undefined || opener === window ? null : opener;
+  } catch (_) {}
+  const fromHostWindow = (source) => source !== null && source !== undefined && (source === hostWindow || source === hostOpener);
   let done = false;
   window.addEventListener("message", (event) => {
-    if (done || event.source !== window.parent || setup.origins.indexOf(event.origin) === -1) {
+    if (done || !fromHostWindow(event.source) || setup.origins.indexOf(event.origin) === -1) {
       return;
     }
     const data = event.data;

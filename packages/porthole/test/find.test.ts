@@ -565,7 +565,7 @@ describe("the shell", () => {
     expect(SHELL_RUNTIME).toContain('!(data.method === "porthole/find.query" && declared("find"))');
     // Only from its parent, from the plan's origins; a request only (an id), answered at once.
     expect(FIND_RUNTIME).toContain(
-      'if (get(messageSourceOf, event, "source") !== parentWindow || !fromHost(get(messageOriginOf, event, "origin"))) {',
+      'if (!fromHostWindow(get(messageSourceOf, event, "source")) || !fromHost(get(messageOriginOf, event, "origin"))) {',
     );
     expect(FIND_RUNTIME).toContain('const id = own(data, "id");');
     expect(FIND_RUNTIME).toContain('if (typeof id !== "string" && typeof id !== "number") {');

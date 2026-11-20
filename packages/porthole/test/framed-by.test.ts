@@ -609,7 +609,8 @@ describe("without framedBy, the pages' scripts are 0.14.16's, byte for byte (P14
  * `'unsafe-inline'` for these documents), so it is pinned here: a change to its bytes fails this
  * test, and is said in the CHANGELOG, not assumed away (0.15.2: annotations', P147; 0.15.3: the
  * shell's, P148; 0.16.0: the shell's again, P149; 0.16.1: annotations', P150; 0.17.0:
- * annotations' again, P152; 0.17.1: annotations' again, P153). From
+ * annotations' again, P152; 0.17.1: annotations' again, P153; next: the shell's, annotations'
+ * and find's, where a frame's host's opener is heard too, P154). From
  * `git show v0.15.0:…/src/shell/*.ts` and `git show v0.14.16:…` (`SHELL_RUNTIME`,
  * `ANNOTATE_RUNTIME`, `FIND_RUNTIME`, `USE_RUNTIME`, `LEGACY_GLOBALS_RUNTIME`).
  */
@@ -618,17 +619,21 @@ const RUNTIME_V0_16_0 = {
   // told a nested page's shell its real presses (P148: 'sha256-kWx9H3mLZTPs2MHT4fmpNuaZN9qIXLAVePeULjBsq/U=').
   // 0.16.0's is 0.15.2's less nine lines: the hook by which a nested page's shell renewed its
   // files' address, gone with nested pages (P149). `git diff v0.15.2 -- src/shell/runtime.ts`
-  // shows those lines and no others.
-  shell: "'sha256-RWgbBR8osnoAwlATYK0bglHOOpBB8KVrDa1OM6+gWRQ='",
+  // shows those lines and no others. 0.16.0's to 0.17.1's was
+  // 'sha256-RWgbBR8osnoAwlATYK0bglHOOpBB8KVrDa1OM6+gWRQ=': since, a message from the frame's
+  // parent's opener is the host's too (P154), for the next release's CHANGELOG to say.
+  shell: "'sha256-caJHuetRkbA94i7oqCBmRQHt+twKw7mImfbFmZ/X7V8='",
   // 0.15.0's was 'sha256-3PZMe4arifdWHJU1jS0laR49wiWc/uBWIFddGJPyf/w=': 0.15.2's marks ride the
   // document's scroll (P147). 0.16.0's was 'sha256-uQ77dZDXcY6pKRoTylHpGXY+ZhhCt4WZhB/qDTQJ6BE=':
   // 0.16.1's, where an element pick says where it was picked (P150), was
   // 'sha256-mEENXVKL++jLcp/UWE5v13gg234n9psEOCsXkq9eu9E='. 0.17.0's, where an anchor says where
   // it is in the page (P152), was 'sha256-yz31SX8KdgOpDylMsmeHkO0AM3pJ0ox6P3kb7BKROBM=': since, an
-  // element holding its own heading is placed under it, and the page's only h1 is left out (P153),
-  // for the next release's CHANGELOG to say. The other three are 0.15.0's.
-  annotate: "'sha256-Z1HU4ZHOiUc3K0TNNyW6bU5iKm3NF2+/nOBq5JpOdh8='",
-  find: "'sha256-invvWJWqsN6Zv0kMLG2eeofMX6XmKNSqsvYydiElDGc='",
+  // element holding its own heading is placed under it, and the page's only h1 is left out (P153):
+  // 0.17.1's was 'sha256-Z1HU4ZHOiUc3K0TNNyW6bU5iKm3NF2+/nOBq5JpOdh8='. Since, annotations' and
+  // find's hear the host's opener too (P154): find's, 0.15.0's to 0.17.1's, was
+  // 'sha256-invvWJWqsN6Zv0kMLG2eeofMX6XmKNSqsvYydiElDGc='. `use` and `legacy` are 0.15.0's.
+  annotate: "'sha256-JkvA19tibKXHXxRa7RTO0gAU3BQaaP1Wkh+H4Z55Zv8='",
+  find: "'sha256-NLUoejPE1efWJqyM2IR5DwbU0vnNoDzlwPhNpx4TOMA='",
   use: "'sha256-TJx7YF/WvrHHkz8iTPfUfH6GNUEgES6O+0+igLRmyPQ='",
   legacy: "'sha256-ZEVJsezqV7n+Ho0m7Y92NYxAZqf8ynKq/rDdXrJUKp0='",
 };
@@ -640,7 +645,7 @@ const RUNTIME_V0_14_16 = {
   legacy: "'sha256-ZEVJsezqV7n+Ho0m7Y92NYxAZqf8ynKq/rDdXrJUKp0='",
 };
 
-describe("the served shell runtime is 0.16.0's (0.15.2's, less a nested page's files hook, P149), but for annotations' (P150, P152, P153), not 0.14.16's: pinned, so what the CHANGELOG says of it is checked (P145)", () => {
+describe("the served shell runtime is 0.16.0's (0.15.2's, less a nested page's files hook, P149), but for annotations' (P150, P152, P153) and the host's opener (P154), not 0.14.16's: pinned, so what the CHANGELOG says of it is checked (P145)", () => {
   const now = {
     shell: hashOf(SHELL_RUNTIME),
     annotate: hashOf(ANNOTATE_RUNTIME),
@@ -649,7 +654,7 @@ describe("the served shell runtime is 0.16.0's (0.15.2's, less a nested page's f
     legacy: hashOf(LEGACY_GLOBALS_RUNTIME),
   };
 
-  it("its bytes are 0.16.0's but for annotations' (a change here is a change every served document carries: say it)", () => {
+  it("its bytes are 0.16.0's but for annotations' and the host's opener (a change here is a change every served document carries: say it)", () => {
     expect(now).toEqual(RUNTIME_V0_16_0);
   });
 

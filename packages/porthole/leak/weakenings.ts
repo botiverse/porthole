@@ -729,9 +729,9 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "embed-origins": [
     {
       file: RUNTIME,
-      find: '\n  window.addEventListener("message", (event) => {\n    if (event.source !== window.parent || plan.origins.indexOf(event.origin) === -1) {',
+      find: '\n  window.addEventListener("message", (event) => {\n    if (!fromHostWindow(event.source) || plan.origins.indexOf(event.origin) === -1) {',
       replace:
-        '\n  window.addEventListener("message", (event) => {\n    if (event.source !== window.parent || (!hostless && plan.origins.indexOf(event.origin) === -1)) {',
+        '\n  window.addEventListener("message", (event) => {\n    if (!fromHostWindow(event.source) || (!hostless && plan.origins.indexOf(event.origin) === -1)) {',
     },
   ],
   // The asset library's CSP (P089), taken out by the served harness: scripts from it run

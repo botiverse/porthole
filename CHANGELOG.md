@@ -4,6 +4,22 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **A frame's host is its parent, or that parent's opener** (P154). A host that draws a display
+  into a window it opened, from its own page's code (a React portal into an `about:blank` popup, a
+  desktop app's object window), had every answer dropped: a message's source is the window whose
+  code called `postMessage`, the opener, not the frame's parent, so the shell never heard its
+  `ui/initialize` answered, asked again until the display timed out, and the display showed as
+  not loaded. The shell's listeners (its own, annotations', find's and link labels') and the MCP
+  Apps sandbox proxy now take a message from the parent or the parent's opener, read once before
+  content runs; the origins checked are unchanged, and a window with no opener adds nothing.
+  **For a host:** nothing to change for a display in your own page. One in a window you opened
+  works once the host and the content server are both upgraded; the window must be same-origin
+  with your page, with a document written into it (`doc.open()`/`doc.write()`/`doc.close()`). The
+  shell runtime every served document carries changed, and with it annotations' and find's (their
+  pinned hashes, P145).
+
 ## 0.17.1
 
 - **An anchor's headings: an element's own heading, and not the page's only h1** (P153, amends

@@ -141,6 +141,15 @@ first") answers `"redirected"` and neither counts nor resets the count. `request
 display's `id`, `title` and the `instance` you gave the frame (never sent to an opaque frame), so the
 dialog can name it from your records. `useRunAgain()` gives a "run again" button.
 
+A window of your own (P154): a frame may be drawn into a window your page opened and renders into
+from its own code (a React portal into `window.open("about:blank", name)`, a desktop app's object
+window). Its answers then come from your page's window, the popup's opener, which the shell hears as
+its host's. The popup must be same-origin with your page and have a document of its own: write it
+(`doc.open()`, `doc.write(…)`, `doc.close()`), since an untouched `about:blank` says
+`location.origin` `"null"` and an opaque display refuses to mount there. Upgrade the content server
+with the host: an older served shell hears its parent alone, and a display in such a window never
+initializes.
+
 ### Context for the agent (`setModelContext`)
 
 A widget or MCP Apps view may tell the agent what the person sees (`ui/update-model-context`, the

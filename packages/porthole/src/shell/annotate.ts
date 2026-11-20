@@ -2089,7 +2089,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       }, true);
 
       window.addEventListener("message", (event) => {
-        if (event.source !== window.parent || plan.origins.indexOf(event.origin) === -1) {
+        if (!fromHostWindow(event.source) || plan.origins.indexOf(event.origin) === -1) {
           return;
         }
         const data = event.data;
