@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.18.0
 
 - **Where the reader is in the page** (P155, amends P053). A new `PagePlace`, `{ page?, hash?,
   scroll }`: which of the content's own pages it is (`"./report.html"`: its address as it loaded,
@@ -22,6 +22,9 @@ P-numbers below.
   page's word. Upgrade the content server with the host (an older shell sends none and answers
   `"unsupported"`). The shell runtime every served document carries changed (a spliced runtime's
   own requests are left to it), and so did annotations' (their pinned hashes, P145).
+  **Known limit:** on WebKit, a display without files that changes its fragment (a link within the
+  page) starts again at the top: WebKit fires the frame's `load` again (P142), which such a display
+  takes as the content navigating away (P031). A file set's pages keep their place.
 
 ## 0.17.2
 
