@@ -4,6 +4,20 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **Which page of the set the frame is on** (P156, amends P084, P098). A new host event, `page`,
+  `{ page }` (React `onPage`): a link, a form or a script opened another page of the content's own
+  files in the frame. `page` is named as P155's `place.page` (`"./report.html"`, `"./"` for the
+  files' root; no query or fragment), told once per page, after the run's `initialized` (each run,
+  a restart included, starts on the page the host framed; a move before the handshake is told just
+  after it). Not for a navigation within a page (a fragment: ask `annotations.place()`), a
+  single-page app's own routes, or content leaving the set (`navigated`). Only a served display with
+  files, from a shell that names its version (P098). No shell or wire change; nothing reaches the
+  frame; no wall, gate or rate moves.
+  **For a host:** nothing to change unless you want it: follow `page` to show and file comments on
+  the page the frame shows rather than the one you framed, and go back to yours on `initialized`.
+
 ## 0.18.0
 
 - **Where the reader is in the page** (P155, amends P053). A new `PagePlace`, `{ page?, hash?,

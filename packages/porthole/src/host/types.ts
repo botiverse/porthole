@@ -218,6 +218,18 @@ export interface DisplayEvents {
   /** The content navigated its frame away; the frame was started again from its content. */
   readonly navigated: undefined;
   /**
+   * The frame is on another page of its content's own files now (P156, P084): a link, a form or
+   * a script opened it in the frame. `page` as a `PagePlace`'s (P155): `"./report.html"`, its
+   * address as it loaded, without its query or fragment, the files' address as `./` (`"./"` for
+   * the files' root). Told once for each page it moves to, after the run's `initialized` (a run,
+   * a restart included, starts on the page the host framed, and a move before its handshake is
+   * told right after it); not for a navigation within the page (a fragment, its history entries),
+   * nor for a single-page app's own routes. Only a display whose content comes with files of its
+   * own (served, with a version), and only from a shell that says which version its page is
+   * (P098). The content's word, as every report is: which page to name, never a fact.
+   */
+  readonly page: { readonly page: string };
+  /**
    * The shell stopped the content navigating its frame to `url` (P079, P080): the address whole,
    * as the content gave it (its word: untrusted, may carry data in its query). Only where the
    * config declares `reportError` (it counts as one of the run's reports), and only in frames with

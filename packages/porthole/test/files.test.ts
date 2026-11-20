@@ -20,7 +20,7 @@ import {
 import { compile } from "../src/compile/compile.ts";
 import { addressWithoutQuery, withoutSealedAddresses } from "../src/bridge/navigation.ts";
 import { createHost } from "../src/host/create-host.ts";
-import { LATE_NOTICE_MS } from "../src/host/pages-of-set.ts";
+import { LATE_NOTICE_MS, PAGE_OF_SET_MS } from "../src/host/pages-of-set.ts";
 import type { PlatformHost } from "../src/platform/types.ts";
 import type { PortholeConfig } from "../src/config/schema.ts";
 import type { InstanceRef } from "../src/isolation/types.ts";
@@ -1952,6 +1952,109 @@ describe("after the security review of 0.6.0's first cut", () => {
     await vi.advanceTimersByTimeAsync(LATE_NOTICE_MS);
     expect(answered(3)).toBe(false);
     expect({ events, surfaces }).toEqual({ events: ["navigated"], surfaces: 2 });
+    display.destroy();
+  });
+
+  // P156: the host hears which page of the set the frame moved to, named as a place names it
+  // (P155), once each, after the run's `initialized`; a run started again is on the page the host
+  // framed (pages-of-set.test.ts says which notices and loads tell it).
+  it("tells the host each page of the set the frame moves to, after the run's initialized (P156)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const navigated: (() => void)[] = [];
+    const listeners: ((message: unknown) => void)[] = [];
+    const platform: PlatformHost = {
+      name: "stand-in",
+      createDoor: openingDoor,
+      createSurface: () => ({
+        transport: {
+          send: () => {},
+          listen: (listener) => {
+            listeners.push(listener);
+            return () => {};
+          },
+          close: () => {},
+        },
+        element: null,
+        setHeight: () => {},
+        setColorScheme: () => {},
+        userActivation: () => undefined,
+        onNavigated: (listener) => {
+          navigated.push(listener);
+          return () => {};
+        },
+        onLoad: () => () => {},
+        destroy: () => {},
+      }),
+    };
+    const container = {
+      ownerDocument: {
+        defaultView: { location: { origin: HOST }, navigator: { language: "en" } },
+      },
+      getBoundingClientRect: () => ({ width: 600 }),
+    } as unknown as HTMLElement;
+    const locator = {
+      locate: () =>
+        Promise.resolve({
+          url: `https://abc.${DOMAIN}/__porthole/d/x`,
+          origin: `https://abc.${DOMAIN}`,
+          reports: true,
+          door: { url: `https://abc.${DOMAIN}/__porthole/door/x?ticket=d` },
+        }),
+    };
+    const display = createHost(
+      presets.artifact({ isolation: "domain", contentOrigins: [CONTENT] }),
+      { platform, locator },
+    ).mount(container, {
+      displayId: "d1",
+      title: "Page",
+      scheme: "light",
+      instance: site("1", "abc"),
+    });
+    const events: string[] = [];
+    display.on("initialized", () => events.push("initialized"));
+    display.on("page", ({ page }) => events.push(page));
+    await vi.advanceTimersByTimeAsync(0);
+    const say = (message: unknown) => {
+      for (const listener of listeners.slice()) {
+        listener(message);
+      }
+    };
+    const SET_1 = { id: "site", version: "1" };
+    const arrived = (url: string) =>
+      say({
+        jsonrpc: "2.0",
+        method: "porthole/navigating",
+        params: { url, arrived: true, set: SET_1 },
+      });
+    const leaving = (url: string) =>
+      say({ jsonrpc: "2.0", method: "porthole/navigating", params: { url, set: SET_1 } });
+    const ready = () => say({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} });
+    // A move before the handshake is told right after it.
+    arrived("./about?id=7#team");
+    expect(events).toEqual([]);
+    ready();
+    expect(events).toEqual(["initialized", "./about"]);
+    // Once for each page: the leaving page's word and the arriving page's are one move; a page's
+    // query and fragment are never told.
+    leaving("./docs/my%20report.html?token=x#s");
+    navigated.at(-1)?.();
+    arrived("./docs/my%20report.html?token=x#s");
+    leaving("./");
+    navigated.at(-1)?.();
+    // An address that is no place's page names none; the load is still the set's.
+    arrived("https://elsewhere.test/about");
+    arrived("./a b.html");
+    expect(events).toEqual(["initialized", "./about", "./docs/my%20report.html", "./"]);
+    // A run started again (a load nobody announced, past every page's word) starts on the page the
+    // host framed.
+    await vi.advanceTimersByTimeAsync(PAGE_OF_SET_MS);
+    navigated.at(-1)?.();
+    await vi.advanceTimersByTimeAsync(LATE_NOTICE_MS);
+    await vi.advanceTimersByTimeAsync(0);
+    events.length = 0;
+    ready();
+    arrived("./");
+    expect(events).toEqual(["initialized", "./"]);
     display.destroy();
   });
 });

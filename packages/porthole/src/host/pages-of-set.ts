@@ -76,6 +76,12 @@ const isHello = (raw: unknown): boolean =>
  * version ends a wait without a restart; one from a shell before P098 (no version) can only be
  * taken for a load still to come, as before.
  *
+ * `page` hears which page of the set the frame is on now (P156), by its notice's address: each
+ * load taken for a page's notice naming the mounted version (not a document that stayed: its page
+ * is the one it was), and each arriving page's own notice for that version, whenever it comes (the
+ * document that sends it is the one in the frame). The same page can be heard twice (the leaving
+ * page's word and the arriving page's): the caller tells a page once.
+ *
  * Returns the surface the display uses: the same, its transport held while a load waits.
  */
 export function pagesOfSet(options: {
@@ -83,8 +89,10 @@ export function pagesOfSet(options: {
   readonly set: FileSetRef | null;
   /** The frame left its content: start the display again. */
   readonly away: () => void;
+  /** The frame is on this page of the set now (P156): a notice's address, the content's word. */
+  readonly page?: (url: string) => void;
 }): Surface {
-  const { surface, set, away } = options;
+  const { surface, set, away, page = () => {} } = options;
   if (set === null) {
     surface.onNavigated(away);
     return surface;
@@ -93,6 +101,8 @@ export function pagesOfSet(options: {
   // Taken for the next load until then, as that page.
   let grantUntil = 0;
   let grantFor = "";
+  // Whether that grant is a page's (P156: told as the page the frame is on), not a document's that stayed.
+  let grantPage = false;
   // The page the frame's last load was taken as: a late copy of its notice is no new one.
   let current: string | null = null;
   // Loads waiting for their notice, and what the frame said and was sent meanwhile.
@@ -149,6 +159,10 @@ export function pagesOfSet(options: {
         }
         return;
       }
+      if (notice.arrived) {
+        // The page in the frame says it is there, as it starts (P156): before or after its load.
+        page(notice.url);
+      }
       if (waiting === 0 && notice.url === current && !notice.same) {
         // A late copy for the page the frame is on (its leaving page's, or its own): no new page.
         // (A document that stayed says so for each navigation within it, the same address again
@@ -157,6 +171,10 @@ export function pagesOfSet(options: {
       }
       if (waiting > 0) {
         if (notice.set === "ok") {
+          if (!notice.same && !notice.arrived) {
+            // The leaving page's word, late: the page the load that waits is.
+            page(notice.url);
+          }
           taken(notice.url);
         }
       } else if (notice.same) {
@@ -166,6 +184,7 @@ export function pagesOfSet(options: {
         if (grantUntil <= Date.now()) {
           grantUntil = Date.now() + LATE_NOTICE_MS;
           grantFor = notice.url;
+          grantPage = false;
         }
       } else {
         // Either page's notice, for the next load within P084's ten seconds: the host hears the
@@ -173,6 +192,7 @@ export function pagesOfSet(options: {
         // the arriving page spoke (after the review of P098).
         grantUntil = Date.now() + PAGE_OF_SET_MS;
         grantFor = notice.url;
+        grantPage = notice.set === "ok";
       }
     } else if (waiting > 0 && isHello(message)) {
       // A page that greets the host before saying it is one of the set's isn't.
@@ -195,6 +215,9 @@ export function pagesOfSet(options: {
     if (grantUntil > Date.now()) {
       grantUntil = 0;
       current = grantFor;
+      if (grantPage) {
+        page(grantFor);
+      }
       return;
     }
     grantUntil = 0;

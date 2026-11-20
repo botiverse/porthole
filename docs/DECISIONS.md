@@ -10152,3 +10152,79 @@ so they tell it.
 
 **Revisit when** a host wants the place without `annotate` (a link to a section, a viewer's own
 bookmark), a page's own scrolling box, or the place told as it changes.
+
+## P156 · 2026-11-20 · The host hears which page of the set the frame is on (`page`) · Accepted
+
+Amends P084 and P098 (what the host is told of a set's pages). From Raft: an Artifact made of many
+files opens at its entry, and a link in it opens another of its pages in the same frame (P084). The
+host kept treating the frame as the page it framed: a comment written on the page the link opened
+was filed under the entry (only P155's `place.page` said where it was), the entry's marks were shown
+on the other page, and that page's own comments were never marked. A host can learn the page from a
+`selected` or `annotations.place()` (P155), but only when the reader comments, so after a link back
+it went on believing the last page it heard of.
+
+**Context.** Every page of a set already tells the host where it goes and where it is
+(`porthole/navigating`: the leaving page's address, `arrived` from the page that opened, P084,
+P098), and `pagesOfSet` decides from them which loads are the set's own; it kept the page to itself.
+The shell adapter's `navigating` event comes as a page leaves, before its load and for a load that
+may never come (a navigation cancelled), so it can't say where the frame is.
+
+**Decision.**
+1. **`DisplayEvents.page`**, `{ page }`: the frame is on another page of its content's own files.
+   `page` is named as a `PagePlace`'s (P155): `./` and its path, without query or fragment, printable
+   ASCII under `./` within `ANNOTATION_LIMITS.page`, from the notice's address (the shell's
+   `ownAddresses`: the files' address as `./`) by `pageOfAddress`, the same check `parsePlace` makes
+   of a place's `page`. So the two name one page by one string. An address that isn't one names
+   none, and nothing is told (the load is still taken as the set's, as before).
+2. **When.** `pagesOfSet` tells it for each load it takes on a page's notice for the mounted version
+   (the leaving page's word before the load, or after it while the load waits), and for each
+   arriving page's own notice for that version whenever it comes, before its load or after (the
+   document that sends it is the one in the frame). The host tells a page once: not again while the
+   frame is on it (the leaving page's word and the arriving page's are one move).
+3. **Not for a navigation within the page** (`same`, P142: a fragment, history between a document's
+   entries): the page is the one it was, and P155 rejected a stream of fragments; a host asks
+   `annotations.place()` for the fragment when it needs it. Not for a single-page app's own routes
+   (`pushState`, never announced). Not for content leaving the set: that stays `navigated` (P031).
+4. **A run starts on the page the host framed.** Its first page says nothing (a ticket's answer,
+   P098), and the host knows which it framed: `initialized` starts every run (a restart included),
+   and `page` comes only after it; a move before the run's handshake is told right after
+   `initialized`. A new run forgets the page.
+5. Only a display whose content comes with files of its own (served, an artifact with a version)
+   and only from a shell that names the version (P098). React: `onPage`.
+
+**Compatibility.** Only added; no shell, runtime or wire change (no pinned hash moves). An older
+host never hears it. A newer host with a content server from before P098 hears no `page` (its
+notices name no version).
+
+**Threat.** Not a weakening: nothing new reaches the frame, no wall, gate or rate moves, and the
+host already heard every one of these addresses (`porthole/navigating`, P084; and `place.page`,
+P155). What the host now gets is the same address, without query or fragment, at the moment its own
+check took the load as the set's. The sealed access is never in it (the shell names its files'
+address as `./`, P083). It is the page's word, as every report is (THREAT_MODEL §7): a page can name
+another page of its set than the one it is (as it can in a `place`), and a host uses it to choose
+which page's things to show, never as a fact or a permission.
+
+**Tested.** `test/pages-of-set.test.ts` "which page of the set the frame is on (P156)": a load taken
+on the leaving page's word, the arriving page's word before and after its load, a waiting load and
+its late word, back to `./`; not a document that stayed (its load taken or waiting), a word no load
+took, another version's page, one that won't say which, nor a display without files.
+`test/files.test.ts` (`createHost`): a move before the handshake told right after `initialized`,
+each page once, no query or fragment, an address that is no place's page told as none, a run started
+again on the framed page. Written and not run here (CI runs them): `leak/served/files.spec.ts`, the
+link cases (`./about`, then `./`; with the leaving page's notice dropped or late; without the
+Navigation API) and the link down a page (only `./about`, never its fragments). No negative control:
+nothing here is a defense of the isolation.
+
+**Rejected.**
+- *The shell adapter's `navigating` as the event*: it comes as a page leaves, before a load that
+  may never happen, and never from a page that opened without the Navigation API (Safari before 26).
+- *The page with its fragment, at every `hashchange`*: P155's rejected stream; the fragment is
+  `place()`'s, when the host needs it.
+- *The first page told too, from its shell's hello*: a change to the shell and every pinned hash for
+  what the host already knows (it framed that page); `initialized` says a run began there.
+- *Telling every notice and letting the host dedupe*: the leaving page's and the arriving page's
+  word for one move would be two events, and a word no load took would be a page the frame never
+  showed.
+
+**Revisit when** a host frames a set without knowing which page it framed (a clean address that
+redirects), wants the fragment as it changes, or a single-page app's routes.

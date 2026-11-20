@@ -54,10 +54,16 @@ function frame() {
 function display(set: typeof SET | null = SET) {
   const raw = frame();
   let restarts = 0;
-  const surface = pagesOfSet({ surface: raw.surface, set, away: () => void (restarts += 1) });
+  const pages: string[] = [];
+  const surface = pagesOfSet({
+    surface: raw.surface,
+    set,
+    away: () => void (restarts += 1),
+    page: (url) => void pages.push(url),
+  });
   const heard: unknown[] = [];
   surface.transport.listen((message) => heard.push(message));
-  return { raw, surface, heard, restarts: () => restarts };
+  return { raw, surface, heard, restarts: () => restarts, pages };
 }
 
 const notice = (url: string, more: Record<string, unknown> = {}) => ({
@@ -323,5 +329,75 @@ describe("a page that stayed (P142)", () => {
     each.raw.say(stayed("./#bottom"));
     each.raw.load();
     expect(each.restarts()).toBe(1);
+  });
+});
+
+describe("which page of the set the frame is on (P156)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("is each load taken for a page's notice, and each arriving page's own word, whenever it comes", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    // The leaving page's word, then the load: that page, at the load (not as the word comes: the
+    // navigation may never happen).
+    const before = display();
+    before.raw.say(leaving("./about"));
+    expect(before.pages).toEqual([]);
+    before.raw.load();
+    expect(before.pages).toEqual(["./about"]);
+    // The arriving page's, before its load or after it (its document is the one in the frame).
+    const arrived = display();
+    arrived.raw.say(arriving("./about"));
+    expect(arrived.pages).toEqual(["./about"]);
+    arrived.raw.load();
+    expect(arrived.pages).toEqual(["./about", "./about"]);
+    // A load that waits, then the leaving page's late word, or the arriving page's.
+    for (const late of [leaving("./about"), arriving("./about")]) {
+      const each = display();
+      each.raw.load();
+      expect(each.pages).toEqual([]);
+      each.raw.say(late);
+      expect(each.pages).toEqual(["./about"]);
+    }
+    // Back: each page as it comes, the entry by its own address.
+    const back = display();
+    back.raw.say(leaving("./about"));
+    back.raw.load();
+    back.raw.say(leaving("./"));
+    back.raw.load();
+    expect(back.pages).toEqual(["./about", "./"]);
+  });
+
+  it("is not a navigation within the page, nor a word no load took, nor another version's page", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    // A document that stayed (P142), its load taken or not.
+    const stays = display();
+    stays.raw.say(stayed("./#bottom"));
+    stays.raw.load();
+    stays.raw.load();
+    stays.raw.say(stayed("./#bottom"));
+    expect(stays.pages).toEqual([]);
+    expect(stays.restarts()).toBe(0);
+    // A leaving page's word with no load in time: nothing.
+    const unused = display();
+    unused.raw.say(leaving("./about"));
+    vi.advanceTimersByTime(PAGE_OF_SET_MS + 1);
+    expect(unused.pages).toEqual([]);
+    // Another version's, or one that won't say which: never this display's page.
+    for (const word of [
+      arriving("./about", { id: "site", version: "2" }),
+      arriving("./about", null),
+      notice("./about"),
+    ]) {
+      const each = display();
+      each.raw.say(word);
+      each.raw.load();
+      expect(each.pages, JSON.stringify(word)).toEqual([]);
+    }
+    // A display whose pages never come with files has none.
+    const single = display(null);
+    single.raw.say(arriving("./about"));
+    expect(single.pages).toEqual([]);
   });
 });

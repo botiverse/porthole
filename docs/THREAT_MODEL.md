@@ -260,7 +260,9 @@ Whatever the use (how to wire each: [ADOPTING.md](ADOPTING.md)):
   must be trusted as the host itself (`[opener.unheard]` holds that one outside is not heard).
 - A frame that navigates is started again, at most three times; the next navigation stops the
   display. A file set's display may first hold such a frame up to 2 s, in case it was a page of its
-  own set, delivering nothing either way meanwhile (P098).
+  own set, delivering nothing either way meanwhile (P098). The host is told which page of the set a
+  load was taken for (`page`, P156): an address it already heard in that page's notice, without
+  query or fragment, the files' address as `./`; the page's word, nothing new to the frame.
 
 **The host must**
 - Send the page's `frame-src` (`displays.embedderCsp(…)`; `frame-src 'none'` where all displays are

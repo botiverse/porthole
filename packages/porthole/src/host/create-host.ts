@@ -12,6 +12,7 @@ import {
   followsSelection,
   hasMarker,
   inViewport,
+  pageOfAddress,
   parsePlace,
   parseReport,
   type StartedMode,
@@ -316,6 +317,16 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       let documentsReady = 0;
       let handshaken = false;
       let storageTold = false;
+      // Which page of its set the run's frame is on (P156): null, the page the host framed; the
+      // page last told the host. A move before the handshake is told right after it.
+      let pageNow: string | null = null;
+      let pageTold: string | null = null;
+      const tellPage = () => {
+        if (handshaken && pageNow !== null && pageNow !== pageTold) {
+          pageTold = pageNow;
+          emit("page", { page: pageNow });
+        }
+      };
       const toFrame = (method: string, params: Record<string, unknown>) => {
         if (handshaken && surface !== null) {
           surface.transport.send({ jsonrpc: "2.0", method, params });
@@ -946,6 +957,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         bridge = null;
         handshaken = false;
         documentsReady = 0;
+        pageNow = null;
+        pageTold = null;
         // The next run's frame tells its own size, the same as this one's or not.
         if (sizeFrame !== null) {
           view?.cancelAnimationFrame(sizeFrame);
@@ -1046,6 +1059,14 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
                   ? { id: mounted.id, version: mounted.version }
                   : null,
               away: navigatedAway,
+              // Which page of the set the frame is on now (P156), named as a place names it (P155).
+              page: (url) => {
+                const page = pageOfAddress(url);
+                if (page !== null) {
+                  pageNow = page;
+                  tellPage();
+                }
+              },
             })
           : framed;
         surface = created;
@@ -1138,7 +1159,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           emit: (event) => {
             if (event.type === "navigating") {
               // Which loads are the set's own pages is the frame's surface's to tell (P084, P098:
-              // `pagesOfSet`, from the frame's own words before any of them reach this display).
+              // `pagesOfSet`, from the frame's own words before any of them reach this display),
+              // and so is which page the frame is on (P156, `page` above): this one comes as the
+              // page leaves, before its load, and for a load that may never come.
               return;
             }
             if (event.type === "initialized") {
@@ -1150,6 +1173,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
                 giveLinks();
               }
               emit("initialized", undefined);
+              tellPage();
             }
           },
           ...(mount.document === undefined ? {} : { document: mount.document }),

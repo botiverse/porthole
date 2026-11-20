@@ -662,6 +662,11 @@ export interface PortholeFrameProps {
   /** The content navigated its frame away; it was started again (or stopped, after a few). */
   readonly onNavigated?: () => void;
   /**
+   * The frame is on another page of its content's own files (P156): `"./report.html"`, as a
+   * place's `page` (P155). After `onInitialized`, which starts each run on the page the host framed.
+   */
+  readonly onPage?: (page: { readonly page: string }) => void;
+  /**
    * The shell stopped the content navigating its frame to `url` (P080): the address whole, the
    * content's word. Served frames only, where the config declares `reportError`; `onContentError`
    * hears it too, without the address's query.
@@ -1092,6 +1097,9 @@ function Mount({
         case "navigated":
           frame.onNavigated?.();
           return;
+        case "page":
+          frame.onPage?.(detail as DisplayEvents["page"]);
+          return;
         case "navigationBlocked":
           frame.onNavigationBlocked?.(detail as DisplayEvents["navigationBlocked"]);
           return;
@@ -1235,6 +1243,7 @@ function Mount({
       "resize",
       "error",
       "navigated",
+      "page",
       "navigationBlocked",
       "refused",
       "muted",
