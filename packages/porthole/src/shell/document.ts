@@ -12,7 +12,8 @@ export interface ShellDocumentOptions {
    * The origins the shell takes messages from: the embedding page's own (`location.origin`), or
    * every host origin a served document may be embedded by. Exact origins of any scheme (a
    * desktop app's own, `ferry://app`), no wildcards, never "null". The sender must also be the
-   * frame's parent.
+   * frame's parent, or that parent's opener (P154): every origin here can drive a display in a
+   * host window it opened, so each must be trusted as the host itself.
    */
   readonly origins: readonly string[];
   /** The frame document's title (for assistive technology inside the frame). */

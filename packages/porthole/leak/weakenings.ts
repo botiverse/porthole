@@ -10,6 +10,7 @@ export interface Edit {
   readonly replace: string;
 }
 const RUNTIME = "src/shell/runtime.ts";
+const FIND = "src/shell/find.ts";
 const POLICY = "src/compile/policy.ts";
 const BRIDGE = "src/bridge/bridge.ts";
 const SHELL_ADAPTER = "src/protocol/shell-adapter.ts";
@@ -729,9 +730,25 @@ export const WEAKENINGS: Readonly<Record<string, readonly Edit[] | "embedder-csp
   "embed-origins": [
     {
       file: RUNTIME,
-      find: '\n  window.addEventListener("message", (event) => {\n    if (event.source !== window.parent || plan.origins.indexOf(event.origin) === -1) {',
+      find: '\n  window.addEventListener("message", (event) => {\n    if (!fromHostWindow(event.source) || plan.origins.indexOf(event.origin) === -1) {',
       replace:
-        '\n  window.addEventListener("message", (event) => {\n    if (event.source !== window.parent || (!hostless && plan.origins.indexOf(event.origin) === -1)) {',
+        '\n  window.addEventListener("message", (event) => {\n    if (!fromHostWindow(event.source) || (!hostless && plan.origins.indexOf(event.origin) === -1)) {',
+    },
+  ],
+  // A frame's host is its parent or that parent's opener (P154), heard from the plan's origins:
+  // the shell's and find's listeners without the origins check, so an opener of the host's page
+  // at any origin is heard as the host.
+  "opener-origins": [
+    {
+      file: RUNTIME,
+      find: '\n  window.addEventListener("message", (event) => {\n    if (!fromHostWindow(event.source) || plan.origins.indexOf(event.origin) === -1) {',
+      replace:
+        '\n  window.addEventListener("message", (event) => {\n    if (!fromHostWindow(event.source)) {',
+    },
+    {
+      file: FIND,
+      find: 'if (!fromHostWindow(get(messageSourceOf, event, "source")) || !fromHost(get(messageOriginOf, event, "origin"))) {',
+      replace: 'if (!fromHostWindow(get(messageSourceOf, event, "source"))) {',
     },
   ],
   // The asset library's CSP (P089), taken out by the served harness: scripts from it run

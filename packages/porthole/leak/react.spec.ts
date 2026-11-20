@@ -415,6 +415,36 @@ test("a whole page shows through the artifact config", async ({ page }) => {
   await expect(frameOf(page, "a").locator("h1")).toHaveText("Report");
 });
 
+test("a display drawn into a window the host opened, from the host's own page, handshakes and runs", async ({
+  page,
+}) => {
+  // An object window: an about:blank child the page opened, drawn into through a portal, so the
+  // host's code (its answers' postMessage) runs in the opener's realm. A message's source is that
+  // realm's window, not the frame's parent: the shell takes its host's opener's word too.
+  // Opened by a person's click, as a host's window is: Firefox gives a document written from a
+  // script Playwright evaluates no address of its opener's (it stays about:blank, origin "null").
+  await open(page, { provider: "default", frames: [] });
+  const [child] = await Promise.all([page.waitForEvent("popup"), page.click("#open-window")]);
+  await open(page, {
+    provider: "default",
+    frames: [
+      frame({
+        displayId: "w",
+        config: "artifact",
+        content: "<h1>In a window</h1>",
+        inWindow: true,
+      }),
+    ],
+  });
+  await expect(page.locator('[data-porthole-display="w"]')).toHaveCount(0);
+  const inside = child.locator('[data-porthole-display="w"] iframe').contentFrame();
+  await expect(inside.locator("h1")).toHaveText("In a window");
+  await expect.poll(async () => (await events(page, "w", "initialized")).length).toBe(1);
+  expect(await events(page, "w", "outcome")).toEqual([
+    { display: "w", event: "outcome", detail: { state: "loaded" } },
+  ]);
+});
+
 test("a url-mode frame shows without a handshake, and says it loaded", async ({ page }) => {
   await open(page, { provider: "default", frames: [frame({ displayId: "u", config: "url" })] });
   await expect(frameOf(page, "u").locator("#app")).toHaveText("A running app.");

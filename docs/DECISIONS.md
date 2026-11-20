@@ -9943,3 +9943,73 @@ so the header and not its h3) gets its own h3.
 **Revisit when** a host shows the page's title beside comments elsewhere and wants the chain to
 carry it, or a page's own heading should come from a container's `aria-labelledby` (a card
 labelled by its h3) rather than its headings.
+
+## P154 · 2026-11-20 · A frame's host is its parent, or that parent's opener · Accepted
+
+**Context.** Raft Desktop draws an Artifact into an object window: its main page opens
+`window.open("about:blank", "raft-object-window-1")`, writes the child's document, and renders the
+viewer into it through a React portal, so all the host's code, Porthole's included, runs in the
+main page's realm. The display's frame loaded and its shell asked `ui/initialize` again and again;
+after the load timeout the viewer said it didn't load. The same Artifact in the main window ran.
+Reproduced in Chromium (opaque mode, a portal into an `about:blank` child written as Raft writes
+it): the host heard every request in the child (from its frame's window, at its origin) and
+answered each; every answer reached the shell with `event.source` the child's opener, not
+`window.parent`, and the shell dropped it. A message's source is the window of the code that
+called `postMessage` (the incumbent realm), not the window the target frame is in. Calling the
+child's own `postMessage` through `Reflect.apply`, its `setTimeout`, `queueMicrotask` or a
+`Promise` of its realm changes nothing; only a function compiled in the child does (`Function`,
+an inline script), which a host's CSP rightly forbids (Raft's: `script-src 'self'` and hashes).
+
+**Decision.** A frame's host is its parent window, or that parent's opener. The shell reads both
+once, at its start, before content runs (`hostWindow`, `hostOpener`), and each of its message
+listeners (the shell's own, annotations', find's, link labels') takes a message only when its
+source is one of them (`fromHostWindow`) and its origin is one of the plan's, as before. The MCP
+Apps sandbox proxy does the same for the view's HTML. The host's side is unchanged: it hears its
+frame's window and origin alone, on the frame's own document's window.
+
+**What it doesn't widen.**
+- The plan's origins are unchanged: an opener at any other origin is never heard. In served mode
+  they are the server's `hostOrigins`; opaque, the host page's own. Tested:
+  `leak/host-opener.spec.ts` `[opener.unheard]`, a page outside them that opened the host's page
+  reaches the frame and says a `ui/initialize` answer (the id the shell asked with) and a find
+  query: neither is taken; `[opener.loads]` is its positive control (the same words from the
+  frame's parent are), and the `opener-origins` control (the shell's and find's listeners without
+  their origins check) fails it. Every origin in the plan can thus drive a display in a host window
+  it opened, and must be trusted as the host itself (THREAT_MODEL).
+- Read once, before content runs: content can replace its own `window.parent` (it is
+  `[Replaceable]`), never what was read. The parent's `opener` is read on a cross-origin window,
+  where content can define or replace nothing.
+- A null opener (a host page in its own tab, an iframe's parent, a window opened `noopener` or
+  whose opener was cleared) matches nothing, and a message with no source is no one's: nothing is
+  heard that wasn't before.
+- A shell on a tab of its own (P139: its parent is itself) reads no opener.
+
+**Compatibility.** A display in the host's own page behaves as before. One in a window the host
+opened works once the host and the content server are both upgraded; the window must be
+same-origin with the host page, with a document written into it (an untouched `about:blank` says
+`location.origin` `"null"`, refused by an opaque display). The shell runtime every served document
+carries changes, and annotations' and find's (their pinned hashes, P145); `use` and `legacy` are
+unchanged.
+
+**Tested.** `leak/react.spec.ts` "a display drawn into a window the host opened, from the host's
+own page, handshakes and runs": the test app opens an `about:blank` child on a click, writes its
+document and draws an artifact into it through a portal; the content shows and the display
+initializes and loads (Chromium, Firefox and WebKit; each fails without this change: the content
+never shows). Opened from a script Playwright evaluates, Firefox leaves the written child at
+`about:blank` (origin `"null"`); from a click it takes its opener's address, as in a host.
+`test/framed-by.test.ts`: the runtime's new pins. `test/shell.test.ts`, `test/find.test.ts`,
+`test/links.test.ts`: the listeners' checks as written; `leak/weakenings.ts`' `embed-origins`
+control follows the new text.
+
+**Rejected.**
+- *Sending from the host's window* (a relay compiled in the child: `new child.Function`, an
+  injected script): a host's CSP forbids it, and a relay the host must serve is one more thing to
+  get wrong.
+- *A `MessageChannel` from the handshake on*: a protocol change for every shell and host for one
+  layout, and the frame's first words still need a window to go to.
+- *Any window at a plan origin*: the source check is what tells the host's window from another
+  page of the same origin that holds the frame; the opener is the one window that drew it.
+
+**Revisit when** a host draws into a window it didn't open (a window opened by another of its
+windows, a frame of a popup), or the platform gives a message the window of the target's realm.
+

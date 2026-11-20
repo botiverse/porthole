@@ -316,7 +316,7 @@ export const LINKS_RUNTIME = String.raw`if (declared("linkLabels")) {
       };
       window.addEventListener("message", (event) => {
         // The event's fields, each read once through the kept getters.
-        if (get(messageSourceOf, event, "source") !== parentWindow || !fromHost(get(messageOriginOf, event, "origin"))) {
+        if (!fromHostWindow(get(messageSourceOf, event, "source")) || !fromHost(get(messageOriginOf, event, "origin"))) {
           return;
         }
         const data = get(messageDataOf, event, "data");

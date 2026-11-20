@@ -167,7 +167,8 @@ export const HANDSHAKE = String.raw`(topLevel, ask, answered, none, later) => {
  * a global for each declared capability that has one.
  *
  * Nothing secret is ever in the frame: everything it says, the host treats as the content's own
- * words. It takes messages only from its parent, and only from the plan's origins.
+ * words. It takes messages only from its parent (or that parent's opener, P154), and only from the
+ * plan's origins.
  */
 export const SHELL_RUNTIME = String.raw`(() => {
   "use strict";
@@ -181,6 +182,20 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // apply or bind, so nothing content later puts there sees what the shell calls or with what.
   const callOf = Reflect.apply;
   const hasOwn = Object.prototype.hasOwnProperty;
+  // Whose messages are the host's (P154): its frame's parent; and, where that parent is a window
+  // another opened and draws into from its own page (a React portal into an about:blank popup),
+  // that opener. A message's source is the window whose code called postMessage, not the window
+  // the frame is in: the host's answers to a frame in such a popup come from the opener. Read once,
+  // before content runs: content can replace window.parent (it is [Replaceable]), never what was
+  // read; a cross-origin window's opener is nothing content can replace. Each listener still
+  // takes the plan's origins alone, and a message with no source is no one's.
+  const hostWindow = window.parent;
+  let hostOpener = null;
+  try {
+    const opener = hostWindow !== window ? hostWindow.opener : null;
+    hostOpener = opener === undefined || opener === window ? null : opener;
+  } catch (_) {}
+  const fromHostWindow = (source) => source !== null && source !== undefined && (source === hostWindow || source === hostOpener);
   // A page that came with files, answered at its ticket's address (P083): its own address first,
   // before anything loads, so its relative addresses are its files' (and the ticket leaves).
   if (plan.files && typeof plan.files.address === "string" && location.href !== plan.files.address) {
@@ -2270,7 +2285,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
     }
   };
   window.addEventListener("message", (event) => {
-    if (event.source !== window.parent || plan.origins.indexOf(event.origin) === -1) {
+    if (!fromHostWindow(event.source) || plan.origins.indexOf(event.origin) === -1) {
       return;
     }
     receive(event.data);

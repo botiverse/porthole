@@ -287,7 +287,7 @@ describe("the shell", () => {
 
   test("takes labels only from its parent and the plan's origins, as a notification; says nothing back", () => {
     expect(LINKS_RUNTIME).toContain(
-      'if (get(messageSourceOf, event, "source") !== parentWindow || !fromHost(get(messageOriginOf, event, "origin"))) {',
+      'if (!fromHostWindow(get(messageSourceOf, event, "source")) || !fromHost(get(messageOriginOf, event, "origin"))) {',
     );
     expect(LINKS_RUNTIME).toContain('own(data, "id") !== undefined');
     expect(LINKS_RUNTIME).not.toContain("postIn");

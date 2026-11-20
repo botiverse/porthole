@@ -1,7 +1,9 @@
-import { createElement as h, Fragment } from "react";
+import { createElement as h, Fragment, type ReactElement } from "react";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import type { ConfirmRequest, Proceed } from "../../src/bridge/types.ts";
 import {
+  compile,
   defineDisplays,
   portholeClient,
   presets,
@@ -72,6 +74,8 @@ export interface FrameSpec {
   readonly trackedSelection?: boolean;
   /** The frame's consent: a Refused, new on every render (P080). */
   readonly consent?: "refused";
+  /** Drawn into the window `app.openWindow()` opened, through a portal from this page's root. */
+  readonly inWindow?: boolean;
 }
 
 export interface AppState {
@@ -112,6 +116,26 @@ const theme = () => ({
 const locator = {
   locate: async () => ({ url: `${APP_ORIGIN}/leak/host/app.html`, origin: APP_ORIGIN }),
 };
+
+/**
+ * A window of the host's own (an object window, P154): an about:blank child this page opened and
+ * wrote a document into, drawn into through a portal from this page's React root, so all its code
+ * runs in this page's realm.
+ */
+let windowRoot: HTMLElement | null = null;
+
+/**
+ * A bare shell (P154's probes, `leak/host-opener.spec.ts`): a frame's shell document, with find,
+ * framed by this page with no host listening, so nothing answers it but what a test posts. What
+ * it says to this page is kept (`bareSaid`).
+ */
+const bareSaid: unknown[] = [];
+
+/** A frame's element, in the host's own window where it asks for one. */
+const placed = (state: AppState, element: ReactElement, index: number) =>
+  state.frames[index]?.inWindow === true && windowRoot !== null
+    ? createPortal(element, windowRoot, element.key)
+    : element;
 
 function render(state: AppState): void {
   const frames = state.frames.map((frame) =>
@@ -190,8 +214,9 @@ function render(state: AppState): void {
       }),
     ),
   );
+  const shown = frames.map((element, index) => placed(state, element, index));
   if (state.provider === "none") {
-    root.render(h(Fragment, null, frames));
+    root.render(h(Fragment, null, shown));
     return;
   }
   const confirm =
@@ -214,7 +239,7 @@ function render(state: AppState): void {
         ...(confirm === undefined ? {} : { confirm }),
         ...(state.consent === "refused" ? { consent: refusedHere() } : {}),
       },
-      frames,
+      shown,
     ),
   );
 }
@@ -373,6 +398,46 @@ const app = {
     pendingCustom?.(accepted);
     pendingCustom = null;
   },
+  /** Opens the host's own window (`inWindow` frames are drawn there): `#open-window`'s click. */
+  openWindow(): void {
+    const opened = window.open("about:blank", "porthole-object-window-1", "popup");
+    if (opened === null) {
+      return;
+    }
+    // Its own document, as a desktop host writes it: an untouched about:blank says
+    // location.origin "null".
+    const doc = opened.document;
+    doc.open();
+    doc.write("<!doctype html><html><head></head><body></body></html>");
+    doc.close();
+    const base = doc.createElement("base");
+    base.href = new URL("/", location.href).href;
+    doc.head.append(base);
+    windowRoot = doc.createElement("div");
+    windowRoot.style.width = "600px";
+    doc.body.append(windowRoot);
+  },
+  /** Frames a bare shell (with find, its page a paragraph) as this page's first frame. */
+  bareShell(): void {
+    const frame = document.createElement("iframe");
+    frame.setAttribute("sandbox", "allow-scripts");
+    frame.id = "bare-shell";
+    frame.srcdoc = compile(presets.artifact({ capabilities: { find: {} } })).shellDocument({
+      origins: [location.origin],
+      title: "A bare shell",
+      document: "<p>The needle is here.</p>",
+    });
+    window.addEventListener("message", (event) => {
+      if (event.source === frame.contentWindow) {
+        bareSaid.push(event.data);
+      }
+    });
+    document.body.prepend(frame);
+  },
+  /** What the bare shell said to this page, in order. */
+  bareSaid(): unknown[] {
+    return bareSaid;
+  },
   /** The host's own styles, set now. */
   restyle(value: string) {
     document.documentElement.style.setProperty("--host-text", value);
@@ -384,3 +449,10 @@ const app = {
 };
 
 (window as unknown as { app: typeof app }).app = app;
+
+// The host's own window opens on a person's click, outside the React root.
+const opener = document.createElement("button");
+opener.id = "open-window";
+opener.textContent = "Open in a window";
+opener.addEventListener("click", () => app.openWindow());
+document.body.append(opener);

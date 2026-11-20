@@ -197,7 +197,7 @@ describe("the shell's handshake with its host (P085, P139, P143)", () => {
     expect(document).toContain("const framed = parentWindow !== window && !hostless;");
     // Every message is dropped: no origin is in an empty list.
     expect(SHELL_RUNTIME).toContain(
-      "if (event.source !== window.parent || plan.origins.indexOf(event.origin) === -1) {",
+      "if (!fromHostWindow(event.source) || plan.origins.indexOf(event.origin) === -1) {",
     );
   });
 });
