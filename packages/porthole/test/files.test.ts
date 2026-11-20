@@ -2100,7 +2100,8 @@ describe("after the security review of 0.6.0's first cut", () => {
       arrived(page);
     }
     const told = events.length;
-    expect(told).toBe(PAGES_PER_SECOND * 2);
+    // The first burst's four and its last page, then this burst's four.
+    expect(told).toBe(PAGES_PER_SECOND * 2 + 1);
     // The burst's last word takes the next load as that page (still waiting to be told); a load no
     // word explained, then another version's page, starts the display again.
     load();
