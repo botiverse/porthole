@@ -609,7 +609,7 @@ describe("without framedBy, the pages' scripts are 0.14.16's, byte for byte (P14
  * `'unsafe-inline'` for these documents), so it is pinned here: a change to its bytes fails this
  * test, and is said in the CHANGELOG, not assumed away (0.15.2: annotations', P147; 0.15.3: the
  * shell's, P148; 0.16.0: the shell's again, P149; 0.16.1: annotations', P150; 0.17.0:
- * annotations' again, P152; 0.17.1: annotations' again, P153; next: the shell's, annotations'
+ * annotations' again, P152; 0.17.1: annotations' again, P153; 0.17.2: the shell's, annotations'
  * and find's, where a frame's host's opener is heard too, P154). From
  * `git show v0.15.0:…/src/shell/*.ts` and `git show v0.14.16:…` (`SHELL_RUNTIME`,
  * `ANNOTATE_RUNTIME`, `FIND_RUNTIME`, `USE_RUNTIME`, `LEGACY_GLOBALS_RUNTIME`).
