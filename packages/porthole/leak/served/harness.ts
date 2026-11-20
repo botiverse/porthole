@@ -369,6 +369,10 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
       display.on("navigationBlocked", ({ url }) => record.navigationsBlocked.push(url));
       return index;
     },
+    // Where the reader is in the display's page (P155): its answer, or what it threw.
+    place(index) {
+      return this.displays[index].annotations.place().catch((error) => String(error && error.message));
+    },
   };
 </script></body></html>`;
 
@@ -503,6 +507,12 @@ async function start(): Promise<Harness> {
       capabilities: { copyText: {}, readData: {}, subscribeData: {} },
     }),
     url: presets.url({ contentOrigins: [contentSource] }),
+    // Annotations (P053), for where the reader is in a set's page (P155).
+    artifactAnnotate: presets.artifact({
+      isolation: "domain",
+      contentOrigins: [contentSource],
+      capabilities: { annotate: {} },
+    }),
     // A page's own nested frames, opted into (P128): its files' frames and srcdoc load and run.
     artifactFrames: presets.artifact({
       isolation: "domain",

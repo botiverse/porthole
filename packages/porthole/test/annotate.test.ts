@@ -1,5 +1,5 @@
 import { runInNewContext, Script } from "node:vm";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   annotateMode,
   checkMarks,
@@ -8,6 +8,7 @@ import {
   hasMarker,
   inViewport,
   parseAnchor,
+  parsePlace,
   parseRect,
   parseReport,
   parseScroll,
@@ -28,6 +29,7 @@ import {
   ANNOTATE_RUNTIME,
   MARKER_HIT,
   MARKER_NAME,
+  PAGE_HASH,
   WORD_LATE,
 } from "../src/shell/annotate.ts";
 import { SHELL_RUNTIME } from "../src/shell/runtime.ts";
@@ -2466,6 +2468,679 @@ describe("where an anchor is in the page (P152): its context, the headings above
       ]);
       expect(posted).toStrictEqual({ id: "m1", anchor: element, count: 2 });
       expect(draft).toStrictEqual({ id: "m2", anchor: text, kind: "draft" });
+    });
+  });
+});
+
+describe("where the reader is in the page (P155): its page, the fragment that names an element, the scroll", () => {
+  const scroll = { x: 0, y: 1_240 };
+  const rect = { x: 10, y: 20, width: 30, height: 18 };
+
+  describe("the host's check (parsePlace)", () => {
+    test("kept, rebuilt from known fields; page and hash where present, scroll always", () => {
+      expect(parsePlace({ page: "./report.html", hash: "#pricing", scroll })).toStrictEqual({
+        page: "./report.html",
+        hash: "#pricing",
+        scroll,
+      });
+      expect(parsePlace({ scroll, extra: "<b>", hash: "#a", page: "./" })).toStrictEqual({
+        page: "./",
+        hash: "#a",
+        scroll,
+      });
+      expect(parsePlace({ scroll })).toStrictEqual({ scroll });
+      // As an address serializes them: percent-encoded, a fragment's own `#`, `?` and `/` kept.
+      expect(parsePlace({ hash: "#caf%C3%A9", scroll })).toStrictEqual({
+        hash: "#caf%C3%A9",
+        scroll,
+      });
+      expect(parsePlace({ hash: "#a/b?c#d", scroll })?.hash).toBe("#a/b?c#d");
+      expect(parsePlace({ page: "./docs/%E5%AE%9A%E4%BB%B7.html", scroll })?.page).toBe(
+        "./docs/%E5%AE%9A%E4%BB%B7.html",
+      );
+    });
+
+    test("at the limits taken; past them, or malformed, null (the report goes with it)", () => {
+      const page = `./${"p".repeat(ANNOTATION_LIMITS.page - 2)}`;
+      const hash = `#${"h".repeat(ANNOTATION_LIMITS.hash - 1)}`;
+      expect(parsePlace({ page, hash, scroll }), "at the limits").toStrictEqual({
+        page,
+        hash,
+        scroll,
+      });
+      for (const bad of [
+        null,
+        "./report.html#pricing",
+        [],
+        {},
+        { page: "./a.html" },
+        { scroll: { x: 0 } },
+        { scroll: { x: 0, y: Number.NaN } },
+        { scroll, page: `${page}p` },
+        { scroll, hash: `${hash}h` },
+        { scroll, page: 1 },
+        { scroll, hash: null },
+        // Not the files' own page: an address, a sealed access, no "./".
+        { scroll, page: "https://c.example/__porthole/f/abcdefghijklmnopqrstuvwxyz/report.html" },
+        { scroll, page: "report.html" },
+        { scroll, page: "/report.html" },
+        // A query or a fragment in the page: where a viewer's data would be.
+        { scroll, page: "./report.html?viewer=ann" },
+        { scroll, page: "./report.html#pricing" },
+        // Not as an address serializes it: spaces, quotes, angle brackets, a backtick, non-ASCII,
+        // controls, bidi controls.
+        { scroll, page: "./my report.html" },
+        { scroll, page: "./<b>.html" },
+        { scroll, hash: "#" },
+        { scroll, hash: "pricing" },
+        { scroll, hash: "#pri cing" },
+        { scroll, hash: '#"x"' },
+        { scroll, hash: "#<b>" },
+        { scroll, hash: "#`x`" },
+        { scroll, hash: "#定价" },
+        { scroll, hash: "#a‮b" },
+        { scroll, hash: "#a\nb" },
+      ]) {
+        expect(parsePlace(bad), JSON.stringify(bad)).toBeNull();
+      }
+    });
+
+    test("a selected report carries it, rebuilt; a malformed one drops the report; an older shell's, without one, as before", () => {
+      const place = { page: "./report.html", hash: "#pricing", scroll };
+      expect(
+        parseReport({
+          type: "selected",
+          anchor: element,
+          rect,
+          scroll,
+          lastLineDocumentRect: rect,
+          place,
+        }),
+      ).toStrictEqual({
+        type: "selected",
+        anchor: element,
+        rect,
+        lastLineDocumentRect: rect,
+        scroll,
+        place,
+      });
+      // Where nothing of it is drawn: no last line nor scroll of the report's own, and the place.
+      expect(
+        parseReport({ type: "selected", anchor: text, rect, place: { scroll } }),
+      ).toStrictEqual({
+        type: "selected",
+        anchor: text,
+        rect,
+        place: { scroll },
+      });
+      expect(parseReport({ type: "selected", anchor: text, rect })).toStrictEqual({
+        type: "selected",
+        anchor: text,
+        rect,
+      });
+      for (const bad of [
+        null,
+        "./a.html#b",
+        { page: "./a.html" },
+        { scroll, hash: "#token=a b" },
+      ]) {
+        expect(
+          parseReport({ type: "selected", anchor: text, rect, place: bad }),
+          JSON.stringify(bad),
+        ).toBeNull();
+      }
+    });
+  });
+
+  describe("in the shell: the fragment told only where it names an element (PAGE_HASH)", () => {
+    /** A stand-in element: its tag, id and name. */
+    interface Named {
+      readonly tag: string;
+      readonly id?: string;
+      readonly name?: string;
+    }
+    /**
+     * `PAGE_HASH` over a stand-in document of `elements`, its reads as the runtime wires them:
+     * `getElementById`, `getElementsByName` (the HTML elements named so, in order), each one's
+     * local name, and `decodeURIComponent`.
+     */
+    const hashIn = (elements: readonly Named[], dom: Partial<Record<string, unknown>> = {}) => {
+      const factory = runInNewContext(PAGE_HASH) as (
+        reads: Record<string, unknown>,
+      ) => (hash: unknown) => string | null;
+      return factory({
+        byId: (id: string) => elements.find((each) => each.id === id) ?? null,
+        named: (name: string) => elements.filter((each) => each.name === name),
+        name: (each: Named) => each.tag,
+        decode: (written: string) => decodeURIComponent(written),
+        ...dom,
+      });
+    };
+    const page: Named[] = [
+      { tag: "section", id: "pricing" },
+      { tag: "h2", id: "café" },
+      { tag: "a", name: "faq" },
+      { tag: "input", name: "q" },
+      { tag: "div", id: "a%20b" },
+      { tag: "p", id: "x y" },
+    ];
+
+    test("an element's id, or an <a name>, as written or percent-decoded: told, as the address says it", () => {
+      const hashOf = hashIn(page);
+      expect(hashOf("#pricing")).toBe("#pricing");
+      expect(hashOf("#faq"), "an <a name>").toBe("#faq");
+      expect(hashOf("#caf%C3%A9"), "decoded").toBe("#caf%C3%A9");
+      expect(hashOf("#a%20b"), "as written first").toBe("#a%20b");
+      expect(hashOf("#x%20y"), "decoded, a space").toBe("#x%20y");
+    });
+
+    test("any other fragment is never told: a route, data, a token, a name that isn't an <a>'s, the top", () => {
+      const hashOf = hashIn(page);
+      for (const hash of [
+        "#/orders/8812",
+        "#!/inbox",
+        "#access_token=eyJhbGciOi.secret&token_type=bearer",
+        "#state=%7B%22tab%22%3A2%7D",
+        "#q",
+        "#Pricing",
+        "#top",
+        "#TOP",
+        "#",
+        "",
+        "pricing",
+        "#%",
+        "#%E0%A4%A",
+      ]) {
+        expect(hashOf(hash), hash).toBeNull();
+      }
+      // A fragment that won't decode is tried as written only.
+      expect(hashIn([{ tag: "div", id: "%E0%A4%A" }])("#%E0%A4%A")).toBe("#%E0%A4%A");
+      // Not the address's serialization (a space, a quote, angle brackets, a backtick, non-ASCII),
+      // or not a string: never, whatever the page has.
+      for (const hash of ["#x y", '#"q"', "#<a>", "#`a`", "#café"]) {
+        expect(hashIn([{ tag: "div", id: hash.slice(1) }])(hash), hash).toBeNull();
+      }
+      for (const hash of [1, null, undefined, {}, ["#pricing"]]) {
+        expect(hashIn(page)(hash), JSON.stringify(hash)).toBeNull();
+      }
+    });
+
+    test("bounded: 256 characters, # included, as the host's limit, never cut; 64 elements named so looked at", () => {
+      expect(ANNOTATION_LIMITS.hash).toBe(256);
+      const at = "i".repeat(255);
+      expect(hashIn([{ tag: "div", id: at }])(`#${at}`)).toBe(`#${at}`);
+      expect(hashIn([{ tag: "div", id: `${at}i` }])(`#${at}i`)).toBeNull();
+      const inputs = (n: number): Named[] =>
+        Array.from({ length: n }, () => ({ tag: "input", name: "faq" }));
+      expect(hashIn([...inputs(63), { tag: "a", name: "faq" }])("#faq"), "the 64th").toBe("#faq");
+      expect(hashIn([...inputs(64), { tag: "a", name: "faq" }])("#faq"), "the 65th").toBeNull();
+    });
+
+    test("a page whose DOM throws, or lies about its list, gets none, and nothing is thrown", () => {
+      const thrower = () => {
+        throw new Error("patched");
+      };
+      expect(hashIn(page, { byId: thrower })("#pricing")).toBeNull();
+      expect(hashIn(page, { named: thrower })("#faq")).toBeNull();
+      expect(hashIn(page, { decode: thrower })("#caf%C3%A9")).toBeNull();
+      expect(
+        hashIn(page, { named: () => ({ length: Number.POSITIVE_INFINITY }) })("#faq"),
+      ).toBeNull();
+    });
+  });
+
+  describe("in the shell: wired", () => {
+    const body = (from: string, to: string) => {
+      const start = ANNOTATE_RUNTIME.indexOf(from);
+      expect(start, from).toBeGreaterThan(-1);
+      return ANNOTATE_RUNTIME.slice(start, ANNOTATE_RUNTIME.indexOf(to, start));
+    };
+
+    test("its reads are the DOM's own, taken before content runs", () => {
+      const listening = ANNOTATE_RUNTIME.indexOf("window.addEventListener");
+      for (const taken of [
+        "const elementById = Document.prototype.getElementById;",
+        "const elementsByName = Document.prototype.getElementsByName;",
+        "const decodeFragment = decodeURIComponent;",
+        'const hashOf = getterOf(location, "hash");',
+      ]) {
+        const at = ANNOTATE_RUNTIME.indexOf(taken);
+        expect(at, taken).toBeGreaterThan(-1);
+        expect(at, taken).toBeLessThan(listening);
+      }
+      expect(ANNOTATE_RUNTIME).toContain(`const hashNamed = (${PAGE_HASH})({`);
+      const wired = body("const hashNamed = (", "      });");
+      expect(wired).toContain("byId: (id) => callOf(elementById, document, [id]),");
+      expect(wired).toContain("named: (name) => callOf(elementsByName, document, [name]),");
+      expect(wired).toContain("decode: (text) => decodeFragment(text),");
+      expect(body("const placeHere = (scroll) => {", "\n      };")).toContain(
+        "hashNamed(hashOf === null ? location.hash : callOf(hashOf, location, []))",
+      );
+    });
+
+    test("the page: its address as it loaded, read once before content runs, without query or fragment, its files' address as ./; none without files", () => {
+      const page = body("const pageHere = (() => {", "})();");
+      expect(page).toContain("if (filesBase === null) {\n          return null;");
+      expect(page).toContain(
+        'const page = ownAddresses(before(before(NativeString(location.href), "#"), "?"));',
+      );
+      expect(page).toContain("page.length <= 2048");
+      expect(ANNOTATION_LIMITS.page).toBe(2_048);
+      // Read once: the place reads pageHere, never the address again.
+      expect(body("const placeHere = (scroll) => {", "\n      };")).not.toContain("location.href");
+      // The shell's shapes are the host's: what it sends, parsePlace takes.
+      expect(page).toContain("/^\\.\\/[!$-;=@-_a-~]*$/.test(page)");
+      expect(PAGE_HASH).toContain("!/^#[!#-;=?-_a-~]+$/.test(hash)");
+      const pageShape = /^\.\/[!$-;=@-_a-~]*$/u;
+      const hashShape = /^#[!#-;=?-_a-~]+$/u;
+      for (let code = 0; code < 0x80; code += 1) {
+        const each = String.fromCharCode(code);
+        expect(parsePlace({ page: `./${each}`, scroll }) !== null, `page ${code}`).toBe(
+          pageShape.test(`./${each}`),
+        );
+        expect(parsePlace({ hash: `#${each}`, scroll }) !== null, `hash ${code}`).toBe(
+          hashShape.test(`#${each}`),
+        );
+      }
+    });
+
+    test("every selected says it, at the report's own scroll; a place request is answered with it and nothing else", () => {
+      const placed = body("const placeOf = (found, point) => {", "\n      };");
+      expect(placed).toContain("const place = placeHere(scroll);");
+      expect(placed).toContain("return { place };");
+      expect(placed.split("place }")).toHaveLength(4);
+      // Every selected goes through placeOf: the pick, the held block, the words.
+      expect(ANNOTATE_RUNTIME.split("tell(M.selected,")).toHaveLength(4);
+      expect(ANNOTATE_RUNTIME.split("placeOf(")).toHaveLength(4);
+      expect(ANNOTATE_RUNTIME).toContain('place: "porthole/annotate.place"');
+      const asked = body("case M.place:", "break;");
+      expect(asked).toContain('if (typeof data.id === "string" || typeof data.id === "number") {');
+      expect(asked).toContain("answer(data.id, placeHere(scrollOf()));");
+      expect(asked).not.toMatch(/tell\(|focus|scrollTo|scrollBy|removeAllRanges|location\./u);
+      // Built as literals, never by assignment through a prototype content could fill.
+      const built = body("const placeHere = (scroll) => {", "\n      };");
+      expect(built).not.toMatch(/\.(page|hash|scroll) =/u);
+      // The shell's own listener leaves the request to annotations', where they are declared, and
+      // names nothing of theirs.
+      expect(ANNOTATE_RUNTIME).toContain("ownRequests[M.place] = true;");
+      expect(SHELL_RUNTIME).toContain("const ownRequests = bare(null);");
+      expect(SHELL_RUNTIME).toContain("&& ownRequests[data.method] !== true) {");
+      expect(SHELL_RUNTIME.indexOf("const ownRequests = bare(null);")).toBeLessThan(
+        SHELL_RUNTIME.indexOf("__ANNOTATE__"),
+      );
+      expect(SHELL_RUNTIME).not.toContain("porthole/annotate");
+    });
+
+    test("with it in, the shell is still a plain script", () => {
+      expect(
+        () =>
+          new Script(
+            SHELL_RUNTIME.replace("__ANNOTATE__", ANNOTATE_RUNTIME).replace("__PLAN__", "{}"),
+          ),
+      ).not.toThrow();
+    });
+  });
+
+  describe("the runtime itself, run over a stand-in window", () => {
+    /** The shell's own definitions the annotation runtime uses, as the shell writes them. */
+    const shellPart = (start: string, end: string) => {
+      const at = SHELL_RUNTIME.indexOf(start);
+      expect(at, start).toBeGreaterThan(-1);
+      return SHELL_RUNTIME.slice(at, SHELL_RUNTIME.indexOf(end, at) + end.length);
+    };
+    const prelude = () =>
+      [
+        "const hostless = false;",
+        "const callOf = Reflect.apply;",
+        'const declared = (name) => name === "annotate";',
+        "const hostWindow = window.parent;",
+        "const hostOpener = null;",
+        shellPart("  const fromHostWindow =", ";\n"),
+        shellPart("  let filesBase =", ";\n"),
+        shellPart("  const filesBases =", ";\n"),
+        shellPart("  const SEALED =", ";\n"),
+        shellPart("  const ownAddresses =", "\n  };\n"),
+        shellPart("  const NativeString =", ";\n"),
+        shellPart("  const indexIn =", ";\n"),
+        shellPart("  const sliceOf =", ";\n"),
+        shellPart("  const before =", "\n  };\n"),
+        shellPart("  const getterOf =", "\n  };\n"),
+        shellPart("  const bare =", ";\n"),
+        shellPart("  const ownRequests =", ";\n"),
+      ].join("\n");
+    const BASE = "https://c.example/__porthole/f/ABCDEFGHIJKLMNOPQRSTUVWX/";
+    interface Named {
+      readonly tag: string;
+      readonly id?: string;
+      readonly name?: string;
+    }
+    /**
+     * `ANNOTATE_RUNTIME` run at `address` (a page of files under `BASE`, or none), over a document
+     * of `elements` scrolled to (3, 1240): what it posts to its parent, and the host's words to it.
+     * Every other built-in it takes is a stand-in that nothing here calls.
+     */
+    const runAt = (address: string, files: string | null, elements: readonly Named[]) => {
+      const posted: unknown[] = [];
+      let heard: ((event: unknown) => void)[] = [];
+      const stub = () => {
+        const made = function () {};
+        made.prototype = {};
+        return made as unknown as { prototype: Record<string, unknown> };
+      };
+      const url = new URL(address);
+      const location = {};
+      Object.defineProperty(location, "href", { get: () => url.href });
+      Object.defineProperty(location, "hash", { get: () => url.hash });
+      const parent = {
+        postMessage: (message: unknown) => posted.push(JSON.parse(JSON.stringify(message))),
+      };
+      const Document = stub();
+      Document.prototype.getElementById = (id: string) =>
+        elements.find((each) => each.id === id) ?? null;
+      Document.prototype.getElementsByName = (name: string) =>
+        elements.filter((each) => each.name === name);
+      const Element = stub();
+      Object.defineProperty(Element.prototype, "localName", {
+        get(this: Named) {
+          return this.tag;
+        },
+      });
+      Element.prototype.getBoundingClientRect = () => ({
+        left: -3,
+        top: -1_240,
+        width: 800,
+        height: 5_000,
+      });
+      const window = {
+        parent,
+        addEventListener: (type: string, listener: (event: unknown) => void) => {
+          if (type === "message") {
+            heard.push(listener);
+          }
+        },
+        requestAnimationFrame: (run: () => void) => setTimeout(run, 0),
+        getComputedStyle: () => ({}),
+        setTimeout,
+        clearTimeout,
+      };
+      const globals: Record<string, unknown> = {
+        window,
+        parent,
+        location,
+        document: { documentElement: {}, addEventListener: () => {} },
+        Document,
+        Element,
+        MutationObserver: class {
+          observe() {}
+        },
+        getComputedStyle: window.getComputedStyle,
+        setTimeout,
+        clearTimeout,
+        plan: {
+          origins: ["https://host.example"],
+          ...(files === null ? {} : { files: { base: files } }),
+        },
+      };
+      // Each DOM interface it takes a built-in of, as a stand-in, as the runtime first names it.
+      for (let tries = 0; ; tries += 1) {
+        heard = [];
+        try {
+          runInNewContext(`${prelude()}\n${ANNOTATE_RUNTIME}`, { ...globals });
+          break;
+        } catch (error) {
+          const missing = /^(\w+) is not defined$/u.exec((error as Error).message);
+          if (missing === null || tries > 80) {
+            throw error;
+          }
+          globals[missing[1] as string] = stub();
+        }
+      }
+      const say = (data: unknown, origin = "https://host.example", source: unknown = parent) => {
+        for (const listener of heard) {
+          listener({ source, origin, data });
+        }
+      };
+      const ask = (id: unknown) =>
+        say({ jsonrpc: "2.0", id, method: "porthole/annotate.place", params: {} });
+      return { posted, say, ask, url };
+    };
+    const page: Named[] = [
+      { tag: "section", id: "pricing" },
+      { tag: "a", name: "faq" },
+      { tag: "h2", id: "café" },
+    ];
+    const scrolled = { x: 3, y: 1_240 };
+
+    test("answers a place request with its page (sealed access as ./, no query), the fragment that names an element, and the scroll", () => {
+      const t = runAt(`${BASE}report.html?viewer=ann#pricing`, BASE, page);
+      t.ask("p1");
+      t.ask(7);
+      expect(t.posted).toEqual([
+        {
+          jsonrpc: "2.0",
+          id: "p1",
+          result: { page: "./report.html", hash: "#pricing", scroll: scrolled },
+        },
+        {
+          jsonrpc: "2.0",
+          id: 7,
+          result: { page: "./report.html", hash: "#pricing", scroll: scrolled },
+        },
+      ]);
+      for (const [address, place] of [
+        [`${BASE}#faq`, { page: "./", hash: "#faq", scroll: scrolled }],
+        [
+          `${BASE}docs/a.html#caf%C3%A9`,
+          { page: "./docs/a.html", hash: "#caf%C3%A9", scroll: scrolled },
+        ],
+        [`${BASE}report.html#access_token=secret`, { page: "./report.html", scroll: scrolled }],
+        [`${BASE}report.html#/orders/8812`, { page: "./report.html", scroll: scrolled }],
+        [`${BASE}report.html`, { page: "./report.html", scroll: scrolled }],
+      ] as const) {
+        const each = runAt(address, BASE, page);
+        each.ask("p");
+        expect(each.posted, address).toEqual([{ jsonrpc: "2.0", id: "p", result: place }]);
+        // What the host takes of it, as it was sent.
+        expect(parsePlace((each.posted[0] as { result: unknown }).result), address).toEqual(place);
+      }
+    });
+
+    test("content without files has no page; the page is the address it loaded at, the fragment the one it has now", () => {
+      const inline = runAt("https://c.example/inline#pricing", null, page);
+      inline.ask("p");
+      expect(inline.posted).toEqual([
+        { jsonrpc: "2.0", id: "p", result: { hash: "#pricing", scroll: scrolled } },
+      ]);
+      const t = runAt(`${BASE}report.html`, BASE, page);
+      // The page's scripts move it (history.pushState, a route) and to a section.
+      t.url.href = `${BASE}orders/8812?viewer=ann#faq`;
+      t.ask("p");
+      expect(t.posted).toEqual([
+        {
+          jsonrpc: "2.0",
+          id: "p",
+          result: { page: "./report.html", hash: "#faq", scroll: scrolled },
+        },
+      ]);
+    });
+
+    test("only the host's request, from its window and origins, with an id, is answered; nothing else is told", () => {
+      const t = runAt(`${BASE}report.html#pricing`, BASE, page);
+      t.say({ jsonrpc: "2.0", method: "porthole/annotate.place", params: {} });
+      t.say({ jsonrpc: "2.0", id: { a: 1 }, method: "porthole/annotate.place" });
+      t.say(
+        { jsonrpc: "2.0", id: "x", method: "porthole/annotate.place" },
+        "https://other.example",
+      );
+      t.say(
+        { jsonrpc: "2.0", id: "x", method: "porthole/annotate.place" },
+        "https://host.example",
+        {},
+      );
+      expect(t.posted).toEqual([]);
+    });
+  });
+
+  describe("on createHost over a stand-in platform", () => {
+    const mounted: DisplayHandle[] = [];
+    afterEach(() => {
+      vi.useRealTimers();
+      for (const display of mounted.splice(0)) {
+        display.destroy();
+      }
+    });
+    /** A display whose frames' messages from the host are kept, each frame's handshake by hand. */
+    const mount = (annotate = true) => {
+      const sent: Record<string, unknown>[] = [];
+      let listeners = new Set<(message: unknown) => void>();
+      const platform: PlatformHost = {
+        name: "stand-in",
+        createSurface: () => {
+          listeners = new Set();
+          const own = listeners;
+          return {
+            transport: {
+              send: (message) => void sent.push(message as Record<string, unknown>),
+              listen: (listener) => {
+                own.add(listener);
+                return () => own.delete(listener);
+              },
+              close: () => own.clear(),
+            },
+            element: null,
+            setHeight: () => {},
+            setColorScheme: () => {},
+            userActivation: () => undefined,
+            viewport: () => ({ width: 600, height: 400 }),
+            onNavigated: () => () => {},
+            onLoad: () => () => {},
+            destroy: () => {},
+          };
+        },
+      };
+      const container = {
+        ownerDocument: {
+          defaultView: {
+            location: { origin: "https://app.example" },
+            navigator: { language: "en" },
+          },
+        },
+        getBoundingClientRect: () => ({ width: 600 }),
+      } as unknown as HTMLElement;
+      const config = annotate
+        ? presets.artifact({ capabilities: { annotate: {} } })
+        : presets.artifact();
+      const display = createHost(config, { platform }).mount(container, {
+        displayId: "d1",
+        title: "Notes",
+        scheme: "light",
+      });
+      mounted.push(display);
+      const say = (message: Record<string, unknown>) => {
+        for (const listener of listeners) {
+          listener({ jsonrpc: "2.0", ...message });
+        }
+      };
+      const handshake = () => say({ method: "ui/notifications/initialized", params: {} });
+      const asked = () => sent.filter((each) => each.method === "porthole/annotate.place");
+      const reports: AnnotationReport[] = [];
+      display.on("annotation", (report) => reports.push(report));
+      return { display, sent, say, handshake, asked, reports };
+    };
+
+    test("asks the frame running now, once its handshake is done, and takes its answer, rebuilt", async () => {
+      const t = mount();
+      expect(await t.display.annotations.place(), "no frame ready").toBe("unsupported");
+      expect(t.asked()).toEqual([]);
+      t.handshake();
+      const now = t.display.annotations.place();
+      expect(t.asked()).toEqual([
+        { jsonrpc: "2.0", id: expect.any(String), method: "porthole/annotate.place", params: {} },
+      ]);
+      const id = t.asked()[0]?.id;
+      // An answer to another id is no answer.
+      t.say({ id: "porthole-place-999", result: { scroll } });
+      t.say({ id, result: { page: "./report.html", hash: "#pricing", scroll, extra: "<b>" } });
+      expect(await now).toStrictEqual({ page: "./report.html", hash: "#pricing", scroll });
+      // A second answer for it changes nothing; each ask has an id of its own.
+      t.say({ id, result: { scroll: { x: 0, y: 0 } } });
+      const again = t.display.annotations.place();
+      expect(t.asked()[1]?.id).not.toBe(id);
+      t.say({ id: t.asked()[1]?.id, result: { scroll } });
+      expect(await again).toStrictEqual({ scroll });
+    });
+
+    test("an older shell's 'isn't offered here', a malformed answer, or none in time: unsupported", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      const t = mount();
+      t.handshake();
+      const older = t.display.annotations.place();
+      t.say({
+        id: t.asked().at(-1)?.id,
+        error: { code: -32601, message: "porthole/annotate.place isn't offered here" },
+      });
+      expect(await older).toBe("unsupported");
+      const leaky = t.display.annotations.place();
+      t.say({ id: t.asked().at(-1)?.id, result: { hash: "#token=a b", scroll } });
+      expect(await leaky).toBe("unsupported");
+      const silent = t.display.annotations.place();
+      await vi.advanceTimersByTimeAsync(ANNOTATION_LIMITS.placeTimeoutMs - 1);
+      let settled = false;
+      void silent.then(() => (settled = true));
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await silent).toBe("unsupported");
+    });
+
+    test("a new run or the display's end while it waits: unsupported, and the late answer is no answer", async () => {
+      const t = mount();
+      t.handshake();
+      const before = t.display.annotations.place();
+      const id = t.asked().at(-1)?.id;
+      t.display.reload();
+      expect(await before).toBe("unsupported");
+      t.handshake();
+      t.say({ id, result: { scroll } });
+      const ended = t.display.annotations.place();
+      t.display.destroy();
+      expect(await ended).toBe("unsupported");
+    });
+
+    test("not kept for a later frame; not a report, so through no gate and no refusal", async () => {
+      const t = mount();
+      t.handshake();
+      void t.display.annotations.place();
+      const before = t.sent.length;
+      t.display.reload();
+      t.handshake();
+      expect(
+        t.sent.slice(before).filter((each) => each.method === "porthole/annotate.place"),
+      ).toEqual([]);
+      expect(t.reports).toEqual([]);
+    });
+
+    test("without annotate declared: a TypeError, and nothing goes to the frame", async () => {
+      const t = mount(false);
+      t.handshake();
+      await expect(t.display.annotations.place()).rejects.toThrow(
+        /place: the config doesn't declare annotate/u,
+      );
+      expect(t.asked()).toEqual([]);
+    });
+
+    test("a selected report's place reaches the host as the shell said it; a malformed one drops the report", async () => {
+      const t = mount();
+      t.handshake();
+      t.display.annotations.start({ elements: false, text: true });
+      const place = { page: "./pricing.html", hash: "#plans", scroll };
+      t.say({ method: "porthole/annotate.selected", params: { anchor: text, rect, place } });
+      t.say({
+        method: "porthole/annotate.selected",
+        params: { anchor: text, rect, place: { hash: "#plans" } },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(t.reports).toEqual([{ type: "selected", anchor: text, rect, place }]);
     });
   });
 });

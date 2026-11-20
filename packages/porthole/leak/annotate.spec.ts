@@ -3824,6 +3824,71 @@ test("an anchor says where it is in the page: the headings above it, never a hid
   expect(chart.anchor).not.toHaveProperty("context");
 });
 
+test("where the reader is in the page: a fragment only where it names an element, never a route, data or a token; the scroll; on a pick too (P155)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    widthPx: 480,
+    heightPx: 300,
+    content: `<!doctype html><html><head><title>Report</title></head><body style="margin: 0">
+<div style="height: 900px">Intro</div>
+<section id="pricing" style="height: 900px"><h2>Pricing</h2><p id="plans">Three plans.</p></section>
+<h2 id="café">Café</h2>
+<p><a name="faq">FAQ</a></p>
+<p id="last" style="height: 900px">The end.</p>
+</body></html>`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#plans")).toBeAttached();
+  const placeNow = async () => {
+    const answer = await display.place();
+    expect(typeof answer, `an answer, not an error: ${JSON.stringify(answer)}`).toBe("object");
+    return answer as Exclude<typeof answer, string>;
+  };
+  const go = (hash: string) => frame.evaluate((to) => void (location.hash = to), hash);
+
+  const first = await placeNow();
+  expect(first, "a document of its own has no page of files, nor a fragment").toEqual({
+    scroll: { x: 0, y: 0 },
+  });
+
+  // A page's own data in its address (a token, a single-page app's route and state): never told.
+  for (const hash of [
+    "#access_token=secret-123&token_type=bearer",
+    "#/orders/8812",
+    "#state=%7B%22viewer%22%3A%22secret-123%22%7D",
+    "#top",
+  ]) {
+    await go(hash);
+    expect(await frame.evaluate(() => location.hash), "the page's address has it").toBe(hash);
+    const place = await placeNow();
+    expect(place, `probe: ${hash} is not told`).not.toHaveProperty("hash");
+  }
+
+  // A fragment that names an element: told, as the address says it; the scroll where it went.
+  await go("#pricing");
+  const pricing = await placeNow();
+  expect(pricing.hash, "probe: an id is told").toBe("#pricing");
+  expect(pricing.scroll.y, "the page scrolled to it").toBeGreaterThan(800);
+  await go("#café");
+  expect((await placeNow()).hash, "probe: an id percent-decoded, told as the address says it").toBe(
+    "#caf%C3%A9",
+  );
+  await go("#faq");
+  expect((await placeNow()).hash, "probe: an <a name>").toBe("#faq");
+
+  // A pick says it too, at the report's own scroll.
+  await display.annotate("start", { elements: true, text: false });
+  await frame.locator("#last").click();
+  const picked = await next(display, "selected");
+  expect(picked.place?.hash, "probe: a pick's place").toBe("#faq");
+  expect(picked.place?.scroll, "the same reading as the report's scroll").toEqual(picked.scroll);
+
+  // Nothing the host heard names the page's data.
+  expect(JSON.stringify(await display.events())).not.toContain("secret-123");
+});
+
 test("an honest scroll session, long, in comment mode, leaves room for a marker's click: follow-ups, the selection's too, at most one a second", async ({
   page,
 }) => {

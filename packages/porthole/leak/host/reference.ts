@@ -6,6 +6,7 @@ import {
   type FindOptions,
   type FindResult,
   type LinkLabel,
+  type PagePlace,
 } from "../../src/index.ts";
 import type { CapabilityHandlers, ConfirmRequest } from "../../src/bridge/types.ts";
 import type { LaunchSpec, RecordedCall, RecordedEvent } from "../../src/conformance/index.ts";
@@ -190,6 +191,18 @@ const reference = {
           break;
       }
       return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  },
+  /** Asks a display where the reader is in its page (`annotations.place`, P155), or what it threw. */
+  async place(id: number): Promise<PagePlace | string> {
+    const controls = displays.get(id)?.handle.annotations;
+    if (controls === undefined) {
+      return "no display";
+    }
+    try {
+      return await controls.place();
     } catch (error) {
       return error instanceof Error ? error.message : String(error);
     }

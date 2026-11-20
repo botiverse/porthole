@@ -18,7 +18,12 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
-import type { AnnotateMode, AnnotationMark, AnnotationReport } from "../annotate/types.ts";
+import type {
+  AnnotateMode,
+  AnnotationMark,
+  AnnotationReport,
+  PagePlace,
+} from "../annotate/types.ts";
 import type { FindOptions, FindResult } from "../find/types.ts";
 import { blankQuery, checkFindQuery } from "../find/validate.ts";
 import type { LinkLabel } from "../links/types.ts";
@@ -508,6 +513,14 @@ export interface PortholeFrameHandle {
    */
   focusMark(id: string): void;
   /**
+   * Where the reader is in the page now (`annotations.place()`, P155): its page of the content's
+   * own files, the fragment that names an element in it, and the scroll; for a comment on the
+   * whole page, and to open the page there again. `"unsupported"` where no display runs, or the
+   * core's call answers so (no frame ready, an older shell, no answer in time). A config without
+   * `annotate`: `onHostError`, kind `"annotations"`, and `"unsupported"` (never a rejection).
+   */
+  place(): Promise<PagePlace | "unsupported">;
+  /**
    * Finds `query` in the frame and highlights it (`find.query`, P131): where the matches stand,
    * or `"unsupported"` (a config without `find`, an older shell, no answer in time, a later
    * query superseded it, or no display running now). The query is kept for the content the frame
@@ -854,6 +867,15 @@ export function PortholeFrame(props: PortholeFrameProps): ReactElement {
         if (now !== null) {
           attempt(() => now.annotations.focusMark(id), own.current);
         }
+      },
+      place() {
+        const now = display.current;
+        return now === null
+          ? Promise.resolve("unsupported")
+          : now.annotations.place().catch((error: unknown) => {
+              hostFailed(own.current, error, "annotations");
+              return "unsupported" as const;
+            });
       },
       find(query, options) {
         try {

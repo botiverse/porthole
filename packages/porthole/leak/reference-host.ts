@@ -1,6 +1,7 @@
 import { expect, type Frame, type Page } from "@playwright/test";
 import { embedderCsp } from "../src/index.ts";
 import type { ConfirmRequest } from "../src/bridge/types.ts";
+import type { PagePlace } from "../src/annotate/types.ts";
 import type { FindOptions, FindResult } from "../src/find/types.ts";
 import type { LinkLabel } from "../src/links/types.ts";
 import type {
@@ -24,6 +25,7 @@ interface Reference {
   setContent(id: number, html: string, partial: boolean): void;
   focus(id: number): void;
   annotate(id: number, operation: AnnotateOperation, argument?: unknown): string | null;
+  place(id: number): Promise<PagePlace | string>;
   find(
     id: number,
     operation: FindOperation,
@@ -55,6 +57,8 @@ export interface ReferenceDisplay extends LaunchedDisplay {
   focus(): Promise<void>;
   /** Runs an annotation control; resolves with what it threw, or null. */
   annotate(operation: AnnotateOperation, argument?: unknown): Promise<string | null>;
+  /** Where the reader is in the page (`annotations.place`, P155): its answer, or what it threw. */
+  place(): Promise<PagePlace | string>;
   /**
    * Sends a `show` and a `focusMark` in one task of the host's page, with the host's move of
    * focus first if asked: the frame takes the second while it finds the first's marks, so it is
@@ -235,6 +239,8 @@ export function referenceHostWith(setup: {
               (window as unknown as WithReference).reference.annotate(each, what, given),
             [id, operation, argument] as const,
           ),
+        place: () =>
+          page.evaluate((each) => (window as unknown as WithReference).reference.place(each), id),
         find: (operation, argument, options) =>
           page.evaluate(
             ([each, what, given, how]) =>

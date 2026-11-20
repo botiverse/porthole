@@ -4,6 +4,25 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **Where the reader is in the page** (P155, amends P053). A new `PagePlace`, `{ page?, hash?,
+  scroll }`: which of the content's own pages it is (`"./report.html"`: its address as it loaded,
+  read before content ran, without query or fragment, never the sealed access), the address's
+  fragment (`"#pricing"`) **only where it names an element** (an id, or an `<a name>`, as written
+  or percent-decoded; a route, a token or other data in the fragment is never told), and the
+  document's scroll (P132's). Every `selected` carries it as `place`; for a comment on the whole
+  page, `display.annotations.place()` asks the frame (`porthole/annotate.place`, a request) and
+  resolves with it, or `"unsupported"` (no frame ready, an older shell, no answer in 3 s), and
+  rejects with a `TypeError` without `annotate`; React's handle has `place()`. The host checks it
+  (`parsePlace`, exported; `ANNOTATION_LIMITS.page` 2,048 and `hash` 256, printable ASCII): a
+  malformed `place` drops its `selected`. No wall, gate or rate moves.
+  **For a host:** nothing to change unless you want it: store `selected.place` with the comment,
+  call `annotations.place()` as a whole-page comment opens, and show `page` and `hash` as the
+  page's word. Upgrade the content server with the host (an older shell sends none and answers
+  `"unsupported"`). The shell runtime every served document carries changed (a spliced runtime's
+  own requests are left to it), and so did annotations' (their pinned hashes, P145).
+
 ## 0.17.2
 
 - **A frame's host is its parent, or that parent's opener** (P154). A host that draws a display

@@ -708,6 +708,16 @@ content's realm.
   px; a host that scales or transforms the frame maps them through that transform. Reading the
   frame's size per report, before the rate, forces a layout of the host's page per message, as a
   repeated `ui/initialize` already does (accepted, P105).
+- *Where the reader is* (P155). A `place` (on `selected`, or the answer to the host's `place`)
+  says which of the content's pages it is, the address's fragment and the scroll. The address's
+  query is never read, and its fragment is told only where it names an element of the page (an id,
+  an `<a name>`), so an honest page's routes, state and tokens there stay out of what the host
+  stores; a page can still name an element after data it put in its own address, as it can say
+  anything in a label. The page path is the document's address as it loaded, read before content
+  runs, its files' address as `./` (never the sealed access, P083), as P080 and P084 already name a
+  page. All of it is the page's word, checked for shape and size: show it as text, and open a page
+  at a stored place only in that content's own frame or tab. The page learns that the host asked,
+  and when.
 - *Places in the document* (P132, P133, P137, P150). `documentRect`, `lastLineDocumentRect` and an
   element pick's `pointDocument`, with the report's `scroll`, are checked (finite, within
   `ANNOTATION_LIMITS.coordinate`, sizes not negative; a malformed one, a last line or a point without

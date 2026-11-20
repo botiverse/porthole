@@ -7,6 +7,7 @@ import {
   presets,
   type FindOptions,
   type FindResult,
+  type PagePlace,
 } from "../src/index.ts";
 import { tabLinkOf } from "../src/react/view.tsx";
 import {
@@ -101,10 +102,13 @@ describe("trackedAnnotation and the handle (P118)", () => {
     expectTypeOf<PortholeViewProps["trackedSelection"]>().toEqualTypeOf<boolean | undefined>();
     // The display's calls, never the display: one method, nothing more.
     expectTypeOf<keyof PortholeFrameHandle>().toEqualTypeOf<
-      "clearSelection" | "focusMark" | "find" | "clearFind"
+      "clearSelection" | "focusMark" | "place" | "find" | "clearFind"
     >();
     expectTypeOf<PortholeFrameHandle["clearSelection"]>().toEqualTypeOf<() => void>();
     expectTypeOf<PortholeFrameHandle["focusMark"]>().toEqualTypeOf<(id: string) => void>();
+    expectTypeOf<PortholeFrameHandle["place"]>().toEqualTypeOf<
+      () => Promise<PagePlace | "unsupported">
+    >();
     expectTypeOf<PortholeFrameHandle["find"]>().toEqualTypeOf<
       (query: string, options?: FindOptions) => Promise<FindResult | "unsupported">
     >();

@@ -1845,6 +1845,10 @@ export const SHELL_RUNTIME = String.raw`(() => {
     }
   };
 
+  // Requests a spliced runtime answers itself (P155), by method: the shell's own listener leaves
+  // them to it. No prototype, so no name content puts on Object.prototype is one.
+  const ownRequests = bare(null);
+
   __ANNOTATE__
 
   __FIND__
@@ -2277,8 +2281,9 @@ export const SHELL_RUNTIME = String.raw`(() => {
         }
         break;
       default:
-        // Find's own request is answered by the find runtime (P131), where the config declares it.
-        if (data.id !== undefined && !(data.method === "porthole/find.query" && declared("find"))) {
+        // Find's own request is answered by the find runtime (P131), where the config declares it,
+        // and a spliced runtime's own by that runtime (ownRequests, P155).
+        if (data.id !== undefined && !(data.method === "porthole/find.query" && declared("find")) && ownRequests[data.method] !== true) {
           send({ id: data.id, error: { code: -32601, message: String(data.method) + " isn't offered here" } });
         }
         break;
