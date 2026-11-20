@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import type { ConfirmRequest, Proceed } from "../../src/bridge/types.ts";
 import {
+  compile,
   defineDisplays,
   portholeClient,
   presets,
@@ -122,6 +123,13 @@ const locator = {
  * runs in this page's realm.
  */
 let windowRoot: HTMLElement | null = null;
+
+/**
+ * A bare shell (P154's probes, `leak/host-opener.spec.ts`): a frame's shell document, with find,
+ * framed by this page with no host listening, so nothing answers it but what a test posts. What
+ * it says to this page is kept (`bareSaid`).
+ */
+const bareSaid: unknown[] = [];
 
 /** A frame's element, in the host's own window where it asks for one. */
 const placed = (state: AppState, element: ReactElement, index: number) =>
@@ -408,6 +416,27 @@ const app = {
     windowRoot = doc.createElement("div");
     windowRoot.style.width = "600px";
     doc.body.append(windowRoot);
+  },
+  /** Frames a bare shell (with find, its page a paragraph) as this page's first frame. */
+  bareShell(): void {
+    const frame = document.createElement("iframe");
+    frame.setAttribute("sandbox", "allow-scripts");
+    frame.id = "bare-shell";
+    frame.srcdoc = compile(presets.artifact({ capabilities: { find: {} } })).shellDocument({
+      origins: [location.origin],
+      title: "A bare shell",
+      document: "<p>The needle is here.</p>",
+    });
+    window.addEventListener("message", (event) => {
+      if (event.source === frame.contentWindow) {
+        bareSaid.push(event.data);
+      }
+    });
+    document.body.prepend(frame);
+  },
+  /** What the bare shell said to this page, in order. */
+  bareSaid(): unknown[] {
+    return bareSaid;
   },
   /** The host's own styles, set now. */
   restyle(value: string) {

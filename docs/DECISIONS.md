@@ -9969,7 +9969,13 @@ frame's window and origin alone, on the frame's own document's window.
 
 **What it doesn't widen.**
 - The plan's origins are unchanged: an opener at any other origin is never heard. In served mode
-  they are the server's `hostOrigins`; opaque, the host page's own.
+  they are the server's `hostOrigins`; opaque, the host page's own. Tested:
+  `leak/host-opener.spec.ts` `[opener.unheard]`, a page outside them that opened the host's page
+  reaches the frame and says a `ui/initialize` answer (the id the shell asked with) and a find
+  query: neither is taken; `[opener.loads]` is its positive control (the same words from the
+  frame's parent are), and the `opener-origins` control (the shell's and find's listeners without
+  their origins check) fails it. Every origin in the plan can thus drive a display in a host window
+  it opened, and must be trusted as the host itself (THREAT_MODEL).
 - Read once, before content runs: content can replace its own `window.parent` (it is
   `[Replaceable]`), never what was read. The parent's `opener` is read on a cross-origin window,
   where content can define or replace nothing.

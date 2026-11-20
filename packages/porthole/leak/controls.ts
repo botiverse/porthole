@@ -89,6 +89,7 @@ const SIBLINGS_STATUS = "leak/served/siblings-status.spec.ts";
 const ANNOTATE = "leak/annotate.spec.ts";
 const LATE_WORD = "leak/late-word.spec.ts";
 const EMBED = "leak/served/embed.spec.ts";
+const HOST_OPENER = "leak/host-opener.spec.ts";
 
 /** What the CSP sandbox alone holds on a tab (P099), every engine. */
 const TAB_SANDBOX = [
@@ -707,6 +708,11 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
   "embed-origins": {
     specs: [EMBED],
     fails: all("[embed.unheard]"),
+  },
+  // The host page's opener heard from any origin, not the plan's alone (P154).
+  "opener-origins": {
+    specs: [HOST_OPENER],
+    fails: all("[opener.unheard]"),
   },
   "comment-draft": {
     specs: [RUNTIME],

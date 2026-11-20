@@ -1491,6 +1491,7 @@ and every control the tables above name to the registry.
 | `embed-ancestors` | `served/embed.spec.ts` | `[embed.reader-unframeable]` | — | — |
 | `embed-handshake` | `served/embed.spec.ts` | `[embed.untold]` | — | — |
 | `embed-origins` | `served/embed.spec.ts` | `[embed.unheard]` | — | — |
+| `opener-origins` | `host-opener.spec.ts` | `[opener.unheard]` | — | — |
 | `comment-draft` | `served/runtime.spec.ts` | `a comment's draft is the host's to check: past the limit, holding what a person can't see, or not text, it opens no composer (P108)` | — | — |
 | `blob-script` | `served/runtime.spec.ts` | nothing | — | an untrusted script asset is served as a download (`blob-script,blob-trusted`) |
 | `blob-trusted` | `served/runtime.spec.ts` | `a script asset runs as code only if an admin uploaded it where uploads are the admins'` | — | — |

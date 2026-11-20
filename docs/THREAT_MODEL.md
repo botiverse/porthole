@@ -256,7 +256,8 @@ Whatever the use (how to wire each: [ADOPTING.md](ADOPTING.md)):
 - The shell takes messages only from its parent window, or that window's opener where the host
   draws into a window it opened (P154: a message's source is the window whose code sent it), and
   only from the plan's origins; the host only from its frame's window and origin; both validate
-  every message.
+  every message. So every origin in the plan can drive a display in a host window it opened: each
+  must be trusted as the host itself (`[opener.unheard]` holds that one outside is not heard).
 - A frame that navigates is started again, at most three times; the next navigation stops the
   display. A file set's display may first hold such a frame up to 2 s, in case it was a page of its
   own set, delivering nothing either way meanwhile (P098).
