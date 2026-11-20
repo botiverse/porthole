@@ -610,7 +610,7 @@ describe("without framedBy, the pages' scripts are 0.14.16's, byte for byte (P14
  * test, and is said in the CHANGELOG, not assumed away (0.15.2: annotations', P147; 0.15.3: the
  * shell's, P148; 0.16.0: the shell's again, P149; 0.16.1: annotations', P150; 0.17.0:
  * annotations' again, P152; 0.17.1: annotations' again, P153; 0.17.2: the shell's, annotations'
- * and find's, where a frame's host's opener is heard too, P154; since: the shell's and
+ * and find's, where a frame's host's opener is heard too, P154; 0.18.0: the shell's and
  * annotations', where the page's place is told, P155). From
  * `git show v0.15.0:…/src/shell/*.ts` and `git show v0.14.16:…` (`SHELL_RUNTIME`,
  * `ANNOTATE_RUNTIME`, `FIND_RUNTIME`, `USE_RUNTIME`, `LEGACY_GLOBALS_RUNTIME`).
@@ -624,7 +624,7 @@ const RUNTIME_V0_16_0 = {
   // 'sha256-RWgbBR8osnoAwlATYK0bglHOOpBB8KVrDa1OM6+gWRQ=': since, a message from the frame's
   // parent's opener is the host's too (P154): 0.17.2's was
   // 'sha256-caJHuetRkbA94i7oqCBmRQHt+twKw7mImfbFmZ/X7V8='. Since, a request a spliced runtime
-  // answers itself is left to it (ownRequests, P155), for the next release's CHANGELOG to say.
+  // answers itself is left to it (ownRequests, P155), as 0.18.0's CHANGELOG says.
   shell: "'sha256-5n++o5niQlBT2Ct3VftRQpwkcic7ckT4fCKM3yNVHSM='",
   // 0.15.0's was 'sha256-3PZMe4arifdWHJU1jS0laR49wiWc/uBWIFddGJPyf/w=': 0.15.2's marks ride the
   // document's scroll (P147). 0.16.0's was 'sha256-uQ77dZDXcY6pKRoTylHpGXY+ZhhCt4WZhB/qDTQJ6BE=':
