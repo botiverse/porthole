@@ -10144,7 +10144,11 @@ here is a defense of the isolation; the fragment rule is held by the probes abov
 
 **Known limits.** A page that scrolls a box of its own rather than its document has `scroll` 0 (as
 P132's). A page that names no section by id has no `hash` to tell; the anchor's `context` (P152)
-still says where a pick was.
+still says where a pick was. On WebKit, a display without files (an inline or srcdoc page) never
+tells a `hash`: following a link within the page fires the host's `<iframe>` a `load` about 0.1 s
+later (P142), which such a display takes as the content navigating away (P031), so it starts again
+at the top, with no fragment. A set's pages (files) keep their display there (P142's `same` notice),
+so they tell it.
 
 **Revisit when** a host wants the place without `annotate` (a link to a section, a viewer's own
 bookmark), a page's own scrolling box, or the place told as it changes.

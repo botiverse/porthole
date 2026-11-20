@@ -858,12 +858,18 @@ setTimeout(() => Promise.reject(new Error("at " + location.href)), 50);
       scroll: { x: 0, y: 0 },
     });
     await clickIn(frame, "#next", "the link to the report was there to follow");
+    // Asked before anything else of the report: the host takes the page a link opened as the
+    // display's only by its notice (P084, P098), so where the guard's control takes that out, the
+    // display starts again at its entry, and this is where that is seen (not a frame gone).
+    await expect
+      .poll(() => shown.place(), {
+        message: "probe: the report, by its path alone",
+        timeout: 10_000,
+      })
+      .toEqual({ page: "./docs/report.html", scroll: { x: 0, y: 0 } });
     const report = await shown.frame();
     await expect(report.locator("#pricing")).toBeAttached();
     expect(report.url(), "the report's address has the viewer's data").toContain("secret-1");
-    await expect
-      .poll(() => shown.place(), { message: "probe: the report, by its path alone" })
-      .toEqual({ page: "./docs/report.html", scroll: { x: 0, y: 0 } });
     await report.evaluate(() => void (location.hash = "#pricing"));
     const pricing = await placeNow();
     expect(pricing.page).toBe("./docs/report.html");
