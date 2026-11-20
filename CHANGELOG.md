@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.17.2
 
 - **A frame's host is its parent, or that parent's opener** (P154). A host that draws a display
   into a window it opened, from its own page's code (a React portal into an `about:blank` popup, a
