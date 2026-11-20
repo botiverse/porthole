@@ -12,6 +12,7 @@ import {
   followsSelection,
   hasMarker,
   inViewport,
+  pageOfAddress,
   parsePlace,
   parseReport,
   type StartedMode,
@@ -111,6 +112,12 @@ const NO_LABELS = "[]";
 
 /** The most `tracked` reports a second the host takes (P112): one per animation frame at 60 Hz. */
 export const TRACKED_PER_SECOND = 60;
+
+/**
+ * The most `page` events a second (P156): a person follows a link or two a second at most; a page
+ * that says it moved faster has the latest page told when the second frees.
+ */
+export const PAGES_PER_SECOND = 4;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -316,6 +323,47 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       let documentsReady = 0;
       let handshaken = false;
       let storageTold = false;
+      // Which page of its set the run's frame is on (P156): null, the page the host framed; the
+      // page last told the host. A move before the handshake is told right after it. At most
+      // PAGES_PER_SECOND told in any second (a page's notices are its word, and reach the host
+      // before any of the bridge's gates): past them, one later tell, of the page the frame is on
+      // then, once the second frees.
+      let pageNow: string | null = null;
+      let pageTold: string | null = null;
+      const pageTimes: number[] = [];
+      let pageLater: ReturnType<typeof setTimeout> | null = null;
+      const tellPage = () => {
+        if (!handshaken || pageNow === null || pageNow === pageTold || pageLater !== null) {
+          return;
+        }
+        const at = Date.now();
+        while (pageTimes.length > 0 && at - (pageTimes[0] as number) >= 1_000) {
+          pageTimes.shift();
+        }
+        if (pageTimes.length >= PAGES_PER_SECOND) {
+          pageLater = setTimeout(
+            () => {
+              pageLater = null;
+              tellPage();
+            },
+            1_000 - (at - (pageTimes[0] as number)),
+          );
+          return;
+        }
+        pageTimes.push(at);
+        pageTold = pageNow;
+        emit("page", { page: pageNow });
+      };
+      // A new run (or the display's end) forgets the page and its later tell; the second's count
+      // stays (a restart is no way past it).
+      const forgetPage = () => {
+        pageNow = null;
+        pageTold = null;
+        if (pageLater !== null) {
+          clearTimeout(pageLater);
+          pageLater = null;
+        }
+      };
       const toFrame = (method: string, params: Record<string, unknown>) => {
         if (handshaken && surface !== null) {
           surface.transport.send({ jsonrpc: "2.0", method, params });
@@ -946,6 +994,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         bridge = null;
         handshaken = false;
         documentsReady = 0;
+        forgetPage();
         // The next run's frame tells its own size, the same as this one's or not.
         if (sizeFrame !== null) {
           view?.cancelAnimationFrame(sizeFrame);
@@ -1046,6 +1095,14 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
                   ? { id: mounted.id, version: mounted.version }
                   : null,
               away: navigatedAway,
+              // Which page of the set the frame is on now (P156), named as a place names it (P155).
+              page: (url) => {
+                const page = pageOfAddress(url);
+                if (page !== null) {
+                  pageNow = page;
+                  tellPage();
+                }
+              },
             })
           : framed;
         surface = created;
@@ -1138,7 +1195,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           emit: (event) => {
             if (event.type === "navigating") {
               // Which loads are the set's own pages is the frame's surface's to tell (P084, P098:
-              // `pagesOfSet`, from the frame's own words before any of them reach this display).
+              // `pagesOfSet`, from the frame's own words before any of them reach this display),
+              // and so is which page the frame is on (P156, `page` above): this one comes as the
+              // page leaves, before its load, and for a load that may never come.
               return;
             }
             if (event.type === "initialized") {
@@ -1150,6 +1209,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
                 giveLinks();
               }
               emit("initialized", undefined);
+              tellPage();
             }
           },
           ...(mount.document === undefined ? {} : { document: mount.document }),

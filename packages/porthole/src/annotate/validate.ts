@@ -196,6 +196,22 @@ function parsePoint(value: unknown): { x: number; y: number } | null {
  */
 const PLACE_PAGE = /^\.\/[!$-;=@-_a-~]*$/u;
 const PLACE_HASH = /^#[!#-;=?-_a-~]+$/u;
+const placePage = (value: unknown): value is string =>
+  text(value, LIMITS.page) && PLACE_PAGE.test(value);
+
+/**
+ * The page an address of the content's own files names (P156), as a place names one (P155): the
+ * address as the shell says it (its files' address as `./`), without its fragment, then its query;
+ * null where that isn't a place's page (another address, past `ANNOTATION_LIMITS.page`, not an
+ * address's serialization). So a host's page and a place's `page` are one string for one page.
+ */
+export function pageOfAddress(url: string): string | null {
+  const hash = url.indexOf("#");
+  const path = hash < 0 ? url : url.slice(0, hash);
+  const query = path.indexOf("?");
+  const page = query < 0 ? path : path.slice(0, query);
+  return placePage(page) ? page : null;
+}
 
 /**
  * Where the reader is in the page (P155), rebuilt from its known fields: its `scroll` (as P132's),
@@ -211,7 +227,7 @@ export function parsePlace(value: unknown): PagePlace | null {
   const { page, hash } = value;
   if (
     scroll === null ||
-    (page !== undefined && !(text(page, LIMITS.page) && PLACE_PAGE.test(page))) ||
+    (page !== undefined && !placePage(page)) ||
     (hash !== undefined && !(text(hash, LIMITS.hash) && PLACE_HASH.test(hash)))
   ) {
     return null;

@@ -203,6 +203,10 @@ document.getElementById("go").addEventListener("click", async () => {
       { state: "loaded" },
     ]);
     expect(record.navigationsBlocked, "probe: the host blocked no navigation").toEqual([]);
+    expect(record.pages, "probe: the host was told each page the frame moved to (P156)").toEqual([
+      "./about",
+      "./",
+    ]);
   });
 
   for (const lost of ["dropped", "late"] as const) {
@@ -267,6 +271,10 @@ document.getElementById("go").addEventListener("click", async () => {
         { state: "loaded" },
       ]);
       expect(record.navigationsBlocked, "probe: the host blocked no navigation").toEqual([]);
+      expect(record.pages, "probe: the host was told each page the frame moved to (P156)").toEqual([
+        "./about",
+        "./",
+      ]);
     });
   }
 
@@ -536,6 +544,8 @@ async function linkDownThePage(page: Page, id: string, before?: (frame: Frame) =
   const record = await shown.read();
   expect(record.outcomes, "probe: the display went on, loaded once").toEqual([{ state: "loaded" }]);
   expect(record.navigationsBlocked, "probe: the host blocked no navigation").toEqual([]);
+  // A link down a page is no move to another page (P156): only the about page was told.
+  expect(record.pages, "probe: the host was told the about page alone").toEqual(["./about"]);
 }
 
 test.describe("in a frame, within a page (P142)", () => {
@@ -594,6 +604,11 @@ test.describe("in a frame, in an engine without the Navigation API (P142)", () =
       { state: "loaded" },
     ]);
     expect(record.navigationsBlocked, "probe: the host blocked no navigation").toEqual([]);
+    // Each arriving page's own word is all there is here, and it is enough (P156).
+    expect(record.pages, "probe: the host was told each page the frame moved to").toEqual([
+      "./about",
+      "./",
+    ]);
   });
 
   test("without the Navigation API, a link down the page scrolls it; the document stays, and so does the display", async ({

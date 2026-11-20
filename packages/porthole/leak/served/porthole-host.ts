@@ -17,6 +17,8 @@ export interface DisplayRecord {
   readonly hostErrors: { readonly message: string; readonly kind: string }[];
   /** The addresses the shell stopped the frame navigating to (`navigationBlocked`, P080). */
   readonly navigationsBlocked: string[];
+  /** The pages of its set the frame moved to (`page`, P156). */
+  readonly pages: string[];
 }
 
 interface PortholeHostPage {
