@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.19.0
 
 - **Which page of the set the frame is on** (P156, amends P084, P098). A new host event, `page`,
   `{ page }` (React `onPage`): a link, a form or a script opened another page of the content's own
