@@ -471,6 +471,9 @@ export const CONTROLS: Readonly<Record<string, Control>> = {
       `without the Navigation API, ${LINK_DOWN}`,
       "a page opens nothing else: not a file that isn't a page, not another path of its origin",
       "no report, content error or blocked navigation names the frame's sealed address (P083)",
+      // Where the reader is on a page a link opened (P155): the host takes that page as the
+      // display's only by its notice, so without it the display starts again at its entry.
+      "where the reader is: another page of the set, by its path alone, never the sealed access, a query or a fragment that names nothing (P155)",
     ),
   },
   // A set's page saying it stayed at a navigation within its document (P142): WebKit fires the
