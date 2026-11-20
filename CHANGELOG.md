@@ -11,10 +11,11 @@ P-numbers below.
   files in the frame. `page` is named as P155's `place.page` (`"./report.html"`, `"./"` for the
   files' root; no query or fragment), told once per page, after the run's `initialized` (each run,
   a restart included, starts on the page the host framed; a move before the handshake is told just
-  after it). Not for a navigation within a page (a fragment: ask `annotations.place()`), a
+  after it), at most 4 a second (`PAGES_PER_SECOND`; past them, the latest page told when the
+  second frees). Not for a navigation within a page (a fragment: ask `annotations.place()`), a
   single-page app's own routes, or content leaving the set (`navigated`). Only a served display with
   files, from a shell that names its version (P098). No shell or wire change; nothing reaches the
-  frame; no wall, gate or rate moves.
+  frame; no existing wall, gate or rate moves.
   **For a host:** nothing to change unless you want it: follow `page` to show and file comments on
   the page the frame shows rather than the one you framed, and go back to yours on `initialized`.
 

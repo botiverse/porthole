@@ -226,7 +226,8 @@ export interface DisplayEvents {
    * told right after it); not for a navigation within the page (a fragment, its history entries),
    * nor for a single-page app's own routes. Only a display whose content comes with files of its
    * own (served, with a version), and only from a shell that says which version its page is
-   * (P098). The content's word, as every report is: which page to name, never a fact.
+   * (P098). At most `PAGES_PER_SECOND` (4) a second; past them, the latest page is told when the
+   * second frees. The content's word, as every report is: which page to name, never a fact.
    */
   readonly page: { readonly page: string };
   /**

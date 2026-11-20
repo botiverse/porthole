@@ -10189,6 +10189,13 @@ may never come (a navigation cancelled), so it can't say where the frame is.
    P098), and the host knows which it framed: `initialized` starts every run (a restart included),
    and `page` comes only after it; a move before the run's handshake is told right after
    `initialized`. A new run forgets the page.
+6. **At most `PAGES_PER_SECOND` (4) a second** (after the review): a page's notices are its own
+   word and reach the host before any of the bridge's gates, so a page could say it moved between
+   `./a` and `./b` with no load, and each word would be an event. Counted in a sliding second, as
+   `tracked`'s are (P112); past it nothing is dropped for good: the page the frame is on is kept
+   and told once, by one timer, when the second frees, so the host always ends on the page last
+   said. A new run, and the display's end, clear that timer; the second's count goes on across
+   runs (a restart is no way past it). Four is above any person's pace through links.
 5. Only a display whose content comes with files of its own (served, an artifact with a version)
    and only from a shell that names the version (P098). React: `onPage`.
 
@@ -10210,7 +10217,9 @@ its late word, back to `./`; not a document that stayed (its load taken or waiti
 took, another version's page, one that won't say which, nor a display without files.
 `test/files.test.ts` (`createHost`): a move before the handshake told right after `initialized`,
 each page once, no query or fragment, an address that is no place's page told as none, a run started
-again on the framed page. Written and not run here (CI runs them): `leak/served/files.spec.ts`, the
+again on the framed page; a burst of notices told at most `PAGES_PER_SECOND` in a second, the last
+page told as the second frees and nothing after, a run started again while a page waits never told
+it. Written and not run here (CI runs them): `leak/served/files.spec.ts`, the
 link cases (`./about`, then `./`; with the leaving page's notice dropped or late; without the
 Navigation API) and the link down a page (only `./about`, never its fragments). No negative control:
 nothing here is a defense of the isolation.
@@ -10222,6 +10231,7 @@ nothing here is a defense of the isolation.
   `place()`'s, when the host needs it.
 - *The first page told too, from its shell's hello*: a change to the shell and every pinned hash for
   what the host already knows (it framed that page); `initialized` says a run began there.
+- *Dropping words past the rate*: the host would be left on a page the frame has left.
 - *Telling every notice and letting the host dedupe*: the leaving page's and the arriving page's
   word for one move would be two events, and a word no load took would be a page the frame never
   showed.

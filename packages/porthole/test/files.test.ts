@@ -19,7 +19,7 @@ import {
 } from "../src/index.ts";
 import { compile } from "../src/compile/compile.ts";
 import { addressWithoutQuery, withoutSealedAddresses } from "../src/bridge/navigation.ts";
-import { createHost } from "../src/host/create-host.ts";
+import { createHost, PAGES_PER_SECOND } from "../src/host/create-host.ts";
 import { LATE_NOTICE_MS, PAGE_OF_SET_MS } from "../src/host/pages-of-set.ts";
 import type { PlatformHost } from "../src/platform/types.ts";
 import type { PortholeConfig } from "../src/config/schema.ts";
@@ -1958,8 +1958,8 @@ describe("after the security review of 0.6.0's first cut", () => {
   // P156: the host hears which page of the set the frame moved to, named as a place names it
   // (P155), once each, after the run's `initialized`; a run started again is on the page the host
   // framed (pages-of-set.test.ts says which notices and loads tell it).
-  it("tells the host each page of the set the frame moves to, after the run's initialized (P156)", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+  /** A served file set's display on a stand-in platform, what it told of its pages, and the frame's words. */
+  async function pagesDisplay() {
     const navigated: (() => void)[] = [];
     const listeners: ((message: unknown) => void)[] = [];
     const platform: PlatformHost = {
@@ -2020,15 +2020,32 @@ describe("after the security review of 0.6.0's first cut", () => {
       }
     };
     const SET_1 = { id: "site", version: "1" };
-    const arrived = (url: string) =>
-      say({
-        jsonrpc: "2.0",
-        method: "porthole/navigating",
-        params: { url, arrived: true, set: SET_1 },
-      });
-    const leaving = (url: string) =>
-      say({ jsonrpc: "2.0", method: "porthole/navigating", params: { url, set: SET_1 } });
-    const ready = () => say({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} });
+    return {
+      display,
+      events,
+      load: () => navigated.at(-1)?.(),
+      arrived: (url: string) =>
+        say({
+          jsonrpc: "2.0",
+          method: "porthole/navigating",
+          params: { url, arrived: true, set: SET_1 },
+        }),
+      leaving: (url: string) =>
+        say({ jsonrpc: "2.0", method: "porthole/navigating", params: { url, set: SET_1 } }),
+      // Another version's page: a load that waits for its word is started again at once (P098).
+      foreign: (url: string) =>
+        say({
+          jsonrpc: "2.0",
+          method: "porthole/navigating",
+          params: { url, arrived: true, set: { id: "site", version: "2" } },
+        }),
+      ready: () => say({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} }),
+    };
+  }
+
+  it("tells the host each page of the set the frame moves to, after the run's initialized (P156)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const { display, events, load, arrived, leaving, ready } = await pagesDisplay();
     // A move before the handshake is told right after it.
     arrived("./about?id=7#team");
     expect(events).toEqual([]);
@@ -2037,10 +2054,10 @@ describe("after the security review of 0.6.0's first cut", () => {
     // Once for each page: the leaving page's word and the arriving page's are one move; a page's
     // query and fragment are never told.
     leaving("./docs/my%20report.html?token=x#s");
-    navigated.at(-1)?.();
+    load();
     arrived("./docs/my%20report.html?token=x#s");
     leaving("./");
-    navigated.at(-1)?.();
+    load();
     // An address that is no place's page names none; the load is still the set's.
     arrived("https://elsewhere.test/about");
     arrived("./a b.html");
@@ -2048,13 +2065,49 @@ describe("after the security review of 0.6.0's first cut", () => {
     // A run started again (a load nobody announced, past every page's word) starts on the page the
     // host framed.
     await vi.advanceTimersByTimeAsync(PAGE_OF_SET_MS);
-    navigated.at(-1)?.();
+    load();
     await vi.advanceTimersByTimeAsync(LATE_NOTICE_MS);
     await vi.advanceTimersByTimeAsync(0);
     events.length = 0;
     ready();
     arrived("./");
     expect(events).toEqual(["initialized", "./"]);
+    display.destroy();
+  });
+
+  // After the review of P156: a page's notices reach the host before any of the bridge's gates, so
+  // a page that says it moved again and again, with no load, is told at most PAGES_PER_SECOND a
+  // second; the page it is on last is told once the second frees, and a new run forgets it.
+  it("tells at most PAGES_PER_SECOND pages a second, the latest once the second frees (P156)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const { display, events, load, arrived, foreign, ready } = await pagesDisplay();
+    ready();
+    events.length = 0;
+    const burst = Array.from({ length: 20 }, (_, n) => (n % 2 === 0 ? "./a" : "./b"));
+    for (const page of burst) {
+      arrived(page);
+    }
+    arrived("./c");
+    expect(events).toEqual(["./a", "./b", "./a", "./b"].slice(0, PAGES_PER_SECOND));
+    await vi.advanceTimersByTimeAsync(999);
+    expect(events).toHaveLength(PAGES_PER_SECOND);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(events.slice(PAGES_PER_SECOND)).toEqual(["./c"]);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(events.slice(PAGES_PER_SECOND)).toEqual(["./c"]);
+    // A run started again while a page waits to be told: it never is.
+    for (const page of burst) {
+      arrived(page);
+    }
+    const told = events.length;
+    expect(told).toBe(PAGES_PER_SECOND * 2);
+    // The burst's last word takes the next load as that page (still waiting to be told); a load no
+    // word explained, then another version's page, starts the display again.
+    load();
+    load();
+    foreign("./x");
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(events).toHaveLength(told);
     display.destroy();
   });
 });
