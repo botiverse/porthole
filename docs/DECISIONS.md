@@ -10256,11 +10256,14 @@ arbitrary popovers) or annotation-only `cancelled` reports (which are only sent 
      `click` → `activated` report without coupling annotation mark ids into `runtime.ts`, so a host
      can dismiss an open card on `press` while preserving same-marker toggle state across `click`.
    - *Escape*: window bubble-phase `keydown`, skipping `isTrusted !== true`, non-`Escape`, `repeat`,
-     `isComposing`, `keyCode === 229`, and synchronous `defaultPrevented`. A microtask queued via
-     native `Promise.prototype.then` re-reads native `defaultPrevented` after any later content
-     bubble listeners on `window` have run, emitting `porthole/escape` only if still uncancelled.
-     All prototype getters (`key`, `keyCode`, `isComposing`, `repeat`, `defaultPrevented`) and
-     `thenOf` are captured via `getterOf` / `callOf` before any content executes.
+     `isComposing`, `keyCode === 229`, and synchronous `defaultPrevented`. Because browsers flush a
+     microtask checkpoint after each individual event listener on `window`, a microtask queued inside
+     the shell's listener would run before content's own bubble listener on `window`; instead, a
+     next-task check via captured `window.setTimeout(..., 0)` re-reads native `defaultPrevented`
+     after event dispatch finishes across all listeners, emitting `porthole/escape` only if still
+     uncancelled. All prototype getters (`key`, `keyCode`, `isComposing`, `repeat`,
+     `defaultPrevented`) and `window.setTimeout` (`deferInteraction`) are captured via `getterOf` /
+     `callOf` before any content executes.
 2. **Host events and rate cap.** Add `DisplayEvents.press` (`undefined`) and `DisplayEvents.escape`
    (`undefined`) and React props `onPress` / `onEscape` on `PortholeFrame`.
    - Any notification arriving before `initialized`, or any message carrying an `id` (request), is
@@ -10276,8 +10279,9 @@ arbitrary popovers) or annotation-only `cancelled` reports (which are only sent 
 their content server alongside `@botiverse/porthole` so frames run the updated shell runtime.
 
 **Tested.** `test/interactions.test.ts` (`SHELL_RUNTIME` listener ordering before `__ANNOTATE__`,
-trusted/untrusted/prevented/composing/repeat/keyCode 229/shadowed getter & `Promise` checks in
-`node:vm`, hostless & top-level silence; `createHost` pre-`initialized` drop, request `id` drop,
-independent per-kind `INTERACTIONS_PER_SECOND` cap & restart persistence), `test/framed-by.test.ts`
-(updated shell runtime hash), and `leak/served/files.spec.ts` (real click, unhandled Escape, and
-page-prevented Escape in Playwright). No negative control: neither is an isolation wall.
+trusted/untrusted/prevented/composing/repeat/keyCode 229/shadowed getter & `window.setTimeout`
+checks in `node:vm`, hostless & top-level silence; `createHost` pre-`initialized` drop, request `id`
+drop, independent per-kind `INTERACTIONS_PER_SECOND` cap & restart persistence),
+`test/framed-by.test.ts` (updated shell runtime hash), and `leak/served/files.spec.ts` (real click,
+unhandled Escape, and page-prevented Escape in Playwright). No negative control: neither is an
+isolation wall.

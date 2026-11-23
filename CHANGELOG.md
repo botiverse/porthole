@@ -10,7 +10,7 @@ P-numbers below.
   (React `onPress`, `onEscape`): a trusted `pointerdown` in the frame (`porthole/press`, emitted at
   the capture phase before annotation markers activate), and a trusted, non-composing, unhandled
   `Escape` key reaching the frame's `window` without `defaultPrevented` (`porthole/escape`, emitted
-  after a microtask in every mode, not only while annotating). Both are dropped before
+  on the next task in every mode, not only while annotating). Both are dropped before
   `initialized`, never sent in top-level or hostless frames, and capped independently per display at
   `INTERACTIONS_PER_SECOND` (20) per sliding second across restarts. Both are UI hints only
   (THREAT_MODEL §6: never dismiss unsaved input or confirmations).

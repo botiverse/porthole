@@ -1292,8 +1292,8 @@ frame and hint guards (items 4, 8: the observer, the wrapped `attachShadow`, the
 insertion and attribute guards), and the closed parser entry points (P029). In framed views with a
 host (`!hostless`), it also listens before annotations and any content for trusted `pointerdown`
 (`porthole/press`, capture phase) and unhandled non-composing `Escape` (`porthole/escape`,
-bubble microtask checking `defaultPrevented`), capped at `INTERACTIONS_PER_SECOND` (20) per kind
-per second on the host (P157). Then, when it speaks for
+next-task check of `defaultPrevented` after bubble listeners run), capped at
+`INTERACTIONS_PER_SECOND` (20) per kind per second on the host (P157). Then, when it speaks for
 the content: the handshake, the theme (P028), the content (§ Streaming), size and error reports,
 link clicks sent out through `openLink`. A view that speaks for itself (`protocol: "none"`, MCP
 Apps) is rendered the same way from the plan once the shell's document has loaded.

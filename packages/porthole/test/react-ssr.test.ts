@@ -117,6 +117,10 @@ describe("trackedAnnotation and the handle (P118)", () => {
     expectTypeOf<PortholeViewProps["onFindUpdated"]>().toEqualTypeOf<
       ((result: FindResult) => void) | undefined
     >();
+    expectTypeOf<PortholeFrameProps["onPress"]>().toEqualTypeOf<(() => void) | undefined>();
+    expectTypeOf<PortholeFrameProps["onEscape"]>().toEqualTypeOf<(() => void) | undefined>();
+    expectTypeOf<PortholeViewProps["onPress"]>().toEqualTypeOf<(() => void) | undefined>();
+    expectTypeOf<PortholeViewProps["onEscape"]>().toEqualTypeOf<(() => void) | undefined>();
     const ref = createRef<PortholeFrameHandle>();
     ({ displayId: "a", title: "A", display: "artifact", ref }) satisfies PortholeViewProps;
     ({ config: presets.artifact(), displayId: "a", title: "A", ref }) satisfies PortholeFrameProps;
@@ -137,6 +141,8 @@ describe("trackedAnnotation and the handle (P118)", () => {
         title: "F",
         trackedAnnotation: null,
         onFindRequested: () => {},
+        onPress: () => {},
+        onEscape: () => {},
         ref: frameRef,
       }),
     );

@@ -1854,8 +1854,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
   const eventComposingOf = getterOf(keyProto, "isComposing");
   const eventRepeatOf = getterOf(keyProto, "repeat");
   const eventPreventedOf = getterOf(Event.prototype, "defaultPrevented");
-  const resolved = Promise.resolve();
-  const thenOf = Promise.prototype.then;
+  const deferInteraction = window.setTimeout;
   const eventProp = (getter, event, name) => (getter !== null ? callOf(getter, event, []) : event[name]);
   if (window.parent !== window && !hostless) {
     callOf(listenIn, window, [
@@ -1870,22 +1869,29 @@ export const SHELL_RUNTIME = String.raw`(() => {
     callOf(listenIn, window, [
       "keydown",
       (event) => {
-        if (
-          event.isTrusted !== true ||
-          eventProp(eventKeyOf, event, "key") !== "Escape" ||
-          eventProp(eventRepeatOf, event, "repeat") === true ||
-          eventProp(eventComposingOf, event, "isComposing") === true ||
-          eventProp(eventKeyCodeOf, event, "keyCode") === 229 ||
-          eventProp(eventPreventedOf, event, "defaultPrevented") === true
-        ) {
+        try {
+          if (
+            event.isTrusted !== true ||
+            eventProp(eventKeyOf, event, "key") !== "Escape" ||
+            eventProp(eventRepeatOf, event, "repeat") === true ||
+            eventProp(eventComposingOf, event, "isComposing") === true ||
+            eventProp(eventKeyCodeOf, event, "keyCode") === 229 ||
+            eventProp(eventPreventedOf, event, "defaultPrevented") === true
+          ) {
+            return;
+          }
+        } catch (_) {
           return;
         }
-        callOf(thenOf, resolved, [
+        callOf(deferInteraction, window, [
           () => {
-            if (eventProp(eventPreventedOf, event, "defaultPrevented") !== true) {
-              post({ method: "porthole/escape", params: {} });
-            }
+            try {
+              if (eventProp(eventPreventedOf, event, "defaultPrevented") !== true) {
+                post({ method: "porthole/escape", params: {} });
+              }
+            } catch (_) {}
           },
+          0,
         ]);
       },
       false,

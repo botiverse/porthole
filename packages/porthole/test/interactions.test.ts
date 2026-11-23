@@ -97,11 +97,10 @@ function runShellInteractions(
   ].join("\n");
 
   const context = {
-    window: Object.assign(win, { parent: parentObj }),
+    window: Object.assign(win, { parent: parentObj, setTimeout }),
     Event,
     EventTarget,
     KeyboardEvent: FakeKeyboardEvent,
-    Promise,
     Object,
     Reflect,
   };
@@ -114,7 +113,7 @@ function runShellInteractions(
     context,
     FakeKeyboardEvent,
     FakePointerEvent,
-    flushMicrotasks: () => new Promise<void>((resolve) => setTimeout(resolve, 0)),
+    flushTasks: () => new Promise<void>((resolve) => setTimeout(resolve, 10)),
   };
 }
 
@@ -140,7 +139,7 @@ describe("P157 shell runtime listeners", () => {
   });
 
   it("posts porthole/escape for trusted unhandled Escape and respects later preventDefault() or non-Escape states", async () => {
-    const { win, posted, FakeKeyboardEvent, flushMicrotasks } = runShellInteractions();
+    const { win, posted, FakeKeyboardEvent, flushTasks } = runShellInteractions();
 
     // Handled by content via bubble listener registered later on window.
     let cancelEscape = false;
@@ -165,42 +164,45 @@ describe("P157 shell runtime listeners", () => {
 
     cancelEscape = true;
     win.dispatchEvent(new FakeKeyboardEvent("keydown", { key: "Escape", trusted: true }));
-    await flushMicrotasks();
+    await flushTasks();
     expect(posted).toEqual([]);
 
-    // Unhandled Escape emits after microtask.
+    // Unhandled Escape emits after the current task finishes.
     cancelEscape = false;
     win.dispatchEvent(new FakeKeyboardEvent("keydown", { key: "Escape", trusted: true }));
     expect(posted).toEqual([]);
-    await flushMicrotasks();
+    await flushTasks();
     expect(posted).toEqual([{ jsonrpc: "2.0", method: ESCAPE_METHOD, params: {} }]);
   });
 
-  it("reads native KeyboardEvent getters and Promise even if content tampers later", async () => {
-    const { win, context, posted, FakeKeyboardEvent, flushMicrotasks } = runShellInteractions();
-    // Simulate hostile content clobbering Promise and KeyboardEvent.prototype.key after boot.
+  it("reads native KeyboardEvent getters and window.setTimeout even if content tampers later", async () => {
+    const { win, context, posted, FakeKeyboardEvent, flushTasks } = runShellInteractions();
+    // Simulate hostile content clobbering window.setTimeout and KeyboardEvent.prototype.key after boot.
     Object.defineProperty(context.KeyboardEvent.prototype, "key", {
       configurable: true,
       get: () => "Enter",
     });
-    (context as unknown as { Promise: unknown }).Promise = {
-      resolve: () => {
-        throw new Error("clobbered Promise.resolve");
-      },
+    (context.window as unknown as { setTimeout: unknown }).setTimeout = () => {
+      throw new Error("clobbered setTimeout");
     };
 
+    // Non-KeyboardEvent trusted keydown safely returns without throwing TypeError.
+    const plainKeydown = new context.Event("keydown", { cancelable: true, bubbles: true });
+    Object.defineProperty(plainKeydown, "isTrusted", { value: true });
+    expect(() => win.dispatchEvent(plainKeydown)).not.toThrow();
+
     win.dispatchEvent(new FakeKeyboardEvent("keydown", { key: "Escape", trusted: true }));
-    await flushMicrotasks();
+    await flushTasks();
     expect(posted).toEqual([{ jsonrpc: "2.0", method: ESCAPE_METHOD, params: {} }]);
   });
 
   it("posts nothing on hostless or top-level frames", async () => {
     for (const opts of [{ hostless: true }, { topLevel: true }]) {
-      const { win, posted, FakePointerEvent, FakeKeyboardEvent, flushMicrotasks } =
+      const { win, posted, FakePointerEvent, FakeKeyboardEvent, flushTasks } =
         runShellInteractions(opts);
       win.dispatchEvent(new FakePointerEvent("pointerdown", true));
       win.dispatchEvent(new FakeKeyboardEvent("keydown", { key: "Escape", trusted: true }));
-      await flushMicrotasks();
+      await flushTasks();
       expect(posted).toEqual([]);
     }
   });
