@@ -158,6 +158,20 @@ export const NAVIGATION_BLOCKED_METHOD = "porthole/navigation-blocked";
  */
 export const NAVIGATING_METHOD = "porthole/navigating";
 
+/**
+ * Porthole's own notification from the shell (P157): a trusted `pointerdown` landed inside the
+ * frame (empty params). Sent at the capture phase before annotation markers react, for UI dismissal
+ * hints; never a permission or a gate-bypass signal (THREAT_MODEL §6).
+ */
+export const PRESS_METHOD = "porthole/press";
+
+/**
+ * Porthole's own notification from the shell (P157): a trusted, non-composing, unhandled `Escape`
+ * key reached the frame's `window` without being cancelled (`defaultPrevented`) by the page (empty
+ * params). Sent as a UI hint in every mode, not only while annotating.
+ */
+export const ESCAPE_METHOD = "porthole/escape";
+
 /** The logger name the shell's error reports (`notifications/message`, level `error`) carry. */
 export const SHELL_LOGGER = "porthole";
 

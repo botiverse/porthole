@@ -239,12 +239,14 @@ export type {
 } from "./protocol/adapter.ts";
 export {
   COPY_TEXT_METHOD,
+  ESCAPE_METHOD,
   MCP_APPS_METHODS,
   MCP_APPS_PROTOCOL_VERSION,
   MCP_APPS_STYLE_VARIABLES,
   NAVIGATING_METHOD,
   NAVIGATION_BLOCKED_METHOD,
   PORTHOLE_STYLES,
+  PRESS_METHOD,
   STALE_META,
   type HostContext,
 } from "./protocol/mcp-apps.ts";

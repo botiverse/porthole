@@ -4,6 +4,20 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **Frame presses and unhandled Escapes** (P157). Two new host events, `press` and `escape`
+  (React `onPress`, `onEscape`): a trusted `pointerdown` in the frame (`porthole/press`, emitted at
+  the capture phase before annotation markers activate), and a trusted, non-composing, unhandled
+  `Escape` key reaching the frame's `window` without `defaultPrevented` (`porthole/escape`, emitted
+  on the next task in every mode, not only while annotating). Both are dropped before
+  `initialized`, never sent in top-level or hostless frames, and capped independently per display at
+  `INTERACTIONS_PER_SECOND` (20) per sliding second across restarts. Both are UI hints only
+  (THREAT_MODEL §6: never dismiss unsaved input or confirmations).
+  **For a host:** upgrade your content server alongside `@botiverse/porthole` so frames run the new
+  shell runtime; `SHELL_RUNTIME` changed (its pinned hash, P145), while `annotate`, `find`, `use`,
+  and `legacy` are unchanged. No isolation wall, CSP, sandbox flag, or gate changes.
+
 ## 0.19.0
 
 - **Which page of the set the frame is on** (P156, amends P084, P098). A new host event, `page`,

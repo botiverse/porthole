@@ -919,6 +919,37 @@ document.getElementById("go").addEventListener("click", async () => {
     await frame.locator("#go").click();
     await expect.poll(() => flag(frame, "seen")).toBe("fresh");
   });
+
+  test("a frame tells real presses and unhandled Escapes, and drops a page-handled Escape (P157)", async ({
+    page,
+  }) => {
+    const id = unique("interactions");
+    await publish(id, "1", {
+      "index.html": `<!doctype html><title>Interactions</title>
+<button id="plain" type="button">plain</button>
+<button id="modal" type="button">trap escape</button>
+<script>
+let trap = false;
+document.getElementById("modal").addEventListener("click", () => { trap = true; });
+window.addEventListener("keydown", (event) => {
+  if (trap && event.key === "Escape") event.preventDefault();
+});
+</script>`,
+    });
+    const { frame, shown } = await showFiles(page, id, "1");
+    await frame.locator("#plain").click();
+    await expect.poll(async () => (await shown.read()).interactions).toEqual(["press"]);
+    await page.keyboard.press("Escape");
+    await expect.poll(async () => (await shown.read()).interactions).toEqual(["press", "escape"]);
+    // Once the page handles Escape with preventDefault(), the shell sends no escape hint.
+    await frame.locator("#modal").click();
+    await expect
+      .poll(async () => (await shown.read()).interactions)
+      .toEqual(["press", "escape", "press"]);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(300);
+    expect((await shown.read()).interactions).toEqual(["press", "escape", "press"]);
+  });
 });
 
 test.describe("on a tab", () => {

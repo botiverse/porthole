@@ -269,6 +269,19 @@ export interface DisplayEvents {
    * The content's word: a find bar's numbers.
    */
   readonly findUpdated: FindResult;
+  /**
+   * A trusted pointer press landed in the frame (`press`, P157), told before any annotation marker
+   * activates so the host can dismiss outside UI without losing marker-toggle semantics. Sent at
+   * most `INTERACTIONS_PER_SECOND` a second after `initialized`; the frame's word (a UI hint only,
+   * never a permission or a reason to drop unsaved input or confirmations: THREAT_MODEL §6).
+   */
+  readonly press: undefined;
+  /**
+   * A trusted, unhandled `Escape` key pressed in the frame (`escape`, P157), in any mode, when not
+   * cancelled (`defaultPrevented`) by the page. Sent at most `INTERACTIONS_PER_SECOND` a second
+   * after `initialized`; the frame's word (a UI hint only: THREAT_MODEL §6).
+   */
+  readonly escape: undefined;
 }
 
 /**

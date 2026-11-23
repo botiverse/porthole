@@ -45,9 +45,11 @@ import { webPlatform } from "../platform/web.ts";
 import type { DoorSurface, Surface } from "../platform/types.ts";
 import type { AdapterConnection, ProtocolAdapter, ShellConnection } from "../protocol/adapter.ts";
 import {
+  ESCAPE_METHOD,
   MCP_APPS_METHODS,
   MCP_APPS_STYLE_VARIABLES,
   PORTHOLE_STYLES,
+  PRESS_METHOD,
   type HostContext,
 } from "../protocol/mcp-apps.ts";
 import { shellAdapter } from "../protocol/shell-adapter.ts";
@@ -118,6 +120,12 @@ export const TRACKED_PER_SECOND = 60;
  * that says it moved faster has the latest page told when the second frees.
  */
 export const PAGES_PER_SECOND = 4;
+
+/**
+ * The most `press` or `escape` interaction hints a second per kind (P157): counted in a sliding
+ * second across runs so restarts cannot bypass it.
+ */
+export const INTERACTIONS_PER_SECOND = 20;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -363,6 +371,24 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           clearTimeout(pageLater);
           pageLater = null;
         }
+      };
+      // Frame presses and unhandled Escapes (P157): counted per kind in a sliding second across
+      // runs (restarts never reset the cap); anything before `initialized` is dropped.
+      const interactionTimes: Record<"press" | "escape", number[]> = { press: [], escape: [] };
+      const tellInteraction = (kind: "press" | "escape") => {
+        if (!handshaken) {
+          return;
+        }
+        const times = interactionTimes[kind];
+        const at = Date.now();
+        while (times.length > 0 && at - (times[0] as number) >= 1_000) {
+          times.shift();
+        }
+        if (times.length >= INTERACTIONS_PER_SECOND) {
+          return;
+        }
+        times.push(at);
+        emit(kind, undefined);
       };
       const toFrame = (method: string, params: Record<string, unknown>) => {
         if (handshaken && surface !== null) {
@@ -1182,6 +1208,17 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           ) {
             storageTold = true;
             emit("storage", { used: true });
+          }
+        });
+        // Frame pointer presses and unhandled Escapes (P157): UI hints only, bounded per second.
+        created.transport.listen((raw) => {
+          if (!handshaken || !isRecord(raw) || raw.jsonrpc !== "2.0" || "id" in raw) {
+            return;
+          }
+          if (raw.method === PRESS_METHOD) {
+            tellInteraction("press");
+          } else if (raw.method === ESCAPE_METHOD) {
+            tellInteraction("escape");
           }
         });
         bridge = opening;
