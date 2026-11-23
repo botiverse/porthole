@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.20.0
 
 - **Frame presses and unhandled Escapes** (P157). Two new host events, `press` and `escape`
   (React `onPress`, `onEscape`): a trusted `pointerdown` in the frame (`porthole/press`, emitted at
