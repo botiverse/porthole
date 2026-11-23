@@ -304,7 +304,7 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
     displays: [],
     mount(config, location, instance, options = {}) {
       const index = this.records.length;
-      const record = { outcomes: [], initialized: false, errors: [], contentErrors: [], hostErrors: [], navigationsBlocked: [], pages: [] };
+      const record = { outcomes: [], initialized: false, errors: [], contentErrors: [], hostErrors: [], navigationsBlocked: [], pages: [], interactions: [] };
       this.records.push(record);
       const box = document.createElement("section");
       box.style.cssText = "width: 600px; height: 300px";
@@ -368,6 +368,8 @@ const PORTHOLE_HOST_PAGE = `<!doctype html>
       display.on("hostError", (error) => record.hostErrors.push(error));
       display.on("navigationBlocked", ({ url }) => record.navigationsBlocked.push(url));
       display.on("page", ({ page }) => record.pages.push(page));
+      display.on("press", () => record.interactions.push("press"));
+      display.on("escape", () => record.interactions.push("escape"));
       return index;
     },
     // Where the reader is in the display's page (P155): its answer, or what it threw.

@@ -1845,6 +1845,53 @@ export const SHELL_RUNTIME = String.raw`(() => {
     }
   };
 
+  // Frame presses and unhandled Escapes (P157): told to the parent as UI hints before
+  // the annotation runtime and before any content runs (and only in a framed view with a host;
+  // top-level and hostless frames never post).
+  const keyProto = typeof KeyboardEvent === "function" ? KeyboardEvent.prototype : null;
+  const eventKeyOf = getterOf(keyProto, "key");
+  const eventKeyCodeOf = getterOf(keyProto, "keyCode");
+  const eventComposingOf = getterOf(keyProto, "isComposing");
+  const eventRepeatOf = getterOf(keyProto, "repeat");
+  const eventPreventedOf = getterOf(Event.prototype, "defaultPrevented");
+  const resolved = Promise.resolve();
+  const thenOf = Promise.prototype.then;
+  const eventProp = (getter, event, name) => (getter !== null ? callOf(getter, event, []) : event[name]);
+  if (window.parent !== window && !hostless) {
+    callOf(listenIn, window, [
+      "pointerdown",
+      (event) => {
+        if (event.isTrusted === true) {
+          post({ method: "porthole/press", params: {} });
+        }
+      },
+      { capture: true, passive: true },
+    ]);
+    callOf(listenIn, window, [
+      "keydown",
+      (event) => {
+        if (
+          event.isTrusted !== true ||
+          eventProp(eventKeyOf, event, "key") !== "Escape" ||
+          eventProp(eventRepeatOf, event, "repeat") === true ||
+          eventProp(eventComposingOf, event, "isComposing") === true ||
+          eventProp(eventKeyCodeOf, event, "keyCode") === 229 ||
+          eventProp(eventPreventedOf, event, "defaultPrevented") === true
+        ) {
+          return;
+        }
+        callOf(thenOf, resolved, [
+          () => {
+            if (eventProp(eventPreventedOf, event, "defaultPrevented") !== true) {
+              post({ method: "porthole/escape", params: {} });
+            }
+          },
+        ]);
+      },
+      false,
+    ]);
+  }
+
   // Requests a spliced runtime answers itself (P155), by method: the shell's own listener leaves
   // them to it. No prototype, so no name content puts on Object.prototype is one.
   const ownRequests = bare(null);

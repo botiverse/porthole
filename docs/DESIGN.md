@@ -770,8 +770,8 @@ again.
     handlers={{ sendPrompt, openLink }}  // one per declared capability; latest are called
     theme={(scheme) => tokens}       // live values for the config's variable names
     generation={n}                   // bump to run again from the start
-    onContentError onHostError onResize onNavigated onNavigationBlocked onRefused onMuted
-    onInitialized onOutcome
+    onContentError onHostError onResize onNavigated onPage onNavigationBlocked onRefused onMuted
+    onPress onEscape onInitialized onOutcome
     fill?                            // fill the box and scroll inside, not grow with the content
     annotating? annotations? focusedAnnotation? trackedAnnotation? trackedSelection? onAnnotation?   // where annotate is declared
     linkLabels?                      // titles for bare links, where linkLabels is declared (P151)
@@ -1289,7 +1289,11 @@ What the page learns: [THREAT_MODEL.md § 7](THREAT_MODEL.md#7-the-display-layer
 The runtime (`src/shell/runtime.ts`, plain ES2020, no build) runs first in every frame it serves.
 Before any content: an in-memory `localStorage` (opaque frames), the WebRTC removal (item 3), the
 frame and hint guards (items 4, 8: the observer, the wrapped `attachShadow`, the synchronous
-insertion and attribute guards), and the closed parser entry points (P029). Then, when it speaks for
+insertion and attribute guards), and the closed parser entry points (P029). In framed views with a
+host (`!hostless`), it also listens before annotations and any content for trusted `pointerdown`
+(`porthole/press`, capture phase) and unhandled non-composing `Escape` (`porthole/escape`,
+bubble microtask checking `defaultPrevented`), capped at `INTERACTIONS_PER_SECOND` (20) per kind
+per second on the host (P157). Then, when it speaks for
 the content: the handshake, the theme (P028), the content (§ Streaming), size and error reports,
 link clicks sent out through `openLink`. A view that speaks for itself (`protocol: "none"`, MCP
 Apps) is rendered the same way from the plan once the shell's document has loaded.

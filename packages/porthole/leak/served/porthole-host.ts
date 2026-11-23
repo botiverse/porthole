@@ -19,6 +19,8 @@ export interface DisplayRecord {
   readonly navigationsBlocked: string[];
   /** The pages of its set the frame moved to (`page`, P156). */
   readonly pages: string[];
+  /** Trusted pointer presses and unhandled Escapes reported by the frame (`press` / `escape`, P157). */
+  readonly interactions: ("press" | "escape")[];
 }
 
 interface PortholeHostPage {

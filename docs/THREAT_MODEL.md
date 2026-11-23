@@ -216,6 +216,12 @@ Whatever the use (how to wire each: [ADOPTING.md](ADOPTING.md)):
   `event.source` and `event.origin`, take a message only from the window and origin it expects (your
   app's page), and treat any other as content's untrusted word. By S7's rule, the widest network
   among the outer page's frames is content's way out.
+- **`press` and `escape` (`onPress`, `onEscape`, P157).** The frame's own report of a pointer press
+  or an unhandled `Escape` key in its document: a UI hint only (for dismissing an empty menu or
+  popover in the host), never a permission and never a gate bypass. An untrusted display can emit
+  or suppress them (including calling `preventDefault()` on `Escape`), and the host caps each to
+  `INTERACTIONS_PER_SECOND` a second: never drop unsaved user input, close a confirmation dialog,
+  or commit a write on either event.
 - **The app runtime.** Run `defineRuntimeConformance` with `api` in CI (§7).
 
 ### S1. Inline widgets in a conversation

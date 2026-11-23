@@ -760,6 +760,16 @@ export interface PortholeFrameProps {
    */
   readonly onFindUpdated?: (result: FindResult) => void;
   /**
+   * A trusted pointer press landed in the frame (`press`, P157), before any annotation marker
+   * activates. A UI hint only (THREAT_MODEL §6).
+   */
+  readonly onPress?: () => void;
+  /**
+   * A trusted, unhandled `Escape` key pressed in the frame (`escape`, P157), in any mode. A UI
+   * hint only (THREAT_MODEL §6).
+   */
+  readonly onEscape?: () => void;
+  /**
    * Titles for the content's bare links (`links.label`, P151), where the config declares
    * `linkLabels`: a link whose only child is its own address as text, to an address labelled
    * here, shows the label's `text` instead; every link to it gets `data-porthole-label` with the
@@ -1123,6 +1133,12 @@ function Mount({
         case "findUpdated":
           frame.onFindUpdated?.(detail as DisplayEvents["findUpdated"]);
           return;
+        case "press":
+          frame.onPress?.();
+          return;
+        case "escape":
+          frame.onEscape?.();
+          return;
       }
     },
   );
@@ -1251,6 +1267,8 @@ function Mount({
       "annotation",
       "findRequested",
       "findUpdated",
+      "press",
+      "escape",
       "contentError",
       "hostError",
     ];

@@ -415,6 +415,13 @@ trust.
 - A platform of your own (a native web view): `display.focus()` calls `focus` on its surface;
   `focused`, if given, says whether the keyboard is in the display (the find shortcut reads it,
   P131). There is no `focusTaken` event, and `onFocusTaken` is not read.
+- **Outside clicks and unhandled Escapes (P157):** `display.on("press", …)` (`onPress`) fires on a
+  trusted `pointerdown` inside the frame, before any annotation marker's `activated` report (so a
+  host can dismiss an open card on the press without losing same-marker toggle state).
+  `display.on("escape", …)` (`onEscape`) fires in any mode (not only while annotating) when a
+  trusted, non-composing `Escape` reaches the frame's `window` without `defaultPrevented`. Both
+  are UI hints only (THREAT_MODEL §6): never discard unsaved user input or close confirmations on
+  them.
 
 ## 4. Served pages: the host kit
 
