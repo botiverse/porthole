@@ -49,6 +49,7 @@ import {
   MCP_APPS_METHODS,
   MCP_APPS_STYLE_VARIABLES,
   PORTHOLE_STYLES,
+  PORTHOLE_TOUCH_SELECTION,
   PRESS_METHOD,
   type HostContext,
 } from "../protocol/mcp-apps.ts";
@@ -66,6 +67,7 @@ import type {
   HostOptions,
   MountOptions,
   PortholeHost,
+  TouchSelection,
 } from "./types.ts";
 
 /** How long a display may take to load before its outcome is a timeout, by default. */
@@ -228,6 +230,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       // A page the host doesn't theme (`documents: "never"`, P065) is always given light.
       const themeless = config.theme.documents === "never";
       let scheme: ColorScheme = themeless ? "light" : mount.scheme;
+      let touchSelection: TouchSelection = mount.touchSelection ?? "auto";
       let height = mount.initialHeightPx ?? 0;
       let surface: Surface | null = null;
       let connection: C | null = null;
@@ -927,6 +930,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
                 platform: "web" as const,
               }),
           ...options.hostContext?.(),
+          ...(touchSelection === "none" ? { [PORTHOLE_TOUCH_SELECTION]: "none" as const } : {}),
         };
       };
 
@@ -1378,6 +1382,13 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
           });
         },
         refreshTheme() {
+          connection?.hostContextChanged(hostContext());
+        },
+        setTouchSelection(next: TouchSelection) {
+          if (next === touchSelection) {
+            return;
+          }
+          touchSelection = next;
           connection?.hostContextChanged(hostContext());
         },
         on<E extends keyof DisplayEvents>(event: E, listener: (detail: DisplayEvents[E]) => void) {

@@ -4,6 +4,21 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **Host-controlled touch text-selection guard** (P158). New `MountOptions.touchSelection`,
+  `DisplayControls.setTouchSelection(mode)`, and `<PortholeFrame touchSelection="none" | "auto">`
+  (protocol field `PORTHOLE_TOUCH_SELECTION` = `"porthole/touch-selection"` in `HostContext`). When
+  set to `"none"`, `SHELL_RUNTIME` injects a zero-specificity `@media (pointer: coarse)` `<style
+  data-porthole-touch-selection>` (with the frame's CSP nonce when present) that disables text
+  selection and the iOS long-press callout inside the frame while keeping `input`, `textarea`, and
+  `[contenteditable]` selectable; standalone tabs, hostless embeds, desktop (`pointer: fine`), and
+  hosts that omit the option are untouched. Updated live via `host-context-changed` without
+  reloading the frame or firing `themeEvent`.
+  **For a host:** upgrade your content server alongside `@botiverse/porthole` so frames run the new
+  shell runtime; `SHELL_RUNTIME` changed (its pinned hash, P145), while `annotate`, `find`, `use`,
+  and `legacy` are unchanged. No isolation wall, CSP, sandbox flag, or gate changes.
+
 ## 0.20.0
 
 - **Frame presses and unhandled Escapes** (P157). Two new host events, `press` and `escape`

@@ -626,8 +626,9 @@ const RUNTIME_V0_16_0 = {
   // 'sha256-caJHuetRkbA94i7oqCBmRQHt+twKw7mImfbFmZ/X7V8='. Since, a request a spliced runtime
   // answers itself is left to it (ownRequests, P155), as 0.18.0's CHANGELOG says.
   // 'sha256-5n++o5niQlBT2Ct3VftRQpwkcic7ckT4fCKM3yNVHSM=': 0.18.0–0.19.0 (ownRequests, P155).
-  // Since: trusted frame presses (`porthole/press`) and unhandled Escapes (`porthole/escape`), P157.
-  shell: "'sha256-15c6y8SD3nNCDA4qYg39k2Jq6iui9pACTZ6jbfiD+V8='",
+  // 'sha256-15c6y8SD3nNCDA4qYg39k2Jq6iui9pACTZ6jbfiD+V8=': 0.20.0 (frame presses & unhandled Escapes, P157).
+  // Since: host-controlled touch text-selection guard (`porthole/touch-selection`), P158.
+  shell: "'sha256-tP+XUVdzaMxVIBDJgtB4jiHUymge1HE5EhHE92Q1sg0='",
   // 0.15.0's was 'sha256-3PZMe4arifdWHJU1jS0laR49wiWc/uBWIFddGJPyf/w=': 0.15.2's marks ride the
   // document's scroll (P147). 0.16.0's was 'sha256-uQ77dZDXcY6pKRoTylHpGXY+ZhhCt4WZhB/qDTQJ6BE=':
   // 0.16.1's, where an element pick says where it was picked (P150), was
@@ -652,7 +653,7 @@ const RUNTIME_V0_14_16 = {
   legacy: "'sha256-ZEVJsezqV7n+Ho0m7Y92NYxAZqf8ynKq/rDdXrJUKp0='",
 };
 
-describe("the served shell runtime is 0.16.0's (0.15.2's, less a nested page's files hook, P149), plus annotations' (P150, P152, P153), the host's opener (P154), the page's place (P155) and frame interactions (P157), not 0.14.16's: pinned, so what the CHANGELOG says of it is checked (P145)", () => {
+describe("the served shell runtime is 0.16.0's (0.15.2's, less a nested page's files hook, P149), plus annotations' (P150, P152, P153), the host's opener (P154), the page's place (P155), frame interactions (P157) and touch selection guard (P158), not 0.14.16's: pinned, so what the CHANGELOG says of it is checked (P145)", () => {
   const now = {
     shell: hashOf(SHELL_RUNTIME),
     annotate: hashOf(ANNOTATE_RUNTIME),

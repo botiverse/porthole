@@ -10285,3 +10285,44 @@ drop, independent per-kind `INTERACTIONS_PER_SECOND` cap & restart persistence),
 `test/framed-by.test.ts` (updated shell runtime hash), and `leak/served/files.spec.ts` (real click,
 unhandled Escape, and page-prevented Escape in Playwright). No negative control: neither is an
 isolation wall.
+
+## P158 · 2026-11-25 · Host-controlled touch text-selection guard (`touchSelection`) · Accepted
+
+From Raft (`#proj-mobile:#366`): on touch screens, framed interactive HTML pages compete with
+browser text-selection handles and the iOS long-press callout (`-webkit-touch-callout`), whereas
+standalone tabs, external embeds, and public share pages without a host comment bar still rely on
+native text selection and copy. CSS placed on the outer `<iframe>` wrapper cannot cross into the
+framed document, and rewriting HTML bytes on the content server would suppress selection on
+standalone/public views that have no comment bar.
+
+**Decision.**
+1. **Protocol field (`hostContext`).** Add `PORTHOLE_TOUCH_SELECTION` (`"porthole/touch-selection"`)
+   in `protocol/mcp-apps.ts` (and re-exported from `@botiverse/porthole`), carried in `HostContext`
+   as `"none"` when the host disables touch text selection and omitted otherwise. Older shells ignore
+   unknown `hostContext` fields; older hosts omit it; standalone tabs and hostless embeds never
+   receive a `hostContext`.
+2. **Host API and React binding.** Add `TouchSelection` (`"auto" | "none"`),
+   `MountOptions.touchSelection`, `DisplayControls.setTouchSelection(mode)`, and React prop
+   `PortholeFrameProps.touchSelection`. Changing the prop updates `hostContext` in place via
+   `ui/notifications/host-context-changed` without reloading the frame, and every new page of a
+   served file set receives the current setting on `ui/initialize`.
+3. **Shell runtime.** In `SHELL_RUNTIME`, `touchSelectionFollows()` runs on both `applyTheme`
+   (`ui/initialize` and `ui/notifications/host-context-changed`) and `renderDocument` (after
+   `document.head.replaceChildren` so whole-document replacement preserves it). When
+   `lastContext["porthole/touch-selection"] === "none"`, the shell appends a `<style
+   data-porthole-touch-selection>` (carrying the frame's CSP `nonce` when present) using a
+   zero-specificity `@media (pointer: coarse)` rule that sets `-webkit-user-select: none;
+   user-select: none; -webkit-touch-callout: none` on `:where(:root, :root *)` while restoring
+   `text` / `default` on `input`, `textarea`, and `[contenteditable]`. Toggling back to `"auto"`
+   removes the `<style>` node without firing `themeEvent`.
+
+**Compatibility.** Additive on the host API; changes `SHELL_RUNTIME` bytes (pinned hash updated in
+`test/framed-by.test.ts`; `annotate`, `find`, `use`, and `legacy` unchanged). Hosts should upgrade
+their content server before or alongside `@botiverse/porthole` so frames run the updated shell
+runtime.
+
+**Tested.** `test/touch-selection.test.ts` (VM tests for `SHELL_RUNTIME` initial `"none"`, live
+toggle off/on via `host-context-changed`, preservation across `renderDocument`, CSP nonce,
+default/omitted silence; `createHost` `MountOptions.touchSelection` & `setTouchSelection()`) and
+`test/framed-by.test.ts` (updated shell runtime hash). No negative control: touch selection is a
+host-driven UX policy, not an isolation wall.

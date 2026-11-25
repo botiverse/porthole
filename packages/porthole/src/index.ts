@@ -246,6 +246,7 @@ export {
   NAVIGATING_METHOD,
   NAVIGATION_BLOCKED_METHOD,
   PORTHOLE_STYLES,
+  PORTHOLE_TOUCH_SELECTION,
   PRESS_METHOD,
   STALE_META,
   type HostContext,
@@ -329,6 +330,7 @@ export type {
   HostOptions,
   MountOptions,
   PortholeHost,
+  TouchSelection,
 } from "./host/types.ts";
 
 // Annotations (P053): anchors, what a frame reports, and the host's checks on both.

@@ -128,6 +128,14 @@ export const MCP_APPS_STYLE_VARIABLES: readonly string[] = [
 export const PORTHOLE_STYLES = "porthole/styles";
 
 /**
+ * The host context's own-prefixed field for touch text-selection suppression (P158): `"none"` tells
+ * the shell to disable text selection and the iOS long-press callout inside the frame on coarse
+ * pointers (`@media (pointer: coarse)`), keeping form controls selectable. Omitted when the host
+ * leaves touch selection at the browser default; an older shell ignores it.
+ */
+export const PORTHOLE_TOUCH_SELECTION = "porthole/touch-selection";
+
+/**
  * Porthole's own request for copying text (`copyText`, P052): `{ text }`, answered `{}` when the
  * host copied it and `{ isError: true }` when it didn't. The standard has no clipboard request.
  */
@@ -191,5 +199,7 @@ export interface HostContext {
   readonly deviceCapabilities?: { readonly touch?: boolean; readonly hover?: boolean };
   /** Porthole's own theme variables, outside the spec's list (`PORTHOLE_STYLES`). */
   readonly "porthole/styles"?: { readonly variables: Readonly<Record<string, string>> };
+  /** Host-controlled touch selection policy (`PORTHOLE_TOUCH_SELECTION`, P158). */
+  readonly "porthole/touch-selection"?: "none";
   readonly [key: string]: unknown;
 }
