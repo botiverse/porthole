@@ -628,7 +628,7 @@ const RUNTIME_V0_16_0 = {
   // 'sha256-5n++o5niQlBT2Ct3VftRQpwkcic7ckT4fCKM3yNVHSM=': 0.18.0–0.19.0 (ownRequests, P155).
   // 'sha256-15c6y8SD3nNCDA4qYg39k2Jq6iui9pACTZ6jbfiD+V8=': 0.20.0 (frame presses & unhandled Escapes, P157).
   // Since: host-controlled touch text-selection guard (`porthole/touch-selection`), P158.
-  shell: "'sha256-tP+XUVdzaMxVIBDJgtB4jiHUymge1HE5EhHE92Q1sg0='",
+  shell: "'sha256-A5dS37XAP3cNcRXZ7qHkuVvvaDF+8qEhB1BIodrbWME='",
   // 0.15.0's was 'sha256-3PZMe4arifdWHJU1jS0laR49wiWc/uBWIFddGJPyf/w=': 0.15.2's marks ride the
   // document's scroll (P147). 0.16.0's was 'sha256-uQ77dZDXcY6pKRoTylHpGXY+ZhhCt4WZhB/qDTQJ6BE=':
   // 0.16.1's, where an element pick says where it was picked (P150), was

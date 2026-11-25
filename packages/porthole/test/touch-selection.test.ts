@@ -22,12 +22,10 @@ const shellPart = (start: string, end: string): string => {
 
 interface FakeStyleEl {
   tagName: string;
-  nonce: string;
-  textContent: string;
+  savedNonce: string;
+  savedText: string;
   attributes: Map<string, string>;
   isConnected: boolean;
-  setAttribute(name: string, value: string): void;
-  remove(): void;
 }
 
 function runShellTouchSelection(options: { readonly nonce?: string } = {}) {
@@ -37,48 +35,66 @@ function runShellTouchSelection(options: { readonly nonce?: string } = {}) {
   const rootAttrs = new Map<string, string>();
   const rootStyles = new Map<string, string>();
 
-  const makeStyle = (): FakeStyleEl => {
-    const el: FakeStyleEl = {
-      tagName: "STYLE",
-      nonce: "",
-      textContent: "",
-      attributes: new Map(),
-      isConnected: false,
-      setAttribute(name: string, value: string) {
-        this.attributes.set(name, value);
-      },
-      remove() {
-        const idx = headChildren.indexOf(el);
-        if (idx !== -1) {
-          headChildren.splice(idx, 1);
-        }
-        el.isConnected = false;
-      },
-    };
-    created.push(el);
-    return el;
-  };
+  class FakeNode {
+    isConnected = false;
+    savedText = "";
+    get textContent(): string {
+      return this.savedText;
+    }
+    set textContent(value: string) {
+      this.savedText = value;
+    }
+    appendChild(el: FakeStyleEl) {
+      if (!headChildren.includes(el)) {
+        headChildren.push(el);
+      }
+      el.isConnected = true;
+      return el;
+    }
+  }
+
+  class FakeElement extends FakeNode {
+    attributes = new Map<string, string>();
+    setAttribute(name: string, value: string) {
+      this.attributes.set(name, value);
+    }
+    remove() {
+      const idx = headChildren.indexOf(this as unknown as FakeStyleEl);
+      if (idx !== -1) {
+        headChildren.splice(idx, 1);
+      }
+      this.isConnected = false;
+    }
+  }
+
+  class FakeHTMLElement extends FakeElement {
+    tagName = "STYLE";
+    savedNonce = "";
+    get nonce(): string {
+      return this.savedNonce;
+    }
+    set nonce(value: string) {
+      this.savedNonce = value;
+    }
+  }
+
+  const head = Object.assign(new FakeElement(), {
+    replaceChildren(...nodes: FakeStyleEl[]) {
+      for (const existing of headChildren) {
+        existing.isConnected = false;
+      }
+      headChildren.length = 0;
+      for (const node of nodes) {
+        node.isConnected = true;
+        headChildren.push(node);
+      }
+    },
+  });
 
   class FakeDocument {
-    readonly head = {
-      appendChild(el: FakeStyleEl) {
-        if (!headChildren.includes(el)) {
-          headChildren.push(el);
-        }
-        el.isConnected = true;
-        return el;
-      },
-      replaceChildren(...nodes: FakeStyleEl[]) {
-        for (const existing of headChildren) {
-          existing.isConnected = false;
-        }
-        headChildren.length = 0;
-        for (const node of nodes) {
-          node.isConnected = true;
-          headChildren.push(node);
-        }
-      },
-    };
+    get head() {
+      return head;
+    }
     readonly documentElement = {
       style: {
         colorScheme: "",
@@ -100,33 +116,35 @@ function runShellTouchSelection(options: { readonly nonce?: string } = {}) {
       if (tag !== "style") {
         throw new Error(`unexpected tag ${tag}`);
       }
-      return makeStyle();
-    }
-  }
-
-  class FakeElement {
-    setAttribute(name: string, value: string) {
-      (this as unknown as FakeStyleEl).attributes.set(name, value);
+      const el = new FakeHTMLElement();
+      created.push(el);
+      return el;
     }
   }
 
   const doc = new FakeDocument();
   const code = [
     "const callOf = Reflect.apply;",
+    "const hasOwn = Object.prototype.hasOwnProperty;",
     "const createIn = Document.prototype.createElement;",
     "const setAttributeOfShell = Element.prototype.setAttribute;",
+    "const removeIn = Element.prototype.remove;",
     `const nonce = ${JSON.stringify(options.nonce ?? "")};`,
     'const plan = { content: "document", themeVariables: [], themeEvent: "porthole:theme" };',
     "let lastContext = null;",
     "let themed = false;",
+    shellPart("  const getterOf =", "\n  const navigateProto"),
+    "const connected = (node) => Boolean(node && node.isConnected);",
     shellPart("  const schemeFollows =", "\n  // A whole document,"),
     shellPart("  const themeNames =", "\n  // No size before"),
     "({ applyTheme, touchSelectionFollows });",
   ].join("\n");
 
   const api = runInNewContext(code, {
+    Node: FakeNode,
     Document: FakeDocument,
     Element: FakeElement,
+    HTMLElement: FakeHTMLElement,
     document: doc,
     CustomEvent: class {
       readonly type: string;
@@ -146,10 +164,23 @@ function runShellTouchSelection(options: { readonly nonce?: string } = {}) {
     touchSelectionFollows(): void;
   };
 
-  return { api, doc, headChildren, created, dispatchedThemeEvents };
+  return {
+    api,
+    doc,
+    head,
+    headChildren,
+    created,
+    dispatchedThemeEvents,
+    FakeHTMLElement,
+    FakeElement,
+    FakeNode,
+  };
 }
 
-function fakeHostHarness(config: PortholeConfig) {
+function fakeHostHarness(
+  config: PortholeConfig,
+  extraHostOptions: { readonly hostContext?: () => Partial<HostContext> } = {},
+) {
   const sentToFrame: unknown[] = [];
   let onMessage: ((data: unknown) => void) | null = null;
   let initializeResponse: { result?: { hostContext?: HostContext } } | null = null;
@@ -205,21 +236,29 @@ function fakeHostHarness(config: PortholeConfig) {
     getBoundingClientRect: () => ({ width: 390, height: 844 }),
   } as unknown as HTMLElement;
 
-  const host = createHost(config, { platform });
-  const handshake = () => {
+  const host = createHost(config, { platform, ...extraHostOptions });
+  const sendInitialize = () => {
     onMessage?.({
       jsonrpc: "2.0",
       id: "init-1",
       method: "ui/initialize",
       params: { protocolVersion: "2026-01-26" },
     });
+  };
+  const sendInitialized = () => {
     onMessage?.({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} });
+  };
+  const handshake = () => {
+    sendInitialize();
+    sendInitialized();
   };
 
   return {
     host,
     container,
     handshake,
+    sendInitialize,
+    sendInitialized,
     sentToFrame,
     initContext: () => initializeResponse?.result?.hostContext,
   };
@@ -233,7 +272,7 @@ describe("SHELL_RUNTIME touchSelectionFollows (P158)", () => {
     expect(headChildren).toHaveLength(0);
   });
 
-  it("injects and removes the coarse-pointer style on hostContext updates without firing themeEvent", () => {
+  it("injects and removes the zero-specificity coarse-pointer style without firing themeEvent", () => {
     const { api, headChildren, dispatchedThemeEvents } = runShellTouchSelection({
       nonce: "nonce1234",
     });
@@ -245,16 +284,13 @@ describe("SHELL_RUNTIME touchSelectionFollows (P158)", () => {
     });
     expect(headChildren).toHaveLength(1);
     const style = headChildren[0]!;
-    expect(style.nonce).toBe("nonce1234");
+    expect(style.savedNonce).toBe("nonce1234");
     expect(style.attributes.get("data-porthole-touch-selection")).toBe("");
-    expect(style.textContent).toContain("@media (pointer: coarse)");
-    expect(style.textContent).toContain("-webkit-touch-callout:none");
-    expect(style.textContent).toContain("user-select:none");
-    expect(style.textContent).toContain("input,textarea");
-
-    // Re-applying after head.replaceChildren (whole-document render) re-attaches the same style.
-    api.touchSelectionFollows();
-    expect(headChildren).toHaveLength(1);
+    expect(style.savedText).toContain("@media (pointer: coarse)");
+    expect(style.savedText).toContain("-webkit-touch-callout:none");
+    expect(style.savedText).toContain("user-select:none");
+    expect(style.savedText).toContain(':where(input,textarea,[contenteditable=""]');
+    expect(style.savedText).toContain('[contenteditable="plaintext-only" i] *');
 
     // Toggling back to default removes the style and emits no themeEvent.
     api.applyTheme({ theme: "light", styles: { variables: {} } });
@@ -276,6 +312,37 @@ describe("SHELL_RUNTIME touchSelectionFollows (P158)", () => {
 
     api.touchSelectionFollows();
     expect(headChildren).toHaveLength(1);
+  });
+
+  it("uses pre-content native setters/methods so tampered prototypes cannot steal nonce or abort applyTheme", () => {
+    const { api, headChildren, FakeHTMLElement, FakeElement, FakeNode } = runShellTouchSelection({
+      nonce: "secret-nonce",
+    });
+    const stolen: string[] = [];
+    Object.defineProperty(FakeHTMLElement.prototype, "nonce", {
+      configurable: true,
+      set(v: string) {
+        stolen.push(v);
+      },
+    });
+    FakeElement.prototype.remove = () => {
+      throw new Error("tampered remove");
+    };
+    FakeNode.prototype.appendChild = () => {
+      throw new Error("tampered appendChild");
+    };
+
+    api.applyTheme({
+      theme: "light",
+      styles: { variables: {} },
+      [PORTHOLE_TOUCH_SELECTION]: "none",
+    });
+    expect(stolen).toEqual([]);
+    expect(headChildren).toHaveLength(1);
+    expect(headChildren[0]!.savedNonce).toBe("secret-nonce");
+
+    expect(() => api.applyTheme({ theme: "light", styles: { variables: {} } })).not.toThrow();
+    expect(headChildren).toHaveLength(0);
   });
 });
 
@@ -313,10 +380,11 @@ describe("createHost touchSelection option and setTouchSelection (P158)", () => 
 
     // Redundant call with same mode sends nothing.
     d2.setTouchSelection("auto");
-    const afterRedundant = guardedHarness.sentToFrame.filter(
-      (msg) => (msg as { method?: string }).method === "ui/notifications/host-context-changed",
-    );
-    expect(afterRedundant).toHaveLength(1);
+    expect(
+      guardedHarness.sentToFrame.filter(
+        (msg) => (msg as { method?: string }).method === "ui/notifications/host-context-changed",
+      ),
+    ).toHaveLength(1);
 
     // Toggle back on sends host-context-changed with "none".
     d2.setTouchSelection("none");
@@ -326,5 +394,30 @@ describe("createHost touchSelection option and setTouchSelection (P158)", () => 
     expect(afterOn).toHaveLength(2);
     expect(afterOn[1]?.params?.[PORTHOLE_TOUCH_SELECTION]).toBe("none");
     d2.destroy();
+  });
+
+  it("reconciles mid-handshake setTouchSelection and clears options.hostContext override", () => {
+    const harness = fakeHostHarness(config, {
+      hostContext: () => ({ [PORTHOLE_TOUCH_SELECTION]: "none" }),
+    });
+    const d = harness.host.mount(harness.container, {
+      displayId: "d-mid",
+      title: "Mid",
+      scheme: "light",
+      touchSelection: "auto",
+    });
+    // Even if options.hostContext sets "none", mount.touchSelection ("auto") wins.
+    harness.sendInitialize();
+    expect(harness.initContext()?.[PORTHOLE_TOUCH_SELECTION]).toBeUndefined();
+
+    // Toggled after ui/initialize but before ui/notifications/initialized: synced on initialized.
+    d.setTouchSelection("none");
+    harness.sendInitialized();
+    const changed = harness.sentToFrame.filter(
+      (msg) => (msg as { method?: string }).method === "ui/notifications/host-context-changed",
+    ) as { params?: HostContext }[];
+    expect(changed).toHaveLength(1);
+    expect(changed[0]?.params?.[PORTHOLE_TOUCH_SELECTION]).toBe("none");
+    d.destroy();
   });
 });

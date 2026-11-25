@@ -231,6 +231,7 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
       const themeless = config.theme.documents === "never";
       let scheme: ColorScheme = themeless ? "light" : mount.scheme;
       let touchSelection: TouchSelection = mount.touchSelection ?? "auto";
+      let sentTouchSelection: TouchSelection | null = null;
       let height = mount.initialHeightPx ?? 0;
       let surface: Surface | null = null;
       let connection: C | null = null;
@@ -915,7 +916,8 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
         for (const [name, value] of Object.entries(variables)) {
           (STANDARD.has(name) ? standard : own)[name] = value;
         }
-        return {
+        sentTouchSelection = touchSelection;
+        const context: Record<string, unknown> = {
           theme: scheme,
           styles: { variables: standard },
           ...(Object.keys(own).length === 0 ? {} : { [PORTHOLE_STYLES]: { variables: own } }),
@@ -930,8 +932,13 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
                 platform: "web" as const,
               }),
           ...options.hostContext?.(),
-          ...(touchSelection === "none" ? { [PORTHOLE_TOUCH_SELECTION]: "none" as const } : {}),
         };
+        if (touchSelection === "none") {
+          context[PORTHOLE_TOUCH_SELECTION] = "none";
+        } else {
+          delete context[PORTHOLE_TOUCH_SELECTION];
+        }
+        return context as HostContext;
       };
 
       // A frame's size is taken at most once an animation frame after its run's first, and only
@@ -1248,6 +1255,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
                 giveAnnotations();
                 giveFind();
                 giveLinks();
+                if (sentTouchSelection !== null && touchSelection !== sentTouchSelection) {
+                  connection?.hostContextChanged(hostContext());
+                }
               }
               emit("initialized", undefined);
               tellPage();
@@ -1389,7 +1399,9 @@ export function createHost<C extends AdapterConnection = ShellConnection>(
             return;
           }
           touchSelection = next;
-          connection?.hostContextChanged(hostContext());
+          if (handshaken) {
+            connection?.hostContextChanged(hostContext());
+          }
         },
         on<E extends keyof DisplayEvents>(event: E, listener: (detail: DisplayEvents[E]) => void) {
           const set = listeners.get(event) ?? new Set();

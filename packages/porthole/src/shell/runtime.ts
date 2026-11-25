@@ -330,6 +330,10 @@ export const SHELL_RUNTIME = String.raw`(() => {
     const descriptor = proto ? Object.getOwnPropertyDescriptor(proto, name) : undefined;
     return descriptor && typeof descriptor.get === "function" ? descriptor.get : null;
   };
+  const setterOf = (proto, name) => {
+    const descriptor = proto ? Object.getOwnPropertyDescriptor(proto, name) : undefined;
+    return descriptor && typeof descriptor.set === "function" ? descriptor.set : null;
+  };
   const navigateProto = typeof NavigateEvent === "function" ? NavigateEvent.prototype : null;
   const destinationOf = getterOf(navigateProto, "destination");
   const navigationTypeOf = getterOf(navigateProto, "navigationType");
@@ -1815,26 +1819,46 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // Host-controlled touch text-selection guard (P158): injected only when the host asks via
   // porthole/touch-selection === "none" in hostContext (never on standalone tabs or hostless
   // embeds), scoped to coarse pointers (pointer: coarse) and keeping form controls selectable.
+  // All DOM access uses pre-content native getters/setters/methods via callOf so untrusted content
+  // can neither exfiltrate the CSP nonce nor abort applyTheme/renderDocument.
   const TOUCH_SELECTION_STYLE =
-    '@media (pointer: coarse){:where(:root,:root *){-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}input,textarea,[contenteditable=""],[contenteditable="true"]{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}}';
+    '@media (pointer: coarse){:where(:root,:root *){-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}:where(input,textarea,[contenteditable=""],[contenteditable="true" i],[contenteditable="plaintext-only" i],[contenteditable=""] *,[contenteditable="true" i] *,[contenteditable="plaintext-only" i] *){-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}}';
+  const headOf = getterOf(Document.prototype, "head");
+  const appendChildIn = Node.prototype.appendChild;
+  const nonceTo = setterOf(typeof HTMLElement === "function" ? HTMLElement.prototype : null, 'nonce');
+  const textContentTo = setterOf(Node.prototype, "textContent");
   let touchSelectionStyle = null;
   const touchSelectionFollows = () => {
-    const block = lastContext !== null && lastContext["porthole/touch-selection"] === "none";
-    if (block) {
-      if (touchSelectionStyle === null) {
-        touchSelectionStyle = callOf(createIn, document, ["style"]);
-        if (nonce) {
-          touchSelectionStyle.nonce = nonce;
+    try {
+      const block =
+        lastContext !== null &&
+        callOf(hasOwn, lastContext, ["porthole/touch-selection"]) &&
+        lastContext["porthole/touch-selection"] === "none";
+      if (block) {
+        if (touchSelectionStyle === null) {
+          touchSelectionStyle = callOf(createIn, document, ["style"]);
+          if (nonce !== "") {
+            if (nonceTo === null) {
+              callOf(setAttributeOfShell, touchSelectionStyle, ['nonce', nonce]);
+            } else {
+              callOf(nonceTo, touchSelectionStyle, [nonce]);
+            }
+          }
+          callOf(setAttributeOfShell, touchSelectionStyle, ["data-porthole-touch-selection", ""]);
+          if (textContentTo === null) {
+            touchSelectionStyle.textContent = TOUCH_SELECTION_STYLE;
+          } else {
+            callOf(textContentTo, touchSelectionStyle, [TOUCH_SELECTION_STYLE]);
+          }
         }
-        callOf(setAttributeOfShell, touchSelectionStyle, ["data-porthole-touch-selection", ""]);
-        touchSelectionStyle.textContent = TOUCH_SELECTION_STYLE;
+        const head = headOf === null ? document.head : callOf(headOf, document, []);
+        if (!connected(touchSelectionStyle) && head !== null) {
+          callOf(appendChildIn, head, [touchSelectionStyle]);
+        }
+      } else if (touchSelectionStyle !== null && connected(touchSelectionStyle)) {
+        callOf(removeIn, touchSelectionStyle, []);
       }
-      if (!touchSelectionStyle.isConnected && document.head !== null) {
-        document.head.appendChild(touchSelectionStyle);
-      }
-    } else if (touchSelectionStyle !== null && touchSelectionStyle.isConnected) {
-      touchSelectionStyle.remove();
-    }
+    } catch (_) {}
   };
   // A whole document, parsed inert (no scripts run, no declarative shadow roots built), guarded,
   // imported in place of the shell's, then its scripts run in order. The theme on the root stays.
