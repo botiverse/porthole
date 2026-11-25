@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.21.0
 
 - **Host-controlled touch text-selection guard** (P158). New `MountOptions.touchSelection`,
   `DisplayControls.setTouchSelection(mode)`, and `<PortholeFrame touchSelection="none" | "auto">`
