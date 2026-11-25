@@ -45,7 +45,13 @@ import type { CapabilityName } from "../config/capabilities.ts";
 import type { ColorScheme, PortholeConfig } from "../config/schema.ts";
 import { writeClipboard } from "../host/clipboard.ts";
 import { createHost } from "../host/create-host.ts";
-import type { DisplayEvents, DisplayHandle, FrameOutcome, HostErrorKind } from "../host/types.ts";
+import type {
+  DisplayEvents,
+  DisplayHandle,
+  FrameOutcome,
+  HostErrorKind,
+  TouchSelection,
+} from "../host/types.ts";
 import type { InstanceLocator, InstanceRef } from "../isolation/types.ts";
 import { ConfirmDialog } from "./dialog.tsx";
 import { ContextNotice, type ContextUpdate } from "./context-notice.tsx";
@@ -783,6 +789,12 @@ export interface PortholeFrameProps {
    * `onHostError`, kind `"links"`; a malformed label is dropped, the rest kept.
    */
   readonly linkLabels?: readonly LinkLabel[];
+  /**
+   * Host-controlled touch text-selection policy inside the frame (P158): `"none"` disables text
+   * selection and long-press callouts on coarse pointers (`@media (pointer: coarse)`) while
+   * keeping form controls selectable. Default `"auto"`.
+   */
+  readonly touchSelection?: TouchSelection;
   /** Draws the placeholder instead of the default one. */
   readonly renderPlaceholder?: (props: PlaceholderProps) => ReactNode;
   readonly className?: string;
@@ -1246,6 +1258,7 @@ function Mount({
         ...(instance === undefined ? {} : { instance }),
         ...(declaration === undefined ? {} : { declaration }),
         ...(viewer === undefined ? {} : { viewer }),
+        ...(first.touchSelection === undefined ? {} : { touchSelection: first.touchSelection }),
         ...(fills ? { fill: true } : {}),
       });
     } catch (error) {
@@ -1470,6 +1483,16 @@ function Mount({
       handle.current?.setTheme(scheme);
     }
   }, [scheme, mountScheme]);
+  // Host-controlled touch selection policy (P158): updated in place without restarting the frame.
+  const touchSelection: TouchSelection = frame.touchSelection ?? "auto";
+  const [mountTouchSelection] = useState(touchSelection);
+  const touchSelectionFlipped = useRef(false);
+  useEffect(() => {
+    if (touchSelectionFlipped.current || touchSelection !== mountTouchSelection) {
+      touchSelectionFlipped.current = true;
+      handle.current?.setTouchSelection(touchSelection);
+    }
+  }, [touchSelection, mountTouchSelection]);
   const themeKey = frame.themeKey ?? page.themeKey;
   const [mountThemeKey] = useState(themeKey);
   useEffect(() => {

@@ -81,6 +81,9 @@ export interface HostOptions<C extends AdapterConnection = ShellConnection> {
   readonly nonce?: string | (() => string | undefined);
 }
 
+/** Host-controlled touch text-selection policy inside a framed document (P158). */
+export type TouchSelection = "auto" | "none";
+
 export interface MountOptions {
   /** The host's id for this display: what its height is remembered by, and calls name. */
   readonly displayId: string;
@@ -115,6 +118,12 @@ export interface MountOptions {
    * Absent everywhere: 0.6's functions run as before; the runtime's own are refused.
    */
   readonly viewer?: ViewerInfo;
+  /**
+   * Whether to disable text selection and long-press callouts on touch screens (`pointer: coarse`)
+   * inside the frame (P158): `"none"` injects a zero-specificity guard (keeping inputs, textareas
+   * and contenteditable selectable); `"auto"` (default) leaves browser behavior untouched.
+   */
+  readonly touchSelection?: TouchSelection;
   /**
    * Fill the container (give it a height) instead of taking the content's height.
    *
@@ -435,6 +444,8 @@ export interface DisplayControls {
   setTheme(scheme: ColorScheme): void;
   /** The host's theme values changed (same scheme): read them now and re-theme the frame. */
   refreshTheme(): void;
+  /** Updates the frame's touch text-selection policy in place without a reload (P158). */
+  setTouchSelection(mode: TouchSelection): void;
   on<E extends keyof DisplayEvents>(
     event: E,
     listener: (detail: DisplayEvents[E]) => void,
