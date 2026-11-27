@@ -1300,7 +1300,23 @@ test("drafts (P107): a dashed line and a hollow marker with no number, apart fro
       );
     }
     const lines = await layerNodes(page, frame, "mark");
-    expect(lines.length, "both drafts are marked").toBeGreaterThanOrEqual(2);
+    const hasNativeHighlights = await frame.evaluate(
+      () =>
+        typeof CSS === "object" &&
+        CSS !== null &&
+        "highlights" in CSS &&
+        typeof Highlight === "function",
+    );
+    if (hasNativeHighlights) {
+      // Text drafts paint through CSS.highlights (`porthole-draft`), element drafts in the layer (P159).
+      expect(lines.length, "element draft is marked in the layer").toBe(1);
+      expect(
+        await frame.evaluate(() => CSS.highlights.get("porthole-draft")?.size ?? 0),
+        "text draft is registered in CSS.highlights",
+      ).toBe(1);
+    } else {
+      expect(lines.length, "both drafts are marked").toBeGreaterThanOrEqual(2);
+    }
     for (const each of lines) {
       expect(each.className, "probe: each draft's line is drawn as a draft's").toMatch(
         /(^|\s)draft(\s|$)/u,
@@ -1833,17 +1849,18 @@ test("on touch, a marker takes a tap a few px off its bubble (44 by 44), after t
   }
 });
 
-test("a marker stays on its line as the document scrolls with no draw: the scroll itself moves it (P147)", async ({
+test("a marker stays on its line as the document scrolls with no draw: the document scroll itself moves it on every engine (P147, P159)", async ({
   page,
 }) => {
   const display = await referenceHost.launch(page, {
     config: presets.artifact({ capabilities: { annotate: {} } }),
     widthPx: 600,
     heightPx: 400,
-    content: `<div style="padding: 300px 20px 1600px"><p id="p1" style="font-size: 18px; margin: 0">Costs <b>fell</b> by three percent.</p></div>${HEARING}`,
+    content: `<div id="wrap" style="padding: 300px 20px 1600px"><p id="p1" style="font-size: 18px; margin: 0">Costs <b>fell</b> by three percent.</p></div>${HEARING}`,
   });
   const frame = await display.frame();
   await expect(frame.locator("#p1")).toBeAttached();
+  const initialScrollHeight = await frame.evaluate(() => document.documentElement.scrollHeight);
   await display.annotate("show", [textMark("fell", "fell", 1)]);
   await next(display, "anchored");
   await expect
@@ -1851,22 +1868,114 @@ test("a marker stays on its line as the document scrolls with no draw: the scrol
       message: "probe: the marker is on its paragraph's line",
     })
     .toBe(1);
-  const rides = await frame.evaluate(() => CSS.supports("animation-timeline: scroll()"));
+  // The document-coordinate layer must not inflate scrollHeight.
+  expect(
+    await frame.evaluate(() => document.documentElement.scrollHeight),
+    "layer adds nothing to document scrollHeight",
+  ).toBe(initialScrollHeight);
+  // Native CSS Custom Highlight API paints text marks with zero .mark.text DOM overlays when supported.
+  const highlightState = await frame.evaluate(() => ({
+    supported:
+      typeof CSS === "object" &&
+      CSS !== null &&
+      "highlights" in CSS &&
+      typeof Highlight === "function",
+    markSize:
+      typeof CSS === "object" && CSS !== null && "highlights" in CSS
+        ? (CSS.highlights.get("porthole-mark")?.size ?? 0)
+        : 0,
+  }));
+  if (highlightState.supported) {
+    expect(highlightState.markSize, "text mark painted via CSS.highlights").toBe(1);
+  }
+  // Shrinking the document shrinks scrollHeight cleanly: the document-coordinate layer re-measures
+  // via ResizeObserver instead of pinning scrollHeight to the old taller size.
+  await frame.evaluate(() => {
+    const wrap = document.getElementById("wrap");
+    if (wrap) wrap.style.paddingBottom = "1000px";
+  });
+  await expect
+    .poll(() => frame.evaluate(() => document.documentElement.scrollHeight), {
+      message: "shrinking the document shrinks scrollHeight without layer pinning",
+    })
+    .toBeLessThan(initialScrollHeight - 500);
   // No draw from here on: the page takes the frame clock the runtime draws on (content can), then
-  // scrolls. Only what the engine moves with the scroll keeps the marker with its words.
+  // scrolls. Because the layer is position:absolute at the document origin and text marks paint
+  // via CSS.highlights, every engine moves them natively with zero scroll-event redraws (P159).
   await frame.evaluate(() => {
     window.requestAnimationFrame = () => 0;
     window.scrollBy(0, 180);
   });
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(300);
   const scrolled = await frame.evaluate(() => window.scrollY);
   expect(scrolled, "probe: the document scrolled").toBe(180);
-  // With a scroll timeline the marker is still on its line. Without one (Firefox today) it is
-  // where it was drawn, off the line: the scroll event's draw, taken away here, is what moves it.
   expect(
     (await markersOnLine(frame, "#p1")).runs.length,
-    rides ? "the marker rode the scroll" : "no scroll timeline: only a draw moves it",
-  ).toBe(rides ? 1 : 0);
+    "the marker stayed locked to its line without any JS redraw",
+  ).toBe(1);
+  // Clearing removes all porthole-* highlights from CSS.highlights.
+  await display.annotate("clear");
+  if (highlightState.supported) {
+    await expect
+      .poll(() => frame.evaluate(() => CSS.highlights.get("porthole-mark")?.size ?? 0))
+      .toBe(0);
+  }
+});
+
+test("followed selection with Element-node range endpoints (triple-click) normalizes to Text nodes and paints visibly on every engine including WebKit (P159)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    widthPx: 600,
+    heightPx: 300,
+    content: `<p id="p1" style="margin: 24px; font: 18px/1.5 sans-serif">Triple click selects <b>this whole</b> paragraph.</p>`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#p1")).toBeVisible();
+  const bare = await look(page, frame, "#p1");
+
+  await display.annotate("start", { elements: false, text: true, keepSelection: true });
+  // Create a selection whose Range endpoints are Element nodes (as WebKit triple-click produces).
+  await frame.evaluate(() => {
+    const p = document.getElementById("p1");
+    if (!p) return;
+    const range = document.createRange();
+    range.selectNodeContents(p);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  });
+  await next(display, "selected");
+  await display.annotate("track", { selection: true });
+  await next(display, "selectionTracked");
+  // Clear the browser's own selection so only Porthole's held highlight remains.
+  await frame.evaluate(() => window.getSelection()?.removeAllRanges());
+  await page.waitForTimeout(100);
+
+  const info = await frame.evaluate(() => {
+    const supported =
+      typeof CSS === "object" &&
+      CSS !== null &&
+      "highlights" in CSS &&
+      typeof Highlight === "function";
+    if (!supported) return { supported, size: 0, startType: 0, endType: 0 };
+    const hl = CSS.highlights.get("porthole-held");
+    const first = hl ? Array.from(hl)[0] : undefined;
+    return {
+      supported,
+      size: hl?.size ?? 0,
+      startType: first?.startContainer.nodeType ?? 0,
+      endType: first?.endContainer.nodeType ?? 0,
+    };
+  });
+  if (info.supported) {
+    expect(info.size, "porthole-held registered").toBe(1);
+    expect(info.startType, "startContainer normalized to Text node for WebKit").toBe(3);
+    expect(info.endType, "endContainer normalized to Text node for WebKit").toBe(3);
+  }
+  const lit = await look(page, frame, "#p1");
+  expect(lit.equals(bare), "probe: held highlight visibly painted over the paragraph").toBe(false);
 });
 
 test("on touch, where two markers' 44 px boxes overlap, a tap is the nearest bubble's (P119)", async ({

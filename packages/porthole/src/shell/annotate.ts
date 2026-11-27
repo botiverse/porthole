@@ -402,7 +402,9 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const rangeRects = Range.prototype.getClientRects;
       const cloneRange = Range.prototype.cloneRange;
       const setStart = Range.prototype.setStart;
+      const setEnd = Range.prototype.setEnd;
       const setStartBefore = Range.prototype.setStartBefore;
+      const intersectsNode = Range.prototype.intersectsNode;
       const compareBoundaryPoints = Range.prototype.compareBoundaryPoints;
       const attachShadow = Element.prototype.attachShadow;
       const getAttribute = Element.prototype.getAttribute;
@@ -419,6 +421,17 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const parentElementOf = getterOf(Node.prototype, "parentElement");
       const childrenOf = getterOf(Element.prototype, "children");
       const listenOn = EventTarget.prototype.addEventListener;
+      const targetOf = getterOf(Event.prototype, "target");
+      const leftOf = getterOf(DOMRectReadOnly.prototype, "left");
+      const topOf = getterOf(DOMRectReadOnly.prototype, "top");
+      const widthOf = getterOf(DOMRectReadOnly.prototype, "width");
+      const heightOf = getterOf(DOMRectReadOnly.prototype, "height");
+      const NativeHighlight = typeof Highlight === "function" ? Highlight : null;
+      const nativeHighlights = typeof CSS === "object" && CSS !== null && CSS.highlights ? CSS.highlights : null;
+      const highlightProto = nativeHighlights !== null ? Object.getPrototypeOf(nativeHighlights) : null;
+      const highlightSet = highlightProto !== null && typeof highlightProto.set === "function" ? highlightProto.set : null;
+      const highlightDelete = highlightProto !== null && typeof highlightProto.delete === "function" ? highlightProto.delete : null;
+      const hasNativeHighlights = NativeHighlight !== null && nativeHighlights !== null && highlightSet !== null && highlightDelete !== null;
       const post = window.parent.postMessage.bind(window.parent);
       // Read once: content can replace window.parent (it is [Replaceable]), never what was read. A
       // hostless plan (P143) tells no parent anything.
@@ -735,12 +748,13 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         return point ? { lastLineDocumentRect, scroll, pointDocument: { x: point.x + scroll.x, y: point.y + scroll.y }, place } : { lastLineDocumentRect, scroll, place };
       };
 
-      // The shell's own layer, over the content: marks, the outline of what would be picked.
+      // The shell's own layer, over the content: element marks, markers, and the picking outline.
       let layer = null;
       let shadow = null;
+      let highlightStyle = null;
       // Marks lie over the content's text, so their fill is light (the text under them keeps its
       // contrast, on a light page and a dark one alike) and an underline or outline says where
-      // they are; the active one and a flash add a ring around it, not more fill over its words.
+      // they are; the active one and a flash add stronger emphasis, not opaque fill over words.
       // An element's mark with a marker is quieter (a thin line): the marker says what it is.
       // A marker is a small bubble with a number, drawn in its own colors and font (only what the
       // layer inherits from the page could reach it, so each of those is set here). A draft
@@ -753,42 +767,130 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       // The selection the host follows (P138) is drawn as what is picked is: an element in the
       // picking outline, a little lighter and without its name; words with a light fill and a line
       // under them, in the same blue, apart from the marks' yellow (no comment is there yet).
-      const STYLE = ".mark{position:absolute;border-radius:2px;background:rgba(250,204,21,.18);box-shadow:inset 0 -2px 0 rgba(234,179,8,.95)}.mark.element{background:rgba(250,204,21,.07);box-shadow:none;outline:2px solid rgba(234,179,8,.9);outline-offset:1px}.mark.active{background:rgba(250,204,21,.26);box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 2px rgba(234,179,8,.45)}.mark.element.active{background:rgba(250,204,21,.12);box-shadow:none;outline-width:3px}.mark.element.quiet{background:rgba(250,204,21,.05);outline:1px solid rgba(234,179,8,.6);outline-offset:2px}.mark.element.quiet.active{background:rgba(250,204,21,.1);outline:2px solid rgba(234,179,8,.9)}.mark.draft{box-sizing:border-box;background:rgba(250,204,21,.08);box-shadow:none;border-bottom:2px dashed rgba(202,138,4,.95)}.mark.draft.active{background:rgba(250,204,21,.16);box-shadow:0 0 0 2px rgba(234,179,8,.45);border-bottom-width:3px}.mark.element.draft{background:rgba(250,204,21,.04);border-bottom:0;outline-style:dashed}.mark.element.draft.active{background:rgba(250,204,21,.08);box-shadow:none;outline-style:dashed}.marker{position:absolute;box-sizing:border-box;height:18px;min-width:18px;display:flex;align-items:center;justify-content:center;gap:3px;margin:0;padding:0 5px;border:1px solid rgba(161,98,7,.6);border-radius:9px 9px 9px 2px;background:#fde68a;color:#422006;box-shadow:0 1px 2px rgba(0,0,0,.3);font:600 11px/16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-style:normal;letter-spacing:0;word-spacing:0;text-transform:none;text-indent:0;text-shadow:none;direction:ltr;writing-mode:horizontal-tb;white-space:nowrap;user-select:none;-webkit-user-select:none;cursor:pointer;pointer-events:auto;appearance:none;-webkit-appearance:none}.marker:focus-visible{outline:2px solid #2563eb;outline-offset:1px}.marker:hover{background:#fcd34d}.marker.active{background:#facc15;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.3)}.marker.compact{padding:0 4px}.marker.draft{border:1px dashed rgb(202,138,4);background:#fffdf5;color:#a16207;box-shadow:0 1px 2px rgba(0,0,0,.2)}.marker.draft:hover{background:#fef9e7}.marker.draft.active{background:#fef3c7;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.2)}.marker.inert,[data-placing]>.marker{pointer-events:none}.touch>.marker::before{content:'';position:absolute;left:50%;top:50%;width:max(100% + 2px,44px);height:max(100% + 2px,44px);transform:translate(-50%,-50%)}.marker svg{display:block;width:11px;height:11px;flex:none}.mark.flash{animation:flash 1.8s ease-out}@keyframes flash{from{box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 6px rgba(250,204,21,.6)}}.hover{position:absolute;outline:2px solid #2563eb;outline-offset:1px;background:rgba(37,99,235,.12)}.held{position:absolute;outline:2px solid #2563eb;outline-offset:1px;background:rgba(37,99,235,.06)}.held.text{outline:0;border-radius:2px;background:rgba(37,99,235,.12);box-shadow:inset 0 -2px 0 #2563eb}.tag{position:absolute;max-width:70vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace;padding:0 6px;border-radius:4px;background:#1e293b;color:#fff}.ride{position:absolute;left:0;top:0;width:0;height:0}@supports (animation-timeline:scroll()){.ride{animation:ride 1ms linear both;animation-timeline:scroll(root y)}@keyframes ride{to{transform:translateY(calc(-1px*var(--ride)))}}}";
-      // The marks ride the document's own scroll (P147). The layer stays fixed and clipped to the
-      // viewport, so it adds nothing to what the page can scroll; inside it one box holds every
-      // mark, marker and outline at its place in the document (its top plus how far the document
-      // is scrolled), and a scroll-driven animation moves that box up by the scroll. The engine
-      // runs it with the scroll itself, so a mark is where its words are in every frame, not a
-      // frame behind (a scroll event is heard after the frame it scrolled). Down the page only:
-      // sideways, and where the engine has no scroll timeline (ridden: 0), a mark is placed in the
-      // viewport and follows from the scroll event as before. Read with the DOM's own getters,
-      // taken before content runs; the range is what the timeline runs over (0: it is inactive,
-      // and nothing moves).
-      const rides = typeof CSS === "object" && CSS !== null && typeof CSS.supports === "function" && CSS.supports("animation-timeline: scroll()");
-      const scrollerOf = getterOf(Document.prototype, "scrollingElement");
-      const scrollTopOf = getterOf(Element.prototype, "scrollTop");
-      const scrollHeightOf = getterOf(Element.prototype, "scrollHeight");
-      const clientHeightOf = getterOf(Element.prototype, "clientHeight");
-      // How far down the document is scrolled as the marks are drawn, and how far it can be.
-      let ridden = 0;
-      const rideOf = () => {
-        const none = { by: 0, range: 0 };
-        if (!rides || scrollerOf === null || scrollTopOf === null || scrollHeightOf === null || clientHeightOf === null) {
-          return none;
+      // Text marks and followed text selections paint through the CSS Custom Highlight API when
+      // available (P159): painted directly with the text runs by the engine, with zero DOM
+      // mutation and zero scroll lag in every scroll container. Longhand text-decoration-* rules
+      // keep WebKit/Safari 17.2+ parsing cleanly.
+      const HIGHLIGHT_NAMES = ["porthole-draft", "porthole-mark", "porthole-draft-active", "porthole-mark-active", "porthole-mark-flash", "porthole-held"];
+      const HIGHLIGHT_STYLE = "::highlight(porthole-draft){background-color:rgba(250,204,21,.1);text-decoration-line:underline;text-decoration-style:dashed;text-decoration-color:rgba(202,138,4,.95);text-decoration-thickness:2px;text-underline-offset:2px}::highlight(porthole-mark){background-color:rgba(250,204,21,.2);text-decoration-line:underline;text-decoration-style:solid;text-decoration-color:rgba(234,179,8,.95);text-decoration-thickness:2px;text-underline-offset:2px}::highlight(porthole-draft-active){background-color:rgba(250,204,21,.2);text-decoration-line:underline;text-decoration-style:dashed;text-decoration-color:rgba(202,138,4,.95);text-decoration-thickness:3px;text-underline-offset:2px}::highlight(porthole-mark-active){background-color:rgba(250,204,21,.3);text-decoration-line:underline;text-decoration-style:solid;text-decoration-color:rgb(234,179,8);text-decoration-thickness:3px;text-underline-offset:2px}::highlight(porthole-mark-flash){background-color:rgba(250,204,21,.45);text-decoration-line:underline;text-decoration-style:solid;text-decoration-color:rgb(234,179,8);text-decoration-thickness:3px;text-underline-offset:2px}::highlight(porthole-held){background-color:rgba(37,99,235,.14);text-decoration-line:underline;text-decoration-style:solid;text-decoration-color:#2563eb;text-decoration-thickness:2px;text-underline-offset:2px}";
+      const ensureHighlightStyle = () => {
+        if (!hasNativeHighlights) {
+          return;
         }
-        const scroller = callOf(scrollerOf, document, []);
-        if (!scroller) {
-          return none;
+        if (highlightStyle === null) {
+          highlightStyle = createElement.call(document, "style");
+          highlightStyle.setAttribute("data-porthole-highlights", "");
+          if (nonce !== "") {
+            highlightStyle.nonce = nonce;
+          }
         }
-        const range = callOf(scrollHeightOf, scroller, []) - callOf(clientHeightOf, scroller, []);
-        const by = callOf(scrollTopOf, scroller, []);
-        return range > 0 && by >= 0 && by <= range + 1 ? { by, range } : none;
+        if (highlightStyle.textContent !== HIGHLIGHT_STYLE) {
+          highlightStyle.textContent = HIGHLIGHT_STYLE;
+        }
+        if (!highlightStyle.isConnected) {
+          document.documentElement.appendChild(highlightStyle);
+        }
       };
+      const clearHighlights = () => {
+        if (!hasNativeHighlights) {
+          return;
+        }
+        for (const name of HIGHLIGHT_NAMES) {
+          try {
+            callOf(highlightDelete, nativeHighlights, [name]);
+          } catch (_) {}
+        }
+      };
+      // WebKit's CSS Custom Highlight API silently skips Ranges whose start/end container is an
+      // Element node (e.g. triple-click or whole-element selections). Normalize non-Text endpoints
+      // onto the first/last intersecting Text node before registering with CSS.highlights (P159).
+      const textRangeOf = (range) => {
+        try {
+          if (range.startContainer.nodeType === 3 && range.endContainer.nodeType === 3) {
+            return range;
+          }
+          const root = range.commonAncestorContainer;
+          if (root === null || root === undefined) {
+            return range;
+          }
+          const walker = createTreeWalker.call(document, root, NodeFilter.SHOW_TEXT);
+          let first = null;
+          let last = null;
+          for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+            if (node.nodeValue.length > 0 && callOf(intersectsNode, range, [node])) {
+              if (first === null) {
+                first = node;
+              }
+              last = node;
+            }
+          }
+          if (first === null || last === null) {
+            return range;
+          }
+          const normalized = createRange.call(document);
+          if (range.startContainer.nodeType === 3) {
+            callOf(setStart, normalized, [range.startContainer, range.startOffset]);
+          } else {
+            callOf(setStart, normalized, [first, 0]);
+          }
+          if (range.endContainer.nodeType === 3) {
+            callOf(setEnd, normalized, [range.endContainer, range.endOffset]);
+          } else {
+            callOf(setEnd, normalized, [last, last.nodeValue.length]);
+          }
+          return normalized;
+        } catch (_) {
+          return range;
+        }
+      };
+      const syncHighlights = (buckets) => {
+        if (!hasNativeHighlights) {
+          return;
+        }
+        let any = false;
+        for (let i = 0; i < HIGHLIGHT_NAMES.length; i += 1) {
+          const name = HIGHLIGHT_NAMES[i];
+          const ranges = buckets[i];
+          if (ranges.length === 0) {
+            try {
+              callOf(highlightDelete, nativeHighlights, [name]);
+            } catch (_) {}
+            continue;
+          }
+          any = true;
+          try {
+            const hl = new NativeHighlight(...ranges.map(textRangeOf));
+            hl.priority = i + 1;
+            callOf(highlightSet, nativeHighlights, [name, hl]);
+          } catch (_) {}
+        }
+        if (any) {
+          ensureHighlightStyle();
+        }
+      };
+      const STYLE = ".mark{position:absolute;border-radius:2px;background:rgba(250,204,21,.18);box-shadow:inset 0 -2px 0 rgba(234,179,8,.95)}.mark.element{background:rgba(250,204,21,.07);box-shadow:none;outline:2px solid rgba(234,179,8,.9);outline-offset:1px}.mark.active{background:rgba(250,204,21,.26);box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 2px rgba(234,179,8,.45)}.mark.element.active{background:rgba(250,204,21,.12);box-shadow:none;outline-width:3px}.mark.element.quiet{background:rgba(250,204,21,.05);outline:1px solid rgba(234,179,8,.6);outline-offset:2px}.mark.element.quiet.active{background:rgba(250,204,21,.1);outline:2px solid rgba(234,179,8,.9)}.mark.draft{box-sizing:border-box;background:rgba(250,204,21,.08);box-shadow:none;border-bottom:2px dashed rgba(202,138,4,.95)}.mark.draft.active{background:rgba(250,204,21,.16);box-shadow:0 0 0 2px rgba(234,179,8,.45);border-bottom-width:3px}.mark.element.draft{background:rgba(250,204,21,.04);border-bottom:0;outline-style:dashed}.mark.element.draft.active{background:rgba(250,204,21,.08);box-shadow:none;outline-style:dashed}.marker{position:absolute;box-sizing:border-box;height:18px;min-width:18px;display:flex;align-items:center;justify-content:center;gap:3px;margin:0;padding:0 5px;border:1px solid rgba(161,98,7,.6);border-radius:9px 9px 9px 2px;background:#fde68a;color:#422006;box-shadow:0 1px 2px rgba(0,0,0,.3);font:600 11px/16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-style:normal;letter-spacing:0;word-spacing:0;text-transform:none;text-indent:0;text-shadow:none;direction:ltr;writing-mode:horizontal-tb;white-space:nowrap;user-select:none;-webkit-user-select:none;cursor:pointer;pointer-events:auto;appearance:none;-webkit-appearance:none}.marker:focus-visible{outline:2px solid #2563eb;outline-offset:1px}.marker:hover{background:#fcd34d}.marker.active{background:#facc15;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.3)}.marker.compact{padding:0 4px}.marker.draft{border:1px dashed rgb(202,138,4);background:#fffdf5;color:#a16207;box-shadow:0 1px 2px rgba(0,0,0,.2)}.marker.draft:hover{background:#fef9e7}.marker.draft.active{background:#fef3c7;box-shadow:0 0 0 2px rgba(234,179,8,.55),0 1px 2px rgba(0,0,0,.2)}.marker.inert,[data-placing]>.marker{pointer-events:none}.touch>.marker::before{content:'';position:absolute;left:50%;top:50%;width:max(100% + 2px,44px);height:max(100% + 2px,44px);transform:translate(-50%,-50%)}.marker svg{display:block;width:11px;height:11px;flex:none}.mark.flash{animation:flash 1.8s ease-out}@keyframes flash{from{box-shadow:inset 0 -3px 0 rgb(234,179,8),0 0 0 6px rgba(250,204,21,.6)}}.hover{position:absolute;outline:2px solid #2563eb;outline-offset:1px;background:rgba(37,99,235,.12)}.held{position:absolute;outline:2px solid #2563eb;outline-offset:1px;background:rgba(37,99,235,.06)}.held.text{outline:0;border-radius:2px;background:rgba(37,99,235,.12);box-shadow:inset 0 -2px 0 #2563eb}.tag{position:absolute;max-width:70vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace;padding:0 6px;border-radius:4px;background:#1e293b;color:#fff}";
+      // Document-coordinate layer (P159, amends P104 and P147). Instead of a position:fixed
+      // viewport overlay driven by a scroll-timeline animation (which falls back to main thread on
+      // some Android WebViews and is absent on Firefox and older Safari), the layer is
+      // position:absolute at the document's origin and clipped to the content's own scroll size.
+      // Every browser's compositor scrolls it natively with the document in every frame, in both
+      // axes, with zero scroll-event redraws on root scroll.
+      const scrollerOf = getterOf(Document.prototype, "scrollingElement");
+      const scrollWidthOf = getterOf(Element.prototype, "scrollWidth");
+      const scrollHeightOf = getterOf(Element.prototype, "scrollHeight");
+      const clientWidthOf = getterOf(Element.prototype, "clientWidth");
+      const clientHeightOf = getterOf(Element.prototype, "clientHeight");
+      let originX = 0;
+      let originY = 0;
       // Inline and important: the content's own style sheets can't hide, shrink or move it by
-      // accident. Set again at each draw, since its scripts can rewrite it (narrowing only: the
-      // content can still cover the layer, or move it with its ancestors, P104). Clipped, where an
-      // engine has it, not hidden: hidden is a box a focused marker out of view would scroll (P133).
-      const LAYER_STYLE = "position:fixed!important;inset:0!important;width:auto!important;height:auto!important;min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;display:block!important;visibility:visible!important;opacity:1!important;pointer-events:none!important;z-index:2147483647!important;overflow:hidden!important;overflow:clip!important;margin:0!important;padding:0!important;border:0!important;background:none!important;transform:none!important;scale:none!important;translate:none!important;rotate:none!important;zoom:1!important;clip-path:none!important;mask:none!important;filter:none!important;content-visibility:visible!important;contain:none!important";
+      // accident. Clipped, where an engine has it, not hidden: hidden is a box a focused marker
+      // out of view would scroll (P133). Sized to the document's content scroll bounds so the
+      // layer adds nothing to what the page can scroll.
+      const LAYER_STYLE_BASE = "position:absolute!important;top:0!important;left:0!important;min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;display:block!important;visibility:visible!important;opacity:1!important;pointer-events:none!important;z-index:2147483647!important;overflow:hidden!important;overflow:clip!important;margin:0!important;padding:0!important;border:0!important;background:none!important;transform:none!important;scale:none!important;translate:none!important;rotate:none!important;zoom:1!important;clip-path:none!important;mask:none!important;filter:none!important;content-visibility:visible!important;contain:none!important";
+      const NativeResizeObserver = typeof ResizeObserver === "function" ? ResizeObserver : null;
+      let observedBody = null;
+      let bodyResizer = null;
+      const layerStyleOf = (width, height) => LAYER_STYLE_BASE + ";width:" + width + "px!important;height:" + height + "px!important";
       const ensureLayer = () => {
         if (layer === null) {
           layer = createElement.call(document, "div");
@@ -798,13 +900,39 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           callOf(listenOn, shadow, ["focusin", onMarkerFocus]);
           callOf(listenOn, shadow, ["focusout", onMarkerFocus]);
         }
-        if (layer.style.cssText !== LAYER_STYLE) {
-          layer.style.cssText = LAYER_STYLE;
-        }
         if (!layer.isConnected) {
           document.documentElement.appendChild(layer);
         }
+        if (NativeResizeObserver !== null && document.body !== null && observedBody !== document.body) {
+          if (bodyResizer === null) {
+            bodyResizer = new NativeResizeObserver(() => {
+              if (marks.length > 0 || hover !== null || heldShown() || pickShown()) {
+                redraw();
+              }
+            });
+          } else if (observedBody !== null) {
+            bodyResizer.unobserve(observedBody);
+          }
+          observedBody = document.body;
+          bodyResizer.observe(observedBody);
+        }
         return shadow;
+      };
+      const measureLayer = (empty) => {
+        const zero = layerStyleOf(0, 0);
+        if (layer.style.cssText !== zero) {
+          layer.style.cssText = zero;
+        }
+        const rect = callOf(elementRect, layer, []);
+        originX = leftOf === null ? rect.left : callOf(leftOf, rect, []);
+        originY = topOf === null ? rect.top : callOf(topOf, rect, []);
+        if (empty) {
+          return;
+        }
+        const scroller = scrollerOf === null ? document.documentElement : (callOf(scrollerOf, document, []) || document.documentElement);
+        const docW = Math.max(scroller && scrollWidthOf !== null ? callOf(scrollWidthOf, scroller, []) : 0, scroller && clientWidthOf !== null ? callOf(clientWidthOf, scroller, []) : 0, window.innerWidth || 0);
+        const docH = Math.max(scroller && scrollHeightOf !== null ? callOf(scrollHeightOf, scroller, []) : 0, scroller && clientHeightOf !== null ? callOf(clientHeightOf, scroller, []) : 0, window.innerHeight || 0);
+        layer.style.cssText = layerStyleOf(docW, docH);
       };
 
       let mode = { elements: false, text: false, hold: false };
@@ -1082,16 +1210,24 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         const seen = document.documentElement.clientHeight || window.innerHeight;
         for (const line of lines) {
           line.top = line.middle - MARKER_HEIGHT / 2;
-          // Not cut off at the frame's top while its anchor is in view; with its anchor as it goes.
-          if (line.top < 2) {
+          // Not cut off at the frame's top while its anchor is in view; offscreen lines above
+          // the viewport keep their natural line-centered position so scrolling back up never jumps.
+          if (line.top < 2 && line.bottom > 0) {
             line.top = Math.min(2, line.bottom - MARKER_HEIGHT);
           }
           let compact = false;
           let found = null;
           let left;
           if (line.top + MARKER_HEIGHT < 0 || line.top > seen) {
-            // Out of view, nothing is measured: it is placed again as it comes into view.
-            found = { left: Math.max(EDGE, Math.min(contentRight(line.block) + GAP, room - EDGE - line.items.length * MARKER_HEIGHT)) };
+            // Out of view, nothing is hit-tested: place close to its natural slot so scrolling it
+            // into view is already aligned, then refine once the scroll settles.
+            let totalWidth = -BETWEEN;
+            for (const each of line.items) {
+              totalWidth += each.width + BETWEEN;
+            }
+            const most = Math.max(EDGE, room - EDGE - totalWidth);
+            const preferred = line.ending && line.at.right + GAP <= most ? line.at.right + GAP : contentRight(line.block) + GAP;
+            found = { left: Math.max(EDGE, Math.min(preferred, most)) };
           } else {
             line.words = lineEnd(line.range, line.block, line.at);
             found = placeLine(line, false, GAP, placed, room);
@@ -1131,7 +1267,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const placeCorner = (each, placed, room) => {
         let left = each.at.right - each.width / 2;
         let top = each.at.top - MARKER_HEIGHT / 2;
-        if (top < 2) {
+        if (top < 2 && each.at.bottom > 0) {
           top = Math.min(2, each.at.bottom - MARKER_HEIGHT);
         }
         for (let tries = 0; tries < 20; tries += 1) {
@@ -1161,7 +1297,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         // button: Safari's Tab skips a button without one, unless the person asked otherwise.
         marker.tabIndex = mode.elements ? -1 : 0;
         marker.className = "marker" + (mark.draft ? " draft" : "") + (each.compact ? " compact" : "") + (mark.id === active ? " active" : "") + (mode.elements ? " inert" : "");
-        marker.style.cssText = "left:" + each.left + "px;top:" + (each.top + ridden) + "px";
+        marker.style.cssText = "left:" + (each.left - originX) + "px;top:" + (each.top - originY) + "px";
         markers.push({ id: mark.id, element: marker });
         const name = nameOf(mark);
         const form = (mark.draft ? "draft:" : "") + (each.compact ? "compact:" : "full:") + label + ":" + name;
@@ -1201,6 +1337,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       // the active mark's are, so a marker in the gutter shows which words it is for (P105).
       let hot = null;
       let flashing = null;
+      let flashMidUntil = 0;
       let flashUntil = 0;
       // The layer's parts: its style, the marks, the markers, the outline while picking. A draw
       // replaces the marks and the outline, and leaves each marker that stays where it is (P105): a
@@ -1208,19 +1345,17 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       // the pointer's arrival on a marker lit its mark and redrew).
       let boxes = null;
       const boxesOf = (root) => {
-        if (boxes === null || boxes.style.parentNode !== root || boxes.ride.parentNode !== root || boxes.marks.parentNode !== boxes.ride || boxes.markers.parentNode !== boxes.ride || boxes.hover.parentNode !== boxes.ride) {
+        if (boxes === null || boxes.style.parentNode !== root || boxes.marks.parentNode !== root || boxes.markers.parentNode !== root || boxes.hover.parentNode !== root) {
           const style = createElement.call(document, "style");
           if (nonce !== "") {
             style.nonce = nonce;
           }
-          boxes = { style, ride: createElement.call(document, "div"), marks: createElement.call(document, "div"), markers: createElement.call(document, "div"), hover: createElement.call(document, "div") };
-          boxes.ride.className = "ride";
+          boxes = { style, marks: createElement.call(document, "div"), markers: createElement.call(document, "div"), hover: createElement.call(document, "div") };
           // Only the markers are for assistive technology (P133): the rest draws what the page
           // already says.
           boxes.marks.setAttribute("aria-hidden", "true");
           boxes.hover.setAttribute("aria-hidden", "true");
-          boxes.ride.replaceChildren(boxes.marks, boxes.markers, boxes.hover);
-          root.replaceChildren(boxes.style, boxes.ride);
+          root.replaceChildren(boxes.style, boxes.marks, boxes.markers, boxes.hover);
         }
         if (boxes.style.textContent !== STYLE) {
           boxes.style.textContent = STYLE;
@@ -1231,17 +1366,31 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         return boxes;
       };
       const draw = () => {
-        if (marks.length === 0 && hover === null && layer === null && !heldShown() && !pickShown()) {
+        const empty = marks.length === 0 && hover === null && !heldShown() && !pickShown();
+        if (empty && layer === null) {
+          clearHighlights();
           return;
         }
         const root = ensureLayer();
         const into = boxesOf(root);
+        // Measure the document's own scroll size and origin while the layer is clipped to 0x0,
+        // so the layer never inflates scrollWidth/scrollHeight and every box lands at its exact
+        // document coordinate (P159).
+        measureLayer(empty);
+        if (empty) {
+          clearHighlights();
+          markers = [];
+          markerNodes.clear();
+          into.marks.replaceChildren();
+          into.markers.replaceChildren();
+          into.hover.replaceChildren();
+          return;
+        }
         const parts = [];
-        const flashOn = Date.now() < flashUntil;
-        // Read with the boxes, in this one task: a place in the document is a box's top in the
-        // viewport plus this.
-        const ride = rideOf();
-        ridden = ride.by;
+        const hlBuckets = [[], [], [], [], [], []];
+        const now = Date.now();
+        const flashStrong = now < flashMidUntil;
+        const flashOn = now < flashUntil;
         // What is measured first, then drawn: no node of the layer changes while the page is read.
         const corners = [];
         const wanted = [];
@@ -1251,15 +1400,30 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           if (mark.found === null) {
             continue;
           }
+          const isActive = mark.id === active || mark.id === hot;
+          const isFlashing = flashOn && mark.id === flashing;
+          const isFlashStrong = flashStrong && mark.id === flashing;
           const rects = mark.found.range ? Array.from(rangeRects.call(mark.found.range)) : [elementRect.call(mark.found.element)];
-          for (const rect of rects.slice(0, LIMIT.boxes)) {
-            if (rect.width === 0 && rect.height === 0) {
-              continue;
+          if (mark.found.range && hasNativeHighlights) {
+            if (isFlashStrong) {
+              hlBuckets[4].push(mark.found.range);
+            } else if (isFlashing) {
+              hlBuckets[mark.draft ? 2 : 3].push(mark.found.range);
+            } else if (mark.draft) {
+              hlBuckets[isActive ? 2 : 0].push(mark.found.range);
+            } else {
+              hlBuckets[isActive ? 3 : 1].push(mark.found.range);
             }
-            const each = createElement.call(document, "div");
-            each.className = "mark " + (mark.found.range ? "text" : "element") + (mark.marker ? " quiet" : "") + (mark.draft ? " draft" : "") + (mark.id === active || mark.id === hot ? " active" : "") + (flashOn && mark.id === flashing ? " flash" : "");
-            each.style.cssText = "left:" + rect.left + "px;top:" + (rect.top + ridden) + "px;width:" + rect.width + "px;height:" + rect.height + "px";
-            parts.push(each);
+          } else {
+            for (const rect of rects.slice(0, LIMIT.boxes)) {
+              if (rect.width === 0 && rect.height === 0) {
+                continue;
+              }
+              const each = createElement.call(document, "div");
+              each.className = "mark " + (mark.found.range ? "text" : "element") + (mark.marker ? " quiet" : "") + (mark.draft ? " draft" : "") + (isActive ? " active" : "") + (isFlashing ? " flash" : "");
+              each.style.cssText = "left:" + (rect.left - originX) + "px;top:" + (rect.top - originY) + "px;width:" + rect.width + "px;height:" + rect.height + "px";
+              parts.push(each);
+            }
           }
           if (mark.marker) {
             const at = lastBox(rects);
@@ -1337,33 +1501,33 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
         const lit = heldShown() ? held.found : pickShown() ? { element: picked } : null;
         if (lit !== null) {
-          const rects = lit.range ? Array.from(rangeRects.call(lit.range)).slice(0, LIMIT.boxes) : [elementRect.call(lit.element)];
-          for (const rect of rects) {
-            if (rect.width === 0 && rect.height === 0) {
-              continue;
+          if (lit.range && hasNativeHighlights) {
+            hlBuckets[5].push(lit.range);
+          } else {
+            const rects = lit.range ? Array.from(rangeRects.call(lit.range)).slice(0, LIMIT.boxes) : [elementRect.call(lit.element)];
+            for (const rect of rects) {
+              if (rect.width === 0 && rect.height === 0) {
+                continue;
+              }
+              const each = createElement.call(document, "div");
+              each.className = lit.range ? "held text" : "held";
+              each.style.cssText = "left:" + (rect.left - originX) + "px;top:" + (rect.top - originY) + "px;width:" + rect.width + "px;height:" + rect.height + "px";
+              outlines.push(each);
             }
-            const each = createElement.call(document, "div");
-            each.className = lit.range ? "held text" : "held";
-            each.style.cssText = "left:" + rect.left + "px;top:" + (rect.top + ridden) + "px;width:" + rect.width + "px;height:" + rect.height + "px";
-            outlines.push(each);
           }
         }
         if (hover !== null && hover.isConnected) {
           const rect = elementRect.call(hover);
           const outline = createElement.call(document, "div");
           outline.className = "hover";
-          outline.style.cssText = "left:" + rect.left + "px;top:" + (rect.top + ridden) + "px;width:" + rect.width + "px;height:" + rect.height + "px";
+          outline.style.cssText = "left:" + (rect.left - originX) + "px;top:" + (rect.top - originY) + "px;width:" + rect.width + "px;height:" + rect.height + "px";
           const tag = createElement.call(document, "div");
           tag.className = "tag";
           tag.textContent = describe(hover).slice(0, 80);
-          tag.style.cssText = "left:" + Math.max(4, rect.left) + "px;top:" + ((rect.top >= 24 ? rect.top - 22 : Math.max(4, rect.bottom + 4)) + ridden) + "px";
+          tag.style.cssText = "left:" + (Math.max(4, rect.left) - originX) + "px;top:" + ((rect.top >= 24 ? rect.top - 22 : Math.max(4, rect.bottom + 4)) - originY) + "px";
           outlines.push(outline, tag);
         }
-        // How far the ride goes, for the animation; set only when it changed.
-        const range = String(ride.range);
-        if (into.ride.style.getPropertyValue("--ride") !== range) {
-          into.ride.style.setProperty("--ride", range);
-        }
+        syncHighlights(hlBuckets);
         into.marks.replaceChildren(...parts);
         for (const child of Array.from(into.markers.childNodes)) {
           if (badges.indexOf(child) === -1) {
@@ -1674,15 +1838,35 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           return;
         }
         for (const record of records) {
-          if (record.target === layer || (record.addedNodes.length + record.removedNodes.length === 1 && (record.addedNodes[0] === layer || record.removedNodes[0] === layer))) {
+          if (
+            record.target === layer ||
+            record.target === highlightStyle ||
+            (record.addedNodes.length + record.removedNodes.length === 1 &&
+              (record.addedNodes[0] === layer ||
+                record.removedNodes[0] === layer ||
+                record.addedNodes[0] === highlightStyle ||
+                record.removedNodes[0] === highlightStyle))
+          ) {
             continue;
           }
           scheduleAnchor(false);
           return;
         }
       }).observe(document, { childList: true, subtree: true, characterData: true });
+      const isRootScroll = (target) =>
+        target === document ||
+        target === window ||
+        target === document.documentElement ||
+        (scrollerOf !== null && target === callOf(scrollerOf, document, []));
       window.addEventListener("resize", redraw);
-      window.addEventListener("scroll", redraw, true);
+      // Root scrolls move both native text highlights and the document-coordinate layer on the
+      // compositor with zero JS work (P159): only inner scrollers or active element picking need
+      // per-frame redraws; root scroll settles refine newly visible markers once quiet.
+      window.addEventListener("scroll", (event) => {
+        if (hover !== null || !isRootScroll(targetOf === null ? event.target : callOf(targetOf, event, []))) {
+          redraw();
+        }
+      }, true);
       // Follow-ups. Once a scroll, a resize or a run of changes has settled: the marks that moved
       // since the host was last told, in one report (P104), while any mark has a marker (a host
       // without markers hears the reports it heard before); and once a scroll has settled, the
@@ -1735,12 +1919,15 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }, wait);
       };
       const settle = () => {
-        if (marks.length === 0 && !selectionScrolled) {
+        if (marks.length === 0 && !selectionScrolled && !heldShown() && !pickShown()) {
           return;
         }
         clearTimeout(settleTimer);
         settleTimer = setTimeout(() => {
           settleTimer = 0;
+          if (marks.length > 0 || heldShown() || pickShown()) {
+            redraw();
+          }
           follow();
         }, 150);
       };
@@ -1765,7 +1952,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             window.scrollBy(0, rect.top - (window.innerHeight - Math.min(rect.height, window.innerHeight)) / 2);
           }
           flashing = id;
-          flashUntil = Date.now() + 1800;
+          const started = Date.now();
+          flashMidUntil = started + 900;
+          flashUntil = started + 1800;
+          setTimeout(redraw, 920);
           setTimeout(redraw, 1850);
         }
         draw();
@@ -1815,7 +2005,6 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const stopPress = Event.prototype.stopImmediatePropagation;
       // The platform's preventDefault, kept before a tab's shell locks its own over it (P099).
       const cancelPress = preventNavigation;
-      const targetOf = getterOf(Event.prototype, "target");
       const typeOf = getterOf(Event.prototype, "type");
       const buttonOf = getterOf(MouseEvent.prototype, "button");
       const detailOf = getterOf(UIEvent.prototype, "detail");
@@ -1825,10 +2014,6 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const scrollWindow = window.scrollBy;
       const clientXOf = getterOf(MouseEvent.prototype, "clientX");
       const clientYOf = getterOf(MouseEvent.prototype, "clientY");
-      const leftOf = getterOf(DOMRectReadOnly.prototype, "left");
-      const topOf = getterOf(DOMRectReadOnly.prototype, "top");
-      const widthOf = getterOf(DOMRectReadOnly.prototype, "width");
-      const heightOf = getterOf(DOMRectReadOnly.prototype, "height");
       const markerBox = (element) => {
         const rect = callOf(elementRect, element, []);
         return { x: callOf(leftOf, rect, []), y: callOf(topOf, rect, []), width: callOf(widthOf, rect, []), height: callOf(heightOf, rect, []) };

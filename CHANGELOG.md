@@ -4,6 +4,23 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## Unreleased
+
+- **Native text highlights and document-coordinate annotation layer** (P159, amends P104 and P147).
+  Text marks, drafts, active/flashing states, and followed text selections now paint via the
+  browser-native CSS Custom Highlight API (`CSS.highlights` + `::highlight(...)` with CSP nonce and
+  WebKit-safe longhand `text-decoration-*` rules, falling back to `.mark.text` boxes on engines
+  without `CSS.highlights`), with zero content DOM mutation and zero scroll lag in any scroll
+  container. The annotation overlay layer (`[data-porthole-annotations]`) moves from a
+  `position: fixed` scroll-timeline overlay to `position: absolute` at the document origin clipped
+  to the document's content scroll bounds, and skips per-frame redraws during root scrolls so
+  markers and element outlines stay natively locked to document scrolling on every engine (Android
+  WebView, iOS WKWebView, Safari, Firefox, and Chrome).
+  **For a host:** no host API or wire change; upgrade your content server alongside
+  `@botiverse/porthole` so frames run the updated annotation runtime. `ANNOTATE_RUNTIME` changed
+  (its pinned hash, P145), while `shell`, `find`, `use`, and `legacy` are unchanged. No isolation
+  wall, CSP, sandbox flag, or gate changes.
+
 ## 0.21.0
 
 - **Host-controlled touch text-selection guard** (P158). New `MountOptions.touchSelection`,
