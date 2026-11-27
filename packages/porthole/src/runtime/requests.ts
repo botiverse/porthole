@@ -298,7 +298,7 @@ export function assetNameProblem(name: unknown): string | null {
     name.trim() === "" ||
     name.length > 255 ||
     !name.isWellFormed() ||
-    /[/\\\p{Cc}\p{Cf}]/u.test(name)
+    /[/\\\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(name)
   ) {
     return "an asset's name is a file name: 1 to 255 characters, no / or \\";
   }

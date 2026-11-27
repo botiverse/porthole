@@ -221,6 +221,8 @@ describe("published paths (P081)", () => {
       "a\u001fb",
       "a\u007fb",
       "a\u0085b",
+      "a\u2028b",
+      "a\u2029b",
       "Café.txt",
       " a.txt",
       "a /b",
@@ -296,6 +298,9 @@ describe("a request's path (P081)", () => {
       "%zz",
       "a%3fb",
       "a%23b",
+      "a%C2%85b",
+      "a%E2%80%A8b",
+      "a%E2%80%A9b",
     ]) {
       expect(requestFilePath(raw), raw).toBeNull();
     }
@@ -1463,6 +1468,26 @@ describe("after the security review of 0.6.0's first cut", () => {
       expect(filePathProblem(path), JSON.stringify(path)).toContain("format character");
     }
     expect(requestFilePath("a%E2%80%AEb.js")).toBeNull();
+  });
+
+  it("publish and request refuse Unicode line and paragraph separators (Zl, Zp, NEL)", () => {
+    for (const [char, escaped] of [
+      ["\u2028", "\\u2028"],
+      ["\u2029", "\\u2029"],
+      ["\u0085", "\\u0085"],
+    ] as const) {
+      const path = `a${char}b.html`;
+      expect(filePathProblem(path), escaped).toBe(
+        "a path holds no control or format characters, or line/paragraph separators (U+2028, U+2029)",
+      );
+      const problems = checkFileSet({ "index.html": { size: 1 }, [path]: { size: 1 } });
+      expect(problems).toHaveLength(1);
+      expect(problems[0]?.message).toContain(`"a${escaped}b.html"`);
+      expect(/[\u0085\u2028\u2029]/.test(problems[0]?.message ?? "")).toBe(false);
+    }
+    expect(requestFilePath("a%E2%80%A8b.html")).toBeNull();
+    expect(requestFilePath("a%E2%80%A9b.html")).toBeNull();
+    expect(requestFilePath("a%C2%85b.html")).toBeNull();
   });
 
   it("traversal: the inputs do traverse under a weaker decoder, never under requestFilePath, and read is asked only for manifest paths", async () => {
