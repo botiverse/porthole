@@ -4,6 +4,21 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
+## 0.23.0
+
+- **Default non-selectable controls** (P160). Buttons and sliders (`button`, `input[type="range" i]`,
+  `[role="slider"]`, `[role="button"]`) now default to `-webkit-user-select: none; user-select: none`
+  at zero specificity (`:where(...)`) so long-pressing interactive controls in agent-authored HTML
+  pages does not trigger browser text-selection handles when native touch selection is enabled.
+  Included in `BASE_STYLE` for fragments and prepended first in `document.head` via
+  `<style data-porthole-control-select>` (carrying the frame's CSP nonce when present) inside
+  `renderDocument` for whole HTML documents, so any author rule — including zero-specificity rules —
+  overrides the default cleanly.
+  **For a host:** no host API or wire change; upgrade your content server alongside
+  `@botiverse/porthole` so frames run the updated shell runtime. `SHELL_RUNTIME` changed (its pinned
+  hash, P145), while `annotate`, `find`, `use`, and `legacy` are unchanged. No isolation wall, CSP,
+  sandbox flag, or gate changes.
+
 ## 0.22.0
 
 - **Native text highlights and document-coordinate annotation layer** (P159, amends P104 and P147).
