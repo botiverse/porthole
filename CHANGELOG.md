@@ -4,7 +4,7 @@
 section); the reasons for every change are in [docs/DECISIONS.md](docs/DECISIONS.md), by the
 P-numbers below.
 
-## Unreleased
+## 0.22.0
 
 - **Native text highlights and document-coordinate annotation layer** (P159, amends P104 and P147).
   Text marks, drafts, active/flashing states, and followed text selections now paint via the
