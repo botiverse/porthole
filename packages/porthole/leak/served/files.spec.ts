@@ -950,6 +950,53 @@ window.addEventListener("keydown", (event) => {
     await page.waitForTimeout(300);
     expect((await shown.read()).interactions).toEqual(["press", "escape", "press"]);
   });
+
+  test("buttons and sliders default to user-select: none while author styles override at any specificity (P160)", async ({
+    page,
+  }) => {
+    const id = unique("control-select");
+    await publish(id, "1", {
+      "index.html": `<!doctype html><head><title>Controls</title><style>
+.author-sel { -webkit-user-select: text; user-select: text; }
+:where(button.zero-sel) { -webkit-user-select: text; user-select: text; }
+</style></head><body>
+<p id="prose">Readable text</p>
+<button id="btn" type="button">Action</button>
+<input id="range" type="range" min="0" max="10" value="5">
+<div id="slider" role="slider" aria-valuenow="5" tabindex="0">Slider</div>
+<div id="role-btn" role="button" tabindex="0">Custom Button</div>
+<button id="override-class" class="author-sel" type="button">Selectable</button>
+<button id="override-where" class="zero-sel" type="button">Zero-specificity override</button>
+</body>`,
+    });
+    const { frame } = await showFiles(page, id, "1");
+    await expect(frame.locator("#btn")).toBeAttached();
+    const values = await frame.evaluate(() => {
+      const read = (sel: string) => {
+        const cs = getComputedStyle(document.querySelector(sel)!);
+        return {
+          userSelect: cs.userSelect,
+          webkitUserSelect: cs.getPropertyValue("-webkit-user-select"),
+        };
+      };
+      return {
+        prose: read("#prose"),
+        btn: read("#btn"),
+        range: read("#range"),
+        slider: read("#slider"),
+        roleBtn: read("#role-btn"),
+        overrideClass: read("#override-class"),
+        overrideWhere: read("#override-where"),
+      };
+    });
+    expect(values.prose.userSelect).toBe("auto");
+    for (const key of ["btn", "range", "slider", "roleBtn"] as const) {
+      expect(values[key].userSelect, key).toBe("none");
+      expect(values[key].webkitUserSelect, key).toBe("none");
+    }
+    expect(values.overrideClass.userSelect).toBe("text");
+    expect(values.overrideWhere.userSelect).toBe("text");
+  });
 });
 
 test.describe("on a tab", () => {

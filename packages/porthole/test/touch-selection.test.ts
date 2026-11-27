@@ -44,9 +44,26 @@ function runShellTouchSelection(options: { readonly nonce?: string } = {}) {
     set textContent(value: string) {
       this.savedText = value;
     }
+    get firstChild(): FakeStyleEl | null {
+      return headChildren[0] ?? null;
+    }
     appendChild(el: FakeStyleEl) {
       if (!headChildren.includes(el)) {
         headChildren.push(el);
+      }
+      el.isConnected = true;
+      return el;
+    }
+    insertBefore(el: FakeStyleEl, ref: FakeStyleEl | null) {
+      const existing = headChildren.indexOf(el);
+      if (existing !== -1) {
+        headChildren.splice(existing, 1);
+      }
+      const at = ref === null ? -1 : headChildren.indexOf(ref);
+      if (at === -1) {
+        headChildren.push(el);
+      } else {
+        headChildren.splice(at, 0, el);
       }
       el.isConnected = true;
       return el;
@@ -137,7 +154,7 @@ function runShellTouchSelection(options: { readonly nonce?: string } = {}) {
     "const connected = (node) => Boolean(node && node.isConnected);",
     shellPart("  const schemeFollows =", "\n  // A whole document,"),
     shellPart("  const themeNames =", "\n  // No size before"),
-    "({ applyTheme, touchSelectionFollows });",
+    "({ applyTheme, controlSelectDefaults, touchSelectionFollows });",
   ].join("\n");
 
   const api = runInNewContext(code, {
@@ -161,6 +178,7 @@ function runShellTouchSelection(options: { readonly nonce?: string } = {}) {
     },
   }) as {
     applyTheme(context: Record<string, unknown>): void;
+    controlSelectDefaults(): void;
     touchSelectionFollows(): void;
   };
 
@@ -343,6 +361,52 @@ describe("SHELL_RUNTIME touchSelectionFollows (P158)", () => {
 
     expect(() => api.applyTheme({ theme: "light", styles: { variables: {} } })).not.toThrow();
     expect(headChildren).toHaveLength(0);
+  });
+});
+
+describe("SHELL_RUNTIME controlSelectDefaults (P160)", () => {
+  it("prepends the zero-specificity control rule ahead of author stylesheets and carries CSP nonce", () => {
+    const { api, doc, headChildren } = runShellTouchSelection({ nonce: "nonce5678" });
+    const authorStyle = doc.createElement("style");
+    authorStyle.savedText = "* { user-select: text }";
+    doc.head.replaceChildren(authorStyle);
+
+    api.controlSelectDefaults();
+    expect(headChildren).toHaveLength(2);
+    const injected = headChildren[0]!;
+    expect(injected.attributes.get("data-porthole-control-select")).toBe("");
+    expect(injected.savedNonce).toBe("nonce5678");
+    expect(injected.savedText).toBe(
+      ':where(button,input[type="range" i],[role="slider"],[role="button"]){-webkit-user-select:none;user-select:none}',
+    );
+    expect(headChildren[1]).toBe(authorStyle);
+
+    // Re-attaches at the front after another document.head.replaceChildren().
+    const nextAuthor = doc.createElement("style");
+    doc.head.replaceChildren(nextAuthor);
+    api.controlSelectDefaults();
+    expect(headChildren).toEqual([injected, nextAuthor]);
+  });
+
+  it("uses pre-content native DOM methods so tampered prototypes cannot steal nonce or throw", () => {
+    const { api, headChildren, FakeHTMLElement, FakeNode } = runShellTouchSelection({
+      nonce: "secret-nonce-2",
+    });
+    const stolen: string[] = [];
+    Object.defineProperty(FakeHTMLElement.prototype, "nonce", {
+      configurable: true,
+      set(v: string) {
+        stolen.push(v);
+      },
+    });
+    FakeNode.prototype.insertBefore = () => {
+      throw new Error("tampered insertBefore");
+    };
+
+    expect(() => api.controlSelectDefaults()).not.toThrow();
+    expect(stolen).toEqual([]);
+    expect(headChildren).toHaveLength(1);
+    expect(headChildren[0]!.savedNonce).toBe("secret-nonce-2");
   });
 });
 

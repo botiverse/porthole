@@ -798,6 +798,9 @@ describe("the shell document", () => {
     );
     expect(head.indexOf("Content-Security-Policy")).toBeLessThan(head.indexOf("<style>"));
     expect(head).toContain('<meta name="referrer" content="no-referrer">');
+    expect(head).toContain(
+      ':where(button, input[type="range" i], [role="slider"], [role="button"]) { -webkit-user-select: none; user-select: none; }',
+    );
   });
 
   test("gives the runtime its plan and the origins it takes messages from", () => {

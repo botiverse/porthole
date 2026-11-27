@@ -1823,10 +1823,43 @@ export const SHELL_RUNTIME = String.raw`(() => {
   // can neither exfiltrate the CSP nonce nor abort applyTheme/renderDocument.
   const TOUCH_SELECTION_STYLE =
     '@media (pointer: coarse){:where(:root,:root *){-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}:where(input,textarea,[contenteditable=""],[contenteditable="true" i],[contenteditable="plaintext-only" i],[contenteditable=""] *,[contenteditable="true" i] *,[contenteditable="plaintext-only" i] *){-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}}';
+  // Default non-selectable controls (P160): prevents accidental long-press text selection on
+  // buttons and sliders in agent-authored HTML pages without overriding page CSS (zero-specificity
+  // :where() prepended ahead of the document's own stylesheets).
+  const CONTROL_SELECT_STYLE =
+    ':where(button,input[type="range" i],[role="slider"],[role="button"]){-webkit-user-select:none;user-select:none}';
   const headOf = getterOf(Document.prototype, "head");
   const appendChildIn = Node.prototype.appendChild;
+  const insertBeforeIn = Node.prototype.insertBefore;
+  const firstChildOf = getterOf(Node.prototype, "firstChild");
   const nonceTo = setterOf(typeof HTMLElement === "function" ? HTMLElement.prototype : null, 'nonce');
   const textContentTo = setterOf(Node.prototype, "textContent");
+  let controlSelectStyle = null;
+  const controlSelectDefaults = () => {
+    try {
+      if (controlSelectStyle === null) {
+        controlSelectStyle = callOf(createIn, document, ["style"]);
+        if (nonce !== "") {
+          if (nonceTo === null) {
+            callOf(setAttributeOfShell, controlSelectStyle, ['nonce', nonce]);
+          } else {
+            callOf(nonceTo, controlSelectStyle, [nonce]);
+          }
+        }
+        callOf(setAttributeOfShell, controlSelectStyle, ["data-porthole-control-select", ""]);
+        if (textContentTo === null) {
+          controlSelectStyle.textContent = CONTROL_SELECT_STYLE;
+        } else {
+          callOf(textContentTo, controlSelectStyle, [CONTROL_SELECT_STYLE]);
+        }
+      }
+      const head = headOf === null ? document.head : callOf(headOf, document, []);
+      if (!connected(controlSelectStyle) && head !== null) {
+        const first = firstChildOf === null ? head.firstChild : callOf(firstChildOf, head, []);
+        callOf(insertBeforeIn, head, [controlSelectStyle, first]);
+      }
+    } catch (_) {}
+  };
   let touchSelectionStyle = null;
   const touchSelectionFollows = () => {
     try {
@@ -1878,6 +1911,7 @@ export const SHELL_RUNTIME = String.raw`(() => {
     const declaredScheme = parsed.querySelector('meta[name="color-scheme" i]');
     themed = plan.themeDocuments !== "never" && (plan.themeDocuments === "always" || (declaredScheme !== null && /\bdark\b/i.test(declaredScheme.getAttribute("content") || "")));
     schemeFollows();
+    controlSelectDefaults();
     touchSelectionFollows();
     await runScripts(scripts);
     announceLoaded();
