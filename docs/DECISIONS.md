@@ -10326,3 +10326,56 @@ toggle off/on via `host-context-changed`, preservation across `renderDocument`, 
 default/omitted silence; `createHost` `MountOptions.touchSelection` & `setTouchSelection()`) and
 `test/framed-by.test.ts` (updated shell runtime hash). No negative control: touch selection is a
 host-driven UX policy, not an isolation wall.
+
+## P159 · 2026-11-27 · Native text highlights (`CSS.highlights`) and document-coordinate annotation layer · Accepted
+
+Amends P104 and P147. From Raft (`#proj-workspace:ec7424ff`, 60fps Android screen recording):
+scrolling a Markdown Artifact with comments, both the yellow text highlight and the inline `💬1`
+marker froze on alternate frames and lagged 1–2 frames (~12 px) behind the text, causing the
+underline to cut across letters like a strikethrough until scrolling stopped.
+
+**Context.** P147 placed all marks and markers inside a `position: fixed` viewport layer and used
+a CSS scroll-driven animation (`animation-timeline: scroll(root y)` with `calc(-1px * var(--ride))`)
+while continuing to run `draw()` on every `scroll` event. In practice, that mechanism fell back to
+the main thread on Android WebViews, is unsupported on Firefox and Safari/iOS < 26, and suffered
+from per-frame DOM destruction/recreation (`replaceChildren` + `display: none` + `elementsFromPoint`)
+on every scroll event.
+
+**Decision.**
+1. **Text highlights via browser-native CSS Custom Highlight API (`CSS.highlights` + `::highlight(...)`).**
+   When `CSS.highlights` and `Highlight` exist (Baseline across Chrome/Android WebView 105+,
+   Safari/iOS WKWebView 17.2+, Firefox 140+), `ANNOTATE_RUNTIME` captures `CSS.highlights`,
+   `Highlight`, and `HighlightRegistry.prototype.set|delete` before content runs and paints posted
+   text marks, drafts, active/flashing marks, and followed text selections through six prioritized
+   `porthole-*` highlight ranges (`porthole-draft`, `porthole-mark`, `porthole-draft-active`,
+   `porthole-mark-active`, `porthole-mark-flash`, `porthole-held`), styled via an injected
+   `<style data-porthole-highlights>` (carrying the frame's CSP `nonce` when present, using
+   longhand `text-decoration-*` properties for WebKit compatibility). No content DOM nodes are
+   mutated, and browsers without `CSS.highlights` cleanly fall back to `.mark.text` overlay boxes.
+2. **Document-coordinate `position: absolute` annotation layer.** Replace `position: fixed` +
+   `.ride` (`animation-timeline: scroll(root y)`) with `position: absolute; top: 0; left: 0;
+   overflow: clip` sized on each draw to the document's own `scrollWidth × scrollHeight` (measured
+   while the layer is temporarily clipped to `0 × 0`, preserving marker focus and guaranteeing zero
+   scroll inflation when content grows or shrinks). Every marker, element mark, and outline is
+   positioned relative to the layer's measured viewport origin (`rect.left - originX`,
+   `rect.top - originY`), so every engine's native document compositor moves them in lockstep with
+   the page in both axes — including Android WebView, iOS WKWebView, Safari, and Firefox.
+3. **Zero per-frame redraws on root scroll.** Skip `redraw()` during root `scroll` events unless
+   element picking (`hover !== null`) or an inner scroll container (`!isRootScroll(event.target)`)
+   scrolled; refine newly visible offscreen markers once scrolling settles (150 ms). Preserve
+   natural line-centered placement for offscreen markers above the viewport (`line.bottom > 0`
+   guard on top-edge clamping) so scrolling back up never shifts them.
+
+**Threat.** None opened. As P104 records, every mark's anchor, kind, and count already arrive in
+the frame's window where content can listen; `CSS.highlights` exposes no information content did
+not already have. `FIND_RUNTIME` stays on its closed shadow root (P131: find queries remain hidden
+from `CSS.highlights`).
+
+**Compatibility.** No host API or wire change; changes `ANNOTATE_RUNTIME` bytes (pinned hash
+updated in `test/framed-by.test.ts`; `shell`, `find`, `use`, and `legacy` unchanged). Hosts should
+upgrade their content server alongside `@botiverse/porthole` so frames run the updated annotation
+runtime.
+
+**Tested.** `test/annotate.test.ts`, `test/find.test.ts`, `test/framed-by.test.ts`, and
+`leak/annotate.spec.ts` (all 62 Chromium tests plus Firefox scroll-without-draw verification and
+strict-CSP nonce check).

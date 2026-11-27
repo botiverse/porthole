@@ -445,9 +445,12 @@ describe("the shell", () => {
     expect(FIND_RUNTIME).toContain(`const isShortcut = ${FIND_SHORTCUT};`);
     expect(FIND_RUNTIME).toContain(TEXT_INDEX);
     expect(ANNOTATE_RUNTIME).toContain(TEXT_INDEX);
-    // The same layer style as annotations' (P104): one text, in both.
-    expect(ANNOTATE_RUNTIME).toContain(`const LAYER_STYLE = "${LAYER_STYLE}";`);
+    // Find keeps its fixed viewport layer style (P104, P131); annotations moved to a
+    // document-coordinate absolute layer in P159.
     expect(FIND_RUNTIME).toContain(`const LAYER_STYLE = "${LAYER_STYLE}";`);
+    expect(ANNOTATE_RUNTIME).toContain(
+      'const LAYER_STYLE_BASE = "position:absolute!important;top:0!important;left:0!important;',
+    );
     // Never the CSS Custom Highlight API (P053, P104): content reads and rewrites it.
     expect(FIND_RUNTIME).not.toMatch(/CSS\.highlights|new Highlight\(/u);
     // A closed shadow root, as annotations' layer.

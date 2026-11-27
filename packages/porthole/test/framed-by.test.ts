@@ -639,8 +639,11 @@ const RUNTIME_V0_16_0 = {
   // find's hear the host's opener too (P154): find's, 0.15.0's to 0.17.1's, was
   // 'sha256-invvWJWqsN6Zv0kMLG2eeofMX6XmKNSqsvYydiElDGc='. 0.17.2's annotations' was
   // 'sha256-JkvA19tibKXHXxRa7RTO0gAU3BQaaP1Wkh+H4Z55Zv8=': since, every `selected` says where the
-  // reader is in the page, and the host may ask it (P155). `use` and `legacy` are 0.15.0's.
-  annotate: "'sha256-HjgCD7pOdmrsiCS7nqbqoG5+Qm9WhmnLOfpmRUOCCYI='",
+  // reader is in the page, and the host may ask it (P155). 0.18.0–0.21.0's was
+  // 'sha256-HjgCD7pOdmrsiCS7nqbqoG5+Qm9WhmnLOfpmRUOCCYI=': since, text highlights paint via the
+  // CSS Custom Highlight API and the annotation layer uses document-coordinate position:absolute
+  // instead of a fixed scroll-timeline overlay (P159). `use` and `legacy` are 0.15.0's.
+  annotate: "'sha256-KSrKI6kq+JRmX0lE+M4CWg1PAKRKOVBFaLO+lgB+k1w='",
   find: "'sha256-NLUoejPE1efWJqyM2IR5DwbU0vnNoDzlwPhNpx4TOMA='",
   use: "'sha256-TJx7YF/WvrHHkz8iTPfUfH6GNUEgES6O+0+igLRmyPQ='",
   legacy: "'sha256-ZEVJsezqV7n+Ho0m7Y92NYxAZqf8ynKq/rDdXrJUKp0='",
@@ -653,7 +656,7 @@ const RUNTIME_V0_14_16 = {
   legacy: "'sha256-ZEVJsezqV7n+Ho0m7Y92NYxAZqf8ynKq/rDdXrJUKp0='",
 };
 
-describe("the served shell runtime is 0.16.0's (0.15.2's, less a nested page's files hook, P149), plus annotations' (P150, P152, P153), the host's opener (P154), the page's place (P155), frame interactions (P157) and touch selection guard (P158), not 0.14.16's: pinned, so what the CHANGELOG says of it is checked (P145)", () => {
+describe("the served shell runtime is 0.16.0's (0.15.2's, less a nested page's files hook, P149), plus annotations' (P150, P152, P153, P159), the host's opener (P154), the page's place (P155), frame interactions (P157) and touch selection guard (P158), not 0.14.16's: pinned, so what the CHANGELOG says of it is checked (P145)", () => {
   const now = {
     shell: hashOf(SHELL_RUNTIME),
     annotate: hashOf(ANNOTATE_RUNTIME),

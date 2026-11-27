@@ -3144,3 +3144,36 @@ describe("where the reader is in the page (P155): its page, the fragment that na
     });
   });
 });
+
+describe("native text highlights and document-coordinate annotation layer (P159)", () => {
+  test("captures CSS.highlights built-ins before content runs and carries the frame nonce on its stylesheet", () => {
+    const handler = ANNOTATE_RUNTIME.indexOf('window.addEventListener("message"');
+    for (const line of [
+      'const NativeHighlight = typeof Highlight === "function" ? Highlight : null;',
+      'const nativeHighlights = typeof CSS === "object" && CSS !== null && CSS.highlights ? CSS.highlights : null;',
+      "const highlightSet =",
+      "const highlightDelete =",
+    ]) {
+      const at = ANNOTATE_RUNTIME.indexOf(line);
+      expect(at, line).toBeGreaterThan(-1);
+      expect(at, `${line} taken before listeners`).toBeLessThan(handler);
+    }
+    expect(ANNOTATE_RUNTIME).toContain(
+      'highlightStyle.setAttribute("data-porthole-highlights", "");',
+    );
+    expect(ANNOTATE_RUNTIME).toContain("highlightStyle.nonce = nonce;");
+    // WebKit-safe longhand text-decoration-* rules inside ::highlight()
+    expect(ANNOTATE_RUNTIME).toContain("::highlight(porthole-mark){");
+    expect(ANNOTATE_RUNTIME).toContain("text-decoration-line:underline;");
+    expect(ANNOTATE_RUNTIME).toContain("text-decoration-style:dashed;");
+  });
+
+  test("uses a document-coordinate absolute layer without scroll-timeline animation and skips per-frame root scroll redraws", () => {
+    expect(ANNOTATE_RUNTIME).not.toContain("animation-timeline:scroll");
+    expect(ANNOTATE_RUNTIME).toContain(
+      'const LAYER_STYLE_BASE = "position:absolute!important;top:0!important;left:0!important;',
+    );
+    expect(ANNOTATE_RUNTIME).toContain("const isRootScroll = (target) =>");
+    expect(ANNOTATE_RUNTIME).toContain("if (hover !== null || !isRootScroll(");
+  });
+});
