@@ -10394,3 +10394,35 @@ runtime.
 **Tested.** `test/annotate.test.ts`, `test/find.test.ts`, `test/framed-by.test.ts`, and
 `leak/annotate.spec.ts` (all 62 Chromium tests plus Firefox scroll-without-draw verification and
 strict-CSP nonce check).
+
+## P160 · 2026-11-27 · Default non-selectable interactive controls (`user-select: none`) · Accepted
+
+From Raft (`#proj-workspace:#460`, `raft-design#1483`): when native touch text selection is
+enabled on HTML Artifacts, long-pressing an interactive control (a button or slider) in an
+agent-authored HTML page that did not set `user-select: none` pops up browser selection handles
+instead of cleanly operating the control. Already-published HTML pages cannot be retroactively
+edited by their authors.
+
+**Decision.**
+1. **Zero-specificity default rule.** Inject
+   `:where(button, input[type="range" i], [role="slider"], [role="button"]) { -webkit-user-select: none; user-select: none; }`
+   into every Porthole-rendered page.
+2. **Both fragment and whole-document paths.** Include the rule in `BASE_STYLE`
+   (`src/shell/document.ts`) for fragment displays, and prepend `<style
+   data-porthole-control-select>` (carrying the frame's CSP `nonce` when present) as the first
+   child of `document.head` inside `renderDocument` (`src/shell/runtime.ts`) via pre-content native
+   DOM getters/methods so whole HTML documents keep the default after
+   `document.head.replaceChildren(...)`. Placing the zero-specificity rule first in `<head>` ensures
+   any author stylesheet rule — including `* { user-select: text }` or `:where(button) {
+   user-select: text }` — overrides it by specificity and/or cascade order.
+
+**Compatibility.** No host API or wire change; changes `SHELL_RUNTIME` bytes (pinned hash updated
+in `test/framed-by.test.ts`; `annotate`, `find`, `use`, and `legacy` unchanged). Hosts should
+upgrade their content server alongside `@botiverse/porthole` so served documents receive the
+updated shell runtime.
+
+**Tested.** `test/shell.test.ts` (`BASE_STYLE`), `test/touch-selection.test.ts` (VM tests for
+`controlSelectDefaults` prepend order before author `<style>`, CSP `nonce`, and tampered
+prototypes), `test/framed-by.test.ts` (updated shell runtime hash), and real-browser Playwright
+verification of computed `user-select` on controls, normal text, and author overrides. No negative
+control: interactive-control selection defaults are a UX policy, not an isolation wall.

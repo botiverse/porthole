@@ -129,7 +129,8 @@ body {
 :where(textarea) { padding: 8px 10px; }
 :where(input:is([type="checkbox" i], [type="radio" i], [type="range" i])) { accent-color: var(--color-accent, auto); }
 :where(button, input, select, textarea):focus-visible { outline: 2px solid var(--color-ring-primary, Highlight); outline-offset: 1px; }
-:where(button, input, select, textarea):disabled { color: var(--color-text-disabled, GrayText); cursor: default; }`;
+:where(button, input, select, textarea):disabled { color: var(--color-text-disabled, GrayText); cursor: default; }
+:where(button, input[type="range" i], [role="slider"], [role="button"]) { -webkit-user-select: none; user-select: none; }`;
 
 /**
  * The frame's document: its policy first, then the base styles, an empty root, and the runtime.
