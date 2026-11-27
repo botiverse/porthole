@@ -402,7 +402,9 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       const rangeRects = Range.prototype.getClientRects;
       const cloneRange = Range.prototype.cloneRange;
       const setStart = Range.prototype.setStart;
+      const setEnd = Range.prototype.setEnd;
       const setStartBefore = Range.prototype.setStartBefore;
+      const intersectsNode = Range.prototype.intersectsNode;
       const compareBoundaryPoints = Range.prototype.compareBoundaryPoints;
       const attachShadow = Element.prototype.attachShadow;
       const getAttribute = Element.prototype.getAttribute;
@@ -799,6 +801,48 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           } catch (_) {}
         }
       };
+      // WebKit's CSS Custom Highlight API silently skips Ranges whose start/end container is an
+      // Element node (e.g. triple-click or whole-element selections). Normalize non-Text endpoints
+      // onto the first/last intersecting Text node before registering with CSS.highlights (P159).
+      const textRangeOf = (range) => {
+        try {
+          if (range.startContainer.nodeType === 3 && range.endContainer.nodeType === 3) {
+            return range;
+          }
+          const root = range.commonAncestorContainer;
+          if (root === null || root === undefined) {
+            return range;
+          }
+          const walker = createTreeWalker.call(document, root, NodeFilter.SHOW_TEXT);
+          let first = null;
+          let last = null;
+          for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+            if (node.nodeValue.length > 0 && callOf(intersectsNode, range, [node])) {
+              if (first === null) {
+                first = node;
+              }
+              last = node;
+            }
+          }
+          if (first === null || last === null) {
+            return range;
+          }
+          const normalized = createRange.call(document);
+          if (range.startContainer.nodeType === 3) {
+            callOf(setStart, normalized, [range.startContainer, range.startOffset]);
+          } else {
+            callOf(setStart, normalized, [first, 0]);
+          }
+          if (range.endContainer.nodeType === 3) {
+            callOf(setEnd, normalized, [range.endContainer, range.endOffset]);
+          } else {
+            callOf(setEnd, normalized, [last, last.nodeValue.length]);
+          }
+          return normalized;
+        } catch (_) {
+          return range;
+        }
+      };
       const syncHighlights = (buckets) => {
         if (!hasNativeHighlights) {
           return;
@@ -815,7 +859,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           }
           any = true;
           try {
-            const hl = new NativeHighlight(...ranges);
+            const hl = new NativeHighlight(...ranges.map(textRangeOf));
             hl.priority = i + 1;
             callOf(highlightSet, nativeHighlights, [name, hl]);
           } catch (_) {}
@@ -1293,6 +1337,7 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
       // the active mark's are, so a marker in the gutter shows which words it is for (P105).
       let hot = null;
       let flashing = null;
+      let flashMidUntil = 0;
       let flashUntil = 0;
       // The layer's parts: its style, the marks, the markers, the outline while picking. A draw
       // replaces the marks and the outline, and leaves each marker that stays where it is (P105): a
@@ -1343,7 +1388,9 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
         }
         const parts = [];
         const hlBuckets = [[], [], [], [], [], []];
-        const flashOn = Date.now() < flashUntil;
+        const now = Date.now();
+        const flashStrong = now < flashMidUntil;
+        const flashOn = now < flashUntil;
         // What is measured first, then drawn: no node of the layer changes while the page is read.
         const corners = [];
         const wanted = [];
@@ -1355,10 +1402,13 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
           }
           const isActive = mark.id === active || mark.id === hot;
           const isFlashing = flashOn && mark.id === flashing;
+          const isFlashStrong = flashStrong && mark.id === flashing;
           const rects = mark.found.range ? Array.from(rangeRects.call(mark.found.range)) : [elementRect.call(mark.found.element)];
           if (mark.found.range && hasNativeHighlights) {
-            if (isFlashing) {
+            if (isFlashStrong) {
               hlBuckets[4].push(mark.found.range);
+            } else if (isFlashing) {
+              hlBuckets[mark.draft ? 2 : 3].push(mark.found.range);
             } else if (mark.draft) {
               hlBuckets[isActive ? 2 : 0].push(mark.found.range);
             } else {
@@ -1902,7 +1952,10 @@ export const ANNOTATE_RUNTIME = String.raw`if (declared("annotate")) {
             window.scrollBy(0, rect.top - (window.innerHeight - Math.min(rect.height, window.innerHeight)) / 2);
           }
           flashing = id;
-          flashUntil = Date.now() + 1800;
+          const started = Date.now();
+          flashMidUntil = started + 900;
+          flashUntil = started + 1800;
+          setTimeout(redraw, 920);
           setTimeout(redraw, 1850);
         }
         draw();

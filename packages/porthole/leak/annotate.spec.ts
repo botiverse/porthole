@@ -1922,6 +1922,62 @@ test("a marker stays on its line as the document scrolls with no draw: the docum
   }
 });
 
+test("followed selection with Element-node range endpoints (triple-click) normalizes to Text nodes and paints visibly on every engine including WebKit (P159)", async ({
+  page,
+}) => {
+  const display = await referenceHost.launch(page, {
+    config: presets.artifact({ capabilities: { annotate: {} } }),
+    widthPx: 600,
+    heightPx: 300,
+    content: `<p id="p1" style="margin: 24px; font: 18px/1.5 sans-serif">Triple click selects <b>this whole</b> paragraph.</p>`,
+  });
+  const frame = await display.frame();
+  await expect(frame.locator("#p1")).toBeVisible();
+  const bare = await look(page, frame, "#p1");
+
+  await display.annotate("start", { elements: false, text: true, keepSelection: true });
+  // Create a selection whose Range endpoints are Element nodes (as WebKit triple-click produces).
+  await frame.evaluate(() => {
+    const p = document.getElementById("p1");
+    if (!p) return;
+    const range = document.createRange();
+    range.selectNodeContents(p);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  });
+  await next(display, "selected");
+  await display.annotate("track", { selection: true });
+  await next(display, "selectionTracked");
+  // Clear the browser's own selection so only Porthole's held highlight remains.
+  await frame.evaluate(() => window.getSelection()?.removeAllRanges());
+  await page.waitForTimeout(100);
+
+  const info = await frame.evaluate(() => {
+    const supported =
+      typeof CSS === "object" &&
+      CSS !== null &&
+      "highlights" in CSS &&
+      typeof Highlight === "function";
+    if (!supported) return { supported, size: 0, startType: 0, endType: 0 };
+    const hl = CSS.highlights.get("porthole-held");
+    const first = hl ? Array.from(hl)[0] : undefined;
+    return {
+      supported,
+      size: hl?.size ?? 0,
+      startType: first?.startContainer.nodeType ?? 0,
+      endType: first?.endContainer.nodeType ?? 0,
+    };
+  });
+  if (info.supported) {
+    expect(info.size, "porthole-held registered").toBe(1);
+    expect(info.startType, "startContainer normalized to Text node for WebKit").toBe(3);
+    expect(info.endType, "endContainer normalized to Text node for WebKit").toBe(3);
+  }
+  const lit = await look(page, frame, "#p1");
+  expect(lit.equals(bare), "probe: held highlight visibly painted over the paragraph").toBe(false);
+});
+
 test("on touch, where two markers' 44 px boxes overlap, a tap is the nearest bubble's (P119)", async ({
   browser,
   browserName,

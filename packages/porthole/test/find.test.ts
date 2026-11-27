@@ -451,7 +451,8 @@ describe("the shell", () => {
     expect(ANNOTATE_RUNTIME).toContain(
       'const LAYER_STYLE_BASE = "position:absolute!important;top:0!important;left:0!important;',
     );
-    // Never the CSS Custom Highlight API (P053, P104): content reads and rewrites it.
+    // Find never uses the CSS Custom Highlight API (P131): find queries stay hidden from the
+    // content-readable highlight registry (annotations opt into it in P159).
     expect(FIND_RUNTIME).not.toMatch(/CSS\.highlights|new Highlight\(/u);
     // A closed shadow root, as annotations' layer.
     expect(FIND_RUNTIME).toContain('callOf(attachShadow, layer, [{ mode: "closed" }])');

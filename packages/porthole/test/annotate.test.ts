@@ -3175,5 +3175,7 @@ describe("native text highlights and document-coordinate annotation layer (P159)
     );
     expect(ANNOTATE_RUNTIME).toContain("const isRootScroll = (target) =>");
     expect(ANNOTATE_RUNTIME).toContain("if (hover !== null || !isRootScroll(");
+    expect(ANNOTATE_RUNTIME).toContain("const textRangeOf = (range) => {");
+    expect(ANNOTATE_RUNTIME).toContain("flashMidUntil = started + 900;");
   });
 });

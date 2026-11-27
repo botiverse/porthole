@@ -10350,8 +10350,12 @@ on every scroll event.
    `porthole-*` highlight ranges (`porthole-draft`, `porthole-mark`, `porthole-draft-active`,
    `porthole-mark-active`, `porthole-mark-flash`, `porthole-held`), styled via an injected
    `<style data-porthole-highlights>` (carrying the frame's CSP `nonce` when present, using
-   longhand `text-decoration-*` properties for WebKit compatibility). No content DOM nodes are
-   mutated, and browsers without `CSS.highlights` cleanly fall back to `.mark.text` overlay boxes.
+   longhand `text-decoration-*` properties for WebKit compatibility). Before registering ranges in
+   `CSS.highlights`, `textRangeOf(range)` normalizes any Element-node endpoints (such as triple-click
+   selections) onto the first/last intersecting Text nodes so WebKit paints them reliably. Focus
+   flashes step down in two stages (`0.45 → 0.30 → normal`, 900 ms + 900 ms). No content DOM nodes
+   are mutated, and browsers without `CSS.highlights` cleanly fall back to `.mark.text` overlay
+   boxes.
 2. **Document-coordinate `position: absolute` annotation layer.** Replace `position: fixed` +
    `.ride` (`animation-timeline: scroll(root y)`) with `position: absolute; top: 0; left: 0;
    overflow: clip` sized on each draw to the document's own `scrollWidth × scrollHeight` (measured
@@ -10366,10 +10370,21 @@ on every scroll event.
    natural line-centered placement for offscreen markers above the viewport (`line.bottom > 0`
    guard on top-edge clamping) so scrolling back up never shifts them.
 
-**Threat.** None opened. As P104 records, every mark's anchor, kind, and count already arrive in
-the frame's window where content can listen; `CSS.highlights` exposes no information content did
-not already have. `FIND_RUNTIME` stays on its closed shadow root (P131: find queries remain hidden
-from `CSS.highlights`).
+**Threat.** Amends P053 and P104's rejection of the CSS Custom Highlight API for text annotations
+(while keeping it rejected for `find`, P131).
+- **No new confidentiality leak:** every mark's anchor, kind, and count already arrive in the
+  frame's window via `show`, where content can listen (P104), and a followed selection is already
+  readable by content via `getSelection()`. `CSS.highlights` holds only the same ranges.
+- **Content-readable/writable highlight registry (accepted for text annotations):** unlike the
+  closed shadow root, `CSS.highlights` is shared with content, so content scripts can now read the
+  registered `Range` objects, clear or restyle `porthole-*` highlights, or register fake highlights
+  under the same names. This is accepted because content could already cover or hide the annotation
+  layer (P104) and draw look-alike yellow underlines/fills anywhere in its own document; clickable
+  markers and `activated` event routing remain in the closed shadow root, and `FIND_RUNTIME`
+  stays off `CSS.highlights` so in-page search queries remain hidden from content (P131).
+- **CSP nonce on `<style data-porthole-highlights>`:** content can read the `nonce` attribute on
+  the injected `<style>` node; this is the same risk already recorded and accepted in P054 (the
+  frame already carries the nonce on the shell's own `<script>`/`<style>`).
 
 **Compatibility.** No host API or wire change; changes `ANNOTATE_RUNTIME` bytes (pinned hash
 updated in `test/framed-by.test.ts`; `shell`, `find`, `use`, and `legacy` unchanged). Hosts should

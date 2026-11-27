@@ -643,7 +643,7 @@ const RUNTIME_V0_16_0 = {
   // 'sha256-HjgCD7pOdmrsiCS7nqbqoG5+Qm9WhmnLOfpmRUOCCYI=': since, text highlights paint via the
   // CSS Custom Highlight API and the annotation layer uses document-coordinate position:absolute
   // instead of a fixed scroll-timeline overlay (P159). `use` and `legacy` are 0.15.0's.
-  annotate: "'sha256-KSrKI6kq+JRmX0lE+M4CWg1PAKRKOVBFaLO+lgB+k1w='",
+  annotate: "'sha256-JGtLSvHHA6Jj2S0nYQMokrLVnEgHNZqt8FTdZjr/1B8='",
   find: "'sha256-NLUoejPE1efWJqyM2IR5DwbU0vnNoDzlwPhNpx4TOMA='",
   use: "'sha256-TJx7YF/WvrHHkz8iTPfUfH6GNUEgES6O+0+igLRmyPQ='",
   legacy: "'sha256-ZEVJsezqV7n+Ho0m7Y92NYxAZqf8ynKq/rDdXrJUKp0='",
