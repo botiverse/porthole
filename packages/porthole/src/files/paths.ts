@@ -45,16 +45,24 @@ export function fileLimits(limits?: Partial<Limits> | null): FileLimits {
 /**
  * What a request's path can never hold once decoded, and a published path never holds: control
  * and format characters (`Cc`, `Cf`: a right-to-left override, a zero-width space, a BOM would make
- * a path read as another), and `\ % ? #`.
+ * a path read as another), Unicode line and paragraph separators (`Zl` U+2028, `Zp` U+2029; `Cc`
+ * already covers C0/C1 breaks including U+0085 NEL), and `\ % ? #`.
  */
 // oxlint-disable-next-line no-control-regex -- control characters are what it refuses
-const FORBIDDEN = /[\p{Cc}\p{Cf}\\%?#]/u;
+const FORBIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\%?#]/u;
+
+const quotePath = (path: string): string =>
+  JSON.stringify(path).replace(
+    /[\u0085\u2028\u2029]/g,
+    (separator) => `\\u${separator.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
 
 /**
  * What is wrong with a published path, or null: relative (no leading `/`), `/`-separated, no
- * empty, `.` or `..` segment, none of `\ % ? #` or a control character, in Unicode NFC, no segment
- * starting or ending with a space, at most 512 characters and 255 a segment, not under
- * `__porthole/` (Porthole's own paths at an origin's root). Case-sensitive.
+ * empty, `.` or `..` segment, none of `\ % ? #`, control or format characters, or line/paragraph
+ * separators (U+2028, U+2029), in Unicode NFC, no segment starting or ending with a space, at most
+ * 512 characters and 255 a segment, not under `__porthole/` (Porthole's own paths at an origin's
+ * root). Case-sensitive.
  */
 export function filePathProblem(path: unknown): string | null {
   if (typeof path !== "string" || path.length === 0) {
@@ -76,7 +84,7 @@ export function filePathProblem(path: unknown): string | null {
   const forbidden = FORBIDDEN.exec(path);
   if (forbidden !== null) {
     const char = forbidden[0];
-    return `a path holds no ${char === "\\" || char === "%" || char === "?" || char === "#" ? char : "control or format character"}`;
+    return `a path holds no ${char === "\\" || char === "%" || char === "?" || char === "#" ? char : "control or format characters, or line/paragraph separators (U+2028, U+2029)"}`;
   }
   if (path.normalize("NFC") !== path) {
     return "a path is in Unicode NFC";
@@ -147,7 +155,7 @@ export function checkFileSet(
   for (const path of paths) {
     const problem = filePathProblem(path);
     if (problem !== null) {
-      problems.push({ path, code: "path", message: `${JSON.stringify(path)}: ${problem}` });
+      problems.push({ path, code: "path", message: `${quotePath(path)}: ${problem}` });
       continue;
     }
     const lower = path.toLowerCase();

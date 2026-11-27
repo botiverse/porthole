@@ -160,6 +160,9 @@ describe("P095 3: what a page names things is well-formed Unicode, refused up fr
     expect(downloadContents({ name: `${lone}.txt`, text: "x" })).toBeNull();
     expect(assetNameProblem(`${lone}.png`)).not.toBeNull();
     expect(filePathProblem(`${lone}.html`)).not.toBeNull();
+    for (const sep of ["\u2028", "\u2029", "\u0085"]) {
+      expect(assetNameProblem(`a${sep}b.png`)).not.toBeNull();
+    }
     expect(parseCommentRequest({ anchor: { name: lone } })).toBeNull();
     expect(
       parseArtifactRequest(
